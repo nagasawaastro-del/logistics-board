@@ -202,85 +202,92 @@ input,select{font-family:inherit;}
 .task-breakdown-chip{display:inline-flex;align-items:center;gap:4px;background:var(--paper-100);border-radius:12px;padding:2px 8px;font-size:11px;margin:2px 4px 2px 0;}
 .report-range-note{font-size:12px;color:var(--slate-500);margin-bottom:10px;}
 
-/* ---------- INPUT VIEW (part-timer) ---------- */
+/* ---------- INPUT VIEW (作業実績入力 / tablet-optimized) ---------- */
 .input-wrap{min-height:calc(100vh - 60px);display:flex;flex-direction:column;}
-.name-grid-wrap{flex:1;padding:24px 16px;max-width:900px;margin:0 auto;width:100%;}
-.name-grid-title{font-family:var(--font-display);font-weight:600;font-size:20px;color:var(--ink-900);margin-bottom:18px;text-align:center;}
-.name-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:14px;}
+.input-wrap button{touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+.name-grid-wrap{flex:1;padding:28px 20px;max-width:1000px;margin:0 auto;width:100%;}
+.name-grid-title{font-family:var(--font-display);font-weight:600;font-size:24px;color:var(--ink-900);margin-bottom:22px;text-align:center;}
+.name-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:16px;}
 .name-tile{
-  background:#fff;border:1px solid var(--paper-line);border-radius:14px;padding:22px 12px;text-align:center;
-  font-family:var(--font-display);font-weight:600;font-size:17px;color:var(--ink-900);transition:transform .12s,border-color .12s;
+  background:#fff;border:2px solid var(--paper-line);border-radius:16px;padding:28px 14px;text-align:center;
+  font-family:var(--font-display);font-weight:600;font-size:20px;color:var(--ink-900);transition:transform .1s,border-color .1s;
+  min-height:88px;-webkit-user-select:none;user-select:none;
 }
-.name-tile:active{transform:scale(.96);}
+.name-tile:active{transform:scale(.95);border-color:var(--amber-500);background:#FFF9EE;}
 .name-tile:hover{border-color:var(--amber-500);}
-.name-empty{text-align:center;color:var(--slate-500);font-size:14px;padding:40px 0;}
+.name-empty{text-align:center;color:var(--slate-500);font-size:15px;padding:40px 0;line-height:1.7;}
 
 .staff-header{
-  display:flex;align-items:center;justify-content:space-between;padding:16px 20px;background:#fff;
+  display:flex;align-items:center;justify-content:space-between;padding:18px 22px;background:#fff;
   border-bottom:1px solid var(--paper-line);
 }
-.staff-header-name{font-family:var(--font-display);font-weight:700;font-size:20px;}
-.staff-header-sub{font-size:12px;color:var(--slate-500);}
-.back-link{border:1px solid var(--paper-line);background:#fff;border-radius:20px;padding:8px 16px;font-size:13px;font-weight:600;color:var(--slate-500);}
-.back-link:hover{border-color:var(--rust-600);color:var(--rust-600);}
+.staff-header-name{font-family:var(--font-display);font-weight:700;font-size:23px;}
+.staff-header-sub{font-size:13px;color:var(--slate-500);margin-top:2px;}
+.back-link{border:2px solid var(--paper-line);background:#fff;border-radius:22px;padding:12px 22px;font-size:14px;font-weight:700;color:var(--slate-500);min-height:48px;-webkit-user-select:none;user-select:none;}
+.back-link:active{border-color:var(--rust-600);color:var(--rust-600);transform:scale(.96);}
 
-.task-tile-wrap{flex:1;padding:20px;max-width:900px;margin:0 auto;width:100%;}
-.task-tile-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:16px;}
+.task-tile-wrap{flex:1;padding:22px;max-width:1000px;margin:0 auto;width:100%;}
+.task-tile-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:18px;}
 .task-tile{
-  position:relative;border-radius:16px;padding:22px 18px;min-height:120px;display:flex;flex-direction:column;
-  justify-content:space-between;border:2px solid transparent;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05);
-  transition:transform .1s;
+  position:relative;border-radius:18px;padding:26px 22px;min-height:150px;display:flex;flex-direction:column;
+  justify-content:space-between;border:3px solid transparent;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.07);
+  transition:transform .1s;-webkit-user-select:none;user-select:none;
 }
-.task-tile:active{transform:scale(.97);}
-.task-tile.active-task{border-color:var(--amber-500);background:#FFF9EE;}
-.task-tile-name{font-family:var(--font-display);font-weight:600;font-size:18px;color:var(--ink-900);}
-.task-tile-unit{font-size:11px;color:var(--slate-500);margin-top:2px;}
-.task-tile-status{font-size:11px;font-weight:700;letter-spacing:.04em;display:flex;align-items:center;gap:6px;margin-top:14px;}
-.status-dot{width:8px;height:8px;border-radius:50%;}
+.task-tile:active{transform:scale(.96);}
+.task-tile.active-task{border-color:var(--amber-500);background:#FFF9EE;box-shadow:0 2px 8px rgba(242,169,59,.25);}
+.task-tile-name{font-family:var(--font-display);font-weight:600;font-size:22px;color:var(--ink-900);line-height:1.25;}
+.task-tile-unit{font-size:12px;color:var(--slate-500);margin-top:4px;}
+.task-tile-status{font-size:13px;font-weight:700;letter-spacing:.03em;display:flex;align-items:center;gap:7px;margin-top:16px;}
+.status-dot{width:10px;height:10px;border-radius:50%;}
 .status-dot.working{background:var(--green-500);animation:pulse 1.6s infinite;}
 .status-dot.idle{background:var(--slate-300);}
-.task-tile-timer{font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--rust-600);margin-top:4px;}
+.task-tile-timer{font-family:var(--font-mono);font-size:28px;font-weight:700;color:var(--rust-600);margin-top:6px;}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
 @media (prefers-reduced-motion:reduce){.status-dot.working{animation:none;}}
 
-.end-day-bar{padding:16px 20px 28px;max-width:900px;margin:0 auto;width:100%;}
+.end-day-bar{padding:18px 22px 32px;max-width:1000px;margin:0 auto;width:100%;}
 .end-day-btn{
-  width:100%;background:var(--ink-900);color:#fff;border:none;border-radius:14px;padding:16px;
-  font-family:var(--font-display);font-weight:600;font-size:15px;letter-spacing:.02em;
+  width:100%;background:var(--ink-900);color:#fff;border:none;border-radius:16px;padding:22px;
+  font-family:var(--font-display);font-weight:600;font-size:17px;letter-spacing:.02em;min-height:64px;
+  -webkit-user-select:none;user-select:none;
 }
-.end-day-btn:hover{background:var(--rust-600);}
-.no-task-note{text-align:center;color:var(--slate-500);font-size:14px;padding:40px 20px;line-height:1.7;}
+.end-day-btn:active{background:var(--rust-600);transform:scale(.98);}
+.no-task-note{text-align:center;color:var(--slate-500);font-size:15px;padding:44px 22px;line-height:1.8;}
 
-.summary-wrap{max-width:640px;margin:60px auto;padding:0 20px;text-align:center;}
-.summary-title{font-family:var(--font-display);font-weight:700;font-size:26px;margin-bottom:6px;}
-.summary-sub{color:var(--slate-500);font-size:14px;margin-bottom:28px;}
-.summary-list{display:flex;flex-direction:column;gap:10px;text-align:left;margin-bottom:28px;}
-.summary-row{display:flex;align-items:center;justify-content:space-between;background:#fff;border:1px solid var(--paper-line);border-radius:12px;padding:12px 16px;}
-.summary-task{display:flex;align-items:center;gap:10px;font-weight:500;font-size:14px;}
-.summary-vals{font-family:var(--font-mono);font-size:13px;color:var(--slate-500);}
-.summary-back{background:var(--amber-500);color:#4A2C00;border:none;border-radius:14px;padding:14px 32px;font-weight:700;font-size:14px;font-family:var(--font-display);}
+.summary-wrap{max-width:680px;margin:60px auto;padding:0 22px;text-align:center;}
+.summary-title{font-family:var(--font-display);font-weight:700;font-size:28px;margin-bottom:6px;}
+.summary-sub{color:var(--slate-500);font-size:15px;margin-bottom:30px;}
+.summary-list{display:flex;flex-direction:column;gap:10px;text-align:left;margin-bottom:30px;}
+.summary-row{display:flex;align-items:center;justify-content:space-between;background:#fff;border:1px solid var(--paper-line);border-radius:14px;padding:16px 20px;}
+.summary-task{display:flex;align-items:center;gap:10px;font-weight:500;font-size:15px;}
+.summary-vals{font-family:var(--font-mono);font-size:14px;color:var(--slate-500);}
+.summary-back{background:var(--amber-500);color:#4A2C00;border:none;border-radius:16px;padding:18px 36px;font-weight:700;font-size:16px;font-family:var(--font-display);min-height:56px;-webkit-user-select:none;user-select:none;}
+.summary-back:active{transform:scale(.97);}
 
-/* ---------- QUANTITY MODAL ---------- */
+/* ---------- QUANTITY MODAL (tablet-optimized) ---------- */
 .modal-overlay{
   position:fixed;inset:0;background:rgba(10,14,23,.55);display:flex;align-items:center;justify-content:center;
   z-index:100;padding:20px;
 }
-.modal-card{background:#fff;border-radius:18px;padding:26px;max-width:360px;width:100%;text-align:center;}
-.modal-task-name{font-family:var(--font-display);font-weight:600;font-size:17px;margin-bottom:2px;}
-.modal-q{font-size:13px;color:var(--slate-500);margin-bottom:20px;}
-.qty-display{font-family:var(--font-mono);font-size:48px;font-weight:700;color:var(--ink-900);margin-bottom:16px;}
-.qty-btns{display:flex;gap:8px;justify-content:center;margin-bottom:16px;flex-wrap:wrap;}
+.modal-overlay button{touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+.modal-card{background:#fff;border-radius:20px;padding:32px 28px;max-width:420px;width:100%;text-align:center;}
+.modal-task-name{font-family:var(--font-display);font-weight:600;font-size:19px;margin-bottom:3px;}
+.modal-q{font-size:14px;color:var(--slate-500);margin-bottom:22px;}
+.qty-display{font-family:var(--font-mono);font-size:56px;font-weight:700;color:var(--ink-900);margin-bottom:20px;}
+.qty-btns{display:flex;gap:10px;justify-content:center;margin-bottom:20px;flex-wrap:wrap;}
 .qty-btn{
-  border:1px solid var(--paper-line);background:var(--paper-50);border-radius:10px;padding:12px 0;width:56px;
-  font-family:var(--font-mono);font-weight:700;font-size:15px;color:var(--ink-900);
+  border:2px solid var(--paper-line);background:var(--paper-50);border-radius:12px;padding:16px 0;width:72px;min-height:60px;
+  font-family:var(--font-mono);font-weight:700;font-size:17px;color:var(--ink-900);-webkit-user-select:none;user-select:none;
 }
-.qty-btn:active{background:var(--amber-500);color:#fff;}
-.qty-manual{width:100%;border:1px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;text-align:center;margin-bottom:18px;outline:none;font-family:var(--font-mono);}
+.qty-btn:active{background:var(--amber-500);color:#fff;border-color:var(--amber-500);transform:scale(.95);}
+.qty-manual{width:100%;border:2px solid var(--paper-line);border-radius:12px;padding:14px;font-size:17px;text-align:center;margin-bottom:20px;outline:none;font-family:var(--font-mono);}
 .qty-manual:focus{border-color:var(--amber-500);}
-.modal-actions{display:flex;gap:10px;}
-.modal-actions button{flex:1;padding:13px;border-radius:12px;border:none;font-weight:700;font-size:14px;}
+.modal-actions{display:flex;gap:12px;}
+.modal-actions button{flex:1;padding:18px;border-radius:14px;border:none;font-weight:700;font-size:16px;min-height:56px;-webkit-user-select:none;user-select:none;}
 .modal-cancel{background:var(--paper-200);color:var(--slate-500);}
+.modal-cancel:active{transform:scale(.97);}
 .modal-confirm{background:var(--amber-500);color:#4A2C00;font-family:var(--font-display);}
+.modal-confirm:active{transform:scale(.97);background:var(--amber-600);}
 
 /* ---------- MONITOR VIEW ---------- */
 .monitor{min-height:100vh;background:var(--ink-950);color:#EDEFF3;padding:0;}
@@ -677,7 +684,7 @@ function renderGate(){
       '</button>'+
       '<button class="gate-card" data-role="input">'+
         '<div class="gate-icon" style="background:#FFF3DE;color:#D98E1F;">&#9997;</div>'+
-        '<div class="gate-card-title">パート入力</div>'+
+        '<div class="gate-card-title">作業実績入力</div>'+
         '<div class="gate-card-desc">タップだけで作業の開始・切り替え・件数入力</div>'+
       '</button>'+
       '<button class="gate-card" data-role="monitor">'+
@@ -705,7 +712,7 @@ function bindGate(){
 
 /* ---------- TOPBAR ---------- */
 function renderTopbar(){
-  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'パート入力', monitor:'モニター'}[state.role];
+  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業実績入力', monitor:'モニター'}[state.role];
   return ''+
   '<div class="topbar">'+
     '<div class="topbar-left">'+

@@ -1,0 +1,1412 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>物流センター 作業割り当てボード</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink-950:#0A0E17;
+  --ink-900:#111827;
+  --ink-800:#1A2338;
+  --ink-700:#232E48;
+  --ink-600:#374156;
+  --paper-50:#FAF8F3;
+  --paper-100:#F1ECE1;
+  --paper-200:#E5DFCF;
+  --paper-line:#D9D2BE;
+  --amber-500:#F2A93B;
+  --amber-600:#D98E1F;
+  --rust-600:#C1521F;
+  --teal-500:#2FA6A6;
+  --green-500:#3FB27F;
+  --indigo-500:#4C5FD5;
+  --pink-500:#D6577E;
+  --slate-500:#667085;
+  --slate-300:#9AA3B2;
+  --ink-text:#1B2333;
+  --font-display:'Oswald',sans-serif;
+  --font-body:'Inter',sans-serif;
+  --font-mono:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;height:100%;}
+body{
+  font-family:var(--font-body);
+  background:var(--paper-50);
+  color:var(--ink-text);
+  overflow-x:hidden;
+}
+button{font-family:inherit;cursor:pointer;}
+input,select{font-family:inherit;}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-thumb{background:var(--paper-line);border-radius:6px;}
+
+#app{min-height:100vh;}
+
+/* ---------- ROLE GATE ---------- */
+.gate{
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:linear-gradient(180deg,var(--paper-50),var(--paper-100));
+  padding:32px 16px;text-align:center;
+}
+.gate-eyebrow{
+  font-family:var(--font-mono);font-size:12px;letter-spacing:.18em;color:var(--rust-600);
+  text-transform:uppercase;margin-bottom:10px;
+}
+.gate-title{
+  font-family:var(--font-display);font-weight:700;font-size:clamp(28px,5vw,44px);
+  color:var(--ink-900);margin:0 0 8px;letter-spacing:.01em;
+}
+.gate-sub{font-size:15px;color:var(--slate-500);margin:0 0 40px;max-width:440px;}
+.gate-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;width:100%;max-width:920px;}
+.gate-card{
+  background:#fff;border:1px solid var(--paper-line);border-radius:14px;padding:28px 20px;
+  display:flex;flex-direction:column;align-items:center;gap:10px;transition:transform .15s,border-color .15s;
+}
+.gate-card:hover{transform:translateY(-2px);border-color:var(--amber-500);}
+.gate-card:active{transform:translateY(0) scale(.98);}
+.gate-icon{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;}
+.gate-card-title{font-family:var(--font-display);font-weight:600;font-size:18px;color:var(--ink-900);}
+.gate-card-desc{font-size:13px;color:var(--slate-500);line-height:1.5;}
+
+/* ---------- TOPBAR ---------- */
+.topbar{
+  background:var(--ink-900);color:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;
+  border-bottom:3px solid var(--amber-500);position:sticky;top:0;z-index:20;
+}
+.topbar-left{display:flex;align-items:baseline;gap:12px;}
+.topbar-title{font-family:var(--font-display);font-weight:600;font-size:16px;letter-spacing:.03em;}
+.topbar-date{font-family:var(--font-mono);font-size:12px;color:var(--slate-300);}
+.topbar-right{display:flex;align-items:center;gap:10px;}
+.pill-btn{
+  background:transparent;border:1px solid var(--ink-600);color:#cfd5e0;border-radius:20px;
+  padding:6px 14px;font-size:12px;font-weight:500;
+}
+.pill-btn:hover{border-color:var(--amber-500);color:#fff;}
+
+/* ---------- MANAGER VIEW ---------- */
+.mgr-wrap{padding:20px;max-width:1400px;margin:0 auto;}
+.mgr-grid{display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start;}
+@media (max-width:900px){.mgr-grid{grid-template-columns:1fr;}}
+.panel{background:#fff;border:1px solid var(--paper-line);border-radius:14px;padding:18px;}
+.panel-title{
+  font-family:var(--font-display);font-weight:600;font-size:14px;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--ink-900);margin:0 0 14px;display:flex;align-items:center;justify-content:space-between;
+}
+.count-badge{font-family:var(--font-mono);font-size:11px;background:var(--paper-100);color:var(--slate-500);padding:2px 8px;border-radius:10px;}
+
+.roster-list{display:flex;flex-direction:column;gap:8px;margin-bottom:14px;}
+.roster-item{
+  display:flex;flex-direction:column;gap:6px;padding:8px 10px;
+  border-radius:10px;background:var(--paper-50);border:1px solid var(--paper-line);
+}
+.pattern-row{display:flex;gap:4px;}
+.pattern-day{
+  width:24px;height:24px;border-radius:6px;border:1px solid var(--paper-line);background:#fff;
+  font-size:11px;font-weight:600;color:var(--slate-300);padding:0;
+}
+.pattern-day.on{background:var(--teal-500);color:#fff;border-color:var(--teal-500);}
+.roster-item.archived{opacity:.4;}
+.roster-name{font-size:14px;font-weight:500;}
+.roster-controls{display:flex;align-items:center;gap:6px;}
+.toggle-att{
+  border:none;border-radius:14px;padding:4px 10px;font-size:11px;font-weight:600;
+}
+.toggle-att.on{background:var(--green-500);color:#fff;}
+.toggle-att.off{background:var(--paper-200);color:var(--slate-500);}
+.icon-x{border:none;background:transparent;color:var(--slate-300);font-size:14px;padding:2px 4px;}
+.icon-x:hover{color:var(--rust-600);}
+.add-row{display:flex;gap:6px;margin-top:8px;}
+.add-row input{
+  flex:1;border:1px solid var(--paper-line);border-radius:8px;padding:8px 10px;font-size:13px;
+  outline:none;
+}
+.add-row input:focus{border-color:var(--amber-500);}
+.add-btn{
+  background:var(--ink-900);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;
+}
+.add-btn:hover{background:var(--ink-700);}
+
+.staff-pool{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--paper-line);}
+.pool-hint{font-size:11px;color:var(--slate-500);width:100%;margin-bottom:2px;}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;background:var(--paper-100);border:1px solid var(--paper-line);
+  border-radius:20px;padding:6px 12px;font-size:13px;font-weight:500;cursor:grab;user-select:none;
+}
+.chip:active{cursor:grabbing;}
+.chip-dot{width:7px;height:7px;border-radius:50%;background:var(--slate-300);}
+
+.task-board{display:flex;gap:14px;overflow-x:auto;padding-bottom:8px;}
+.task-col{
+  min-width:230px;flex:1 0 230px;background:var(--paper-50);border:1px solid var(--paper-line);border-radius:12px;
+  padding:12px;transition:background .12s,border-color .12s;
+}
+.task-col.dragover{background:#FFF7E8;border-color:var(--amber-500);}
+.task-col-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+.task-color-dot{width:12px;height:12px;border-radius:3px;flex:none;}
+.task-col-name{font-family:var(--font-display);font-weight:600;font-size:15px;flex:1;}
+.task-col-unit{font-size:11px;color:var(--slate-500);}
+.task-col-del{border:none;background:transparent;color:var(--slate-300);font-size:13px;}
+.task-col-del:hover{color:var(--rust-600);}
+.task-col-body{display:flex;flex-wrap:wrap;gap:6px;min-height:50px;}
+.task-chip{
+  display:flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--paper-line);border-radius:16px;
+  padding:5px 10px;font-size:12px;font-weight:500;
+}
+.task-chip button{border:none;background:transparent;color:var(--slate-300);font-size:12px;padding:0;line-height:1;}
+.task-chip button:hover{color:var(--rust-600);}
+.new-task-btn{
+  min-width:150px;flex:0 0 auto;border:2px dashed var(--paper-line);border-radius:12px;background:transparent;
+  color:var(--slate-500);font-size:13px;font-weight:600;padding:0 20px;display:flex;align-items:center;justify-content:center;
+}
+.new-task-btn:hover{border-color:var(--amber-500);color:var(--amber-600);}
+
+.task-form{background:var(--paper-50);border:1px solid var(--paper-line);border-radius:12px;padding:14px;min-width:230px;flex:1 0 230px;}
+.task-form label{font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;margin-top:8px;}
+.task-form input{width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:7px 9px;font-size:13px;outline:none;}
+.task-form input:focus{border-color:var(--amber-500);}
+.swatches{display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;}
+.swatch{width:22px;height:22px;border-radius:6px;border:2px solid transparent;}
+.swatch.sel{border-color:var(--ink-900);}
+.task-form-actions{display:flex;gap:8px;margin-top:12px;}
+.task-form-actions button{flex:1;padding:8px;border-radius:8px;font-size:12px;font-weight:600;border:none;}
+.tf-cancel{background:var(--paper-200);color:var(--slate-500);}
+.tf-confirm{background:var(--amber-500);color:#4A2C00;}
+
+.empty-note{font-size:13px;color:var(--slate-500);padding:14px 0;}
+
+.reg-group{margin-bottom:16px;}
+.reg-group-date{font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--rust-600);margin-bottom:6px;letter-spacing:.03em;}
+.reg-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--paper-50);border:1px solid var(--paper-line);margin-bottom:6px;}
+.reg-row-name{font-size:13px;font-weight:600;flex:1;}
+.reg-row-unit{font-size:11px;color:var(--slate-500);}
+
+/* ---------- INPUT VIEW (part-timer) ---------- */
+.input-wrap{min-height:calc(100vh - 60px);display:flex;flex-direction:column;}
+.name-grid-wrap{flex:1;padding:24px 16px;max-width:900px;margin:0 auto;width:100%;}
+.name-grid-title{font-family:var(--font-display);font-weight:600;font-size:20px;color:var(--ink-900);margin-bottom:18px;text-align:center;}
+.name-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:14px;}
+.name-tile{
+  background:#fff;border:1px solid var(--paper-line);border-radius:14px;padding:22px 12px;text-align:center;
+  font-family:var(--font-display);font-weight:600;font-size:17px;color:var(--ink-900);transition:transform .12s,border-color .12s;
+}
+.name-tile:active{transform:scale(.96);}
+.name-tile:hover{border-color:var(--amber-500);}
+.name-empty{text-align:center;color:var(--slate-500);font-size:14px;padding:40px 0;}
+
+.staff-header{
+  display:flex;align-items:center;justify-content:space-between;padding:16px 20px;background:#fff;
+  border-bottom:1px solid var(--paper-line);
+}
+.staff-header-name{font-family:var(--font-display);font-weight:700;font-size:20px;}
+.staff-header-sub{font-size:12px;color:var(--slate-500);}
+.back-link{border:1px solid var(--paper-line);background:#fff;border-radius:20px;padding:8px 16px;font-size:13px;font-weight:600;color:var(--slate-500);}
+.back-link:hover{border-color:var(--rust-600);color:var(--rust-600);}
+
+.task-tile-wrap{flex:1;padding:20px;max-width:900px;margin:0 auto;width:100%;}
+.task-tile-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:16px;}
+.task-tile{
+  position:relative;border-radius:16px;padding:22px 18px;min-height:120px;display:flex;flex-direction:column;
+  justify-content:space-between;border:2px solid transparent;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05);
+  transition:transform .1s;
+}
+.task-tile:active{transform:scale(.97);}
+.task-tile.active-task{border-color:var(--amber-500);background:#FFF9EE;}
+.task-tile-name{font-family:var(--font-display);font-weight:600;font-size:18px;color:var(--ink-900);}
+.task-tile-unit{font-size:11px;color:var(--slate-500);margin-top:2px;}
+.task-tile-status{font-size:11px;font-weight:700;letter-spacing:.04em;display:flex;align-items:center;gap:6px;margin-top:14px;}
+.status-dot{width:8px;height:8px;border-radius:50%;}
+.status-dot.working{background:var(--green-500);animation:pulse 1.6s infinite;}
+.status-dot.idle{background:var(--slate-300);}
+.task-tile-timer{font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--rust-600);margin-top:4px;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+@media (prefers-reduced-motion:reduce){.status-dot.working{animation:none;}}
+
+.end-day-bar{padding:16px 20px 28px;max-width:900px;margin:0 auto;width:100%;}
+.end-day-btn{
+  width:100%;background:var(--ink-900);color:#fff;border:none;border-radius:14px;padding:16px;
+  font-family:var(--font-display);font-weight:600;font-size:15px;letter-spacing:.02em;
+}
+.end-day-btn:hover{background:var(--rust-600);}
+.no-task-note{text-align:center;color:var(--slate-500);font-size:14px;padding:40px 20px;line-height:1.7;}
+
+.summary-wrap{max-width:640px;margin:60px auto;padding:0 20px;text-align:center;}
+.summary-title{font-family:var(--font-display);font-weight:700;font-size:26px;margin-bottom:6px;}
+.summary-sub{color:var(--slate-500);font-size:14px;margin-bottom:28px;}
+.summary-list{display:flex;flex-direction:column;gap:10px;text-align:left;margin-bottom:28px;}
+.summary-row{display:flex;align-items:center;justify-content:space-between;background:#fff;border:1px solid var(--paper-line);border-radius:12px;padding:12px 16px;}
+.summary-task{display:flex;align-items:center;gap:10px;font-weight:500;font-size:14px;}
+.summary-vals{font-family:var(--font-mono);font-size:13px;color:var(--slate-500);}
+.summary-back{background:var(--amber-500);color:#4A2C00;border:none;border-radius:14px;padding:14px 32px;font-weight:700;font-size:14px;font-family:var(--font-display);}
+
+/* ---------- QUANTITY MODAL ---------- */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(10,14,23,.55);display:flex;align-items:center;justify-content:center;
+  z-index:100;padding:20px;
+}
+.modal-card{background:#fff;border-radius:18px;padding:26px;max-width:360px;width:100%;text-align:center;}
+.modal-task-name{font-family:var(--font-display);font-weight:600;font-size:17px;margin-bottom:2px;}
+.modal-q{font-size:13px;color:var(--slate-500);margin-bottom:20px;}
+.qty-display{font-family:var(--font-mono);font-size:48px;font-weight:700;color:var(--ink-900);margin-bottom:16px;}
+.qty-btns{display:flex;gap:8px;justify-content:center;margin-bottom:16px;flex-wrap:wrap;}
+.qty-btn{
+  border:1px solid var(--paper-line);background:var(--paper-50);border-radius:10px;padding:12px 0;width:56px;
+  font-family:var(--font-mono);font-weight:700;font-size:15px;color:var(--ink-900);
+}
+.qty-btn:active{background:var(--amber-500);color:#fff;}
+.qty-manual{width:100%;border:1px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;text-align:center;margin-bottom:18px;outline:none;font-family:var(--font-mono);}
+.qty-manual:focus{border-color:var(--amber-500);}
+.modal-actions{display:flex;gap:10px;}
+.modal-actions button{flex:1;padding:13px;border-radius:12px;border:none;font-weight:700;font-size:14px;}
+.modal-cancel{background:var(--paper-200);color:var(--slate-500);}
+.modal-confirm{background:var(--amber-500);color:#4A2C00;font-family:var(--font-display);}
+
+/* ---------- MONITOR VIEW ---------- */
+.monitor{min-height:100vh;background:var(--ink-950);color:#EDEFF3;padding:0;}
+.mon-header{
+  display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:2px solid var(--ink-700);
+}
+.mon-title-block{display:flex;align-items:baseline;gap:14px;}
+.mon-title{font-family:var(--font-display);font-weight:700;font-size:22px;letter-spacing:.02em;color:#fff;}
+.mon-date{font-family:var(--font-mono);font-size:13px;color:var(--slate-300);}
+.mon-clock{font-family:var(--font-mono);font-size:30px;font-weight:700;color:var(--amber-500);}
+.mon-exit{border:1px solid var(--ink-600);background:transparent;color:var(--slate-300);border-radius:16px;padding:5px 12px;font-size:11px;}
+
+.mon-body{display:grid;grid-template-columns:1fr 340px;gap:0;min-height:calc(100vh - 68px);}
+@media (max-width:1000px){.mon-body{grid-template-columns:1fr;}}
+
+.mon-staff-list{padding:18px 24px;display:flex;flex-direction:column;gap:10px;}
+.mon-row{
+  display:grid;grid-template-columns:150px 1fr 110px 200px;align-items:center;gap:16px;
+  background:var(--ink-900);border:1px solid var(--ink-700);border-radius:12px;padding:14px 18px;
+}
+@media (max-width:760px){.mon-row{grid-template-columns:110px 1fr 90px;}.mon-row .mon-bar-wrap{display:none;}}
+.mon-name{font-family:var(--font-display);font-weight:600;font-size:16px;color:#fff;}
+.mon-status{display:flex;align-items:center;gap:8px;}
+.mon-status-dot{width:9px;height:9px;border-radius:50%;flex:none;}
+.mon-status-text{font-size:14px;font-weight:500;}
+.mon-status-text.idle{color:var(--slate-300);}
+.mon-timer{font-family:var(--font-mono);font-size:19px;font-weight:700;color:var(--amber-500);text-align:right;}
+.mon-timer.idle{color:var(--slate-500);}
+.mon-bar-wrap{display:flex;flex-direction:column;gap:4px;}
+.mon-bar{height:8px;border-radius:4px;background:var(--ink-700);overflow:hidden;display:flex;}
+.mon-bar-seg{height:100%;}
+.mon-bar-total{font-family:var(--font-mono);font-size:11px;color:var(--slate-300);text-align:right;}
+.mon-empty{color:var(--slate-500);text-align:center;padding:60px 0;font-size:14px;}
+
+.mon-side{border-left:2px solid var(--ink-700);padding:18px 20px;display:flex;flex-direction:column;gap:12px;}
+.mon-side-title{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--slate-300);margin-bottom:2px;}
+.mon-task-card{background:var(--ink-900);border:1px solid var(--ink-700);border-radius:12px;padding:14px 16px;border-left:4px solid var(--slate-300);}
+.mon-task-name{font-family:var(--font-display);font-weight:600;font-size:15px;color:#fff;margin-bottom:8px;}
+.mon-task-stats{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:12px;color:var(--slate-300);}
+.mon-task-stats b{color:var(--amber-500);font-size:14px;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(function(){
+  "use strict";
+  var cfg = window.SUPABASE_CONFIG || {};
+  var client = null;
+  if(cfg.url && cfg.anonKey && cfg.url.indexOf('YOUR-PROJECT')===-1){
+    client = window.supabase.createClient(cfg.url, cfg.anonKey);
+  }
+
+  window.storage = {
+    get: async function(key, shared){
+      if(!client) throw new Error('Supabase未設定です(config.jsを確認してください)');
+      var res = await client.from('kv_store').select('value').eq('key', key).maybeSingle();
+      if(res.error) throw res.error;
+      if(!res.data) throw new Error('key not found');
+      return { key: key, value: res.data.value };
+    },
+    set: async function(key, value, shared){
+      if(!client) return null;
+      var res = await client.from('kv_store').upsert({ key: key, value: value }, { onConflict: 'key' }).select('value').maybeSingle();
+      if(res.error) return null;
+      return { key: key, value: value };
+    },
+    delete: async function(key, shared){
+      if(!client) return null;
+      var res = await client.from('kv_store').delete().eq('key', key);
+      if(res.error) return null;
+      return { key: key, deleted: true };
+    },
+    list: async function(prefix, shared){
+      if(!client) throw new Error('Supabase未設定です(config.jsを確認してください)');
+      var query = client.from('kv_store').select('key');
+      if(prefix) query = query.like('key', prefix+'%');
+      var res = await query;
+      if(res.error) throw res.error;
+      return { keys: (res.data||[]).map(function(r){ return r.key; }), prefix: prefix };
+    }
+  };
+})();
+</script>
+<script>
+(function(){
+"use strict";
+
+var TASK_COLORS = [
+  {name:'amber', hex:'#F2A93B'},
+  {name:'teal', hex:'#2FA6A6'},
+  {name:'indigo', hex:'#4C5FD5'},
+  {name:'pink', hex:'#D6577E'},
+  {name:'green', hex:'#3FB27F'},
+  {name:'rust', hex:'#C1521F'},
+  {name:'slate', hex:'#667085'}
+];
+
+var state = {
+  role: null,
+  roster: [],
+  backlog: [],
+  templates: [],
+  day: null,
+  activeStaffId: null,
+  newTaskColIndex: -1,
+  newTaskColor: TASK_COLORS[0].hex,
+  regNewDate: null,
+  newTemplateColor: TASK_COLORS[0].hex,
+  newTemplatePattern: null,
+  modal: null,
+  suppressRender: false,
+  dragStaffId: null
+};
+
+function uid(){
+  if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
+}
+function todayStr(){
+  var d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function todayLabel(){
+  var d = new Date();
+  var days = ['日','月','火','水','木','金','土'];
+  return (d.getMonth()+1)+'/'+d.getDate()+'('+days[d.getDay()]+')';
+}
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+function fmtElapsed(ms){
+  if(ms<0) ms=0;
+  var s = Math.floor(ms/1000);
+  var h = Math.floor(s/3600);
+  var m = Math.floor((s%3600)/60);
+  var sec = s%60;
+  if(h>0) return h+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
+  return String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
+}
+function fmtHM(ms){
+  var mins = Math.round(ms/60000);
+  var h = Math.floor(mins/60);
+  var m = mins%60;
+  if(h>0) return h+'h'+String(m).padStart(2,'0')+'m';
+  return m+'m';
+}
+function fmtClock(iso){
+  var d = new Date(iso);
+  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+
+/* ---------- storage ---------- */
+var pendingSaves = 0;
+function storageAvailable(){
+  return !!(window.storage && typeof window.storage.get==='function' && typeof window.storage.set==='function');
+}
+async function loadRoster(){
+  try{
+    var r = await window.storage.get('roster', true);
+    return r ? JSON.parse(r.value) : [];
+  }catch(e){ return []; }
+}
+async function saveRoster(list){
+  state.roster = list;
+  pendingSaves++;
+  try{ await window.storage.set('roster', JSON.stringify(list), true); }catch(e){}
+  finally{ pendingSaves--; }
+}
+async function loadBacklog(){
+  try{
+    var r = await window.storage.get('task-backlog', true);
+    return r ? JSON.parse(r.value) : [];
+  }catch(e){ return []; }
+}
+async function saveBacklog(list){
+  state.backlog = list;
+  pendingSaves++;
+  try{ await window.storage.set('task-backlog', JSON.stringify(list), true); }catch(e){}
+  finally{ pendingSaves--; }
+}
+async function loadTemplates(){
+  try{
+    var r = await window.storage.get('task-templates', true);
+    return r ? JSON.parse(r.value) : [];
+  }catch(e){ return []; }
+}
+async function saveTemplates(list){
+  state.templates = list;
+  pendingSaves++;
+  try{ await window.storage.set('task-templates', JSON.stringify(list), true); }catch(e){}
+  finally{ pendingSaves--; }
+}
+async function ensureTemplateTasksForToday(){
+  var wd = new Date().getDay();
+  var existingKeys = {};
+  state.backlog.forEach(function(t){ if(t.fromTemplate) existingKeys[t.fromTemplate+'|'+t.workDate] = true; });
+  var changed = false;
+  state.templates.forEach(function(tmpl){
+    if(tmpl.archived) return;
+    var pattern = tmpl.pattern || defaultPattern();
+    if(!pattern[wd]) return;
+    var key = tmpl.id+'|'+todayStr();
+    if(existingKeys[key]) return;
+    state.backlog.push({id:uid(), name:tmpl.name, unit:tmpl.unit, color:tmpl.color, workDate:todayStr(), archived:false, fromTemplate:tmpl.id});
+    changed = true;
+  });
+  if(changed) await saveBacklog(state.backlog);
+}
+function defaultPattern(){
+  return [false,true,true,true,true,true,false];
+}
+function freshDay(dateStr){
+  var attendance = {};
+  var weekday = new Date(dateStr+'T00:00:00').getDay();
+  state.roster.forEach(function(s){
+    if(s.archived) return;
+    var pattern = s.pattern || defaultPattern();
+    attendance[s.id] = !!pattern[weekday];
+  });
+  return { date: dateStr, attendance: attendance, assignments:{}, logs:[] };
+}
+async function loadDay(){
+  var key = 'day:'+todayStr();
+  try{
+    var r = await window.storage.get(key, true);
+    if(r && r.value){
+      var d = JSON.parse(r.value);
+      if(d.date===todayStr()) return d;
+    }
+  }catch(e){}
+  return freshDay(todayStr());
+}
+async function saveDay(day){
+  state.day = day;
+  pendingSaves++;
+  try{ await window.storage.set('day:'+day.date, JSON.stringify(day), true); }catch(e){}
+  finally{ pendingSaves--; }
+}
+
+/* ---------- derived data ---------- */
+function presentStaff(){
+  return state.roster.filter(function(s){ return !s.archived && state.day.attendance[s.id]; });
+}
+function activeRoster(){
+  return state.roster.filter(function(s){ return !s.archived; });
+}
+function activeBacklog(){
+  return state.backlog.filter(function(t){ return !t.archived; });
+}
+function activeTemplates(){
+  return state.templates.filter(function(t){ return !t.archived; });
+}
+function tasksForDate(dateStr){
+  return activeBacklog().filter(function(t){ return t.workDate===dateStr; });
+}
+function tasksForToday(){
+  return tasksForDate(todayStr());
+}
+function taskById(id){
+  var t = state.backlog.find(function(t){ return t.id===id; });
+  return t || {name:'(削除済み)', color:'#999', unit:''};
+}
+function staffById(id){
+  var s = state.roster.find(function(s){ return s.id===id; });
+  return s || {name:'(不明)'};
+}
+function currentLog(staffId){
+  return state.day.logs.find(function(l){ return l.staffId===staffId && l.end===null; }) || null;
+}
+function totalsByTask(staffId){
+  var map = {};
+  state.day.logs.filter(function(l){ return l.staffId===staffId; }).forEach(function(l){
+    var end = l.end ? new Date(l.end).getTime() : Date.now();
+    var dur = end - new Date(l.start).getTime();
+    map[l.taskId] = (map[l.taskId]||0) + dur;
+  });
+  return map;
+}
+function taskAggregate(taskId){
+  var ms=0, qty=0, activeCount=0;
+  state.day.logs.forEach(function(l){
+    if(l.taskId!==taskId) return;
+    var end = l.end ? new Date(l.end).getTime() : Date.now();
+    ms += end - new Date(l.start).getTime();
+    qty += (l.quantity||0);
+    if(l.end===null) activeCount++;
+  });
+  return {ms:ms, qty:qty, activeCount:activeCount};
+}
+
+/* ---------- render root ---------- */
+function render(){
+  var root = document.getElementById('app');
+  if(!state.role){
+    root.innerHTML = renderGate();
+    bindGate();
+    return;
+  }
+  var html = '';
+  if(state.role !== 'monitor'){
+    html += renderTopbar();
+  }
+  if(state.role==='manager') html += renderManager();
+  else if(state.role==='register') html += renderRegister();
+  else if(state.role==='input') html += renderInput();
+  else if(state.role==='monitor') html += renderMonitor();
+  if(state.modal) html += renderModal();
+  root.innerHTML = html;
+  bindCommon();
+  if(state.role==='manager') bindManager();
+  if(state.role==='register') bindRegister();
+  if(state.role==='input') bindInput();
+  if(state.role==='monitor') bindMonitor();
+  if(state.modal) bindModal();
+}
+
+/* ---------- GATE ---------- */
+function renderGate(){
+  return ''+
+  '<div class="gate">'+
+    '<div class="gate-eyebrow">Warehouse Dispatch Board</div>'+
+    '<h1 class="gate-title">物流センター 作業割り当てボード</h1>'+
+    '<p class="gate-sub">このアプリのデータは全員で共有されます。使う画面の役割を選んでください。</p>'+
+    '<div class="gate-grid">'+
+      '<button class="gate-card" data-role="manager">'+
+        '<div class="gate-icon" style="background:#EFEBE2;color:#1B2333;">&#128203;</div>'+
+        '<div class="gate-card-title">管理者</div>'+
+        '<div class="gate-card-desc">当日分の作業に出勤者を割り当て</div>'+
+      '</button>'+
+      '<button class="gate-card" data-role="register">'+
+        '<div class="gate-icon" style="background:#E9F2F0;color:#0F6E56;">&#128221;</div>'+
+        '<div class="gate-card-title">作業登録</div>'+
+        '<div class="gate-card-desc">日付指定の単発作業や、毎日/曜日で繰り返す作業を登録</div>'+
+      '</button>'+
+      '<button class="gate-card" data-role="input">'+
+        '<div class="gate-icon" style="background:#FFF3DE;color:#D98E1F;">&#9997;</div>'+
+        '<div class="gate-card-title">パート入力</div>'+
+        '<div class="gate-card-desc">タップだけで作業の開始・切り替え・件数入力</div>'+
+      '</button>'+
+      '<button class="gate-card" data-role="monitor">'+
+        '<div class="gate-icon" style="background:#111827;color:#F2A93B;">&#128225;</div>'+
+        '<div class="gate-card-title">モニター表示</div>'+
+        '<div class="gate-card-desc">共有モニターに稼働状況をリアルタイム表示</div>'+
+      '</button>'+
+    '</div>'+
+  '</div>';
+}
+function bindGate(){
+  document.querySelectorAll('.gate-card').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      state.role = btn.getAttribute('data-role');
+      render();
+      startPolling();
+    });
+  });
+}
+
+/* ---------- TOPBAR ---------- */
+function renderTopbar(){
+  var roleLabel = {manager:'管理者', register:'作業登録', input:'パート入力', monitor:'モニター'}[state.role];
+  return ''+
+  '<div class="topbar">'+
+    '<div class="topbar-left">'+
+      '<span class="topbar-title">物流センター 作業割り当てボード</span>'+
+      '<span class="topbar-date">'+todayLabel()+' / '+roleLabel+'</span>'+
+    '</div>'+
+    '<div class="topbar-right">'+
+      '<button class="pill-btn" id="switchRoleBtn">役割を変更</button>'+
+    '</div>'+
+  '</div>';
+}
+function bindCommon(){
+  var b = document.getElementById('switchRoleBtn');
+  if(b) b.addEventListener('click', function(){
+    state.role = null; state.activeStaffId = null; state.modal = null;
+    render();
+  });
+}
+
+/* ---------- MANAGER ---------- */
+function renderManager(){
+  var roster = activeRoster();
+  var present = presentStaff();
+  var tasks = tasksForToday();
+  var WD = ['日','月','火','水','木','金','土'];
+
+  var rosterHtml = roster.map(function(s){
+    var on = !!state.day.attendance[s.id];
+    var pattern = s.pattern || defaultPattern();
+    var dayToggles = pattern.map(function(v,i){
+      return '<button class="pattern-day '+(v?'on':'')+'" data-pattern-toggle="'+s.id+'|'+i+'">'+WD[i]+'</button>';
+    }).join('');
+    return '<div class="roster-item">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
+        '<span class="roster-name">'+esc(s.name)+'</span>'+
+        '<div class="roster-controls">'+
+          '<button class="toggle-att '+(on?'on':'off')+'" data-toggle-att="'+s.id+'">'+(on?'出勤中':'欠勤')+'</button>'+
+          '<button class="icon-x" data-del-staff="'+s.id+'" title="削除">&times;</button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="pattern-row">'+dayToggles+'</div>'+
+    '</div>';
+  }).join('') || '<div class="empty-note">スタッフを登録してください。</div>';
+
+  var poolHtml = present.map(function(s){
+    return '<div class="chip" draggable="true" data-staff-chip="'+s.id+'"><span class="chip-dot"></span>'+esc(s.name)+'</div>';
+  }).join('') || '<div class="pool-hint">出勤中のスタッフがここに表示されます</div>';
+
+  var colsHtml = tasks.map(function(t, idx){
+    var assignedNames = roster.filter(function(s){
+      return (state.day.assignments[s.id]||[]).indexOf(t.id) !== -1;
+    });
+    var chips = assignedNames.map(function(s){
+      return '<div class="task-chip">'+esc(s.name)+'<button data-unassign="'+s.id+'|'+t.id+'">&times;</button></div>';
+    }).join('') || '<span class="pool-hint" style="margin:0;">ここにスタッフをドラッグ</span>';
+    return '<div class="task-col" data-task-col="'+t.id+'">'+
+      '<div class="task-col-head">'+
+        '<span class="task-color-dot" style="background:'+t.color+'"></span>'+
+        '<span class="task-col-name">'+esc(t.name)+'</span>'+
+        '<button class="task-col-del" data-del-task="'+t.id+'" title="削除">&times;</button>'+
+      '</div>'+
+      '<div class="task-col-unit">単位: '+esc(t.unit)+'</div>'+
+      '<div class="task-col-body" style="margin-top:10px;">'+chips+'</div>'+
+    '</div>';
+  }).join('');
+
+  var newTaskForm = state.newTaskColIndex>=0 ? renderTaskForm() : '<button class="new-task-btn" id="addTaskBtn">+ 作業を追加</button>';
+
+  return ''+
+  '<div class="mgr-wrap">'+
+    '<div class="mgr-grid">'+
+      '<div class="panel">'+
+        '<div class="panel-title">出勤スタッフ <span class="count-badge">'+present.length+' / '+roster.length+'</span></div>'+
+        '<div class="pool-hint" style="margin-bottom:8px;">曜日ボタンで通常の出勤パターンを設定。当日の出退勤はボタンで個別に切替。</div>'+
+        '<div class="roster-list">'+rosterHtml+'</div>'+
+        '<div class="add-row">'+
+          '<input type="text" id="newStaffInput" placeholder="名前を入力">'+
+          '<button class="add-btn" id="addStaffBtn">追加</button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="panel">'+
+        '<div class="panel-title">本日の作業(作業日 '+todayLabel()+') <span class="count-badge">'+tasks.length+'件</span></div>'+
+        '<div class="pool-hint" style="margin-bottom:8px;">作業登録画面で本日付の作業として登録されたものが並びます。急ぎの作業はここから直接追加できます。</div>'+
+        '<div class="task-board">'+colsHtml+newTaskForm+'</div>'+
+        '<div class="staff-pool">'+
+          '<div class="pool-hint">出勤中スタッフ(ドラッグして作業に割り当て)</div>'+
+          poolHtml+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+function renderTaskForm(){
+  var swatches = TASK_COLORS.map(function(c){
+    return '<div class="swatch '+(state.newTaskColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-color-swatch="'+c.hex+'"></div>';
+  }).join('');
+  return '<div class="task-form">'+
+    '<label>作業名</label>'+
+    '<input type="text" id="newTaskName" placeholder="例: 検品">'+
+    '<label>単位(件・箱・ピース等)</label>'+
+    '<input type="text" id="newTaskUnit" placeholder="件" value="件">'+
+    '<label>カラー</label>'+
+    '<div class="swatches">'+swatches+'</div>'+
+    '<div class="task-form-actions">'+
+      '<button class="tf-cancel" id="cancelTaskBtn">キャンセル</button>'+
+      '<button class="tf-confirm" id="confirmTaskBtn">追加</button>'+
+    '</div>'+
+  '</div>';
+}
+function bindManager(){
+  document.querySelectorAll('[data-toggle-att]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var id = el.getAttribute('data-toggle-att');
+      state.day.attendance[id] = !state.day.attendance[id];
+      await saveDay(state.day);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-del-staff]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var id = el.getAttribute('data-del-staff');
+      if(!confirm('このスタッフを削除しますか?(過去の記録は残ります)')) return;
+      var s = state.roster.find(function(s){ return s.id===id; });
+      if(s) s.archived = true;
+      await saveRoster(state.roster);
+      render();
+    });
+  });
+  var newStaffInput = document.getElementById('newStaffInput');
+  var addStaffBtn = document.getElementById('addStaffBtn');
+  function focusGuard(el){
+    el.addEventListener('focusin', function(){ state.suppressRender = true; });
+    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+  }
+  if(newStaffInput){
+    focusGuard(newStaffInput);
+    newStaffInput.addEventListener('keydown', function(e){ if(e.key==='Enter') addStaffBtn.click(); });
+  }
+  if(addStaffBtn){
+    addStaffBtn.addEventListener('click', async function(){
+      var name = (newStaffInput.value||'').trim();
+      if(!name) return;
+      state.roster.push({id:uid(), name:name, archived:false, pattern:defaultPattern()});
+      state.suppressRender = false;
+      await saveRoster(state.roster);
+      render();
+    });
+  }
+  document.querySelectorAll('[data-del-task]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var id = el.getAttribute('data-del-task');
+      if(!confirm('この作業を削除しますか?(本日の記録は残ります)')) return;
+      var t = state.backlog.find(function(t){ return t.id===id; });
+      if(t) t.archived = true;
+      await saveBacklog(state.backlog);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-pattern-toggle]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var parts = el.getAttribute('data-pattern-toggle').split('|');
+      var sid = parts[0], idx = parseInt(parts[1],10);
+      var s = state.roster.find(function(s){ return s.id===sid; });
+      if(!s) return;
+      var pattern = (s.pattern || defaultPattern()).slice();
+      pattern[idx] = !pattern[idx];
+      s.pattern = pattern;
+      await saveRoster(state.roster);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-unassign]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var parts = el.getAttribute('data-unassign').split('|');
+      var sid=parts[0], tid=parts[1];
+      var arr = state.day.assignments[sid]||[];
+      state.day.assignments[sid] = arr.filter(function(x){ return x!==tid; });
+      await saveDay(state.day);
+      render();
+    });
+  });
+  var addTaskBtn = document.getElementById('addTaskBtn');
+  if(addTaskBtn){
+    addTaskBtn.addEventListener('click', function(){
+      state.newTaskColIndex = 0;
+      state.newTaskColor = TASK_COLORS[tasksForToday().length % TASK_COLORS.length].hex;
+      state.suppressRender = true;
+      render();
+    });
+  }
+  var cancelTaskBtn = document.getElementById('cancelTaskBtn');
+  if(cancelTaskBtn){
+    cancelTaskBtn.addEventListener('click', function(){
+      state.newTaskColIndex = -1;
+      state.suppressRender = false;
+      render();
+    });
+  }
+  document.querySelectorAll('[data-color-swatch]').forEach(function(el){
+    el.addEventListener('click', function(){
+      state.newTaskColor = el.getAttribute('data-color-swatch');
+      render();
+    });
+  });
+  var newTaskNameInput = document.getElementById('newTaskName');
+  var newTaskUnitInput = document.getElementById('newTaskUnit');
+  [newTaskNameInput, newTaskUnitInput].forEach(function(el){
+    if(!el) return;
+    el.addEventListener('focusin', function(){ state.suppressRender = true; });
+  });
+  var confirmTaskBtn = document.getElementById('confirmTaskBtn');
+  if(confirmTaskBtn){
+    confirmTaskBtn.addEventListener('click', async function(){
+      var name = (newTaskNameInput.value||'').trim();
+      if(!name){ newTaskNameInput.style.borderColor = '#C1521F'; newTaskNameInput.focus(); return; }
+      var unit = (newTaskUnitInput.value||'件').trim() || '件';
+      state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:todayStr(), archived:false});
+      state.newTaskColIndex = -1;
+      state.suppressRender = false;
+      await saveBacklog(state.backlog);
+      render();
+    });
+  }
+  document.querySelectorAll('[data-staff-chip]').forEach(function(el){
+    el.addEventListener('dragstart', function(e){
+      state.dragStaffId = el.getAttribute('data-staff-chip');
+      e.dataTransfer.effectAllowed = 'copy';
+    });
+  });
+  document.querySelectorAll('[data-task-col]').forEach(function(el){
+    el.addEventListener('dragover', function(e){ e.preventDefault(); el.classList.add('dragover'); });
+    el.addEventListener('dragleave', function(){ el.classList.remove('dragover'); });
+    el.addEventListener('drop', async function(e){
+      e.preventDefault();
+      el.classList.remove('dragover');
+      var taskId = el.getAttribute('data-task-col');
+      var staffId = state.dragStaffId;
+      if(!staffId) return;
+      var arr = state.day.assignments[staffId] || [];
+      if(arr.indexOf(taskId)===-1) arr.push(taskId);
+      state.day.assignments[staffId] = arr;
+      state.dragStaffId = null;
+      await saveDay(state.day);
+      render();
+    });
+  });
+}
+
+/* ---------- REGISTER (task registration by employees) ---------- */
+function tomorrowStr(){
+  var d = new Date();
+  d.setDate(d.getDate()+1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function dateLabelFromStr(dateStr){
+  var d = new Date(dateStr+'T00:00:00');
+  var WD = ['日','月','火','水','木','金','土'];
+  var label = (d.getMonth()+1)+'/'+d.getDate()+'('+WD[d.getDay()]+')';
+  if(dateStr===todayStr()) label += ' ・本日';
+  return label;
+}
+function renderRegister(){
+  if(!state.regNewDate) state.regNewDate = tomorrowStr();
+  var swatches = TASK_COLORS.map(function(c){
+    return '<div class="swatch '+(state.newTaskColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-color-swatch="'+c.hex+'"></div>';
+  }).join('');
+
+  var upcoming = activeBacklog().filter(function(t){ return t.workDate >= todayStr(); })
+    .sort(function(a,b){ return a.workDate < b.workDate ? -1 : (a.workDate > b.workDate ? 1 : 0); });
+  var groups = {};
+  var order = [];
+  upcoming.forEach(function(t){
+    if(!groups[t.workDate]){ groups[t.workDate] = []; order.push(t.workDate); }
+    groups[t.workDate].push(t);
+  });
+  var listHtml = order.map(function(dateStr){
+    var rows = groups[dateStr].map(function(t){
+      return '<div class="reg-row">'+
+        '<span class="task-color-dot" style="background:'+t.color+'"></span>'+
+        '<span class="reg-row-name">'+esc(t.name)+'</span>'+
+        '<span class="reg-row-unit">単位: '+esc(t.unit)+'</span>'+
+        '<button class="icon-x" data-del-backlog="'+t.id+'" title="削除">&times;</button>'+
+      '</div>';
+    }).join('');
+    return '<div class="reg-group">'+
+      '<div class="reg-group-date">'+dateLabelFromStr(dateStr)+'</div>'+
+      rows+
+    '</div>';
+  }).join('') || '<div class="empty-note">登録済みの作業はまだありません。</div>';
+
+  var WD = ['日','月','火','水','木','金','土'];
+  if(!state.newTemplatePattern) state.newTemplatePattern = defaultPattern();
+  var draftToggles = state.newTemplatePattern.map(function(v,i){
+    return '<button class="pattern-day '+(v?'on':'')+'" data-draft-pattern-toggle="'+i+'">'+WD[i]+'</button>';
+  }).join('');
+  var tmplSwatches = TASK_COLORS.map(function(c){
+    return '<div class="swatch '+(state.newTemplateColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-tmpl-color-swatch="'+c.hex+'"></div>';
+  }).join('');
+  var templateRows = activeTemplates().map(function(tmpl){
+    var pattern = tmpl.pattern || defaultPattern();
+    var toggles = pattern.map(function(v,i){
+      return '<button class="pattern-day '+(v?'on':'')+'" data-tmpl-pattern-toggle="'+tmpl.id+'|'+i+'">'+WD[i]+'</button>';
+    }).join('');
+    return '<div class="roster-item">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
+        '<span class="roster-name"><span class="task-color-dot" style="background:'+tmpl.color+';display:inline-block;margin-right:6px;"></span>'+esc(tmpl.name)+' <span style="font-size:11px;color:var(--slate-500);font-weight:400;">('+esc(tmpl.unit)+')</span></span>'+
+        '<button class="icon-x" data-del-template="'+tmpl.id+'" title="削除">&times;</button>'+
+      '</div>'+
+      '<div class="pattern-row">'+toggles+'</div>'+
+    '</div>';
+  }).join('') || '<div class="empty-note">毎日/毎週発生する作業を登録すると、該当する曜日に自動で本日分の作業として追加されます。</div>';
+
+  return '<div class="mgr-wrap"><div class="mgr-grid" style="grid-template-columns:320px 1fr;">'+
+    '<div style="display:flex;flex-direction:column;gap:20px;">'+
+    '<div class="panel">'+
+      '<div class="panel-title">単発の作業を登録</div>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業日</label>'+
+      '<input type="date" id="regDate" value="'+state.regNewDate+'" min="'+todayStr()+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
+      '<input type="text" id="regName" placeholder="例: 検品" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位(件・箱・ピース等)</label>'+
+      '<input type="text" id="regUnit" placeholder="件" value="件" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">カラー</label>'+
+      '<div class="swatches" style="margin-bottom:14px;">'+swatches+'</div>'+
+      '<button class="add-btn" id="regSubmitBtn" style="width:100%;padding:11px;">この作業を登録</button>'+
+    '</div>'+
+    '<div class="panel">'+
+      '<div class="panel-title">毎日/曜日で繰り返す作業</div>'+
+      '<div class="pool-hint" style="margin-bottom:10px;">該当する曜日になると、自動でその日の作業として登録されます。</div>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
+      '<input type="text" id="tmplName" placeholder="例: 入荷検品" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位</label>'+
+      '<input type="text" id="tmplUnit" placeholder="件" value="件" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">カラー</label>'+
+      '<div class="swatches" style="margin-bottom:10px;">'+tmplSwatches+'</div>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">発生する曜日</label>'+
+      '<div class="pattern-row" style="margin-bottom:14px;">'+draftToggles+'</div>'+
+      '<button class="add-btn" id="tmplSubmitBtn" style="width:100%;padding:11px;margin-bottom:16px;">この繰り返し作業を登録</button>'+
+      '<div class="roster-list">'+templateRows+'</div>'+
+    '</div>'+
+    '</div>'+
+    '<div class="panel">'+
+      '<div class="panel-title">登録済みの作業(本日以降)</div>'+
+      listHtml+
+    '</div>'+
+  '</div></div>';
+}
+function bindRegister(){
+  var dateInput = document.getElementById('regDate');
+  var nameInput = document.getElementById('regName');
+  var unitInput = document.getElementById('regUnit');
+  [dateInput, nameInput, unitInput].forEach(function(el){
+    if(!el) return;
+    el.addEventListener('focusin', function(){ state.suppressRender = true; });
+    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+  });
+  if(dateInput){
+    dateInput.addEventListener('change', function(){ state.regNewDate = dateInput.value; });
+  }
+  document.querySelectorAll('[data-color-swatch]').forEach(function(el){
+    el.addEventListener('click', function(){
+      state.newTaskColor = el.getAttribute('data-color-swatch');
+      render();
+    });
+  });
+  var submitBtn = document.getElementById('regSubmitBtn');
+  if(submitBtn){
+    submitBtn.addEventListener('click', async function(){
+      var name = (nameInput.value||'').trim();
+      if(!name){ nameInput.style.borderColor='#C1521F'; nameInput.focus(); return; }
+      var unit = (unitInput.value||'件').trim() || '件';
+      var workDate = dateInput.value || tomorrowStr();
+      state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:workDate, archived:false});
+      state.regNewDate = workDate;
+      nameInput.value = '';
+      state.suppressRender = false;
+      await saveBacklog(state.backlog);
+      render();
+    });
+  }
+  document.querySelectorAll('[data-del-backlog]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var id = el.getAttribute('data-del-backlog');
+      if(!confirm('この作業を削除しますか?')) return;
+      var t = state.backlog.find(function(t){ return t.id===id; });
+      if(t) t.archived = true;
+      await saveBacklog(state.backlog);
+      render();
+    });
+  });
+
+  var tmplNameInput = document.getElementById('tmplName');
+  var tmplUnitInput = document.getElementById('tmplUnit');
+  [tmplNameInput, tmplUnitInput].forEach(function(el){
+    if(!el) return;
+    el.addEventListener('focusin', function(){ state.suppressRender = true; });
+    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+  });
+  document.querySelectorAll('[data-tmpl-color-swatch]').forEach(function(el){
+    el.addEventListener('click', function(){
+      state.newTemplateColor = el.getAttribute('data-tmpl-color-swatch');
+      render();
+    });
+  });
+  document.querySelectorAll('[data-draft-pattern-toggle]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var idx = parseInt(el.getAttribute('data-draft-pattern-toggle'),10);
+      state.newTemplatePattern[idx] = !state.newTemplatePattern[idx];
+      render();
+    });
+  });
+  var tmplSubmitBtn = document.getElementById('tmplSubmitBtn');
+  if(tmplSubmitBtn){
+    tmplSubmitBtn.addEventListener('click', async function(){
+      var name = (tmplNameInput.value||'').trim();
+      if(!name){ tmplNameInput.style.borderColor='#C1521F'; tmplNameInput.focus(); return; }
+      var unit = (tmplUnitInput.value||'件').trim() || '件';
+      state.templates.push({id:uid(), name:name, unit:unit, color:state.newTemplateColor, pattern:state.newTemplatePattern, archived:false});
+      state.newTemplatePattern = defaultPattern();
+      tmplNameInput.value = '';
+      state.suppressRender = false;
+      await saveTemplates(state.templates);
+      await ensureTemplateTasksForToday();
+      render();
+    });
+  }
+  document.querySelectorAll('[data-tmpl-pattern-toggle]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var parts = el.getAttribute('data-tmpl-pattern-toggle').split('|');
+      var tid = parts[0], idx = parseInt(parts[1],10);
+      var tmpl = state.templates.find(function(t){ return t.id===tid; });
+      if(!tmpl) return;
+      var pattern = (tmpl.pattern || defaultPattern()).slice();
+      pattern[idx] = !pattern[idx];
+      tmpl.pattern = pattern;
+      await saveTemplates(state.templates);
+      await ensureTemplateTasksForToday();
+      render();
+    });
+  });
+  document.querySelectorAll('[data-del-template]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var id = el.getAttribute('data-del-template');
+      if(!confirm('この繰り返し作業の設定を削除しますか?(すでに作成済みの作業は残ります)')) return;
+      var t = state.templates.find(function(t){ return t.id===id; });
+      if(t) t.archived = true;
+      await saveTemplates(state.templates);
+      render();
+    });
+  });
+}
+
+/* ---------- INPUT (part-timer) ---------- */
+function renderInput(){
+  if(!state.activeStaffId){
+    var present = presentStaff();
+    var tiles = present.map(function(s){
+      return '<button class="name-tile" data-pick-staff="'+s.id+'">'+esc(s.name)+'</button>';
+    }).join('');
+    return '<div class="input-wrap"><div class="name-grid-wrap">'+
+      '<div class="name-grid-title">あなたの名前をタップしてください</div>'+
+      (present.length ? '<div class="name-grid">'+tiles+'</div>' : '<div class="name-empty">本日出勤登録されているスタッフがいません。<br>管理者に出勤登録を依頼してください。</div>')+
+    '</div></div>';
+  }
+
+  var staff = staffById(state.activeStaffId);
+  if(state.day.summaryFor === state.activeStaffId){
+    return renderSummary(staff);
+  }
+  var assignedIds = state.day.assignments[state.activeStaffId] || [];
+  var log = currentLog(state.activeStaffId);
+  var body;
+  if(!assignedIds.length){
+    body = '<div class="no-task-note">本日の作業がまだ割り当てられていません。<br>管理者に確認してください。</div>';
+  }else{
+    var tiles = assignedIds.map(function(tid){
+      var t = taskById(tid);
+      var isActive = log && log.taskId===tid;
+      var elapsed = isActive ? (Date.now() - new Date(log.start).getTime()) : 0;
+      return '<button class="task-tile '+(isActive?'active-task':'')+'" data-tap-task="'+tid+'" style="border-left:6px solid '+t.color+'">'+
+        '<div><div class="task-tile-name">'+esc(t.name)+'</div><div class="task-tile-unit">単位: '+esc(t.unit)+'</div></div>'+
+        '<div>'+
+          '<div class="task-tile-status"><span class="status-dot '+(isActive?'working':'idle')+'"></span>'+(isActive?'作業中':'タップして開始')+'</div>'+
+          (isActive ? '<div class="task-tile-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsed)+'</div>' : '')+
+        '</div>'+
+      '</button>';
+    }).join('');
+    body = '<div class="task-tile-grid">'+tiles+'</div>';
+  }
+
+  return '<div class="input-wrap">'+
+    '<div class="staff-header">'+
+      '<div><div class="staff-header-name">'+esc(staff.name)+'</div><div class="staff-header-sub">作業をタップすると開始/切替します</div></div>'+
+      '<button class="back-link" id="backToNames">戻る</button>'+
+    '</div>'+
+    '<div class="task-tile-wrap">'+body+'</div>'+
+    '<div class="end-day-bar"><button class="end-day-btn" id="endDayBtn">本日の作業を終了する</button></div>'+
+  '</div>';
+}
+function renderSummary(staff){
+  var totals = totalsByTask(staff.id);
+  var rows = Object.keys(totals).map(function(tid){
+    var t = taskById(tid);
+    var qty = 0;
+    state.day.logs.forEach(function(l){ if(l.staffId===staff.id && l.taskId===tid) qty += (l.quantity||0); });
+    return '<div class="summary-row">'+
+      '<div class="summary-task"><span class="task-color-dot" style="background:'+t.color+'"></span>'+esc(t.name)+'</div>'+
+      '<div class="summary-vals">'+fmtHM(totals[tid])+' ・ '+qty+esc(t.unit)+'</div>'+
+    '</div>';
+  }).join('') || '<div class="empty-note">本日の記録はありません。</div>';
+  return '<div class="input-wrap"><div class="summary-wrap">'+
+    '<div class="summary-title">お疲れ様でした</div>'+
+    '<div class="summary-sub">'+esc(staff.name)+'さんの本日の作業</div>'+
+    '<div class="summary-list">'+rows+'</div>'+
+    '<button class="summary-back" id="summaryBack">名前選択に戻る</button>'+
+  '</div></div>';
+}
+function bindInput(){
+  document.querySelectorAll('[data-pick-staff]').forEach(function(el){
+    el.addEventListener('click', function(){
+      state.activeStaffId = el.getAttribute('data-pick-staff');
+      render();
+      startTicker();
+    });
+  });
+  var backBtn = document.getElementById('backToNames');
+  if(backBtn) backBtn.addEventListener('click', function(){
+    state.activeStaffId = null;
+    render();
+  });
+  var summaryBack = document.getElementById('summaryBack');
+  if(summaryBack) summaryBack.addEventListener('click', function(){
+    delete state.day.summaryFor;
+    state.activeStaffId = null;
+    render();
+  });
+  document.querySelectorAll('[data-tap-task]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var tid = el.getAttribute('data-tap-task');
+      var log = currentLog(state.activeStaffId);
+      if(log && log.taskId===tid) return;
+      openQuantityModal(tid, false);
+    });
+  });
+  var endDayBtn = document.getElementById('endDayBtn');
+  if(endDayBtn) endDayBtn.addEventListener('click', function(){
+    var log = currentLog(state.activeStaffId);
+    if(log){
+      openQuantityModal(null, true);
+    }else{
+      state.day.summaryFor = state.activeStaffId;
+      render();
+    }
+  });
+}
+function openQuantityModal(nextTaskId, isEndDay){
+  var log = currentLog(state.activeStaffId);
+  state.suppressRender = true;
+  if(log){
+    var t = taskById(log.taskId);
+    state.modal = {kind:'qty', closingTaskId: log.taskId, closingTaskName: t.name, closingUnit: t.unit, value:0, nextTaskId: nextTaskId, isEndDay: isEndDay};
+  }else{
+    startTask(nextTaskId);
+    return;
+  }
+  render();
+}
+async function startTask(taskId){
+  var entry = {id:uid(), staffId:state.activeStaffId, taskId:taskId, start:new Date().toISOString(), end:null, quantity:null};
+  state.day.logs.push(entry);
+  await saveDay(state.day);
+  state.suppressRender = false;
+  render();
+}
+async function closeCurrentAndProceed(qty){
+  var m = state.modal;
+  var log = state.day.logs.find(function(l){ return l.staffId===state.activeStaffId && l.taskId===m.closingTaskId && l.end===null; });
+  if(log){ log.end = new Date().toISOString(); log.quantity = qty; }
+  await saveDay(state.day);
+  state.modal = null;
+  if(m.isEndDay){
+    state.day.summaryFor = state.activeStaffId;
+    state.suppressRender = false;
+    await saveDay(state.day);
+    render();
+  }else if(m.nextTaskId){
+    await startTask(m.nextTaskId);
+  }else{
+    state.suppressRender = false;
+    render();
+  }
+}
+
+/* ---------- MODAL ---------- */
+function renderModal(){
+  var m = state.modal;
+  if(m.kind!=='qty') return '';
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card">'+
+      '<div class="modal-task-name">'+esc(m.closingTaskName)+'</div>'+
+      '<div class="modal-q">何'+esc(m.closingUnit)+'できましたか?</div>'+
+      '<div class="qty-display" id="qtyDisplay">'+m.value+'</div>'+
+      '<div class="qty-btns">'+
+        '<button class="qty-btn" data-qty-delta="-10">-10</button>'+
+        '<button class="qty-btn" data-qty-delta="-1">-1</button>'+
+        '<button class="qty-btn" data-qty-delta="1">+1</button>'+
+        '<button class="qty-btn" data-qty-delta="10">+10</button>'+
+      '</div>'+
+      '<input type="number" inputmode="numeric" class="qty-manual" id="qtyManual" value="'+m.value+'" min="0">'+
+      '<div class="modal-actions">'+
+        '<button class="modal-cancel" id="qtyCancel">キャンセル</button>'+
+        '<button class="modal-confirm" id="qtyConfirm">確定'+(m.nextTaskId?'して次へ':'')+'</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+function bindModal(){
+  var m = state.modal;
+  document.querySelectorAll('[data-qty-delta]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var d = parseInt(el.getAttribute('data-qty-delta'),10);
+      m.value = Math.max(0, m.value + d);
+      document.getElementById('qtyDisplay').textContent = m.value;
+      document.getElementById('qtyManual').value = m.value;
+    });
+  });
+  var manual = document.getElementById('qtyManual');
+  if(manual){
+    manual.addEventListener('input', function(){
+      var v = parseInt(manual.value,10);
+      if(isNaN(v) || v<0) v=0;
+      m.value = v;
+      document.getElementById('qtyDisplay').textContent = v;
+    });
+  }
+  var cancelBtn = document.getElementById('qtyCancel');
+  if(cancelBtn) cancelBtn.addEventListener('click', function(){
+    state.modal = null;
+    state.suppressRender = false;
+    render();
+  });
+  var confirmBtn = document.getElementById('qtyConfirm');
+  if(confirmBtn) confirmBtn.addEventListener('click', function(){
+    closeCurrentAndProceed(m.value);
+  });
+}
+
+/* ---------- MONITOR ---------- */
+function renderMonitor(){
+  var present = presentStaff();
+  var tasks = tasksForToday();
+  var rows = present.map(function(s){
+    var log = currentLog(s.id);
+    var totals = totalsByTask(s.id);
+    var totalMs = Object.keys(totals).reduce(function(a,k){ return a+totals[k]; },0);
+    var barSegs = Object.keys(totals).map(function(tid){
+      var t = taskById(tid);
+      var pct = totalMs>0 ? (totals[tid]/totalMs*100) : 0;
+      return '<span class="mon-bar-seg" style="width:'+pct.toFixed(1)+'%;background:'+t.color+'"></span>';
+    }).join('');
+    var statusText, dotColor, timerHtml;
+    if(log){
+      var t = taskById(log.taskId);
+      statusText = '<span class="mon-status-dot" style="background:'+t.color+'"></span><span class="mon-status-text">'+esc(t.name)+'</span>';
+      timerHtml = '<div class="mon-timer" data-live-timer="'+log.start+'">'+fmtElapsed(Date.now()-new Date(log.start).getTime())+'</div>';
+    }else{
+      statusText = '<span class="mon-status-dot" style="background:#667085"></span><span class="mon-status-text idle">待機中</span>';
+      timerHtml = '<div class="mon-timer idle">-</div>';
+    }
+    return '<div class="mon-row">'+
+      '<div class="mon-name">'+esc(s.name)+'</div>'+
+      '<div class="mon-status">'+statusText+'</div>'+
+      timerHtml+
+      '<div class="mon-bar-wrap"><div class="mon-bar">'+(barSegs||'')+'</div><div class="mon-bar-total">本日計 '+fmtHM(totalMs)+'</div></div>'+
+    '</div>';
+  }).join('') || '<div class="mon-empty">本日出勤中のスタッフはいません</div>';
+
+  var sideCards = tasks.map(function(t){
+    var agg = taskAggregate(t.id);
+    return '<div class="mon-task-card" style="border-left-color:'+t.color+'">'+
+      '<div class="mon-task-name">'+esc(t.name)+'</div>'+
+      '<div class="mon-task-stats"><span>稼働 <b>'+agg.activeCount+'</b>人</span><span>計 <b>'+fmtHM(agg.ms)+'</b></span><span>'+agg.qty+esc(t.unit)+'</span></div>'+
+    '</div>';
+  }).join('') || '<div class="empty-note" style="color:var(--slate-300)">本日の作業が未登録です</div>';
+
+  var now = new Date();
+  var clock = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
+
+  return '<div class="monitor">'+
+    '<div class="mon-header">'+
+      '<div class="mon-title-block"><span class="mon-title">本日の稼働状況</span><span class="mon-date">'+todayLabel()+'</span></div>'+
+      '<div style="display:flex;align-items:center;gap:16px;">'+
+        '<span class="mon-clock" id="monClock">'+clock+'</span>'+
+        '<button class="mon-exit" id="switchRoleBtn">役割を変更</button>'+
+      '</div>'+
+    '</div>'+
+    '<div class="mon-body">'+
+      '<div class="mon-staff-list">'+rows+'</div>'+
+      '<div class="mon-side"><div class="mon-side-title">作業別サマリー</div>'+sideCards+'</div>'+
+    '</div>'+
+  '</div>';
+}
+function bindMonitor(){}
+
+/* ---------- ticking / polling ---------- */
+var tickerHandle = null;
+function startTicker(){
+  if(tickerHandle) return;
+  tickerHandle = setInterval(function(){
+    document.querySelectorAll('[data-live-timer]').forEach(function(el){
+      var start = new Date(el.getAttribute('data-live-timer')).getTime();
+      el.textContent = fmtElapsed(Date.now()-start);
+    });
+    var clockEl = document.getElementById('monClock');
+    if(clockEl){
+      var now = new Date();
+      clockEl.textContent = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
+    }
+  }, 1000);
+}
+
+var pollHandle = null;
+function startPolling(){
+  if(pollHandle) return;
+  pollHandle = setInterval(async function(){
+    if(!state.role) return;
+    if(pendingSaves>0) return;
+    var roster = await loadRoster();
+    var backlog = await loadBacklog();
+    var templates = await loadTemplates();
+    if(pendingSaves>0) return;
+    state.roster = roster;
+    state.backlog = backlog;
+    state.templates = templates;
+    await ensureTemplateTasksForToday();
+    var day = await loadDay();
+    if(pendingSaves>0) return;
+    state.day = day;
+    if(!state.suppressRender) render();
+  }, 4000);
+}
+
+/* ---------- init ---------- */
+function renderStorageWarning(){
+  return '<div class="gate">'+
+    '<div class="gate-eyebrow">Setup required</div>'+
+    '<h1 class="gate-title" style="font-size:26px;">保存機能が使えません</h1>'+
+    '<p class="gate-sub" style="max-width:520px;">このアプリはClaudeのアーティファクト表示画面の中で開いたときだけデータが保存されます。ダウンロードしたHTMLファイルを直接開いたり、社内サーバーにそのまま置いて開いたりすると、入力した内容が保存されず消えてしまいます。<br><br>Claudeの会話(アーティファクトのリンクや共有リンク)から開き直してください。</p>'+
+  '</div>';
+}
+function renderSupabaseWarning(){
+  return '<div class="gate">'+
+    '<div class="gate-eyebrow">Setup required</div>'+
+    '<h1 class="gate-title" style="font-size:26px;">Supabaseが未設定です</h1>'+
+    '<p class="gate-sub" style="max-width:520px;">config.js に SupabaseプロジェクトのURLとanonキーが設定されていません。<br><br>Supabaseダッシュボード → Project Settings → API から値を取得し、config.js の url / anonKey を書き換えてから、もう一度このページを開いてください。</p>'+
+  '</div>';
+}
+async function init(){
+  if(!window.SUPABASE_CONFIG || !window.SUPABASE_CONFIG.url || window.SUPABASE_CONFIG.url.indexOf('YOUR-PROJECT')!==-1){
+    document.getElementById('app').innerHTML = renderSupabaseWarning();
+    return;
+  }
+  if(!storageAvailable()){
+    document.getElementById('app').innerHTML = renderStorageWarning();
+    return;
+  }
+  state.roster = await loadRoster();
+  state.backlog = await loadBacklog();
+  state.templates = await loadTemplates();
+  await ensureTemplateTasksForToday();
+  state.day = await loadDay();
+  render();
+  startTicker();
+}
+init();
+
+})();
+</script>
+</body>
+</html>

@@ -185,6 +185,23 @@ input,select{font-family:inherit;}
 .reg-row-name{font-size:13px;font-weight:600;flex:1;}
 .reg-row-unit{font-size:11px;color:var(--slate-500);}
 
+.report-mode-toggle{display:flex;gap:8px;margin-bottom:18px;}
+.report-mode-btn{padding:8px 18px;border-radius:20px;border:1px solid var(--paper-line);background:#fff;font-size:13px;font-weight:600;color:var(--slate-500);}
+.report-mode-btn.active{background:var(--ink-900);color:#fff;border-color:var(--ink-900);}
+.report-controls{display:flex;gap:14px;align-items:flex-end;margin-bottom:22px;flex-wrap:wrap;}
+.report-field label{font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;}
+.report-field input{border:1px solid var(--paper-line);border-radius:8px;padding:8px 10px;font-size:13px;outline:none;}
+.report-field input:focus{border-color:var(--amber-500);}
+.report-go-btn{background:var(--ink-900);color:#fff;border:none;border-radius:8px;padding:9px 20px;font-size:13px;font-weight:600;}
+.report-go-btn:hover{background:var(--ink-700);}
+.report-section-title{font-family:var(--font-display);font-weight:600;font-size:15px;color:var(--ink-900);margin:22px 0 10px;}
+.report-table{width:100%;border-collapse:collapse;}
+.report-table th{text-align:left;font-size:11px;color:var(--slate-500);text-transform:uppercase;letter-spacing:.04em;padding:8px 10px;border-bottom:1px solid var(--paper-line);}
+.report-table td{padding:10px;border-bottom:1px solid var(--paper-line);font-size:13px;vertical-align:top;}
+.report-table td.num{font-family:var(--font-mono);text-align:right;white-space:nowrap;}
+.task-breakdown-chip{display:inline-flex;align-items:center;gap:4px;background:var(--paper-100);border-radius:12px;padding:2px 8px;font-size:11px;margin:2px 4px 2px 0;}
+.report-range-note{font-size:12px;color:var(--slate-500);margin-bottom:10px;}
+
 /* ---------- INPUT VIEW (part-timer) ---------- */
 .input-wrap{min-height:calc(100vh - 60px);display:flex;flex-direction:column;}
 .name-grid-wrap{flex:1;padding:24px 16px;max-width:900px;margin:0 auto;width:100%;}
@@ -377,6 +394,14 @@ var state = {
   regNewDate: null,
   newTemplateColor: TASK_COLORS[0].hex,
   newTemplatePattern: null,
+  reportMode: 'single',
+  reportDate: null,
+  reportStart: null,
+  reportEnd: null,
+  reportSingleDay: undefined,
+  reportRangeResult: null,
+  reportLoading: false,
+  reportError: null,
   modal: null,
   suppressRender: false,
   dragStaffId: null
@@ -491,15 +516,18 @@ function freshDay(dateStr){
   });
   return { date: dateStr, attendance: attendance, assignments:{}, logs:[] };
 }
-async function loadDay(){
-  var key = 'day:'+todayStr();
+async function loadDayByDate(dateStr){
   try{
-    var r = await window.storage.get(key, true);
+    var r = await window.storage.get('day:'+dateStr, true);
     if(r && r.value){
-      var d = JSON.parse(r.value);
-      if(d.date===todayStr()) return d;
+      return JSON.parse(r.value);
     }
   }catch(e){}
+  return null;
+}
+async function loadDay(){
+  var d = await loadDayByDate(todayStr());
+  if(d && d.date===todayStr()) return d;
   return freshDay(todayStr());
 }
 async function saveDay(day){
@@ -539,18 +567,21 @@ function staffById(id){
 function currentLog(staffId){
   return state.day.logs.find(function(l){ return l.staffId===staffId && l.end===null; }) || null;
 }
-function totalsByTask(staffId){
+function totalsByTaskForDay(day, staffId){
   var map = {};
-  state.day.logs.filter(function(l){ return l.staffId===staffId; }).forEach(function(l){
+  day.logs.filter(function(l){ return l.staffId===staffId; }).forEach(function(l){
     var end = l.end ? new Date(l.end).getTime() : Date.now();
     var dur = end - new Date(l.start).getTime();
     map[l.taskId] = (map[l.taskId]||0) + dur;
   });
   return map;
 }
-function taskAggregate(taskId){
+function totalsByTask(staffId){
+  return totalsByTaskForDay(state.day, staffId);
+}
+function taskAggregateForDay(day, taskId){
   var ms=0, qty=0, activeCount=0;
-  state.day.logs.forEach(function(l){
+  day.logs.forEach(function(l){
     if(l.taskId!==taskId) return;
     var end = l.end ? new Date(l.end).getTime() : Date.now();
     ms += end - new Date(l.start).getTime();
@@ -558,6 +589,44 @@ function taskAggregate(taskId){
     if(l.end===null) activeCount++;
   });
   return {ms:ms, qty:qty, activeCount:activeCount};
+}
+function taskAggregate(taskId){
+  return taskAggregateForDay(state.day, taskId);
+}
+function dateRangeList(startStr, endStr){
+  var dates = [];
+  var d = new Date(startStr+'T00:00:00');
+  var end = new Date(endStr+'T00:00:00');
+  var guard = 0;
+  while(d.getTime() <= end.getTime() && guard < 400){
+    dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
+    d.setDate(d.getDate()+1);
+    guard++;
+  }
+  return dates;
+}
+function aggregateDays(days){
+  var perStaff = {};
+  var perTask = {};
+  days.forEach(function(day){
+    if(!day) return;
+    day.logs.forEach(function(l){
+      var end = l.end ? new Date(l.end).getTime() : Date.now();
+      var dur = Math.max(0, end - new Date(l.start).getTime());
+      var qty = l.quantity || 0;
+      if(!perStaff[l.staffId]) perStaff[l.staffId] = { ms:0, byTask:{} };
+      perStaff[l.staffId].ms += dur;
+      if(!perStaff[l.staffId].byTask[l.taskId]) perStaff[l.staffId].byTask[l.taskId] = { ms:0, qty:0 };
+      perStaff[l.staffId].byTask[l.taskId].ms += dur;
+      perStaff[l.staffId].byTask[l.taskId].qty += qty;
+
+      if(!perTask[l.taskId]) perTask[l.taskId] = { ms:0, qty:0, staff:{} };
+      perTask[l.taskId].ms += dur;
+      perTask[l.taskId].qty += qty;
+      perTask[l.taskId].staff[l.staffId] = true;
+    });
+  });
+  return { perStaff: perStaff, perTask: perTask };
 }
 
 /* ---------- render root ---------- */
@@ -574,6 +643,7 @@ function render(){
   }
   if(state.role==='manager') html += renderManager();
   else if(state.role==='register') html += renderRegister();
+  else if(state.role==='report') html += renderReport();
   else if(state.role==='input') html += renderInput();
   else if(state.role==='monitor') html += renderMonitor();
   if(state.modal) html += renderModal();
@@ -581,6 +651,7 @@ function render(){
   bindCommon();
   if(state.role==='manager') bindManager();
   if(state.role==='register') bindRegister();
+  if(state.role==='report') bindReport();
   if(state.role==='input') bindInput();
   if(state.role==='monitor') bindMonitor();
   if(state.modal) bindModal();
@@ -614,6 +685,11 @@ function renderGate(){
         '<div class="gate-card-title">モニター表示</div>'+
         '<div class="gate-card-desc">共有モニターに稼働状況をリアルタイム表示</div>'+
       '</button>'+
+      '<button class="gate-card" data-role="report">'+
+        '<div class="gate-icon" style="background:#EEF0FB;color:#4C5FD5;">&#128202;</div>'+
+        '<div class="gate-card-title">集計</div>'+
+        '<div class="gate-card-desc">日別・期間別にスタッフ/作業ごとの実績を集計</div>'+
+      '</button>'+
     '</div>'+
   '</div>';
 }
@@ -629,7 +705,7 @@ function bindGate(){
 
 /* ---------- TOPBAR ---------- */
 function renderTopbar(){
-  var roleLabel = {manager:'管理者', register:'作業登録', input:'パート入力', monitor:'モニター'}[state.role];
+  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'パート入力', monitor:'モニター'}[state.role];
   return ''+
   '<div class="topbar">'+
     '<div class="topbar-left">'+
@@ -1079,6 +1155,173 @@ function bindRegister(){
       await saveTemplates(state.templates);
       render();
     });
+  });
+}
+
+/* ---------- REPORT (集計) ---------- */
+function renderReport(){
+  if(!state.reportDate) state.reportDate = todayStr();
+  if(!state.reportEnd) state.reportEnd = todayStr();
+  if(!state.reportStart){
+    var d = new Date();
+    d.setDate(d.getDate()-6);
+    state.reportStart = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  var toggles = '<div class="report-mode-toggle">'+
+    '<button class="report-mode-btn '+(state.reportMode==='single'?'active':'')+'" data-report-mode="single">特定の1日</button>'+
+    '<button class="report-mode-btn '+(state.reportMode==='range'?'active':'')+'" data-report-mode="range">期間で合計</button>'+
+  '</div>';
+
+  var controls, body;
+  if(state.reportMode==='single'){
+    controls = '<div class="report-controls">'+
+      '<div class="report-field"><label>日付</label><input type="date" id="reportDateInput" value="'+state.reportDate+'"></div>'+
+      '<button class="report-go-btn" id="reportSingleGo">この日を集計</button>'+
+    '</div>';
+    body = renderReportSingleBody();
+  }else{
+    controls = '<div class="report-controls">'+
+      '<div class="report-field"><label>開始日</label><input type="date" id="reportStartInput" value="'+state.reportStart+'"></div>'+
+      '<div class="report-field"><label>終了日</label><input type="date" id="reportEndInput" value="'+state.reportEnd+'"></div>'+
+      '<button class="report-go-btn" id="reportRangeGo">この期間を集計</button>'+
+    '</div>';
+    body = renderReportRangeBody();
+  }
+
+  return '<div class="mgr-wrap"><div style="max-width:1000px;margin:0 auto;">'+
+    toggles + controls +
+    '<div class="panel">'+body+'</div>'+
+  '</div></div>';
+}
+function renderReportSingleBody(){
+  if(state.reportLoading) return '<div class="empty-note">読み込み中...</div>';
+  if(state.reportError) return '<div class="empty-note">'+esc(state.reportError)+'</div>';
+  var day = state.reportSingleDay;
+  if(day===undefined) return '<div class="empty-note">日付を選んで「この日を集計」を押してください。</div>';
+  if(day===null) return '<div class="empty-note">'+esc(dateLabelFromStr(state.reportDate))+' の記録は見つかりませんでした。</div>';
+
+  var agg = aggregateDays([day]);
+  var staffIds = Object.keys(agg.perStaff).sort(function(a,b){
+    return agg.perStaff[b].ms - agg.perStaff[a].ms;
+  });
+  var staffRows = staffIds.map(function(sid){
+    var s = staffById(sid);
+    var info = agg.perStaff[sid];
+    var chips = Object.keys(info.byTask).map(function(tid){
+      var t = taskById(tid);
+      return '<span class="task-breakdown-chip"><span class="task-color-dot" style="background:'+t.color+';width:7px;height:7px;"></span>'+esc(t.name)+' '+fmtHM(info.byTask[tid].ms)+'</span>';
+    }).join('');
+    return '<tr><td>'+esc(s.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td>'+chips+'</td></tr>';
+  }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">記録がありません</td></tr>';
+
+  var taskIds = Object.keys(agg.perTask).sort(function(a,b){
+    return agg.perTask[b].ms - agg.perTask[a].ms;
+  });
+  var taskRows = taskIds.map(function(tid){
+    var t = taskById(tid);
+    var info = agg.perTask[tid];
+    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
+  }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
+
+  return '<div class="panel-title">'+esc(dateLabelFromStr(state.reportDate))+' の集計</div>'+
+    '<div class="report-section-title">スタッフ別</div>'+
+    '<table class="report-table"><thead><tr><th>名前</th><th>合計時間</th><th>作業内訳</th></tr></thead><tbody>'+staffRows+'</tbody></table>'+
+    '<div class="report-section-title">作業別</div>'+
+    '<table class="report-table"><thead><tr><th>作業</th><th>合計時間</th><th>合計件数</th><th>稼働人数</th></tr></thead><tbody>'+taskRows+'</tbody></table>';
+}
+function renderReportRangeBody(){
+  if(state.reportLoading) return '<div class="empty-note">読み込み中...(日数が多いと少し時間がかかります)</div>';
+  if(state.reportError) return '<div class="empty-note">'+esc(state.reportError)+'</div>';
+  var result = state.reportRangeResult;
+  if(!result) return '<div class="empty-note">開始日・終了日を選んで「この期間を集計」を押してください。(最大62日間)</div>';
+
+  var agg = result.agg;
+  var staffIds = Object.keys(agg.perStaff).sort(function(a,b){ return agg.perStaff[b].ms - agg.perStaff[a].ms; });
+  var staffRows = staffIds.map(function(sid){
+    var s = staffById(sid);
+    var info = agg.perStaff[sid];
+    var chips = Object.keys(info.byTask).map(function(tid){
+      var t = taskById(tid);
+      return '<span class="task-breakdown-chip"><span class="task-color-dot" style="background:'+t.color+';width:7px;height:7px;"></span>'+esc(t.name)+' '+fmtHM(info.byTask[tid].ms)+'</span>';
+    }).join('');
+    return '<tr><td>'+esc(s.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td>'+chips+'</td></tr>';
+  }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">記録がありません</td></tr>';
+
+  var taskIds = Object.keys(agg.perTask).sort(function(a,b){ return agg.perTask[b].ms - agg.perTask[a].ms; });
+  var taskRows = taskIds.map(function(tid){
+    var t = taskById(tid);
+    var info = agg.perTask[tid];
+    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
+  }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
+
+  return '<div class="panel-title">'+esc(dateLabelFromStr(result.start))+' 〜 '+esc(dateLabelFromStr(result.end))+' の合計</div>'+
+    '<div class="report-range-note">対象'+result.dayCount+'日間のうち、記録があった日: '+result.daysWithData+'日</div>'+
+    '<div class="report-section-title">スタッフ別合計</div>'+
+    '<table class="report-table"><thead><tr><th>名前</th><th>合計時間</th><th>作業内訳</th></tr></thead><tbody>'+staffRows+'</tbody></table>'+
+    '<div class="report-section-title">作業別合計</div>'+
+    '<table class="report-table"><thead><tr><th>作業</th><th>合計時間</th><th>合計件数</th><th>稼働人数</th></tr></thead><tbody>'+taskRows+'</tbody></table>';
+}
+async function runSingleReport(dateStr){
+  state.reportDate = dateStr;
+  state.reportLoading = true;
+  state.reportError = null;
+  render();
+  var day = await loadDayByDate(dateStr);
+  state.reportSingleDay = day;
+  state.reportLoading = false;
+  render();
+}
+async function runRangeReport(startStr, endStr){
+  state.reportStart = startStr;
+  state.reportEnd = endStr;
+  if(new Date(startStr) > new Date(endStr)){
+    state.reportError = '開始日は終了日より前にしてください。';
+    render();
+    return;
+  }
+  var dates = dateRangeList(startStr, endStr);
+  if(dates.length > 62){
+    state.reportError = '一度に集計できるのは62日間までです。期間を短くしてください。';
+    render();
+    return;
+  }
+  state.reportLoading = true;
+  state.reportError = null;
+  render();
+  var days = [];
+  for(var i=0;i<dates.length;i++){
+    var d = await loadDayByDate(dates[i]);
+    if(d) days.push(d);
+  }
+  var agg = aggregateDays(days);
+  state.reportRangeResult = { start: startStr, end: endStr, dayCount: dates.length, daysWithData: days.length, agg: agg };
+  state.reportLoading = false;
+  render();
+}
+function bindReport(){
+  document.querySelectorAll('[data-report-mode]').forEach(function(el){
+    el.addEventListener('click', function(){
+      state.reportMode = el.getAttribute('data-report-mode');
+      render();
+    });
+  });
+  var dateInput = document.getElementById('reportDateInput');
+  var startInput = document.getElementById('reportStartInput');
+  var endInput = document.getElementById('reportEndInput');
+  [dateInput, startInput, endInput].forEach(function(el){
+    if(!el) return;
+    el.addEventListener('focusin', function(){ state.suppressRender = true; });
+    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+  });
+  var singleGo = document.getElementById('reportSingleGo');
+  if(singleGo) singleGo.addEventListener('click', function(){
+    state.suppressRender = false;
+    runSingleReport(dateInput.value || todayStr());
+  });
+  var rangeGo = document.getElementById('reportRangeGo');
+  if(rangeGo) rangeGo.addEventListener('click', function(){
+    state.suppressRender = false;
+    runRangeReport(startInput.value || todayStr(), endInput.value || todayStr());
   });
 }
 

@@ -203,11 +203,19 @@ input,select{font-family:inherit;}
 
 .empty-note{font-size:13px;color:var(--slate-500);padding:14px 0;}
 
-.reg-group{margin-bottom:16px;}
-.reg-group-date{font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--rust-600);margin-bottom:6px;letter-spacing:.03em;}
-.reg-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--paper-50);border:1px solid var(--paper-line);margin-bottom:6px;}
-.reg-row-name{font-size:13px;font-weight:600;flex:1;}
-.reg-row-unit{font-size:11px;color:var(--slate-500);}
+.reg-group{margin-bottom:14px;border:1px solid var(--paper-line);border-radius:12px;padding:4px 14px 14px;background:var(--paper-50);}
+.reg-group-summary{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 2px;cursor:pointer;list-style:none;}
+.reg-group-summary::-webkit-details-marker{display:none;}
+.reg-group-summary::before{content:'▸';color:var(--slate-500);font-size:11px;margin-right:6px;transition:transform .15s;}
+details[open] > .reg-group-summary::before{transform:rotate(90deg);}
+.reg-group-date{font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--rust-600);letter-spacing:.03em;}
+.reg-group-items{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px;margin-top:6px;}
+.reg-search{width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:9px 12px;font-size:13px;margin-bottom:14px;outline:none;}
+.reg-search:focus{border-color:var(--amber-500);}
+.reg-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:#fff;border:1px solid var(--paper-line);margin-bottom:0;}
+.reg-row-name{font-size:13px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.reg-row-badge{font-size:10px;font-weight:700;color:var(--teal-500);background:#E9F6F6;border-radius:8px;padding:1px 6px;flex:none;}
+.reg-row-unit{font-size:11px;color:var(--slate-500);flex:none;}
 
 .report-mode-toggle{display:flex;gap:8px;margin-bottom:18px;}
 .report-mode-btn{padding:8px 18px;border-radius:20px;border:1px solid var(--paper-line);background:#fff;font-size:13px;font-weight:600;color:var(--slate-500);}
@@ -427,6 +435,13 @@ var TASK_COLORS = [
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-20', items:[
+    '作業登録画面の「登録済みの作業」一覧を見やすく改善(作業名で絞り込み検索、日付ごとに折りたたみ表示、複数列での表示、繰り返し作業には「定型」バッジを表示)'
+  ]},
+  { date:'2026-08-20', items:[
+    '管理者画面で日付を切り替えられるように変更(◀/▶や日付指定で他の日の出勤・割り当てを確認・編集可能に。未来の日付では繰り返し作業も自動生成)',
+    '管理者画面に「作業実績」一覧を追加し、パートさんが入力した記録(作業・開始/終了時刻・件数)を編集・削除できるように'
+  ]},
   { date:'2026-08-20', items:[
     '画面のレイアウト崩れ(本日の作業カードが画面からはみ出して隠れる問題)を修正',
     '管理者・作業登録画面に、他の人が行った変更をリアルタイムに知らせるお知らせ(トースト通知)機能を追加',
@@ -1200,11 +1215,14 @@ function dateLabelFromStr(dateStr){
 }
 function renderRegister(){
   if(!state.regNewDate) state.regNewDate = tomorrowStr();
+  if(state.regSearchQuery===undefined) state.regSearchQuery = '';
   var swatches = TASK_COLORS.map(function(c){
     return '<div class="swatch '+(state.newTaskColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-color-swatch="'+c.hex+'"></div>';
   }).join('');
 
+  var query = state.regSearchQuery.trim().toLowerCase();
   var upcoming = activeBacklog().filter(function(t){ return t.workDate >= todayStr(); })
+    .filter(function(t){ return !query || t.name.toLowerCase().indexOf(query)!==-1; })
     .sort(function(a,b){ return a.workDate < b.workDate ? -1 : (a.workDate > b.workDate ? 1 : 0); });
   var groups = {};
   var order = [];
@@ -1213,19 +1231,23 @@ function renderRegister(){
     groups[t.workDate].push(t);
   });
   var listHtml = order.map(function(dateStr){
-    var rows = groups[dateStr].map(function(t){
+    var items = groups[dateStr].slice().sort(function(a,b){ return a.name.localeCompare(b.name,'ja'); });
+    var rows = items.map(function(t){
+      var badge = t.fromTemplate ? '<span class="reg-row-badge">定型</span>' : '';
       return '<div class="reg-row">'+
         '<span class="task-color-dot" style="background:'+t.color+'"></span>'+
         '<span class="reg-row-name">'+esc(t.name)+'</span>'+
-        '<span class="reg-row-unit">単位: '+esc(t.unit)+'</span>'+
+        badge+
+        '<span class="reg-row-unit">'+esc(t.unit)+'</span>'+
         '<button class="icon-x" data-del-backlog="'+t.id+'" title="削除">&times;</button>'+
       '</div>';
     }).join('');
-    return '<div class="reg-group">'+
-      '<div class="reg-group-date">'+dateLabelFromStr(dateStr)+'</div>'+
-      rows+
-    '</div>';
-  }).join('') || '<div class="empty-note">登録済みの作業はまだありません。</div>';
+    var isToday = dateStr===todayStr();
+    return '<details class="reg-group" '+(isToday?'open':'')+'>'+
+      '<summary class="reg-group-summary"><span class="reg-group-date">'+dateLabelFromStr(dateStr)+'</span><span class="count-badge">'+items.length+'件</span></summary>'+
+      '<div class="reg-group-items">'+rows+'</div>'+
+    '</details>';
+  }).join('') || '<div class="empty-note">'+(query?'一致する作業が見つかりません。':'登録済みの作業はまだありません。')+'</div>';
 
   var WD = ['日','月','火','水','木','金','土'];
   if(!state.newTemplatePattern) state.newTemplatePattern = defaultPattern();
@@ -1279,7 +1301,8 @@ function renderRegister(){
     '</div>'+
     '</div>'+
     '<div class="panel">'+
-      '<div class="panel-title">登録済みの作業(本日以降)</div>'+
+      '<div class="panel-title">登録済みの作業(本日以降) <span class="count-badge">'+upcoming.length+'件</span></div>'+
+      '<input type="text" id="regSearchInput" class="reg-search" placeholder="作業名で絞り込み..." value="'+esc(state.regSearchQuery)+'">'+
       listHtml+
     '</div>'+
   '</div></div>';
@@ -1295,6 +1318,18 @@ function bindRegister(){
   });
   if(dateInput){
     dateInput.addEventListener('change', function(){ state.regNewDate = dateInput.value; });
+  }
+  var searchInput = document.getElementById('regSearchInput');
+  if(searchInput){
+    searchInput.addEventListener('focusin', function(){ state.suppressRender = true; });
+    searchInput.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+    searchInput.addEventListener('input', function(){
+      state.regSearchQuery = searchInput.value;
+      var caret = searchInput.selectionStart;
+      render();
+      var again = document.getElementById('regSearchInput');
+      if(again){ again.focus(); try{ again.setSelectionRange(caret, caret); }catch(e){} }
+    });
   }
   document.querySelectorAll('[data-color-swatch]').forEach(function(el){
     el.addEventListener('click', function(){

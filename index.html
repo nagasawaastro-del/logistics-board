@@ -433,10 +433,20 @@ var TASK_COLORS = [
   {name:'rust', hex:'#C1521F'},
   {name:'slate', hex:'#667085'}
 ];
+function colorSortIndex(hex){
+  var idx = TASK_COLORS.findIndex(function(c){ return c.hex===hex; });
+  return idx===-1 ? 999 : idx;
+}
+function byTaskColor(getColor){
+  return function(a,b){ return colorSortIndex(getColor(a)) - colorSortIndex(getColor(b)); };
+}
 
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-20', items:[
+    '全画面(管理者・作業登録・パート入力・モニター・集計)で、作業に関連する一覧を作業の色順に統一して並べ替え、同じ色の作業がまとまって見えるように変更'
+  ]},
   { date:'2026-08-20', items:[
     '登録済みの作業(単発・繰り返しとも)を編集できるように変更(作業名・単位・カラー・作業日を後から修正可能に)',
     '管理者画面の各作業に「出勤者◯人を全員割り当て」ボタンを追加し、出勤中スタッフ全員を1クリックで同じ作業に配置できるように'
@@ -920,7 +930,7 @@ function renderManager(){
   var isToday = viewDate===todayStr();
   var roster = activeRoster();
   var present = presentStaffForDay(day);
-  var tasks = tasksForDate(viewDate);
+  var tasks = tasksForDate(viewDate).slice().sort(byTaskColor(function(t){ return t.color; }));
   var WD = ['日','月','火','水','木','金','土'];
 
   var dateNav = '<div class="date-nav">'+
@@ -973,7 +983,11 @@ function renderManager(){
 
   var newTaskForm = state.newTaskColIndex>=0 ? renderTaskForm() : '<button class="new-task-btn" id="addTaskBtn">+ 作業を追加</button>';
 
-  var logsSorted = (day.logs||[]).slice().sort(function(a,b){ return new Date(a.start)-new Date(b.start); });
+  var logsSorted = (day.logs||[]).slice().sort(function(a,b){
+    var ci = colorSortIndex(taskById(a.taskId).color) - colorSortIndex(taskById(b.taskId).color);
+    if(ci!==0) return ci;
+    return new Date(a.start)-new Date(b.start);
+  });
   var logRows = logsSorted.map(function(l){
     var s = staffById(l.staffId);
     var t = taskById(l.taskId);
@@ -1255,7 +1269,7 @@ function renderRegister(){
     groups[t.workDate].push(t);
   });
   var listHtml = order.map(function(dateStr){
-    var items = groups[dateStr].slice().sort(function(a,b){ return a.name.localeCompare(b.name,'ja'); });
+    var items = groups[dateStr].slice().sort(byTaskColor(function(t){ return t.color; }));
     var rows = items.map(function(t){
       var badge = t.fromTemplate ? '<span class="reg-row-badge">定型</span>' : '';
       return '<div class="reg-row">'+
@@ -1282,7 +1296,7 @@ function renderRegister(){
   var tmplSwatches = TASK_COLORS.map(function(c){
     return '<div class="swatch '+(state.newTemplateColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-tmpl-color-swatch="'+c.hex+'"></div>';
   }).join('');
-  var templateRows = activeTemplates().map(function(tmpl){
+  var templateRows = activeTemplates().slice().sort(byTaskColor(function(t){ return t.color; })).map(function(tmpl){
     var pattern = tmpl.pattern || defaultPattern();
     var toggles = pattern.map(function(v,i){
       return '<button class="pattern-day '+(v?'on':'')+'" data-tmpl-pattern-toggle="'+tmpl.id+'|'+i+'">'+WD[i]+'</button>';
@@ -1524,16 +1538,14 @@ function renderReportSingleBody(){
   var staffRows = staffIds.map(function(sid){
     var s = staffById(sid);
     var info = agg.perStaff[sid];
-    var chips = Object.keys(info.byTask).map(function(tid){
+    var chips = Object.keys(info.byTask).sort(byTaskColor(function(tid){ return taskById(tid).color; })).map(function(tid){
       var t = taskById(tid);
       return '<span class="task-breakdown-chip"><span class="task-color-dot" style="background:'+t.color+';width:7px;height:7px;"></span>'+esc(t.name)+' '+fmtHM(info.byTask[tid].ms)+'</span>';
     }).join('');
     return '<tr><td>'+esc(s.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td>'+chips+'</td></tr>';
   }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">記録がありません</td></tr>';
 
-  var taskIds = Object.keys(agg.perTask).sort(function(a,b){
-    return agg.perTask[b].ms - agg.perTask[a].ms;
-  });
+  var taskIds = Object.keys(agg.perTask).sort(byTaskColor(function(tid){ return taskById(tid).color; }));
   var taskRows = taskIds.map(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
@@ -1557,14 +1569,14 @@ function renderReportRangeBody(){
   var staffRows = staffIds.map(function(sid){
     var s = staffById(sid);
     var info = agg.perStaff[sid];
-    var chips = Object.keys(info.byTask).map(function(tid){
+    var chips = Object.keys(info.byTask).sort(byTaskColor(function(tid){ return taskById(tid).color; })).map(function(tid){
       var t = taskById(tid);
       return '<span class="task-breakdown-chip"><span class="task-color-dot" style="background:'+t.color+';width:7px;height:7px;"></span>'+esc(t.name)+' '+fmtHM(info.byTask[tid].ms)+'</span>';
     }).join('');
     return '<tr><td>'+esc(s.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td>'+chips+'</td></tr>';
   }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">記録がありません</td></tr>';
 
-  var taskIds = Object.keys(agg.perTask).sort(function(a,b){ return agg.perTask[b].ms - agg.perTask[a].ms; });
+  var taskIds = Object.keys(agg.perTask).sort(byTaskColor(function(tid){ return taskById(tid).color; }));
   var taskRows = taskIds.map(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
@@ -1659,7 +1671,7 @@ function renderInput(){
   if(state.day.summaryFor === state.activeStaffId){
     return renderSummary(staff);
   }
-  var assignedIds = state.day.assignments[state.activeStaffId] || [];
+  var assignedIds = (state.day.assignments[state.activeStaffId] || []).slice().sort(byTaskColor(function(tid){ return taskById(tid).color; }));
   var log = currentLog(state.activeStaffId);
   var body;
   if(!assignedIds.length){
@@ -1691,7 +1703,7 @@ function renderInput(){
 }
 function renderSummary(staff){
   var totals = totalsByTask(staff.id);
-  var rows = Object.keys(totals).map(function(tid){
+  var rows = Object.keys(totals).sort(byTaskColor(function(tid){ return taskById(tid).color; })).map(function(tid){
     var t = taskById(tid);
     var qty = 0;
     state.day.logs.forEach(function(l){ if(l.staffId===staff.id && l.taskId===tid) qty += (l.quantity||0); });
@@ -2086,12 +2098,12 @@ function bindModal(){
 /* ---------- MONITOR ---------- */
 function renderMonitor(){
   var present = presentStaff();
-  var tasks = tasksForToday();
+  var tasks = tasksForToday().slice().sort(byTaskColor(function(t){ return t.color; }));
   var rows = present.map(function(s){
     var log = currentLog(s.id);
     var totals = totalsByTask(s.id);
     var totalMs = Object.keys(totals).reduce(function(a,k){ return a+totals[k]; },0);
-    var barSegs = Object.keys(totals).map(function(tid){
+    var barSegs = Object.keys(totals).sort(byTaskColor(function(tid){ return taskById(tid).color; })).map(function(tid){
       var t = taskById(tid);
       var pct = totalMs>0 ? (totals[tid]/totalMs*100) : 0;
       return '<span class="mon-bar-seg" style="width:'+pct.toFixed(1)+'%;background:'+t.color+'"></span>';

@@ -445,6 +445,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-20', items:[
+    '不具合修正: 作業登録・スタッフ追加・作業追加のテキスト入力欄で、入力中に自動更新(4秒ごとの同期)が重なると入力内容が消えたり空欄に戻ったりすることがあった問題を修正。入力内容を一時的に保持するようにし、途中で画面が再描画されても消えないように変更'
+  ]},
+  { date:'2026-08-20', items:[
     '全画面(管理者・作業登録・パート入力・モニター・集計)で、作業に関連する一覧を作業の色順に統一して並べ替え、同じ色の作業がまとまって見えるように変更'
   ]},
   { date:'2026-08-20', items:[
@@ -495,8 +498,16 @@ var state = {
   newTaskColIndex: -1,
   newTaskColor: TASK_COLORS[0].hex,
   regNewDate: null,
+  regSearchQuery: undefined,
+  regDraftName: '',
+  regDraftUnit: '件',
+  newStaffDraftName: '',
+  newTaskDraftName: '',
+  newTaskDraftUnit: '件',
   newTemplateColor: TASK_COLORS[0].hex,
   newTemplatePattern: null,
+  tmplDraftName: '',
+  tmplDraftUnit: '件',
   reportMode: 'single',
   reportDate: null,
   reportStart: null,
@@ -1012,7 +1023,7 @@ function renderManager(){
         '<div class="pool-hint" style="margin-bottom:8px;">曜日ボタンで通常の出勤パターンを設定。この日の出退勤はボタンで個別に切替。</div>'+
         '<div class="roster-list">'+rosterHtml+'</div>'+
         '<div class="add-row">'+
-          '<input type="text" id="newStaffInput" placeholder="名前を入力">'+
+          '<input type="text" id="newStaffInput" placeholder="名前を入力" value="'+esc(state.newStaffDraftName)+'">'+
           '<button class="add-btn" id="addStaffBtn">追加</button>'+
         '</div>'+
       '</div>'+
@@ -1039,9 +1050,9 @@ function renderTaskForm(){
   }).join('');
   return '<div class="task-form">'+
     '<label>作業名</label>'+
-    '<input type="text" id="newTaskName" placeholder="例: 検品">'+
+    '<input type="text" id="newTaskName" placeholder="例: 検品" value="'+esc(state.newTaskDraftName)+'">'+
     '<label>単位(件・箱・ピース等)</label>'+
-    '<input type="text" id="newTaskUnit" placeholder="件" value="件">'+
+    '<input type="text" id="newTaskUnit" placeholder="件" value="'+esc(state.newTaskDraftUnit)+'">'+
     '<label>カラー</label>'+
     '<div class="swatches">'+swatches+'</div>'+
     '<div class="task-form-actions">'+
@@ -1078,6 +1089,7 @@ function bindManager(){
   }
   if(newStaffInput){
     focusGuard(newStaffInput);
+    newStaffInput.addEventListener('input', function(){ state.newStaffDraftName = newStaffInput.value; });
     newStaffInput.addEventListener('keydown', function(e){ if(e.key==='Enter') addStaffBtn.click(); });
   }
   if(addStaffBtn){
@@ -1085,6 +1097,7 @@ function bindManager(){
       var name = (newStaffInput.value||'').trim();
       if(!name) return;
       state.roster.push({id:uid(), name:name, archived:false, pattern:defaultPattern()});
+      state.newStaffDraftName = '';
       state.suppressRender = false;
       await saveRoster(state.roster);
       render();
@@ -1151,6 +1164,8 @@ function bindManager(){
   if(cancelTaskBtn){
     cancelTaskBtn.addEventListener('click', function(){
       state.newTaskColIndex = -1;
+      state.newTaskDraftName = '';
+      state.newTaskDraftUnit = '件';
       state.suppressRender = false;
       render();
     });
@@ -1166,7 +1181,10 @@ function bindManager(){
   [newTaskNameInput, newTaskUnitInput].forEach(function(el){
     if(!el) return;
     el.addEventListener('focusin', function(){ state.suppressRender = true; });
+    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
   });
+  if(newTaskNameInput) newTaskNameInput.addEventListener('input', function(){ state.newTaskDraftName = newTaskNameInput.value; });
+  if(newTaskUnitInput) newTaskUnitInput.addEventListener('input', function(){ state.newTaskDraftUnit = newTaskUnitInput.value; });
   var confirmTaskBtn = document.getElementById('confirmTaskBtn');
   if(confirmTaskBtn){
     confirmTaskBtn.addEventListener('click', async function(){
@@ -1175,6 +1193,8 @@ function bindManager(){
       var unit = (newTaskUnitInput.value||'件').trim() || '件';
       state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:managerActiveDate(), archived:false});
       state.newTaskColIndex = -1;
+      state.newTaskDraftName = '';
+      state.newTaskDraftUnit = '件';
       state.suppressRender = false;
       await saveBacklog(state.backlog);
       render();
@@ -1320,9 +1340,9 @@ function renderRegister(){
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業日</label>'+
       '<input type="date" id="regDate" value="'+state.regNewDate+'" min="'+todayStr()+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
-      '<input type="text" id="regName" placeholder="例: 検品" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
+      '<input type="text" id="regName" placeholder="例: 検品" value="'+esc(state.regDraftName)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位(件・箱・ピース等)</label>'+
-      '<input type="text" id="regUnit" placeholder="件" value="件" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
+      '<input type="text" id="regUnit" placeholder="件" value="'+esc(state.regDraftUnit)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:14px;">'+swatches+'</div>'+
       '<button class="add-btn" id="regSubmitBtn" style="width:100%;padding:11px;">この作業を登録</button>'+
@@ -1331,9 +1351,9 @@ function renderRegister(){
       '<div class="panel-title">毎日/曜日で繰り返す作業</div>'+
       '<div class="pool-hint" style="margin-bottom:10px;">該当する曜日になると、自動でその日の作業として登録されます。</div>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
-      '<input type="text" id="tmplName" placeholder="例: 入荷検品" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
+      '<input type="text" id="tmplName" placeholder="例: 入荷検品" value="'+esc(state.tmplDraftName)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位</label>'+
-      '<input type="text" id="tmplUnit" placeholder="件" value="件" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
+      '<input type="text" id="tmplUnit" placeholder="件" value="'+esc(state.tmplDraftUnit)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:10px;">'+tmplSwatches+'</div>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">発生する曜日</label>'+
@@ -1361,6 +1381,8 @@ function bindRegister(){
   if(dateInput){
     dateInput.addEventListener('change', function(){ state.regNewDate = dateInput.value; });
   }
+  if(nameInput) nameInput.addEventListener('input', function(){ state.regDraftName = nameInput.value; });
+  if(unitInput) unitInput.addEventListener('input', function(){ state.regDraftUnit = unitInput.value; });
   var searchInput = document.getElementById('regSearchInput');
   if(searchInput){
     searchInput.addEventListener('focusin', function(){ state.suppressRender = true; });
@@ -1388,7 +1410,7 @@ function bindRegister(){
       var workDate = dateInput.value || tomorrowStr();
       state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:workDate, archived:false});
       state.regNewDate = workDate;
-      nameInput.value = '';
+      state.regDraftName = '';
       state.suppressRender = false;
       await saveBacklog(state.backlog);
       render();
@@ -1419,6 +1441,8 @@ function bindRegister(){
     el.addEventListener('focusin', function(){ state.suppressRender = true; });
     el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
   });
+  if(tmplNameInput) tmplNameInput.addEventListener('input', function(){ state.tmplDraftName = tmplNameInput.value; });
+  if(tmplUnitInput) tmplUnitInput.addEventListener('input', function(){ state.tmplDraftUnit = tmplUnitInput.value; });
   document.querySelectorAll('[data-tmpl-color-swatch]').forEach(function(el){
     el.addEventListener('click', function(){
       state.newTemplateColor = el.getAttribute('data-tmpl-color-swatch');
@@ -1440,7 +1464,7 @@ function bindRegister(){
       var unit = (tmplUnitInput.value||'件').trim() || '件';
       state.templates.push({id:uid(), name:name, unit:unit, color:state.newTemplateColor, pattern:state.newTemplatePattern, archived:false});
       state.newTemplatePattern = defaultPattern();
-      tmplNameInput.value = '';
+      state.tmplDraftName = '';
       state.suppressRender = false;
       await saveTemplates(state.templates);
       await ensureTemplateTasksForToday();

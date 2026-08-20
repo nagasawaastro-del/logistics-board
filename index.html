@@ -174,6 +174,8 @@ input,select{font-family:inherit;}
 .task-color-dot{width:12px;height:12px;border-radius:3px;flex:none;}
 .task-col-name{font-family:var(--font-display);font-weight:600;font-size:15px;flex:1;}
 .task-col-unit{font-size:11px;color:var(--slate-500);}
+.assign-all-btn{width:100%;margin-top:8px;padding:7px;border-radius:8px;border:1px dashed var(--slate-300);background:#fff;font-size:11px;font-weight:600;color:var(--slate-500);}
+.assign-all-btn:hover{border-color:var(--teal-500);color:var(--teal-500);border-style:solid;}
 .task-col-del{border:none;background:transparent;color:var(--slate-300);font-size:13px;}
 .task-col-del:hover{color:var(--rust-600);}
 .task-col-body{display:flex;flex-wrap:wrap;gap:6px;min-height:50px;}
@@ -435,6 +437,10 @@ var TASK_COLORS = [
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-20', items:[
+    '登録済みの作業(単発・繰り返しとも)を編集できるように変更(作業名・単位・カラー・作業日を後から修正可能に)',
+    '管理者画面の各作業に「出勤者◯人を全員割り当て」ボタンを追加し、出勤中スタッフ全員を1クリックで同じ作業に配置できるように'
+  ]},
   { date:'2026-08-20', items:[
     '繰り返し作業(定型)を削除すると、本日以降にすでに自動生成されていた作業もあわせて削除されるように変更(過去の記録は残ります)'
   ]},
@@ -960,6 +966,7 @@ function renderManager(){
         '<button class="task-col-del" data-del-task="'+t.id+'" title="削除">&times;</button>'+
       '</div>'+
       '<div class="task-col-unit">単位: '+esc(t.unit)+'</div>'+
+      '<button class="assign-all-btn" data-assign-all="'+t.id+'">出勤者'+present.length+'人を全員割り当て</button>'+
       '<div class="task-col-body" style="margin-top:10px;">'+chips+'</div>'+
     '</div>';
   }).join('');
@@ -1103,6 +1110,20 @@ function bindManager(){
       render();
     });
   });
+  document.querySelectorAll('[data-assign-all]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var tid = el.getAttribute('data-assign-all');
+      var day = managerActiveDay();
+      var present = presentStaffForDay(day);
+      present.forEach(function(s){
+        var arr = day.assignments[s.id] || [];
+        if(arr.indexOf(tid)===-1) arr.push(tid);
+        day.assignments[s.id] = arr;
+      });
+      await saveDay(day);
+      render();
+    });
+  });
   var addTaskBtn = document.getElementById('addTaskBtn');
   if(addTaskBtn){
     addTaskBtn.addEventListener('click', function(){
@@ -1242,6 +1263,7 @@ function renderRegister(){
         '<span class="reg-row-name">'+esc(t.name)+'</span>'+
         badge+
         '<span class="reg-row-unit">'+esc(t.unit)+'</span>'+
+        '<button class="log-edit-btn" data-edit-backlog="'+t.id+'">編集</button>'+
         '<button class="icon-x" data-del-backlog="'+t.id+'" title="削除">&times;</button>'+
       '</div>';
     }).join('');
@@ -1268,7 +1290,10 @@ function renderRegister(){
     return '<div class="roster-item">'+
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
         '<span class="roster-name"><span class="task-color-dot" style="background:'+tmpl.color+';display:inline-block;margin-right:6px;"></span>'+esc(tmpl.name)+' <span style="font-size:11px;color:var(--slate-500);font-weight:400;">('+esc(tmpl.unit)+')</span></span>'+
-        '<button class="icon-x" data-del-template="'+tmpl.id+'" title="削除">&times;</button>'+
+        '<div class="roster-controls">'+
+          '<button class="log-edit-btn" data-edit-template="'+tmpl.id+'">編集</button>'+
+          '<button class="icon-x" data-del-template="'+tmpl.id+'" title="削除">&times;</button>'+
+        '</div>'+
       '</div>'+
       '<div class="pattern-row">'+toggles+'</div>'+
     '</div>';
@@ -1365,6 +1390,13 @@ function bindRegister(){
       render();
     });
   });
+  document.querySelectorAll('[data-edit-backlog]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var id = el.getAttribute('data-edit-backlog');
+      var t = state.backlog.find(function(t){ return t.id===id; });
+      if(t) openEditTaskModal(t);
+    });
+  });
 
   var tmplNameInput = document.getElementById('tmplName');
   var tmplUnitInput = document.getElementById('tmplUnit');
@@ -1432,6 +1464,13 @@ function bindRegister(){
       });
       if(changed) await saveBacklog(state.backlog);
       render();
+    });
+  });
+  document.querySelectorAll('[data-edit-template]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var id = el.getAttribute('data-edit-template');
+      var t = state.templates.find(function(t){ return t.id===id; });
+      if(t) openEditTemplateModal(t);
     });
   });
 }
@@ -1805,10 +1844,123 @@ function bindEditLogModal(m){
   if(deleteBtn) deleteBtn.addEventListener('click', deleteEditLog);
 }
 
+function openEditTaskModal(task){
+  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate };
+  state.suppressRender = true;
+  render();
+}
+async function saveEditTask(){
+  var m = state.modal;
+  var task = state.backlog.find(function(t){ return t.id===m.taskId; });
+  if(!task){ state.modal=null; state.suppressRender=false; render(); return; }
+  var nameInput = document.getElementById('editTaskName');
+  var unitInput = document.getElementById('editTaskUnit');
+  var dateInput = document.getElementById('editTaskDate');
+  var name = (nameInput.value||'').trim();
+  if(!name){ nameInput.style.borderColor='#C1521F'; nameInput.focus(); return; }
+  task.name = name;
+  task.unit = (unitInput.value||'件').trim() || '件';
+  task.color = m.color;
+  task.workDate = dateInput.value || task.workDate;
+  state.modal = null;
+  state.suppressRender = false;
+  await saveBacklog(state.backlog);
+  render();
+}
+async function deleteEditTask(){
+  var m = state.modal;
+  if(!confirm('この作業を削除しますか?(記録は残ります)')) return;
+  var task = state.backlog.find(function(t){ return t.id===m.taskId; });
+  if(task) task.archived = true;
+  state.modal = null;
+  state.suppressRender = false;
+  await saveBacklog(state.backlog);
+  render();
+}
+function bindEditTaskModal(m){
+  document.querySelectorAll('[data-edit-task-color]').forEach(function(el){
+    el.addEventListener('click', function(){
+      state.modal.color = el.getAttribute('data-edit-task-color');
+      render();
+    });
+  });
+  var cancelBtn = document.getElementById('editCancelBtn');
+  if(cancelBtn) cancelBtn.addEventListener('click', function(){
+    state.modal = null;
+    state.suppressRender = false;
+    render();
+  });
+  var saveBtn = document.getElementById('editSaveBtn');
+  if(saveBtn) saveBtn.addEventListener('click', saveEditTask);
+  var deleteBtn = document.getElementById('editDeleteBtn');
+  if(deleteBtn) deleteBtn.addEventListener('click', deleteEditTask);
+}
+
+function openEditTemplateModal(tmpl){
+  state.modal = { kind:'editTemplate', templateId: tmpl.id, name: tmpl.name, unit: tmpl.unit, color: tmpl.color };
+  state.suppressRender = true;
+  render();
+}
+async function saveEditTemplate(){
+  var m = state.modal;
+  var tmpl = state.templates.find(function(t){ return t.id===m.templateId; });
+  if(!tmpl){ state.modal=null; state.suppressRender=false; render(); return; }
+  var nameInput = document.getElementById('editTmplName');
+  var unitInput = document.getElementById('editTmplUnit');
+  var name = (nameInput.value||'').trim();
+  if(!name){ nameInput.style.borderColor='#C1521F'; nameInput.focus(); return; }
+  tmpl.name = name;
+  tmpl.unit = (unitInput.value||'件').trim() || '件';
+  tmpl.color = m.color;
+  state.modal = null;
+  state.suppressRender = false;
+  await saveTemplates(state.templates);
+  render();
+}
+async function deleteEditTemplate(){
+  var m = state.modal;
+  if(!confirm('この繰り返し作業の設定を削除しますか?\n本日以降に自動生成された作業もあわせて削除されます(過去の記録は残ります)。')) return;
+  var tmpl = state.templates.find(function(t){ return t.id===m.templateId; });
+  if(tmpl) tmpl.archived = true;
+  await saveTemplates(state.templates);
+  var today = todayStr();
+  var changed = false;
+  state.backlog.forEach(function(task){
+    if(task.fromTemplate===m.templateId && task.workDate>=today && !task.archived){
+      task.archived = true;
+      changed = true;
+    }
+  });
+  if(changed) await saveBacklog(state.backlog);
+  state.modal = null;
+  state.suppressRender = false;
+  render();
+}
+function bindEditTemplateModal(m){
+  document.querySelectorAll('[data-edit-tmpl-color]').forEach(function(el){
+    el.addEventListener('click', function(){
+      state.modal.color = el.getAttribute('data-edit-tmpl-color');
+      render();
+    });
+  });
+  var cancelBtn = document.getElementById('editCancelBtn');
+  if(cancelBtn) cancelBtn.addEventListener('click', function(){
+    state.modal = null;
+    state.suppressRender = false;
+    render();
+  });
+  var saveBtn = document.getElementById('editSaveBtn');
+  if(saveBtn) saveBtn.addEventListener('click', saveEditTemplate);
+  var deleteBtn = document.getElementById('editDeleteBtn');
+  if(deleteBtn) deleteBtn.addEventListener('click', deleteEditTemplate);
+}
+
 /* ---------- MODAL ---------- */
 function renderModal(){
   var m = state.modal;
   if(m.kind==='editLog') return renderEditLogModal(m);
+  if(m.kind==='editTask') return renderEditTaskModal(m);
+  if(m.kind==='editTemplate') return renderEditTemplateModal(m);
   if(m.kind!=='qty') return '';
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card">'+
@@ -1853,9 +2005,55 @@ function renderEditLogModal(m){
     '</div>'+
   '</div>';
 }
+function editFieldSwatches(colorState, dataAttr){
+  return TASK_COLORS.map(function(c){
+    return '<div class="swatch '+(colorState===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-'+dataAttr+'="'+c.hex+'"></div>';
+  }).join('');
+}
+function renderEditTaskModal(m){
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card" style="max-width:400px;text-align:left;">'+
+      '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">作業を編集</div>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業日</label>'+
+      '<input type="date" id="editTaskDate" value="'+m.workDate+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
+      '<input type="text" id="editTaskName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位</label>'+
+      '<input type="text" id="editTaskUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">カラー</label>'+
+      '<div class="swatches" style="margin-bottom:18px;">'+editFieldSwatches(m.color,'edit-task-color')+'</div>'+
+      '<div class="modal-actions">'+
+        '<button class="modal-cancel" id="editCancelBtn">キャンセル</button>'+
+        '<button class="modal-confirm" id="editSaveBtn">保存</button>'+
+      '</div>'+
+      '<button id="editDeleteBtn" style="width:100%;margin-top:12px;background:transparent;border:none;color:var(--rust-600);font-size:13px;font-weight:600;padding:8px;">この作業を削除する</button>'+
+    '</div>'+
+  '</div>';
+}
+function renderEditTemplateModal(m){
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card" style="max-width:400px;text-align:left;">'+
+      '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">繰り返し作業を編集</div>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
+      '<input type="text" id="editTmplName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位</label>'+
+      '<input type="text" id="editTmplUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">カラー</label>'+
+      '<div class="swatches" style="margin-bottom:8px;">'+editFieldSwatches(m.color,'edit-tmpl-color')+'</div>'+
+      '<div class="pool-hint" style="margin-bottom:14px;">発生する曜日は一覧の曜日ボタンから変更できます。</div>'+
+      '<div class="modal-actions">'+
+        '<button class="modal-cancel" id="editCancelBtn">キャンセル</button>'+
+        '<button class="modal-confirm" id="editSaveBtn">保存</button>'+
+      '</div>'+
+      '<button id="editDeleteBtn" style="width:100%;margin-top:12px;background:transparent;border:none;color:var(--rust-600);font-size:13px;font-weight:600;padding:8px;">この繰り返し作業を削除する</button>'+
+    '</div>'+
+  '</div>';
+}
 function bindModal(){
   var m = state.modal;
   if(m.kind==='editLog'){ bindEditLogModal(m); return; }
+  if(m.kind==='editTask'){ bindEditTaskModal(m); return; }
+  if(m.kind==='editTemplate'){ bindEditTemplateModal(m); return; }
   document.querySelectorAll('[data-qty-delta]').forEach(function(el){
     el.addEventListener('click', function(){
       var d = parseInt(el.getAttribute('data-qty-delta'),10);

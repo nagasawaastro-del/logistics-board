@@ -436,6 +436,9 @@ var TASK_COLORS = [
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-20', items:[
+    '繰り返し作業(定型)を削除すると、本日以降にすでに自動生成されていた作業もあわせて削除されるように変更(過去の記録は残ります)'
+  ]},
+  { date:'2026-08-20', items:[
     '作業登録画面の「登録済みの作業」一覧を見やすく改善(作業名で絞り込み検索、日付ごとに折りたたみ表示、複数列での表示、繰り返し作業には「定型」バッジを表示)'
   ]},
   { date:'2026-08-20', items:[
@@ -1415,10 +1418,19 @@ function bindRegister(){
   document.querySelectorAll('[data-del-template]').forEach(function(el){
     el.addEventListener('click', async function(){
       var id = el.getAttribute('data-del-template');
-      if(!confirm('この繰り返し作業の設定を削除しますか?(すでに作成済みの作業は残ります)')) return;
+      if(!confirm('この繰り返し作業の設定を削除しますか?\n本日以降に自動生成された作業もあわせて削除されます(過去の記録は残ります)。')) return;
       var t = state.templates.find(function(t){ return t.id===id; });
       if(t) t.archived = true;
       await saveTemplates(state.templates);
+      var today = todayStr();
+      var changed = false;
+      state.backlog.forEach(function(task){
+        if(task.fromTemplate===id && task.workDate>=today && !task.archived){
+          task.archived = true;
+          changed = true;
+        }
+      });
+      if(changed) await saveBacklog(state.backlog);
       render();
     });
   });

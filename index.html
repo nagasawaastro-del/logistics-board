@@ -101,6 +101,18 @@ input,select{font-family:inherit;}
 
 /* ---------- MANAGER VIEW ---------- */
 .mgr-wrap{padding:20px;max-width:1400px;margin:0 auto;}
+.date-nav{display:flex;align-items:center;gap:10px;margin-bottom:18px;}
+.date-nav-btn{
+  width:40px;height:40px;border-radius:10px;border:1px solid var(--paper-line);background:#fff;
+  font-size:16px;color:var(--ink-900);flex:none;
+}
+.date-nav-btn:hover{border-color:var(--amber-500);}
+.date-nav-input{border:1px solid var(--paper-line);border-radius:10px;padding:9px 12px;font-size:14px;font-family:var(--font-mono);}
+.date-nav-today-badge{background:var(--green-500);color:#fff;font-size:11px;font-weight:700;padding:4px 12px;border-radius:12px;}
+.date-nav-today-btn{background:var(--ink-900);color:#fff;border:none;border-radius:12px;padding:8px 16px;font-size:12px;font-weight:600;}
+.date-nav-today-btn:hover{background:var(--ink-700);}
+.log-edit-btn{background:var(--paper-100);border:1px solid var(--paper-line);border-radius:14px;padding:5px 14px;font-size:12px;font-weight:600;color:var(--ink-900);}
+.log-edit-btn:hover{border-color:var(--amber-500);background:#FFF7E8;}
 .mgr-grid{display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start;min-width:0;}
 @media (max-width:900px){.mgr-grid{grid-template-columns:1fr;}}
 .mgr-grid > *{min-width:0;}
@@ -459,6 +471,8 @@ var state = {
   reportRangeResult: null,
   reportLoading: false,
   reportError: null,
+  managerDate: null,
+  managerDay: null,
   modal: null,
   suppressRender: false,
   dragStaffId: null
@@ -544,8 +558,8 @@ async function saveTemplates(list){
   try{ await window.storage.set('task-templates', JSON.stringify(list), true); }catch(e){}
   finally{ pendingSaves--; }
 }
-async function ensureTemplateTasksForToday(){
-  var wd = new Date().getDay();
+async function ensureTemplateTasksForDate(dateStr){
+  var wd = new Date(dateStr+'T00:00:00').getDay();
   var existingKeys = {};
   state.backlog.forEach(function(t){ if(t.fromTemplate) existingKeys[t.fromTemplate+'|'+t.workDate] = true; });
   var changed = false;
@@ -553,12 +567,15 @@ async function ensureTemplateTasksForToday(){
     if(tmpl.archived) return;
     var pattern = tmpl.pattern || defaultPattern();
     if(!pattern[wd]) return;
-    var key = tmpl.id+'|'+todayStr();
+    var key = tmpl.id+'|'+dateStr;
     if(existingKeys[key]) return;
-    state.backlog.push({id:uid(), name:tmpl.name, unit:tmpl.unit, color:tmpl.color, workDate:todayStr(), archived:false, fromTemplate:tmpl.id});
+    state.backlog.push({id:uid(), name:tmpl.name, unit:tmpl.unit, color:tmpl.color, workDate:dateStr, archived:false, fromTemplate:tmpl.id});
     changed = true;
   });
   if(changed) await saveBacklog(state.backlog);
+}
+async function ensureTemplateTasksForToday(){
+  return ensureTemplateTasksForDate(todayStr());
 }
 function defaultPattern(){
   return [false,true,true,true,true,true,false];
@@ -588,7 +605,12 @@ async function loadDay(){
   return freshDay(todayStr());
 }
 async function saveDay(day){
-  state.day = day;
+  if(day.date===todayStr()){
+    state.day = day;
+  }
+  if(state.managerDate && state.managerDate===day.date){
+    state.managerDay = day;
+  }
   pendingSaves++;
   try{ await window.storage.set('day:'+day.date, JSON.stringify(day), true); }catch(e){}
   finally{ pendingSaves--; }
@@ -598,8 +620,57 @@ async function saveDay(day){
 function presentStaff(){
   return state.roster.filter(function(s){ return !s.archived && state.day.attendance[s.id]; });
 }
+function presentStaffForDay(day){
+  return state.roster.filter(function(s){ return !s.archived && day.attendance[s.id]; });
+}
 function activeRoster(){
   return state.roster.filter(function(s){ return !s.archived; });
+}
+function managerActiveDate(){
+  return state.managerDate || todayStr();
+}
+function managerActiveDay(){
+  return managerActiveDate()===todayStr() ? state.day : state.managerDay;
+}
+async function switchManagerDate(dateStr){
+  state.managerDate = dateStr;
+  if(dateStr===todayStr()){
+    state.managerDay = null;
+    render();
+    return;
+  }
+  var day = await loadDayByDate(dateStr);
+  if(!day) day = freshDay(dateStr);
+  state.managerDay = day;
+  render();
+  await ensureTemplateTasksForDate(dateStr);
+  var refreshed = await loadDayByDate(dateStr);
+  if(refreshed && state.managerDate===dateStr) state.managerDay = refreshed;
+  render();
+}
+function shiftDateStr(dateStr, deltaDays){
+  var d = new Date(dateStr+'T00:00:00');
+  d.setDate(d.getDate()+deltaDays);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function localDateTimeToISO(dateStr, timeStr){
+  var dp = dateStr.split('-').map(Number);
+  var tp = (timeStr||'00:00').split(':').map(Number);
+  var d = new Date(dp[0], dp[1]-1, dp[2], tp[0]||0, tp[1]||0, 0);
+  return d.toISOString();
+}
+function isoToLocalTimeInput(iso){
+  if(!iso) return '';
+  var d = new Date(iso);
+  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+function taskOptionsForEdit(dateStr, currentTaskId){
+  var list = tasksForDate(dateStr).slice();
+  if(currentTaskId && !list.some(function(t){ return t.id===currentTaskId; })){
+    var t = taskById(currentTaskId);
+    list.unshift({ id:currentTaskId, name:t.name+'(削除済み)', color:t.color, unit:t.unit });
+  }
+  return list;
 }
 function activeBacklog(){
   return state.backlog.filter(function(t){ return !t.archived; });
@@ -820,13 +891,23 @@ function bindCommon(){
 
 /* ---------- MANAGER ---------- */
 function renderManager(){
+  var viewDate = managerActiveDate();
+  var day = managerActiveDay();
+  var isToday = viewDate===todayStr();
   var roster = activeRoster();
-  var present = presentStaff();
-  var tasks = tasksForToday();
+  var present = presentStaffForDay(day);
+  var tasks = tasksForDate(viewDate);
   var WD = ['日','月','火','水','木','金','土'];
 
+  var dateNav = '<div class="date-nav">'+
+    '<button class="date-nav-btn" id="dateNavPrev" title="前の日">&#8592;</button>'+
+    '<input type="date" id="dateNavInput" value="'+viewDate+'" class="date-nav-input">'+
+    '<button class="date-nav-btn" id="dateNavNext" title="次の日">&#8594;</button>'+
+    (isToday ? '<span class="date-nav-today-badge">本日</span>' : '<button class="date-nav-today-btn" id="dateNavToday">本日に戻る</button>')+
+  '</div>';
+
   var rosterHtml = roster.map(function(s){
-    var on = !!state.day.attendance[s.id];
+    var on = !!day.attendance[s.id];
     var pattern = s.pattern || defaultPattern();
     var dayToggles = pattern.map(function(v,i){
       return '<button class="pattern-day '+(v?'on':'')+'" data-pattern-toggle="'+s.id+'|'+i+'">'+WD[i]+'</button>';
@@ -849,7 +930,7 @@ function renderManager(){
 
   var colsHtml = tasks.map(function(t, idx){
     var assignedNames = roster.filter(function(s){
-      return (state.day.assignments[s.id]||[]).indexOf(t.id) !== -1;
+      return (day.assignments[s.id]||[]).indexOf(t.id) !== -1;
     });
     var chips = assignedNames.map(function(s){
       return '<div class="task-chip">'+esc(s.name)+'<button data-unassign="'+s.id+'|'+t.id+'">&times;</button></div>';
@@ -867,12 +948,29 @@ function renderManager(){
 
   var newTaskForm = state.newTaskColIndex>=0 ? renderTaskForm() : '<button class="new-task-btn" id="addTaskBtn">+ 作業を追加</button>';
 
+  var logsSorted = (day.logs||[]).slice().sort(function(a,b){ return new Date(a.start)-new Date(b.start); });
+  var logRows = logsSorted.map(function(l){
+    var s = staffById(l.staffId);
+    var t = taskById(l.taskId);
+    var endLabel = l.end ? fmtClock(l.end) : '<span style="color:var(--green-500);font-weight:700;">作業中</span>';
+    var qtyLabel = l.end ? (l.quantity||0)+esc(t.unit) : '-';
+    return '<tr>'+
+      '<td>'+esc(s.name)+'</td>'+
+      '<td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td>'+
+      '<td class="num">'+fmtClock(l.start)+'</td>'+
+      '<td class="num">'+endLabel+'</td>'+
+      '<td class="num">'+qtyLabel+'</td>'+
+      '<td class="num"><button class="log-edit-btn" data-edit-log="'+l.id+'">編集</button></td>'+
+    '</tr>';
+  }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この日の記録はまだありません</td></tr>';
+
   return ''+
   '<div class="mgr-wrap">'+
+    dateNav+
     '<div class="mgr-grid">'+
       '<div class="panel">'+
         '<div class="panel-title">出勤スタッフ <span class="count-badge">'+present.length+' / '+roster.length+'</span></div>'+
-        '<div class="pool-hint" style="margin-bottom:8px;">曜日ボタンで通常の出勤パターンを設定。当日の出退勤はボタンで個別に切替。</div>'+
+        '<div class="pool-hint" style="margin-bottom:8px;">曜日ボタンで通常の出勤パターンを設定。この日の出退勤はボタンで個別に切替。</div>'+
         '<div class="roster-list">'+rosterHtml+'</div>'+
         '<div class="add-row">'+
           '<input type="text" id="newStaffInput" placeholder="名前を入力">'+
@@ -880,14 +978,19 @@ function renderManager(){
         '</div>'+
       '</div>'+
       '<div class="panel">'+
-        '<div class="panel-title">本日の作業(作業日 '+todayLabel()+') <span class="count-badge">'+tasks.length+'件</span></div>'+
-        '<div class="pool-hint" style="margin-bottom:8px;">作業登録画面で本日付の作業として登録されたものが並びます。急ぎの作業はここから直接追加できます。</div>'+
+        '<div class="panel-title">'+esc(dateLabelFromStr(viewDate))+'の作業 <span class="count-badge">'+tasks.length+'件</span></div>'+
+        '<div class="pool-hint" style="margin-bottom:8px;">作業登録画面でこの日付の作業として登録されたものが並びます。急ぎの作業はここから直接追加できます。</div>'+
         '<div class="task-board">'+colsHtml+newTaskForm+'</div>'+
         '<div class="staff-pool">'+
           '<div class="pool-hint">出勤中スタッフ(ドラッグして作業に割り当て)</div>'+
           poolHtml+
         '</div>'+
       '</div>'+
+    '</div>'+
+    '<div class="panel" style="margin-top:20px;">'+
+      '<div class="panel-title">作業実績(この日の記録) <span class="count-badge">'+logsSorted.length+'件</span></div>'+
+      '<div class="pool-hint" style="margin-bottom:10px;">パートさんが入力した内容に誤りがあれば「編集」から修正できます。</div>'+
+      '<table class="report-table"><thead><tr><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>件数</th><th></th></tr></thead><tbody>'+logRows+'</tbody></table>'+
     '</div>'+
   '</div>';
 }
@@ -912,8 +1015,9 @@ function bindManager(){
   document.querySelectorAll('[data-toggle-att]').forEach(function(el){
     el.addEventListener('click', async function(){
       var id = el.getAttribute('data-toggle-att');
-      state.day.attendance[id] = !state.day.attendance[id];
-      await saveDay(state.day);
+      var day = managerActiveDay();
+      day.attendance[id] = !day.attendance[id];
+      await saveDay(day);
       render();
     });
   });
@@ -950,7 +1054,7 @@ function bindManager(){
   document.querySelectorAll('[data-del-task]').forEach(function(el){
     el.addEventListener('click', async function(){
       var id = el.getAttribute('data-del-task');
-      if(!confirm('この作業を削除しますか?(本日の記録は残ります)')) return;
+      if(!confirm('この作業を削除しますか?(記録は残ります)')) return;
       var t = state.backlog.find(function(t){ return t.id===id; });
       if(t) t.archived = true;
       await saveBacklog(state.backlog);
@@ -974,9 +1078,10 @@ function bindManager(){
     el.addEventListener('click', async function(){
       var parts = el.getAttribute('data-unassign').split('|');
       var sid=parts[0], tid=parts[1];
-      var arr = state.day.assignments[sid]||[];
-      state.day.assignments[sid] = arr.filter(function(x){ return x!==tid; });
-      await saveDay(state.day);
+      var day = managerActiveDay();
+      var arr = day.assignments[sid]||[];
+      day.assignments[sid] = arr.filter(function(x){ return x!==tid; });
+      await saveDay(day);
       render();
     });
   });
@@ -984,7 +1089,7 @@ function bindManager(){
   if(addTaskBtn){
     addTaskBtn.addEventListener('click', function(){
       state.newTaskColIndex = 0;
-      state.newTaskColor = TASK_COLORS[tasksForToday().length % TASK_COLORS.length].hex;
+      state.newTaskColor = TASK_COLORS[tasksForDate(managerActiveDate()).length % TASK_COLORS.length].hex;
       state.suppressRender = true;
       render();
     });
@@ -1015,7 +1120,7 @@ function bindManager(){
       var name = (newTaskNameInput.value||'').trim();
       if(!name){ newTaskNameInput.style.borderColor = '#C1521F'; newTaskNameInput.focus(); return; }
       var unit = (newTaskUnitInput.value||'件').trim() || '件';
-      state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:todayStr(), archived:false});
+      state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:managerActiveDate(), archived:false});
       state.newTaskColIndex = -1;
       state.suppressRender = false;
       await saveBacklog(state.backlog);
@@ -1037,12 +1142,45 @@ function bindManager(){
       var taskId = el.getAttribute('data-task-col');
       var staffId = state.dragStaffId;
       if(!staffId) return;
-      var arr = state.day.assignments[staffId] || [];
+      var day = managerActiveDay();
+      var arr = day.assignments[staffId] || [];
       if(arr.indexOf(taskId)===-1) arr.push(taskId);
-      state.day.assignments[staffId] = arr;
+      day.assignments[staffId] = arr;
       state.dragStaffId = null;
-      await saveDay(state.day);
+      await saveDay(day);
       render();
+    });
+  });
+
+  var dateInput = document.getElementById('dateNavInput');
+  if(dateInput){
+    dateInput.addEventListener('focusin', function(){ state.suppressRender = true; });
+    dateInput.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+    dateInput.addEventListener('change', function(){
+      state.suppressRender = false;
+      if(dateInput.value) switchManagerDate(dateInput.value);
+    });
+  }
+  var prevBtn = document.getElementById('dateNavPrev');
+  if(prevBtn) prevBtn.addEventListener('click', function(){
+    switchManagerDate(shiftDateStr(managerActiveDate(), -1));
+  });
+  var nextBtn = document.getElementById('dateNavNext');
+  if(nextBtn) nextBtn.addEventListener('click', function(){
+    switchManagerDate(shiftDateStr(managerActiveDate(), 1));
+  });
+  var todayBtn = document.getElementById('dateNavToday');
+  if(todayBtn) todayBtn.addEventListener('click', function(){
+    switchManagerDate(todayStr());
+  });
+
+  document.querySelectorAll('[data-edit-log]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var logId = el.getAttribute('data-edit-log');
+      var day = managerActiveDay();
+      var log = (day.logs||[]).find(function(l){ return l.id===logId; });
+      if(!log) return;
+      openEditLogModal(log);
     });
   });
 }
@@ -1559,9 +1697,71 @@ async function closeCurrentAndProceed(qty){
   }
 }
 
+function openEditLogModal(log){
+  state.modal = {
+    kind:'editLog',
+    logId: log.id,
+    staffId: log.staffId,
+    taskId: log.taskId,
+    startTime: isoToLocalTimeInput(log.start),
+    endTime: isoToLocalTimeInput(log.end),
+    quantity: log.quantity || 0
+  };
+  state.suppressRender = true;
+  render();
+}
+async function saveEditLog(){
+  var m = state.modal;
+  var day = managerActiveDay();
+  var log = (day.logs||[]).find(function(l){ return l.id===m.logId; });
+  if(!log){ state.modal=null; state.suppressRender=false; render(); return; }
+  var taskSelect = document.getElementById('editTaskSelect');
+  var startInput = document.getElementById('editStartTime');
+  var endInput = document.getElementById('editEndTime');
+  var qtyInput = document.getElementById('editQtyInput');
+  var dateStr = managerActiveDate();
+  log.taskId = taskSelect.value;
+  log.start = localDateTimeToISO(dateStr, startInput.value || '00:00');
+  if(endInput.value){
+    log.end = localDateTimeToISO(dateStr, endInput.value);
+    var q = parseInt(qtyInput.value,10);
+    log.quantity = isNaN(q) ? 0 : q;
+  }else{
+    log.end = null;
+    log.quantity = null;
+  }
+  state.modal = null;
+  state.suppressRender = false;
+  await saveDay(day);
+  render();
+}
+async function deleteEditLog(){
+  var m = state.modal;
+  if(!confirm('この記録を削除しますか?この操作は元に戻せません。')) return;
+  var day = managerActiveDay();
+  day.logs = (day.logs||[]).filter(function(l){ return l.id!==m.logId; });
+  state.modal = null;
+  state.suppressRender = false;
+  await saveDay(day);
+  render();
+}
+function bindEditLogModal(m){
+  var cancelBtn = document.getElementById('editCancelBtn');
+  if(cancelBtn) cancelBtn.addEventListener('click', function(){
+    state.modal = null;
+    state.suppressRender = false;
+    render();
+  });
+  var saveBtn = document.getElementById('editSaveBtn');
+  if(saveBtn) saveBtn.addEventListener('click', saveEditLog);
+  var deleteBtn = document.getElementById('editDeleteBtn');
+  if(deleteBtn) deleteBtn.addEventListener('click', deleteEditLog);
+}
+
 /* ---------- MODAL ---------- */
 function renderModal(){
   var m = state.modal;
+  if(m.kind==='editLog') return renderEditLogModal(m);
   if(m.kind!=='qty') return '';
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card">'+
@@ -1582,8 +1782,33 @@ function renderModal(){
     '</div>'+
   '</div>';
 }
+function renderEditLogModal(m){
+  var s = staffById(m.staffId);
+  var options = taskOptionsForEdit(managerActiveDate(), m.taskId).map(function(t){
+    return '<option value="'+t.id+'" '+(t.id===m.taskId?'selected':'')+'>'+esc(t.name)+'</option>';
+  }).join('');
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card" style="max-width:400px;text-align:left;">'+
+      '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">実績を編集('+esc(s.name)+'さん)</div>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業</label>'+
+      '<select id="editTaskSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+options+'</select>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">開始時刻</label>'+
+      '<input type="time" id="editStartTime" value="'+m.startTime+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">終了時刻(空欄=作業中のまま)</label>'+
+      '<input type="time" id="editEndTime" value="'+m.endTime+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">件数</label>'+
+      '<input type="number" id="editQtyInput" value="'+m.quantity+'" min="0" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:18px;">'+
+      '<div class="modal-actions">'+
+        '<button class="modal-cancel" id="editCancelBtn">キャンセル</button>'+
+        '<button class="modal-confirm" id="editSaveBtn">保存</button>'+
+      '</div>'+
+      '<button id="editDeleteBtn" style="width:100%;margin-top:12px;background:transparent;border:none;color:var(--rust-600);font-size:13px;font-weight:600;padding:8px;">この記録を削除する</button>'+
+    '</div>'+
+  '</div>';
+}
 function bindModal(){
   var m = state.modal;
+  if(m.kind==='editLog'){ bindEditLogModal(m); return; }
   document.querySelectorAll('[data-qty-delta]').forEach(function(el){
     el.addEventListener('click', function(){
       var d = parseInt(el.getAttribute('data-qty-delta'),10);

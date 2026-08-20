@@ -72,6 +72,17 @@ input,select{font-family:inherit;}
 .gate-icon{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;}
 .gate-card-title{font-family:var(--font-display);font-weight:600;font-size:18px;color:var(--ink-900);}
 .gate-card-desc{font-size:13px;color:var(--slate-500);line-height:1.5;}
+.changelog-link{background:transparent;border:none;color:var(--slate-500);font-size:12px;text-decoration:underline;margin-top:28px;cursor:pointer;}
+.changelog-link:hover{color:var(--ink-900);}
+
+.changelog-card{background:#fff;border-radius:20px;padding:28px;max-width:480px;width:100%;max-height:80vh;overflow-y:auto;text-align:left;}
+.changelog-title{font-family:var(--font-display);font-weight:700;font-size:20px;margin-bottom:18px;color:var(--ink-900);}
+.changelog-entry{margin-bottom:20px;}
+.changelog-entry:last-of-type{margin-bottom:12px;}
+.changelog-date{font-family:var(--font-mono);font-size:12px;color:var(--rust-600);font-weight:700;margin-bottom:6px;letter-spacing:.03em;}
+.changelog-items{margin:0;padding-left:20px;font-size:13px;line-height:1.8;color:var(--ink-text);}
+.changelog-close{width:100%;padding:13px;border-radius:12px;border:none;background:var(--paper-200);color:var(--slate-500);font-weight:700;font-size:14px;}
+.changelog-close:hover{background:var(--paper-line);}
 
 /* ---------- TOPBAR ---------- */
 .topbar{
@@ -90,9 +101,10 @@ input,select{font-family:inherit;}
 
 /* ---------- MANAGER VIEW ---------- */
 .mgr-wrap{padding:20px;max-width:1400px;margin:0 auto;}
-.mgr-grid{display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start;}
+.mgr-grid{display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start;min-width:0;}
 @media (max-width:900px){.mgr-grid{grid-template-columns:1fr;}}
-.panel{background:#fff;border:1px solid var(--paper-line);border-radius:14px;padding:18px;}
+.mgr-grid > *{min-width:0;}
+.panel{background:#fff;border:1px solid var(--paper-line);border-radius:14px;padding:18px;min-width:0;}
 .panel-title{
   font-family:var(--font-display);font-weight:600;font-size:14px;letter-spacing:.04em;
   text-transform:uppercase;color:var(--ink-900);margin:0 0 14px;display:flex;align-items:center;justify-content:space-between;
@@ -140,7 +152,7 @@ input,select{font-family:inherit;}
 .chip:active{cursor:grabbing;}
 .chip-dot{width:7px;height:7px;border-radius:50%;background:var(--slate-300);}
 
-.task-board{display:flex;gap:14px;overflow-x:auto;padding-bottom:8px;}
+.task-board{display:flex;flex-wrap:wrap;gap:14px;}
 .task-col{
   min-width:230px;flex:1 0 230px;background:var(--paper-50);border:1px solid var(--paper-line);border-radius:12px;
   padding:12px;transition:background .12s,border-color .12s;
@@ -201,6 +213,17 @@ input,select{font-family:inherit;}
 .report-table td.num{font-family:var(--font-mono);text-align:right;white-space:nowrap;}
 .task-breakdown-chip{display:inline-flex;align-items:center;gap:4px;background:var(--paper-100);border-radius:12px;padding:2px 8px;font-size:11px;margin:2px 4px 2px 0;}
 .report-range-note{font-size:12px;color:var(--slate-500);margin-bottom:10px;}
+
+.toast-container{position:fixed;top:74px;right:16px;z-index:300;display:flex;flex-direction:column;gap:8px;max-width:320px;}
+.toast{
+  background:var(--ink-900);color:#fff;border-radius:10px;padding:12px 16px;font-size:13px;line-height:1.5;
+  box-shadow:0 6px 18px rgba(0,0,0,.25);border-left:4px solid var(--amber-500);
+  animation:toastIn .22s ease-out;
+}
+.toast.leaving{animation:toastOut .18s ease-in forwards;}
+@keyframes toastIn{from{opacity:0;transform:translateX(14px);}to{opacity:1;transform:translateX(0);}}
+@keyframes toastOut{to{opacity:0;transform:translateX(14px);}}
+@media (max-width:640px){.toast-container{left:12px;right:12px;max-width:none;top:66px;}}
 
 /* ---------- INPUT VIEW (作業実績入力 / tablet-optimized) ---------- */
 .input-wrap{min-height:calc(100vh - 60px);display:flex;flex-direction:column;}
@@ -389,8 +412,35 @@ var TASK_COLORS = [
   {name:'slate', hex:'#667085'}
 ];
 
+// アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
+// トップ画面の「更新履歴」から誰でも確認できます。
+var CHANGELOG = [
+  { date:'2026-08-20', items:[
+    '画面のレイアウト崩れ(本日の作業カードが画面からはみ出して隠れる問題)を修正',
+    '管理者・作業登録画面に、他の人が行った変更をリアルタイムに知らせるお知らせ(トースト通知)機能を追加',
+    'トップ画面に「更新履歴」を追加(このアプリの変更内容をいつでも確認できるように)'
+  ]},
+  { date:'2026-08-20', items:[
+    '「パート入力」の名称を「作業実績入力」に変更',
+    'タブレットでの入力のしやすさを改善(名前・作業タイルの拡大、件数入力ボタンの拡大、タップ時の反応改善など)'
+  ]},
+  { date:'2026-08-19', items:[
+    '「集計」画面を追加。特定の1日、または期間を指定して、スタッフ別・作業別の実績(合計時間・件数)を確認できるように'
+  ]},
+  { date:'2026-08-18', items:[
+    '毎日/曜日で繰り返す作業をあらかじめパターン登録できる機能を追加(自動でその日の作業として登録)',
+    '作業内容を先の日付で登録しておき、当日分だけが管理者画面に自動で並ぶ運用に変更',
+    'スタッフの出勤も曜日パターンを設定しておくと自動で反映されるように変更',
+    '保存中に自動更新(4秒ごとの同期)が走ることで、入力した内容が古いデータで上書きされ消えてしまう不具合を修正'
+  ]},
+  { date:'2026-08-17', items:[
+    '初版を作成:管理者(出勤・作業割り当て)/パート入力/共有モニターの3画面構成で公開'
+  ]}
+];
+
 var state = {
   role: null,
+  showChangelog: false,
   roster: [],
   backlog: [],
   templates: [],
@@ -640,8 +690,11 @@ function aggregateDays(days){
 function render(){
   var root = document.getElementById('app');
   if(!state.role){
-    root.innerHTML = renderGate();
+    var gateHtml = renderGate();
+    if(state.showChangelog) gateHtml += renderChangelogModal();
+    root.innerHTML = gateHtml;
     bindGate();
+    if(state.showChangelog) bindChangelogModal();
     return;
   }
   var html = '';
@@ -698,6 +751,23 @@ function renderGate(){
         '<div class="gate-card-desc">日別・期間別にスタッフ/作業ごとの実績を集計</div>'+
       '</button>'+
     '</div>'+
+    '<button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
+  '</div>';
+}
+function renderChangelogModal(){
+  var entries = CHANGELOG.map(function(entry){
+    var items = entry.items.map(function(it){ return '<li>'+esc(it)+'</li>'; }).join('');
+    return '<div class="changelog-entry">'+
+      '<div class="changelog-date">'+esc(entry.date)+'</div>'+
+      '<ul class="changelog-items">'+items+'</ul>'+
+    '</div>';
+  }).join('');
+  return '<div class="modal-overlay" id="changelogOverlay">'+
+    '<div class="changelog-card">'+
+      '<div class="changelog-title">更新履歴</div>'+
+      entries+
+      '<button class="changelog-close" id="changelogCloseBtn">閉じる</button>'+
+    '</div>'+
   '</div>';
 }
 function bindGate(){
@@ -707,6 +777,22 @@ function bindGate(){
       render();
       startPolling();
     });
+  });
+  var openBtn = document.getElementById('changelogOpenBtn');
+  if(openBtn) openBtn.addEventListener('click', function(){
+    state.showChangelog = true;
+    render();
+  });
+}
+function bindChangelogModal(){
+  var closeBtn = document.getElementById('changelogCloseBtn');
+  if(closeBtn) closeBtn.addEventListener('click', function(){
+    state.showChangelog = false;
+    render();
+  });
+  var overlay = document.getElementById('changelogOverlay');
+  if(overlay) overlay.addEventListener('click', function(e){
+    if(e.target===overlay){ state.showChangelog = false; render(); }
   });
 }
 
@@ -1601,12 +1687,107 @@ function startTicker(){
   }, 1000);
 }
 
+/* ---------- update notifications (toast) ---------- */
+function showToast(msg){
+  var container = document.getElementById('toastContainer');
+  if(!container){
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  var el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  container.appendChild(el);
+  while(container.children.length > 5){
+    container.removeChild(container.firstChild);
+  }
+  setTimeout(function(){
+    el.classList.add('leaving');
+    setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 200);
+  }, 5500);
+}
+function notifyChanges(oldRoster, oldBacklog, oldDay, newRoster, newBacklog, newDay){
+  if(state.role!=='manager' && state.role!=='register') return;
+  if(!oldDay || !newDay || oldDay.date!==newDay.date) return;
+  var msgs = [];
+  var rosterById = {};
+  newRoster.forEach(function(s){ rosterById[s.id] = s; });
+
+  newRoster.forEach(function(s){
+    if(s.archived) return;
+    var oldOn = !!(oldDay.attendance||{})[s.id];
+    var newOn = !!(newDay.attendance||{})[s.id];
+    if(oldOn!==newOn){
+      msgs.push(esc(s.name)+'さんが'+(newOn?'出勤中':'欠勤')+'に変更されました');
+    }
+  });
+
+  newRoster.forEach(function(s){
+    if(s.archived) return;
+    var oldArr = (oldDay.assignments||{})[s.id] || [];
+    var newArr = (newDay.assignments||{})[s.id] || [];
+    newArr.forEach(function(tid){
+      if(oldArr.indexOf(tid)===-1){
+        var t = newBacklog.find(function(x){ return x.id===tid; });
+        msgs.push(s.name+'さんが「'+(t?t.name:'作業')+'」に割り当てられました');
+      }
+    });
+    oldArr.forEach(function(tid){
+      if(newArr.indexOf(tid)===-1){
+        var t = oldBacklog.find(function(x){ return x.id===tid; });
+        msgs.push(s.name+'さんが「'+(t?t.name:'作業')+'」から外れました');
+      }
+    });
+  });
+
+  var today = todayStr();
+  var oldToday = {}; oldBacklog.forEach(function(t){ if(t.workDate===today) oldToday[t.id] = t; });
+  var newToday = {}; newBacklog.forEach(function(t){ if(t.workDate===today) newToday[t.id] = t; });
+  Object.keys(newToday).forEach(function(id){
+    var nt = newToday[id];
+    var ot = oldToday[id];
+    if(!ot){
+      if(!nt.archived) msgs.push('新しい作業「'+nt.name+'」が追加されました');
+    }else if(!ot.archived && nt.archived){
+      msgs.push('作業「'+nt.name+'」が削除されました');
+    }
+  });
+
+  var oldLogsById = {};
+  (oldDay.logs||[]).forEach(function(l){ oldLogsById[l.id] = l; });
+  (newDay.logs||[]).forEach(function(l){
+    var s = rosterById[l.staffId];
+    var t = newBacklog.find(function(x){ return x.id===l.taskId; });
+    var sName = s ? s.name : '?';
+    var tName = t ? t.name : '?';
+    var old = oldLogsById[l.id];
+    if(!old){
+      msgs.push(sName+'さんが「'+tName+'」を開始しました');
+    }else if(old.end===null && l.end!==null){
+      msgs.push(sName+'さんが「'+tName+'」を終了しました('+(l.quantity||0)+(t?t.unit:'')+')');
+    }
+  });
+
+  if(msgs.length===0) return;
+  if(msgs.length>4){
+    msgs.slice(0,4).forEach(showToast);
+    showToast('他'+(msgs.length-4)+'件の更新がありました');
+  }else{
+    msgs.forEach(showToast);
+  }
+}
+
 var pollHandle = null;
 function startPolling(){
   if(pollHandle) return;
   pollHandle = setInterval(async function(){
     if(!state.role) return;
     if(pendingSaves>0) return;
+    var oldRoster = state.roster;
+    var oldBacklog = state.backlog;
+    var oldDay = state.day;
     var roster = await loadRoster();
     var backlog = await loadBacklog();
     var templates = await loadTemplates();
@@ -1618,6 +1799,7 @@ function startPolling(){
     var day = await loadDay();
     if(pendingSaves>0) return;
     state.day = day;
+    notifyChanges(oldRoster, oldBacklog, oldDay, state.roster, state.backlog, state.day);
     if(!state.suppressRender) render();
   }, 4000);
 }

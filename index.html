@@ -284,7 +284,7 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
   width:52px;height:58px;position:relative;z-index:2;display:flex;align-items:center;justify-content:center;
   background:rgba(255,255,255,.04);border-radius:8px;
 }
-.rpg-avatar-pixel svg{width:44px;height:auto;image-rendering:pixelated;image-rendering:crisp-edges;}
+.rpg-avatar-pixel svg{width:44px;height:auto;}
 .avatar-tier-4 .rpg-avatar-pixel svg{filter:drop-shadow(0 0 5px rgba(242,169,59,.85));animation:rpgAvatarGlow 1.8s infinite;}
 @keyframes rpgAvatarGlow{0%,100%{filter:drop-shadow(0 0 3px rgba(242,169,59,.5));}50%{filter:drop-shadow(0 0 9px rgba(242,169,59,1));}}
 .avatar-cape{position:absolute;top:4px;left:50%;transform:translateX(-50%);width:62px;height:66px;background:radial-gradient(circle,rgba(76,111,213,.4),transparent 70%);z-index:1;}
@@ -552,6 +552,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-21', items:[
+    '「🎮 累計実績」のアバターを、ドット絵(ピクセル配置)から丸・角丸四角形などのシンプルな図形を組み合わせたベクター調のキャラクターに変更。小さいサイズでも輪郭が崩れにくく、体の形がはっきり分かるように改善'
+  ]},
   { date:'2026-08-21', items:[
     '不具合修正: ドット絵アバターの胴体が頭・脚とうまく繋がって見えず「頭と脚しか認識できない」状態だった問題を修正。肩から胴体への幅の変化を滑らかにし、首元に区切り線を追加、差し色は胴体全体のストライプから胸元の小さなエンブレムに変更して、体の形がはっきり分かるように改善'
   ]},
@@ -2079,20 +2082,6 @@ function rpgStats(info){
     spd: Math.min(99, Math.round(rate*3))
   };
 }
-var RPG_SPRITE_ROWS = [
-  '...OOOO...',
-  '..OHHHHO..',
-  '.OHSSSSHO.',
-  '.OSSSSSSO.',
-  '..OSSSSO..',
-  '..OOOOOO..',
-  '.OBBBBBBO.',
-  'OBBBAABBBO',
-  'OBBBBBBBBO',
-  '.OBB..BBO.',
-  '..OB..BO..',
-  '..OB..BO..'
-];
 var RPG_TIER_PALETTE = [
   { hair:'#8A94A6', body:'#667085' },
   { hair:'#4C5FD5', body:'#4C5FD5' },
@@ -2108,29 +2097,28 @@ function defaultAvatarColor(staffId){
 function avatarColorForStaff(s){
   return (s && s.avatarColor) || defaultAvatarColor(s ? s.id : 'x');
 }
-function renderPixelSprite(tier, accentColor){
+function renderFlatSprite(tier, accentColor){
   var pal = RPG_TIER_PALETTE[tier] || RPG_TIER_PALETTE[0];
   var skin = '#F2C9A0';
   var outline = '#12173A';
   var accent = accentColor || '#F2A93B';
-  var cell = 5;
-  var cols = RPG_SPRITE_ROWS[0].length;
-  var w = cols*cell, h = RPG_SPRITE_ROWS.length*cell;
-  var rects = '';
-  RPG_SPRITE_ROWS.forEach(function(row, y){
-    for(var x=0;x<row.length;x++){
-      var ch = row[x];
-      if(ch==='.') continue;
-      var color = ch==='O' ? outline : ch==='H' ? pal.hair : ch==='S' ? skin : ch==='B' ? pal.body : ch==='A' ? accent : outline;
-      rects += '<rect x="'+(x*cell)+'" y="'+(y*cell)+'" width="'+cell+'" height="'+cell+'" fill="'+color+'"/>';
-    }
-  });
-  return '<svg viewBox="0 0 '+w+' '+h+'" shape-rendering="crispEdges">'+rects+'</svg>';
+  var sw = 1.5;
+  return '<svg viewBox="0 0 60 76">'+
+    '<rect x="17" y="55" width="10" height="17" rx="4" fill="'+pal.body+'" stroke="'+outline+'" stroke-width="'+sw+'"/>'+
+    '<rect x="33" y="55" width="10" height="17" rx="4" fill="'+pal.body+'" stroke="'+outline+'" stroke-width="'+sw+'"/>'+
+    '<rect x="11" y="28" width="38" height="31" rx="13" fill="'+pal.body+'" stroke="'+outline+'" stroke-width="'+sw+'"/>'+
+    '<circle cx="30" cy="43" r="6" fill="'+accent+'" stroke="'+outline+'" stroke-width="1"/>'+
+    '<rect x="22" y="23" width="16" height="9" fill="'+skin+'"/>'+
+    '<circle cx="30" cy="16" r="17" fill="'+pal.hair+'" stroke="'+outline+'" stroke-width="'+sw+'"/>'+
+    '<circle cx="30" cy="20" r="13" fill="'+skin+'" stroke="'+outline+'" stroke-width="1.2"/>'+
+    '<circle cx="25" cy="21" r="1.8" fill="'+outline+'"/>'+
+    '<circle cx="35" cy="21" r="1.8" fill="'+outline+'"/>'+
+  '</svg>';
 }
 function renderRpgAvatar(s, tier){
   var html = '<div class="rpg-avatar-wrap avatar-tier-'+tier+'">';
   if(tier>=2) html += '<span class="avatar-cape"></span>';
-  html += '<div class="rpg-avatar-pixel">'+renderPixelSprite(tier, avatarColorForStaff(s))+'</div>';
+  html += '<div class="rpg-avatar-pixel">'+renderFlatSprite(tier, avatarColorForStaff(s))+'</div>';
   if(tier>=1) html += '<span class="avatar-badge avatar-badge-star">⭐</span>';
   if(tier>=2) html += '<span class="avatar-badge avatar-badge-sword">⚔️</span>';
   if(tier>=3) html += '<span class="avatar-badge avatar-badge-shield">🛡️</span>';

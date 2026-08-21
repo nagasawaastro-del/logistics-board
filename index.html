@@ -222,10 +222,13 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 }
 .subcat-chip button{border:none;background:transparent;color:var(--slate-300);font-size:14px;line-height:1;padding:2px 4px;}
 .subcat-chip button:hover{color:var(--rust-600);}
+.subcat-chip-unit{color:var(--slate-500);font-weight:400;}
 .subcat-add-row{display:flex;gap:6px;}
 .subcat-add-row input{
-  flex:1;border:1px solid var(--paper-line);border-radius:8px;padding:8px 10px;font-size:13px;outline:none;
+  border:1px solid var(--paper-line);border-radius:8px;padding:8px 10px;font-size:13px;outline:none;
 }
+.subcat-name-input{flex:2;min-width:0;}
+.subcat-unit-input{flex:1;min-width:0;}
 .subcat-add-row input:focus{border-color:var(--amber-500);}
 .subcat-add-btn{background:var(--ink-900);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;flex:none;}
 .subcat-add-btn:hover{background:var(--ink-700);}
@@ -256,8 +259,14 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .toast{
   background:var(--ink-900);color:#fff;border-radius:10px;padding:12px 16px;font-size:13px;line-height:1.5;
   box-shadow:0 6px 18px rgba(0,0,0,.25);border-left:4px solid var(--amber-500);
-  animation:toastIn .22s ease-out;
+  animation:toastIn .22s ease-out;display:flex;align-items:center;gap:12px;justify-content:space-between;
 }
+.toast-text{flex:1;}
+.toast-action{
+  flex:none;background:rgba(255,255,255,.14);border:none;color:#fff;border-radius:16px;padding:6px 14px;
+  font-size:12px;font-weight:700;white-space:nowrap;
+}
+.toast-action:hover{background:rgba(255,255,255,.24);}
 .toast.leaving{animation:toastOut .18s ease-in forwards;}
 @keyframes toastIn{from{opacity:0;transform:translateX(14px);}to{opacity:1;transform:translateX(0);}}
 @keyframes toastOut{to{opacity:0;transform:translateX(14px);}}
@@ -471,6 +480,13 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-20', items:[
+    '内訳を使う作業では、作業本体の単位入力欄を非表示にし、内訳ごとの単位だけで運用できるように変更',
+    '作業(単発・繰り返し)の削除を、確認ダイアログなしの即時削除+「元に戻す」ボタン付きの通知に変更。誤操作してもすぐ復元できるようにしつつ、削除操作をスムーズに'
+  ]},
+  { date:'2026-08-20', items:[
+    '作業の「内訳」に、内訳ごとの単位を設定できるように変更(例: ピッキングは件、梱包は箱、など)。内訳追加時に名前と単位をあわせて入力し、パートさんの実績入力・管理者の実績編集・モニター・集計など全画面の表示に反映されるように'
+  ]},
+  { date:'2026-08-20', items:[
     '作業の「内訳」の入力方法をカンマ区切りのテキストから、1件ずつ入力してEnterまたは追加ボタンで登録するタグ形式(チップ表示)に変更。作業登録・その場追加・編集画面すべてで統一'
   ]},
   { date:'2026-08-20', items:[
@@ -579,23 +595,36 @@ function esc(s){
 function parseSubcats(str){
   return (str||'').split(/[,、]/).map(function(s){ return s.trim(); }).filter(function(s){ return s.length>0; });
 }
-function subcatsToInputValue(arr){
-  return (arr||[]).join(',');
+function subcatName(sc){
+  return typeof sc==='string' ? sc : ((sc && sc.name) || '');
 }
-function breakdownLabel(breakdown, unit){
+function subcatUnit(sc, fallback){
+  if(typeof sc==='string') return fallback || '件';
+  return (sc && sc.unit) || fallback || '件';
+}
+function subcatUnitMap(task){
+  var map = {};
+  (task.subcategories||[]).forEach(function(sc){
+    map[subcatName(sc)] = subcatUnit(sc, task.unit);
+  });
+  return map;
+}
+function breakdownLabel(breakdown, task){
   if(!breakdown) return '';
   var keys = Object.keys(breakdown).filter(function(k){ return breakdown[k]>0; });
   if(!keys.length) return '';
-  return '('+keys.map(function(k){ return esc(k)+' '+breakdown[k]+esc(unit); }).join(' / ')+')';
+  var unitMap = subcatUnitMap(task);
+  return '('+keys.map(function(k){ return esc(k)+' '+breakdown[k]+esc(unitMap[k]||task.unit); }).join(' / ')+')';
 }
-function renderSubcatTagInput(list, context, textId){
+function renderSubcatTagInput(list, context, textId, defaultUnit){
   var chips = (list||[]).map(function(sc,i){
-    return '<span class="subcat-chip">'+esc(sc)+'<button type="button" data-subcat-remove="'+context+'|'+i+'">&times;</button></span>';
+    return '<span class="subcat-chip">'+esc(subcatName(sc))+' <span class="subcat-chip-unit">('+esc(subcatUnit(sc, defaultUnit))+')</span><button type="button" data-subcat-remove="'+context+'|'+i+'">&times;</button></span>';
   }).join('') || '<span class="pool-hint" style="margin:0;">まだ内訳がありません</span>';
   return '<div class="subcat-tag-wrap">'+
     '<div class="subcat-chips">'+chips+'</div>'+
     '<div class="subcat-add-row">'+
-      '<input type="text" id="'+textId+'" placeholder="内訳名を入力してEnter(例: ピッキング)">'+
+      '<input type="text" id="'+textId+'" class="subcat-name-input" placeholder="内訳名(例: ピッキング)">'+
+      '<input type="text" id="'+textId+'-unit" class="subcat-unit-input" placeholder="単位" value="'+esc(defaultUnit||'件')+'">'+
       '<button type="button" class="subcat-add-btn" data-subcat-add="'+context+'|'+textId+'">追加</button>'+
     '</div>'+
   '</div>';
@@ -613,14 +642,18 @@ function bindSubcatTagControls(){
     el.addEventListener('click', function(){
       var parts = el.getAttribute('data-subcat-add').split('|');
       var ctx = parts[0], textId = parts[1];
-      var input = document.getElementById(textId);
-      if(!input) return;
-      var val = (input.value||'').trim();
-      if(!val) return;
+      var nameInput = document.getElementById(textId);
+      var unitInput = document.getElementById(textId+'-unit');
+      if(!nameInput) return;
+      var name = (nameInput.value||'').trim();
+      if(!name) return;
+      var unit = (unitInput && unitInput.value.trim()) || '件';
       var ref = subcatListRef(ctx);
       if(!ref) return;
       var list = (ref.get()||[]).slice();
-      if(list.indexOf(val)===-1) list.push(val);
+      if(!list.some(function(sc){ return subcatName(sc)===name; })){
+        list.push({name:name, unit:unit});
+      }
       ref.set(list);
       if(!inModal) state.suppressRender = false;
       render();
@@ -1125,7 +1158,7 @@ function renderManager(){
     var s = staffById(l.staffId);
     var t = taskById(l.taskId);
     var endLabel = l.end ? fmtClock(l.end) : '<span style="color:var(--green-500);font-weight:700;">作業中</span>';
-    var qtyLabel = l.end ? (l.quantity||0)+esc(t.unit)+(l.breakdown?' <span style="color:var(--slate-500);font-weight:400;">'+breakdownLabel(l.breakdown, t.unit)+'</span>':'') : '-';
+    var qtyLabel = l.end ? (l.quantity||0)+esc(t.unit)+(l.breakdown?' <span style="color:var(--slate-500);font-weight:400;">'+breakdownLabel(l.breakdown, t)+'</span>':'') : '-';
     return '<tr>'+
       '<td>'+esc(s.name)+'</td>'+
       '<td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td>'+
@@ -1170,13 +1203,13 @@ function renderTaskForm(){
   var swatches = TASK_COLORS.map(function(c){
     return '<div class="swatch '+(state.newTaskColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-color-swatch="'+c.hex+'"></div>';
   }).join('');
+  var hasSubcats = (state.newTaskDraftSubcats||[]).length > 0;
   return '<div class="task-form">'+
     '<label>作業名</label>'+
     '<input type="text" id="newTaskName" placeholder="例: 検品" value="'+esc(state.newTaskDraftName)+'">'+
-    '<label>単位(件・箱・ピース等)</label>'+
-    '<input type="text" id="newTaskUnit" placeholder="件" value="'+esc(state.newTaskDraftUnit)+'">'+
-    '<label>内訳(任意)</label>'+
-    renderSubcatTagInput(state.newTaskDraftSubcats,'newTask','newTaskSubcatText')+
+    '<label>内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
+    renderSubcatTagInput(state.newTaskDraftSubcats,'newTask','newTaskSubcatText',state.newTaskDraftUnit)+
+    (hasSubcats ? '' : '<label>単位(件・箱・ピース等)</label><input type="text" id="newTaskUnit" placeholder="件" value="'+esc(state.newTaskDraftUnit)+'">')+
     '<label>カラー</label>'+
     '<div class="swatches">'+swatches+'</div>'+
     '<div class="task-form-actions">'+
@@ -1230,11 +1263,16 @@ function bindManager(){
   document.querySelectorAll('[data-del-task]').forEach(function(el){
     el.addEventListener('click', async function(){
       var id = el.getAttribute('data-del-task');
-      if(!confirm('この作業を削除しますか?(記録は残ります)')) return;
       var t = state.backlog.find(function(t){ return t.id===id; });
-      if(t) t.archived = true;
+      if(!t) return;
+      t.archived = true;
       await saveBacklog(state.backlog);
       render();
+      showToast('「'+t.name+'」を削除しました', '元に戻す', async function(){
+        t.archived = false;
+        await saveBacklog(state.backlog);
+        render();
+      });
     });
   });
   document.querySelectorAll('[data-pattern-toggle]').forEach(function(el){
@@ -1314,7 +1352,7 @@ function bindManager(){
     confirmTaskBtn.addEventListener('click', async function(){
       var name = (newTaskNameInput.value||'').trim();
       if(!name){ newTaskNameInput.style.borderColor = '#C1521F'; newTaskNameInput.focus(); return; }
-      var unit = (newTaskUnitInput.value||'件').trim() || '件';
+      var unit = newTaskUnitInput ? ((newTaskUnitInput.value||'件').trim() || '件') : '件';
       var subcats = (state.newTaskDraftSubcats||[]).slice();
       state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:managerActiveDate(), archived:false, subcategories:subcats});
       state.newTaskColIndex = -1;
@@ -1468,10 +1506,9 @@ function renderRegister(){
       '<input type="date" id="regDate" value="'+state.regNewDate+'" min="'+todayStr()+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
       '<input type="text" id="regName" placeholder="例: 検品" value="'+esc(state.regDraftName)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位(件・箱・ピース等)</label>'+
-      '<input type="text" id="regUnit" placeholder="件" value="'+esc(state.regDraftUnit)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意。例: 出荷作業ならピッキング・梱包)</label>'+
-      renderSubcatTagInput(state.regDraftSubcats,'reg','regSubcatText')+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意。例: 出荷作業ならピッキング・梱包。使う場合は単位はここで内訳ごとに設定)</label>'+
+      renderSubcatTagInput(state.regDraftSubcats,'reg','regSubcatText',state.regDraftUnit)+
+      ((state.regDraftSubcats||[]).length ? '' : '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">単位(件・箱・ピース等)</label><input type="text" id="regUnit" placeholder="件" value="'+esc(state.regDraftUnit)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;">')+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:14px;">'+swatches+'</div>'+
       '<button class="add-btn" id="regSubmitBtn" style="width:100%;padding:11px;">この作業を登録</button>'+
@@ -1481,10 +1518,9 @@ function renderRegister(){
       '<div class="pool-hint" style="margin-bottom:10px;">該当する曜日になると、自動でその日の作業として登録されます。</div>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
       '<input type="text" id="tmplName" placeholder="例: 入荷検品" value="'+esc(state.tmplDraftName)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位</label>'+
-      '<input type="text" id="tmplUnit" placeholder="件" value="'+esc(state.tmplDraftUnit)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意)</label>'+
-      renderSubcatTagInput(state.tmplDraftSubcats,'tmpl','tmplSubcatText')+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
+      renderSubcatTagInput(state.tmplDraftSubcats,'tmpl','tmplSubcatText',state.tmplDraftUnit)+
+      ((state.tmplDraftSubcats||[]).length ? '' : '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">単位</label><input type="text" id="tmplUnit" placeholder="件" value="'+esc(state.tmplDraftUnit)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;">')+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:10px;">'+tmplSwatches+'</div>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">発生する曜日</label>'+
@@ -1537,7 +1573,7 @@ function bindRegister(){
     submitBtn.addEventListener('click', async function(){
       var name = (nameInput.value||'').trim();
       if(!name){ nameInput.style.borderColor='#C1521F'; nameInput.focus(); return; }
-      var unit = (unitInput.value||'件').trim() || '件';
+      var unit = unitInput ? ((unitInput.value||'件').trim() || '件') : '件';
       var workDate = dateInput.value || tomorrowStr();
       var subcats = (state.regDraftSubcats||[]).slice();
       state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:workDate, archived:false, subcategories:subcats});
@@ -1552,11 +1588,16 @@ function bindRegister(){
   document.querySelectorAll('[data-del-backlog]').forEach(function(el){
     el.addEventListener('click', async function(){
       var id = el.getAttribute('data-del-backlog');
-      if(!confirm('この作業を削除しますか?')) return;
       var t = state.backlog.find(function(t){ return t.id===id; });
-      if(t) t.archived = true;
+      if(!t) return;
+      t.archived = true;
       await saveBacklog(state.backlog);
       render();
+      showToast('「'+t.name+'」を削除しました', '元に戻す', async function(){
+        t.archived = false;
+        await saveBacklog(state.backlog);
+        render();
+      });
     });
   });
   document.querySelectorAll('[data-edit-backlog]').forEach(function(el){
@@ -1594,7 +1635,7 @@ function bindRegister(){
     tmplSubmitBtn.addEventListener('click', async function(){
       var name = (tmplNameInput.value||'').trim();
       if(!name){ tmplNameInput.style.borderColor='#C1521F'; tmplNameInput.focus(); return; }
-      var unit = (tmplUnitInput.value||'件').trim() || '件';
+      var unit = tmplUnitInput ? ((tmplUnitInput.value||'件').trim() || '件') : '件';
       var subcats = (state.tmplDraftSubcats||[]).slice();
       state.templates.push({id:uid(), name:name, unit:unit, color:state.newTemplateColor, pattern:state.newTemplatePattern, archived:false, subcategories:subcats});
       state.newTemplatePattern = defaultPattern();
@@ -1623,20 +1664,30 @@ function bindRegister(){
   document.querySelectorAll('[data-del-template]').forEach(function(el){
     el.addEventListener('click', async function(){
       var id = el.getAttribute('data-del-template');
-      if(!confirm('この繰り返し作業の設定を削除しますか?\n本日以降に自動生成された作業もあわせて削除されます(過去の記録は残ります)。')) return;
       var t = state.templates.find(function(t){ return t.id===id; });
-      if(t) t.archived = true;
+      if(!t) return;
+      t.archived = true;
       await saveTemplates(state.templates);
       var today = todayStr();
-      var changed = false;
+      var cascadedIds = [];
       state.backlog.forEach(function(task){
         if(task.fromTemplate===id && task.workDate>=today && !task.archived){
           task.archived = true;
-          changed = true;
+          cascadedIds.push(task.id);
         }
       });
-      if(changed) await saveBacklog(state.backlog);
+      if(cascadedIds.length) await saveBacklog(state.backlog);
       render();
+      showToast('繰り返し作業「'+t.name+'」を削除しました', '元に戻す', async function(){
+        t.archived = false;
+        await saveTemplates(state.templates);
+        cascadedIds.forEach(function(taskId){
+          var task = state.backlog.find(function(x){ return x.id===taskId; });
+          if(task) task.archived = false;
+        });
+        if(cascadedIds.length) await saveBacklog(state.backlog);
+        render();
+      });
     });
   });
   document.querySelectorAll('[data-edit-template]').forEach(function(el){
@@ -1709,7 +1760,7 @@ function renderReportSingleBody(){
   var taskRows = taskIds.map(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
-    var bd = breakdownLabel(info.breakdown, t.unit);
+    var bd = breakdownLabel(info.breakdown, t);
     return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+(bd?'<div style="font-size:11px;color:var(--slate-500);font-weight:400;">'+bd+'</div>':'')+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
@@ -1741,7 +1792,7 @@ function renderReportRangeBody(){
   var taskRows = taskIds.map(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
-    var bd = breakdownLabel(info.breakdown, t.unit);
+    var bd = breakdownLabel(info.breakdown, t);
     return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+(bd?'<div style="font-size:11px;color:var(--slate-500);font-weight:400;">'+bd+'</div>':'')+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
@@ -1877,7 +1928,7 @@ function renderSummary(staff){
         }
       }
     });
-    var bd = breakdownLabel(breakdown, t.unit);
+    var bd = breakdownLabel(breakdown, t);
     return '<div class="summary-row">'+
       '<div class="summary-task"><span class="task-color-dot" style="background:'+t.color+'"></span>'+esc(t.name)+'</div>'+
       '<div class="summary-vals">'+fmtHM(totals[tid])+' ・ '+qty+esc(t.unit)+(bd?' '+bd:'')+'</div>'+
@@ -1934,9 +1985,10 @@ function openQuantityModal(nextTaskId, isEndDay){
   if(log){
     var t = taskById(log.taskId);
     if(t.subcategories && t.subcategories.length){
+      var subcatObjs = t.subcategories.map(function(sc){ return { name: subcatName(sc), unit: subcatUnit(sc, t.unit) }; });
       var values = {};
-      t.subcategories.forEach(function(sc){ values[sc] = 0; });
-      state.modal = {kind:'qtyBreakdown', closingTaskId: log.taskId, closingTaskName: t.name, closingUnit: t.unit, subcategories: t.subcategories, values: values, nextTaskId: nextTaskId, isEndDay: isEndDay};
+      subcatObjs.forEach(function(sc){ values[sc.name] = 0; });
+      state.modal = {kind:'qtyBreakdown', closingTaskId: log.taskId, closingTaskName: t.name, closingUnit: t.unit, subcategories: subcatObjs, values: values, nextTaskId: nextTaskId, isEndDay: isEndDay};
     }else{
       state.modal = {kind:'qty', closingTaskId: log.taskId, closingTaskName: t.name, closingUnit: t.unit, value:0, nextTaskId: nextTaskId, isEndDay: isEndDay};
     }
@@ -1982,6 +2034,7 @@ async function closeCurrentAndProceed(qty){
 function openEditLogModal(log){
   var task = taskById(log.taskId);
   var hasSubcats = task.subcategories && task.subcategories.length;
+  var subcatObjs = hasSubcats ? task.subcategories.map(function(sc){ return { name: subcatName(sc), unit: subcatUnit(sc, task.unit) }; }) : null;
   state.modal = {
     kind:'editLog',
     logId: log.id,
@@ -1990,8 +2043,8 @@ function openEditLogModal(log){
     startTime: isoToLocalTimeInput(log.start),
     endTime: isoToLocalTimeInput(log.end),
     quantity: log.quantity || 0,
-    subcategories: hasSubcats ? task.subcategories : null,
-    breakdownValues: hasSubcats ? Object.assign({}, (task.subcategories||[]).reduce(function(acc,sc){ acc[sc]=0; return acc; }, {}), log.breakdown||{}) : null
+    subcategories: subcatObjs,
+    breakdownValues: hasSubcats ? Object.assign({}, subcatObjs.reduce(function(acc,sc){ acc[sc.name]=0; return acc; }, {}), log.breakdown||{}) : null
   };
   state.suppressRender = true;
   render();
@@ -2016,7 +2069,7 @@ async function saveEditLog(){
         var input = document.getElementById('editBreakdown-'+idx);
         var v = input ? parseInt(input.value,10) : 0;
         if(isNaN(v)) v = 0;
-        breakdown[sc] = v;
+        breakdown[sc.name] = v;
         total += v;
       });
       log.quantity = total;
@@ -2075,7 +2128,7 @@ async function saveEditTask(){
   var name = (nameInput.value||'').trim();
   if(!name){ nameInput.style.borderColor='#C1521F'; nameInput.focus(); return; }
   task.name = name;
-  task.unit = (unitInput.value||'件').trim() || '件';
+  task.unit = unitInput ? ((unitInput.value||'件').trim() || '件') : '件';
   task.color = m.color;
   task.workDate = dateInput.value || task.workDate;
   task.subcategories = (m.subcatsList||[]).slice();
@@ -2086,13 +2139,18 @@ async function saveEditTask(){
 }
 async function deleteEditTask(){
   var m = state.modal;
-  if(!confirm('この作業を削除しますか?(記録は残ります)')) return;
   var task = state.backlog.find(function(t){ return t.id===m.taskId; });
-  if(task) task.archived = true;
+  if(!task) return;
+  task.archived = true;
   state.modal = null;
   state.suppressRender = false;
   await saveBacklog(state.backlog);
   render();
+  showToast('「'+task.name+'」を削除しました', '元に戻す', async function(){
+    task.archived = false;
+    await saveBacklog(state.backlog);
+    render();
+  });
 }
 function bindEditTaskModal(m){
   document.querySelectorAll('[data-edit-task-color]').forEach(function(el){
@@ -2128,7 +2186,7 @@ async function saveEditTemplate(){
   var name = (nameInput.value||'').trim();
   if(!name){ nameInput.style.borderColor='#C1521F'; nameInput.focus(); return; }
   tmpl.name = name;
-  tmpl.unit = (unitInput.value||'件').trim() || '件';
+  tmpl.unit = unitInput ? ((unitInput.value||'件').trim() || '件') : '件';
   tmpl.color = m.color;
   tmpl.subcategories = (m.subcatsList||[]).slice();
   state.modal = null;
@@ -2138,22 +2196,32 @@ async function saveEditTemplate(){
 }
 async function deleteEditTemplate(){
   var m = state.modal;
-  if(!confirm('この繰り返し作業の設定を削除しますか?\n本日以降に自動生成された作業もあわせて削除されます(過去の記録は残ります)。')) return;
   var tmpl = state.templates.find(function(t){ return t.id===m.templateId; });
-  if(tmpl) tmpl.archived = true;
+  if(!tmpl) return;
+  tmpl.archived = true;
   await saveTemplates(state.templates);
   var today = todayStr();
-  var changed = false;
+  var cascadedIds = [];
   state.backlog.forEach(function(task){
     if(task.fromTemplate===m.templateId && task.workDate>=today && !task.archived){
       task.archived = true;
-      changed = true;
+      cascadedIds.push(task.id);
     }
   });
-  if(changed) await saveBacklog(state.backlog);
+  if(cascadedIds.length) await saveBacklog(state.backlog);
   state.modal = null;
   state.suppressRender = false;
   render();
+  showToast('繰り返し作業「'+tmpl.name+'」を削除しました', '元に戻す', async function(){
+    tmpl.archived = false;
+    await saveTemplates(state.templates);
+    cascadedIds.forEach(function(taskId){
+      var task = state.backlog.find(function(x){ return x.id===taskId; });
+      if(task) task.archived = false;
+    });
+    if(cascadedIds.length) await saveBacklog(state.backlog);
+    render();
+  });
 }
 function bindEditTemplateModal(m){
   document.querySelectorAll('[data-edit-tmpl-color]').forEach(function(el){
@@ -2180,13 +2248,13 @@ function bindQtyBreakdownModal(m){
     el.addEventListener('click', function(){
       var parts = el.getAttribute('data-qtyb-delta').split('|');
       var idx = parseInt(parts[0],10), delta = parseInt(parts[1],10);
-      var sc = m.subcategories[idx];
-      m.values[sc] = Math.max(0, (m.values[sc]||0) + delta);
+      var key = m.subcategories[idx].name;
+      m.values[key] = Math.max(0, (m.values[key]||0) + delta);
       var valEl = document.querySelector('[data-qtyb-value="'+idx+'"]');
-      if(valEl) valEl.textContent = m.values[sc];
+      if(valEl) valEl.textContent = m.values[key];
       var totalEl = document.getElementById('qtybTotal');
       if(totalEl){
-        var total = m.subcategories.reduce(function(a,s){ return a+(m.values[s]||0); },0);
+        var total = m.subcategories.reduce(function(a,s){ return a+(m.values[s.name]||0); },0);
         totalEl.textContent = total;
       }
     });
@@ -2199,7 +2267,7 @@ function bindQtyBreakdownModal(m){
   });
   var confirmBtn = document.getElementById('qtyConfirmBreakdown');
   if(confirmBtn) confirmBtn.addEventListener('click', function(){
-    var total = m.subcategories.reduce(function(a,s){ return a+(m.values[s]||0); },0);
+    var total = m.subcategories.reduce(function(a,s){ return a+(m.values[s.name]||0); },0);
     closeLogAndProceed(total, Object.assign({}, m.values));
   });
 }
@@ -2233,9 +2301,9 @@ function renderModal(){
 }
 function renderQtyBreakdownModal(m){
   var rows = m.subcategories.map(function(sc, i){
-    var v = m.values[sc]||0;
+    var v = m.values[sc.name]||0;
     return '<div class="qty-break-row">'+
-      '<div class="qty-break-label">'+esc(sc)+'</div>'+
+      '<div class="qty-break-label">'+esc(sc.name)+' <span style="font-weight:400;color:var(--slate-500);">('+esc(sc.unit)+')</span></div>'+
       '<div class="qty-break-controls">'+
         '<button class="qty-btn qty-btn-sm" data-qtyb-delta="'+i+'|-10">-10</button>'+
         '<button class="qty-btn qty-btn-sm" data-qtyb-delta="'+i+'|-1">-1</button>'+
@@ -2245,13 +2313,15 @@ function renderQtyBreakdownModal(m){
       '</div>'+
     '</div>';
   }).join('');
-  var total = m.subcategories.reduce(function(a,sc){ return a+(m.values[sc]||0); },0);
+  var total = m.subcategories.reduce(function(a,sc){ return a+(m.values[sc.name]||0); },0);
+  var allSameUnit = m.subcategories.length && m.subcategories.every(function(sc){ return sc.unit===m.subcategories[0].unit; });
+  var totalUnitLabel = allSameUnit ? esc(m.subcategories[0].unit) : '';
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" style="max-width:440px;">'+
       '<div class="modal-task-name">'+esc(m.closingTaskName)+'</div>'+
-      '<div class="modal-q">内訳ごとに何'+esc(m.closingUnit)+'できましたか?</div>'+
+      '<div class="modal-q">内訳ごとに何個できましたか?</div>'+
       '<div class="qty-break-list">'+rows+'</div>'+
-      '<div class="qty-break-total">合計 <b id="qtybTotal">'+total+'</b>'+esc(m.closingUnit)+'</div>'+
+      '<div class="qty-break-total">合計 <b id="qtybTotal">'+total+'</b>'+totalUnitLabel+'</div>'+
       '<div class="modal-actions">'+
         '<button class="modal-cancel" id="qtyCancel">キャンセル</button>'+
         '<button class="modal-confirm" id="qtyConfirmBreakdown">確定'+(m.nextTaskId?'して次へ':'')+'</button>'+
@@ -2268,8 +2338,8 @@ function renderEditLogModal(m){
   if(m.subcategories){
     var rows = m.subcategories.map(function(sc, idx){
       return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;">'+
-        '<label style="font-size:13px;color:var(--ink-900);">'+esc(sc)+'</label>'+
-        '<input type="number" id="editBreakdown-'+idx+'" value="'+(m.breakdownValues[sc]||0)+'" min="0" style="width:100px;border:2px solid var(--paper-line);border-radius:10px;padding:8px;font-size:14px;text-align:right;">'+
+        '<label style="font-size:13px;color:var(--ink-900);">'+esc(sc.name)+' <span style="color:var(--slate-500);font-weight:400;">('+esc(sc.unit)+')</span></label>'+
+        '<input type="number" id="editBreakdown-'+idx+'" value="'+(m.breakdownValues[sc.name]||0)+'" min="0" style="width:100px;border:2px solid var(--paper-line);border-radius:10px;padding:8px;font-size:14px;text-align:right;">'+
       '</div>';
     }).join('');
     qtySection = '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:6px;">内訳</label>'+rows;
@@ -2301,6 +2371,7 @@ function editFieldSwatches(colorState, dataAttr){
   }).join('');
 }
 function renderEditTaskModal(m){
+  var hasSubcats = (m.subcatsList||[]).length > 0;
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" style="max-width:400px;text-align:left;">'+
       '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">作業を編集</div>'+
@@ -2308,10 +2379,9 @@ function renderEditTaskModal(m){
       '<input type="date" id="editTaskDate" value="'+m.workDate+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
       '<input type="text" id="editTaskName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位</label>'+
-      '<input type="text" id="editTaskUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意)</label>'+
-      renderSubcatTagInput(m.subcatsList,'editTask','editTaskSubcatText')+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
+      renderSubcatTagInput(m.subcatsList,'editTask','editTaskSubcatText',m.unit)+
+      (hasSubcats ? '' : '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">単位</label><input type="text" id="editTaskUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;">')+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:18px;">'+editFieldSwatches(m.color,'edit-task-color')+'</div>'+
       '<div class="modal-actions">'+
@@ -2323,15 +2393,15 @@ function renderEditTaskModal(m){
   '</div>';
 }
 function renderEditTemplateModal(m){
+  var hasSubcats = (m.subcatsList||[]).length > 0;
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" style="max-width:400px;text-align:left;">'+
       '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">繰り返し作業を編集</div>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
       '<input type="text" id="editTmplName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位</label>'+
-      '<input type="text" id="editTmplUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意)</label>'+
-      renderSubcatTagInput(m.subcatsList,'editTmpl','editTmplSubcatText')+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
+      renderSubcatTagInput(m.subcatsList,'editTmpl','editTmplSubcatText',m.unit)+
+      (hasSubcats ? '' : '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">単位</label><input type="text" id="editTmplUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;">')+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:8px;">'+editFieldSwatches(m.color,'edit-tmpl-color')+'</div>'+
       '<div class="pool-hint" style="margin-bottom:14px;">発生する曜日は一覧の曜日ボタンから変更できます。</div>'+
@@ -2410,7 +2480,7 @@ function renderMonitor(){
 
   var sideCards = tasks.map(function(t){
     var agg = taskAggregate(t.id);
-    var bd = breakdownLabel(agg.breakdown, t.unit);
+    var bd = breakdownLabel(agg.breakdown, t);
     return '<div class="mon-task-card" style="border-left-color:'+t.color+'">'+
       '<div class="mon-task-name">'+esc(t.name)+'</div>'+
       '<div class="mon-task-stats"><span>稼働 <b>'+agg.activeCount+'</b>人</span><span>計 <b>'+fmtHM(agg.ms)+'</b></span><span>'+agg.qty+esc(t.unit)+'</span></div>'+
@@ -2455,7 +2525,7 @@ function startTicker(){
 }
 
 /* ---------- update notifications (toast) ---------- */
-function showToast(msg){
+function showToast(msg, actionLabel, actionFn){
   var container = document.getElementById('toastContainer');
   if(!container){
     container = document.createElement('div');
@@ -2465,7 +2535,21 @@ function showToast(msg){
   }
   var el = document.createElement('div');
   el.className = 'toast';
-  el.textContent = msg;
+  var textSpan = document.createElement('span');
+  textSpan.textContent = msg;
+  textSpan.className = 'toast-text';
+  el.appendChild(textSpan);
+  if(actionLabel && actionFn){
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action';
+    btn.textContent = actionLabel;
+    btn.addEventListener('click', function(){
+      actionFn();
+      if(el.parentNode) el.parentNode.removeChild(el);
+    });
+    el.appendChild(btn);
+  }
   container.appendChild(el);
   while(container.children.length > 5){
     container.removeChild(container.firstChild);

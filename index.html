@@ -268,6 +268,31 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .task-breakdown-chip{display:inline-flex;align-items:center;gap:4px;background:var(--paper-100);border-radius:12px;padding:2px 8px;font-size:11px;margin:2px 4px 2px 0;}
 .report-range-note{font-size:12px;color:var(--slate-500);margin-bottom:10px;}
 
+.rpg-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:14px;}
+.rpg-card{
+  background:linear-gradient(160deg,#1B2340,#232C52);border:1px solid #384080;border-radius:16px;
+  padding:16px 18px;color:#fff;box-shadow:0 4px 14px rgba(35,44,82,.25);
+}
+.rpg-card-top{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+.rpg-rank{font-size:18px;flex:none;width:28px;text-align:center;}
+.rpg-avatar{
+  width:42px;height:42px;border-radius:50%;background:var(--amber-500);color:#4A2C00;flex:none;
+  display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;font-size:18px;
+}
+.rpg-name-block{flex:1;min-width:0;}
+.rpg-name{font-family:var(--font-display);font-weight:700;font-size:16px;}
+.rpg-title{font-size:12px;color:#B9C0E8;margin-top:1px;}
+.rpg-level-badge{
+  background:var(--amber-500);color:#4A2C00;font-family:var(--font-mono);font-weight:700;font-size:13px;
+  border-radius:10px;padding:4px 10px;flex:none;
+}
+.rpg-xp-bar{height:10px;border-radius:5px;background:#12173080;overflow:hidden;margin-bottom:6px;}
+.rpg-xp-fill{height:100%;background:linear-gradient(90deg,var(--amber-500),#FFD782);border-radius:5px;transition:width .3s;}
+.rpg-xp-label{font-family:var(--font-mono);font-size:11px;color:#9AA3D6;margin-bottom:10px;}
+.rpg-spec-chips{display:flex;flex-wrap:wrap;gap:6px;}
+.rpg-spec-chip{background:#12173080;border-radius:10px;padding:3px 9px;font-size:11px;color:#DCE1FF;}
+.rpg-spec-chip b{color:var(--amber-500);font-family:var(--font-mono);}
+
 .toast-container{position:fixed;top:74px;right:16px;z-index:300;display:flex;flex-direction:column;gap:8px;max-width:320px;}
 .toast{
   background:var(--ink-900);color:#fff;border-radius:10px;padding:12px 16px;font-size:13px;line-height:1.5;
@@ -501,6 +526,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-21', items:[
+    '集計画面に「🎮 累計実績」モードを追加。記録のある全期間のデータから、スタッフごとにこれまで処理した件数(内訳ごと含む)を累計し、ゲーム風のレベル・称号・経験値バーで表示するように'
+  ]},
+  { date:'2026-08-21', items:[
     '休憩の自動記録を追加。管理者画面で休憩の開始・終了時刻を設定すると、その時間になった時点で出勤中スタッフの作業タイマーが自動的に止まり「休憩」として記録される(終了時刻になると自動的に休憩も終了)',
     '管理者画面に、出勤しているのにまだどの作業にも割り当てられていないスタッフの警告表示を追加',
     '集計画面に「生産性ランキング」を追加(休憩時間を除いた実働時間1時間あたりの件数で順位表示)',
@@ -603,6 +631,9 @@ var state = {
   reportEnd: null,
   reportSingleDay: undefined,
   reportRangeResult: null,
+  reportRpgResult: null,
+  reportRpgLoading: false,
+  reportRpgError: null,
   reportLoading: false,
   reportError: null,
   managerDate: null,
@@ -839,6 +870,23 @@ async function loadDayByDate(dateStr){
     }
   }catch(e){}
   return null;
+}
+async function loadAllDayKeys(){
+  try{
+    var r = await window.storage.list('day:', true);
+    return r ? r.keys : [];
+  }catch(e){ return []; }
+}
+async function loadAllDaysForLifetime(){
+  var keys = await loadAllDayKeys();
+  keys = keys.slice(0, 400);
+  var days = [];
+  for(var i=0;i<keys.length;i++){
+    var dateStr = keys[i].replace('day:','');
+    var d = await loadDayByDate(dateStr);
+    if(d) days.push(d);
+  }
+  return days;
 }
 async function loadDay(){
   var d = await loadDayByDate(todayStr());
@@ -1823,6 +1871,7 @@ function renderReport(){
   var toggles = '<div class="report-mode-toggle">'+
     '<button class="report-mode-btn '+(state.reportMode==='single'?'active':'')+'" data-report-mode="single">特定の1日</button>'+
     '<button class="report-mode-btn '+(state.reportMode==='range'?'active':'')+'" data-report-mode="range">期間で合計</button>'+
+    '<button class="report-mode-btn '+(state.reportMode==='rpg'?'active':'')+'" data-report-mode="rpg">🎮 累計実績</button>'+
   '</div>';
 
   var controls, body;
@@ -1832,13 +1881,18 @@ function renderReport(){
       '<button class="report-go-btn" id="reportSingleGo">この日を集計</button>'+
     '</div>';
     body = renderReportSingleBody();
-  }else{
+  }else if(state.reportMode==='range'){
     controls = '<div class="report-controls">'+
       '<div class="report-field"><label>開始日</label><input type="date" id="reportStartInput" value="'+state.reportStart+'"></div>'+
       '<div class="report-field"><label>終了日</label><input type="date" id="reportEndInput" value="'+state.reportEnd+'"></div>'+
       '<button class="report-go-btn" id="reportRangeGo">この期間を集計</button>'+
     '</div>';
     body = renderReportRangeBody();
+  }else{
+    controls = '<div class="report-controls">'+
+      '<button class="report-go-btn" id="reportRpgGo">'+(state.reportRpgResult?'更新する':'これまでの累計を集計する')+'</button>'+
+    '</div>';
+    body = renderReportRpgBody();
   }
 
   return '<div class="mgr-wrap"><div style="max-width:1000px;margin:0 auto;">'+
@@ -1905,6 +1959,100 @@ function exportAggCSV(agg, label){
     rows.push([t.name, Math.round(info.ms/60000), info.qty, Object.keys(info.staff).length]);
   });
   downloadCSV('集計_'+label+'.csv', rows);
+}
+
+/* ---------- RPG-style lifetime achievements ---------- */
+function aggregateLifetime(days){
+  var perStaff = {};
+  days.forEach(function(day){
+    if(!day) return;
+    day.logs.forEach(function(l){
+      if(l.taskId==='BREAK') return;
+      if(!perStaff[l.staffId]) perStaff[l.staffId] = { xp:0, bySpec:{} };
+      if(l.breakdown){
+        Object.keys(l.breakdown).forEach(function(k){
+          var v = l.breakdown[k]||0;
+          if(v<=0) return;
+          perStaff[l.staffId].xp += v;
+          perStaff[l.staffId].bySpec[k] = (perStaff[l.staffId].bySpec[k]||0) + v;
+        });
+      }else if(l.quantity){
+        var q = l.quantity||0;
+        if(q<=0) return;
+        perStaff[l.staffId].xp += q;
+        var t = taskById(l.taskId);
+        perStaff[l.staffId].bySpec[t.name] = (perStaff[l.staffId].bySpec[t.name]||0) + q;
+      }
+    });
+  });
+  return perStaff;
+}
+function rpgXpForLevel(lv){ return 25*Math.pow(lv-1,2); }
+function rpgLevelInfo(xp){
+  var level = Math.floor(Math.sqrt(xp/25)) + 1;
+  var curFloor = rpgXpForLevel(level);
+  var nextFloor = rpgXpForLevel(level+1);
+  var progress = nextFloor>curFloor ? (xp-curFloor)/(nextFloor-curFloor) : 1;
+  return { level:level, xp:xp, curFloor:curFloor, nextFloor:nextFloor, progress:Math.min(1,Math.max(0,progress)) };
+}
+function rpgTitleForLevel(level){
+  if(level>=21) return 'マスター';
+  if(level>=11) return 'エキスパート';
+  if(level>=6) return 'ベテラン';
+  if(level>=3) return '一人前';
+  return '見習い';
+}
+async function runRpgReport(){
+  state.reportRpgLoading = true;
+  state.reportRpgError = null;
+  render();
+  var days = await loadAllDaysForLifetime();
+  var perStaff = aggregateLifetime(days);
+  state.reportRpgResult = { perStaff: perStaff, dayCount: days.length };
+  state.reportRpgLoading = false;
+  render();
+}
+function renderReportRpgBody(){
+  if(state.reportRpgLoading) return '<div class="empty-note">これまでの記録をすべて読み込み中...(データ量によっては少し時間がかかります)</div>';
+  if(state.reportRpgError) return '<div class="empty-note">'+esc(state.reportRpgError)+'</div>';
+  var result = state.reportRpgResult;
+  if(!result) return '<div class="empty-note">「これまでの累計を集計する」を押すと、記録のあるすべての日からスタッフごとの累計件数・レベルを計算します。</div>';
+
+  var staffIds = Object.keys(result.perStaff).sort(function(a,b){ return result.perStaff[b].xp - result.perStaff[a].xp; });
+  if(!staffIds.length) return '<div class="empty-note">まだ件数の記録がありません。</div>';
+
+  var medals = ['🥇','🥈','🥉'];
+  var cards = staffIds.map(function(sid, idx){
+    var s = staffById(sid);
+    var info = result.perStaff[sid];
+    var lv = rpgLevelInfo(info.xp);
+    var title = rpgTitleForLevel(lv.level);
+    var specKeys = Object.keys(info.bySpec).sort(function(a,b){ return info.bySpec[b]-info.bySpec[a]; });
+    var topSpec = specKeys[0];
+    var specLabel = topSpec ? esc(topSpec)+'の'+title : title;
+    var specBadges = specKeys.slice(0,4).map(function(k){
+      return '<span class="rpg-spec-chip">'+esc(k)+' <b>'+info.bySpec[k]+'</b></span>';
+    }).join('');
+    var medal = medals[idx] || '#'+(idx+1);
+    return '<div class="rpg-card">'+
+      '<div class="rpg-card-top">'+
+        '<div class="rpg-rank">'+medal+'</div>'+
+        '<div class="rpg-avatar">'+esc(s.name.slice(0,1))+'</div>'+
+        '<div class="rpg-name-block">'+
+          '<div class="rpg-name">'+esc(s.name)+'</div>'+
+          '<div class="rpg-title">'+specLabel+'</div>'+
+        '</div>'+
+        '<div class="rpg-level-badge">Lv.'+lv.level+'</div>'+
+      '</div>'+
+      '<div class="rpg-xp-bar"><div class="rpg-xp-fill" style="width:'+(lv.progress*100).toFixed(0)+'%"></div></div>'+
+      '<div class="rpg-xp-label">次のレベルまで '+(lv.nextFloor-lv.xp)+' / 累計 '+lv.xp+'</div>'+
+      (specBadges ? '<div class="rpg-spec-chips">'+specBadges+'</div>' : '')+
+    '</div>';
+  }).join('');
+
+  return '<div class="panel-title">🎮 累計実績</div>'+
+    '<div class="report-range-note">記録がある全'+result.dayCount+'日分から集計(休憩は対象外)。数量入力(内訳・件数)がある作業のみカウントされます。</div>'+
+    '<div class="rpg-card-grid">'+cards+'</div>';
 }
 function renderReportSingleBody(){
   if(state.reportLoading) return '<div class="empty-note">読み込み中...</div>';
@@ -2047,6 +2195,10 @@ function bindReport(){
   if(csvRange) csvRange.addEventListener('click', function(){
     if(!state.reportRangeResult) return;
     exportAggCSV(state.reportRangeResult.agg, state.reportRangeResult.start+'_'+state.reportRangeResult.end);
+  });
+  var rpgGo = document.getElementById('reportRpgGo');
+  if(rpgGo) rpgGo.addEventListener('click', function(){
+    runRpgReport();
   });
 }
 

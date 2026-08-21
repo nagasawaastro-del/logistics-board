@@ -140,6 +140,9 @@ input,select{font-family:inherit;}
   border-radius:10px;background:var(--paper-50);border:1px solid var(--paper-line);
 }
 .pattern-row{display:flex;gap:4px;}
+.avatar-swatch-row{display:flex;gap:5px;margin-top:6px;}
+.avatar-swatch{width:16px;height:16px;border-radius:4px;border:2px solid transparent;cursor:pointer;}
+.avatar-swatch.sel{border-color:var(--ink-900);}
 .pattern-day{
   width:24px;height:24px;border-radius:6px;border:1px solid var(--paper-line);background:#fff;
   font-size:11px;font-weight:600;color:var(--slate-300);padding:0;
@@ -276,15 +279,15 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .rpg-card-top{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
 .rpg-rank{font-size:18px;flex:none;width:28px;text-align:center;}
 
-.rpg-avatar-wrap{position:relative;width:48px;height:48px;flex:none;}
+.rpg-avatar-wrap{position:relative;width:52px;height:58px;flex:none;}
 .rpg-avatar-pixel{
-  width:48px;height:48px;position:relative;z-index:2;display:flex;align-items:center;justify-content:center;
+  width:52px;height:58px;position:relative;z-index:2;display:flex;align-items:center;justify-content:center;
   background:rgba(255,255,255,.04);border-radius:8px;
 }
 .rpg-avatar-pixel svg{width:44px;height:auto;image-rendering:pixelated;image-rendering:crisp-edges;}
 .avatar-tier-4 .rpg-avatar-pixel svg{filter:drop-shadow(0 0 5px rgba(242,169,59,.85));animation:rpgAvatarGlow 1.8s infinite;}
 @keyframes rpgAvatarGlow{0%,100%{filter:drop-shadow(0 0 3px rgba(242,169,59,.5));}50%{filter:drop-shadow(0 0 9px rgba(242,169,59,1));}}
-.avatar-cape{position:absolute;top:4px;left:50%;transform:translateX(-50%);width:58px;height:58px;background:radial-gradient(circle,rgba(76,111,213,.4),transparent 70%);z-index:1;}
+.avatar-cape{position:absolute;top:4px;left:50%;transform:translateX(-50%);width:62px;height:66px;background:radial-gradient(circle,rgba(76,111,213,.4),transparent 70%);z-index:1;}
 .avatar-badge{position:absolute;font-size:13px;z-index:3;line-height:1;}
 .avatar-badge-star{top:-3px;right:-3px;}
 .avatar-badge-sword{bottom:-3px;right:-5px;}
@@ -549,6 +552,12 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-21', items:[
+    '不具合修正: ドット絵アバターの胴体が頭・脚とうまく繋がって見えず「頭と脚しか認識できない」状態だった問題を修正。肩から胴体への幅の変化を滑らかにし、首元に区切り線を追加、差し色は胴体全体のストライプから胸元の小さなエンブレムに変更して、体の形がはっきり分かるように改善'
+  ]},
+  { date:'2026-08-21', items:[
+    '管理者画面のスタッフ一覧に「アバターカラー」の小さな色スウォッチを追加。累計実績のキャラクターに個人ごとの差し色(ベルト部分)が付くように。設定しなくても名前から自動で色が割り振られるので、全員が同じ見た目になりにくいように調整'
+  ]},
   { date:'2026-08-21', items:[
     '「🎮 累計実績」のアバターを、頭文字入りの丸アイコンから、ドット絵(ピクセルアート)のキャラクターに変更。レベル帯ごとに髪と防具の色が変化するオリジナルデザイン'
   ]},
@@ -1245,6 +1254,10 @@ function renderManager(){
     var dayToggles = pattern.map(function(v,i){
       return '<button class="pattern-day '+(v?'on':'')+'" data-pattern-toggle="'+s.id+'|'+i+'">'+WD[i]+'</button>';
     }).join('');
+    var currentAvatarColor = avatarColorForStaff(s);
+    var avatarSwatches = TASK_COLORS.map(function(c){
+      return '<div class="avatar-swatch '+(currentAvatarColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-avatar-color="'+s.id+'|'+c.hex+'"></div>';
+    }).join('');
     return '<div class="roster-item">'+
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
         '<span class="roster-name">'+esc(s.name)+'</span>'+
@@ -1254,6 +1267,7 @@ function renderManager(){
         '</div>'+
       '</div>'+
       '<div class="pattern-row">'+dayToggles+'</div>'+
+      '<div class="avatar-swatch-row" title="アバターカラー(累計実績画面のキャラクターの色)">'+avatarSwatches+'</div>'+
     '</div>';
   }).join('') || '<div class="empty-note">スタッフを登録してください。</div>';
 
@@ -1441,6 +1455,17 @@ function bindManager(){
       var pattern = (s.pattern || defaultPattern()).slice();
       pattern[idx] = !pattern[idx];
       s.pattern = pattern;
+      await saveRoster(state.roster);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-avatar-color]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var parts = el.getAttribute('data-avatar-color').split('|');
+      var sid = parts[0], color = parts[1];
+      var s = state.roster.find(function(s){ return s.id===sid; });
+      if(!s) return;
+      s.avatarColor = color;
       await saveRoster(state.roster);
       render();
     });
@@ -2055,16 +2080,18 @@ function rpgStats(info){
   };
 }
 var RPG_SPRITE_ROWS = [
-  '..OOOO..',
-  '.OHHHHO.',
-  'OHSSSSHO',
-  'OHSSSSHO',
-  '.OSSSSO.',
-  '..OBBO..',
-  '.OBBBBO.',
-  'OBBBBBBO',
-  'OBB..BBO',
-  'OBB..BBO'
+  '...OOOO...',
+  '..OHHHHO..',
+  '.OHSSSSHO.',
+  '.OSSSSSSO.',
+  '..OSSSSO..',
+  '..OOOOOO..',
+  '.OBBBBBBO.',
+  'OBBBAABBBO',
+  'OBBBBBBBBO',
+  '.OBB..BBO.',
+  '..OB..BO..',
+  '..OB..BO..'
 ];
 var RPG_TIER_PALETTE = [
   { hair:'#8A94A6', body:'#667085' },
@@ -2073,10 +2100,19 @@ var RPG_TIER_PALETTE = [
   { hair:'#C1521F', body:'#C1521F' },
   { hair:'#F2A93B', body:'#F2A93B' }
 ];
-function renderPixelSprite(tier){
+function defaultAvatarColor(staffId){
+  var sum = 0;
+  for(var i=0;i<staffId.length;i++) sum += staffId.charCodeAt(i);
+  return TASK_COLORS[sum % TASK_COLORS.length].hex;
+}
+function avatarColorForStaff(s){
+  return (s && s.avatarColor) || defaultAvatarColor(s ? s.id : 'x');
+}
+function renderPixelSprite(tier, accentColor){
   var pal = RPG_TIER_PALETTE[tier] || RPG_TIER_PALETTE[0];
   var skin = '#F2C9A0';
   var outline = '#12173A';
+  var accent = accentColor || '#F2A93B';
   var cell = 5;
   var cols = RPG_SPRITE_ROWS[0].length;
   var w = cols*cell, h = RPG_SPRITE_ROWS.length*cell;
@@ -2085,16 +2121,16 @@ function renderPixelSprite(tier){
     for(var x=0;x<row.length;x++){
       var ch = row[x];
       if(ch==='.') continue;
-      var color = ch==='O' ? outline : ch==='H' ? pal.hair : ch==='S' ? skin : ch==='B' ? pal.body : outline;
+      var color = ch==='O' ? outline : ch==='H' ? pal.hair : ch==='S' ? skin : ch==='B' ? pal.body : ch==='A' ? accent : outline;
       rects += '<rect x="'+(x*cell)+'" y="'+(y*cell)+'" width="'+cell+'" height="'+cell+'" fill="'+color+'"/>';
     }
   });
   return '<svg viewBox="0 0 '+w+' '+h+'" shape-rendering="crispEdges">'+rects+'</svg>';
 }
-function renderRpgAvatar(name, tier){
+function renderRpgAvatar(s, tier){
   var html = '<div class="rpg-avatar-wrap avatar-tier-'+tier+'">';
   if(tier>=2) html += '<span class="avatar-cape"></span>';
-  html += '<div class="rpg-avatar-pixel">'+renderPixelSprite(tier)+'</div>';
+  html += '<div class="rpg-avatar-pixel">'+renderPixelSprite(tier, avatarColorForStaff(s))+'</div>';
   if(tier>=1) html += '<span class="avatar-badge avatar-badge-star">⭐</span>';
   if(tier>=2) html += '<span class="avatar-badge avatar-badge-sword">⚔️</span>';
   if(tier>=3) html += '<span class="avatar-badge avatar-badge-shield">🛡️</span>';
@@ -2147,7 +2183,7 @@ function renderReportRpgBody(){
     return '<div class="rpg-card">'+
       '<div class="rpg-card-top">'+
         '<div class="rpg-rank">'+medal+'</div>'+
-        renderRpgAvatar(s.name, tier)+
+        renderRpgAvatar(s, tier)+
         '<div class="rpg-name-block">'+
           '<div class="rpg-name">'+esc(s.name)+'</div>'+
           '<div class="rpg-title">'+specLabel+'</div>'+

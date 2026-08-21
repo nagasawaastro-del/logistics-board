@@ -277,19 +277,13 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .rpg-rank{font-size:18px;flex:none;width:28px;text-align:center;}
 
 .rpg-avatar-wrap{position:relative;width:48px;height:48px;flex:none;}
-.rpg-avatar{
-  width:48px;height:48px;border-radius:50%;background:var(--slate-500);color:#fff;position:relative;z-index:2;
-  display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;font-size:19px;
-  border:2px solid rgba(255,255,255,.18);
+.rpg-avatar-pixel{
+  width:48px;height:48px;position:relative;z-index:2;display:flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.04);border-radius:8px;
 }
-.avatar-tier-1 .rpg-avatar{background:var(--indigo-500);}
-.avatar-tier-2 .rpg-avatar{background:var(--teal-500);}
-.avatar-tier-3 .rpg-avatar{background:var(--rust-600);border-color:var(--amber-500);}
-.avatar-tier-4 .rpg-avatar{
-  background:linear-gradient(135deg,var(--amber-500),#FFD782);color:#4A2C00;border-color:#fff;
-  box-shadow:0 0 12px rgba(242,169,59,.7);animation:rpgAvatarGlow 1.8s infinite;
-}
-@keyframes rpgAvatarGlow{0%,100%{box-shadow:0 0 6px rgba(242,169,59,.5);}50%{box-shadow:0 0 16px rgba(242,169,59,.95);}}
+.rpg-avatar-pixel svg{width:44px;height:auto;image-rendering:pixelated;image-rendering:crisp-edges;}
+.avatar-tier-4 .rpg-avatar-pixel svg{filter:drop-shadow(0 0 5px rgba(242,169,59,.85));animation:rpgAvatarGlow 1.8s infinite;}
+@keyframes rpgAvatarGlow{0%,100%{filter:drop-shadow(0 0 3px rgba(242,169,59,.5));}50%{filter:drop-shadow(0 0 9px rgba(242,169,59,1));}}
 .avatar-cape{position:absolute;top:4px;left:50%;transform:translateX(-50%);width:58px;height:58px;background:radial-gradient(circle,rgba(76,111,213,.4),transparent 70%);z-index:1;}
 .avatar-badge{position:absolute;font-size:13px;z-index:3;line-height:1;}
 .avatar-badge-star{top:-3px;right:-3px;}
@@ -555,6 +549,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-21', items:[
+    '「🎮 累計実績」のアバターを、頭文字入りの丸アイコンから、ドット絵(ピクセルアート)のキャラクターに変更。レベル帯ごとに髪と防具の色が変化するオリジナルデザイン'
+  ]},
   { date:'2026-08-21', items:[
     '「🎮 累計実績」にキャラクターの見た目の成長を追加。レベル帯(見習い→一人前→ベテラン→エキスパート→マスター)が上がるごとに、アバターの色・星バッジ・マント・盾・王冠などが段階的に追加されるように',
     '同モードに攻撃・防御・すばやさのステータス表示を追加(攻撃=累計処理量、防御=出勤日数、すばやさ=時間あたりの処理効率から自動算出)'
@@ -2057,10 +2054,47 @@ function rpgStats(info){
     spd: Math.min(99, Math.round(rate*3))
   };
 }
+var RPG_SPRITE_ROWS = [
+  '..OOOO..',
+  '.OHHHHO.',
+  'OHSSSSHO',
+  'OHSSSSHO',
+  '.OSSSSO.',
+  '..OBBO..',
+  '.OBBBBO.',
+  'OBBBBBBO',
+  'OBB..BBO',
+  'OBB..BBO'
+];
+var RPG_TIER_PALETTE = [
+  { hair:'#8A94A6', body:'#667085' },
+  { hair:'#4C5FD5', body:'#4C5FD5' },
+  { hair:'#2FA6A6', body:'#2FA6A6' },
+  { hair:'#C1521F', body:'#C1521F' },
+  { hair:'#F2A93B', body:'#F2A93B' }
+];
+function renderPixelSprite(tier){
+  var pal = RPG_TIER_PALETTE[tier] || RPG_TIER_PALETTE[0];
+  var skin = '#F2C9A0';
+  var outline = '#12173A';
+  var cell = 5;
+  var cols = RPG_SPRITE_ROWS[0].length;
+  var w = cols*cell, h = RPG_SPRITE_ROWS.length*cell;
+  var rects = '';
+  RPG_SPRITE_ROWS.forEach(function(row, y){
+    for(var x=0;x<row.length;x++){
+      var ch = row[x];
+      if(ch==='.') continue;
+      var color = ch==='O' ? outline : ch==='H' ? pal.hair : ch==='S' ? skin : ch==='B' ? pal.body : outline;
+      rects += '<rect x="'+(x*cell)+'" y="'+(y*cell)+'" width="'+cell+'" height="'+cell+'" fill="'+color+'"/>';
+    }
+  });
+  return '<svg viewBox="0 0 '+w+' '+h+'" shape-rendering="crispEdges">'+rects+'</svg>';
+}
 function renderRpgAvatar(name, tier){
   var html = '<div class="rpg-avatar-wrap avatar-tier-'+tier+'">';
   if(tier>=2) html += '<span class="avatar-cape"></span>';
-  html += '<div class="rpg-avatar">'+esc(name.slice(0,1))+'</div>';
+  html += '<div class="rpg-avatar-pixel">'+renderPixelSprite(tier)+'</div>';
   if(tier>=1) html += '<span class="avatar-badge avatar-badge-star">⭐</span>';
   if(tier>=2) html += '<span class="avatar-badge avatar-badge-sword">⚔️</span>';
   if(tier>=3) html += '<span class="avatar-badge avatar-badge-shield">🛡️</span>';

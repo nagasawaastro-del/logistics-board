@@ -371,6 +371,7 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 
 /* ---------- MONITOR VIEW ---------- */
 .monitor{min-height:100vh;background:var(--ink-950);color:#EDEFF3;padding:0;}
+.mon-inner{max-width:1760px;margin:0 auto;}
 .mon-header{
   display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:2px solid var(--ink-700);
 }
@@ -380,29 +381,29 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .mon-clock{font-family:var(--font-mono);font-size:30px;font-weight:700;color:var(--amber-500);}
 .mon-exit{border:1px solid var(--ink-600);background:transparent;color:var(--slate-300);border-radius:16px;padding:5px 12px;font-size:11px;}
 
-.mon-body{display:grid;grid-template-columns:1fr 340px;gap:0;min-height:calc(100vh - 68px);}
+.mon-body{display:grid;grid-template-columns:1fr 360px;gap:0;min-height:calc(100vh - 68px);}
 @media (max-width:1000px){.mon-body{grid-template-columns:1fr;}}
 
-.mon-staff-list{padding:18px 24px;display:flex;flex-direction:column;gap:10px;}
+.mon-staff-list{padding:20px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;align-content:start;}
 .mon-row{
-  display:grid;grid-template-columns:150px 1fr 110px 200px;align-items:center;gap:16px;
-  background:var(--ink-900);border:1px solid var(--ink-700);border-radius:12px;padding:14px 18px;
+  display:flex;flex-direction:column;gap:10px;
+  background:var(--ink-900);border:1px solid var(--ink-700);border-radius:14px;padding:16px 18px;
 }
-@media (max-width:760px){.mon-row{grid-template-columns:110px 1fr 90px;}.mon-row .mon-bar-wrap{display:none;}}
-.mon-name{font-family:var(--font-display);font-weight:600;font-size:16px;color:#fff;}
+.mon-row-top{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.mon-name{font-family:var(--font-display);font-weight:700;font-size:18px;color:#fff;}
 .mon-status{display:flex;align-items:center;gap:8px;}
-.mon-status-dot{width:9px;height:9px;border-radius:50%;flex:none;}
-.mon-status-text{font-size:14px;font-weight:500;}
+.mon-status-dot{width:10px;height:10px;border-radius:50%;flex:none;}
+.mon-status-text{font-size:15px;font-weight:600;}
 .mon-status-text.idle{color:var(--slate-300);}
-.mon-timer{font-family:var(--font-mono);font-size:19px;font-weight:700;color:var(--amber-500);text-align:right;}
-.mon-timer.idle{color:var(--slate-500);}
+.mon-timer{font-family:var(--font-mono);font-size:23px;font-weight:700;color:var(--amber-500);}
+.mon-timer.idle{color:var(--slate-500);font-size:19px;}
 .mon-bar-wrap{display:flex;flex-direction:column;gap:4px;}
 .mon-bar{height:8px;border-radius:4px;background:var(--ink-700);overflow:hidden;display:flex;}
 .mon-bar-seg{height:100%;}
-.mon-bar-total{font-family:var(--font-mono);font-size:11px;color:var(--slate-300);text-align:right;}
-.mon-empty{color:var(--slate-500);text-align:center;padding:60px 0;font-size:14px;}
+.mon-bar-total{font-family:var(--font-mono);font-size:12px;color:var(--slate-300);text-align:right;}
+.mon-empty{color:var(--slate-500);text-align:center;padding:60px 0;font-size:14px;grid-column:1/-1;}
 
-.mon-side{border-left:2px solid var(--ink-700);padding:18px 20px;display:flex;flex-direction:column;gap:12px;}
+.mon-side{border-left:2px solid var(--ink-700);padding:20px 22px;display:flex;flex-direction:column;gap:12px;}
 .mon-side-title{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--slate-300);margin-bottom:2px;}
 .mon-task-card{background:var(--ink-900);border:1px solid var(--ink-700);border-radius:12px;padding:14px 16px;border-left:4px solid var(--slate-300);}
 .mon-task-name{font-family:var(--font-display);font-weight:600;font-size:15px;color:#fff;margin-bottom:8px;}
@@ -479,6 +480,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-20', items:[
+    'モニター画面のレイアウトを見直し。スタッフごとの表示を横一列に引き伸ばす形から、幅を抑えたカード形式にして画面幅に応じて自動で並ぶように変更。全体の最大幅も制限し、横長・大画面のモニターでも間延びしないように調整'
+  ]},
   { date:'2026-08-20', items:[
     '不具合修正: 作業登録画面で本日以外の日付を開いても、4秒ごとの自動更新のタイミングですぐ閉じてしまう問題を修正。開閉状態を記憶し、自動更新をまたいでも開いたままになるように'
   ]},
@@ -2505,9 +2509,11 @@ function renderMonitor(){
       timerHtml = '<div class="mon-timer idle">-</div>';
     }
     return '<div class="mon-row">'+
-      '<div class="mon-name">'+esc(s.name)+'</div>'+
+      '<div class="mon-row-top">'+
+        '<div class="mon-name">'+esc(s.name)+'</div>'+
+        timerHtml+
+      '</div>'+
       '<div class="mon-status">'+statusText+'</div>'+
-      timerHtml+
       '<div class="mon-bar-wrap"><div class="mon-bar">'+(barSegs||'')+'</div><div class="mon-bar-total">本日計 '+fmtHM(totalMs)+'</div></div>'+
     '</div>';
   }).join('') || '<div class="mon-empty">本日出勤中のスタッフはいません</div>';
@@ -2525,7 +2531,7 @@ function renderMonitor(){
   var now = new Date();
   var clock = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
 
-  return '<div class="monitor">'+
+  return '<div class="monitor"><div class="mon-inner">'+
     '<div class="mon-header">'+
       '<div class="mon-title-block"><span class="mon-title">本日の稼働状況</span><span class="mon-date">'+todayLabel()+'</span></div>'+
       '<div style="display:flex;align-items:center;gap:16px;">'+
@@ -2537,7 +2543,7 @@ function renderMonitor(){
       '<div class="mon-staff-list">'+rows+'</div>'+
       '<div class="mon-side"><div class="mon-side-title">作業別サマリー</div>'+sideCards+'</div>'+
     '</div>'+
-  '</div>';
+  '</div></div>';
 }
 function bindMonitor(){}
 

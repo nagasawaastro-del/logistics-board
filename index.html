@@ -275,10 +275,28 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 }
 .rpg-card-top{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
 .rpg-rank{font-size:18px;flex:none;width:28px;text-align:center;}
+
+.rpg-avatar-wrap{position:relative;width:48px;height:48px;flex:none;}
 .rpg-avatar{
-  width:42px;height:42px;border-radius:50%;background:var(--amber-500);color:#4A2C00;flex:none;
-  display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;font-size:18px;
+  width:48px;height:48px;border-radius:50%;background:var(--slate-500);color:#fff;position:relative;z-index:2;
+  display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;font-size:19px;
+  border:2px solid rgba(255,255,255,.18);
 }
+.avatar-tier-1 .rpg-avatar{background:var(--indigo-500);}
+.avatar-tier-2 .rpg-avatar{background:var(--teal-500);}
+.avatar-tier-3 .rpg-avatar{background:var(--rust-600);border-color:var(--amber-500);}
+.avatar-tier-4 .rpg-avatar{
+  background:linear-gradient(135deg,var(--amber-500),#FFD782);color:#4A2C00;border-color:#fff;
+  box-shadow:0 0 12px rgba(242,169,59,.7);animation:rpgAvatarGlow 1.8s infinite;
+}
+@keyframes rpgAvatarGlow{0%,100%{box-shadow:0 0 6px rgba(242,169,59,.5);}50%{box-shadow:0 0 16px rgba(242,169,59,.95);}}
+.avatar-cape{position:absolute;top:4px;left:50%;transform:translateX(-50%);width:58px;height:58px;background:radial-gradient(circle,rgba(76,111,213,.4),transparent 70%);z-index:1;}
+.avatar-badge{position:absolute;font-size:13px;z-index:3;line-height:1;}
+.avatar-badge-star{top:-3px;right:-3px;}
+.avatar-badge-sword{bottom:-3px;right:-5px;}
+.avatar-badge-shield{bottom:-3px;left:-5px;}
+.avatar-badge-crown{top:-13px;left:50%;transform:translateX(-50%);font-size:15px;}
+
 .rpg-name-block{flex:1;min-width:0;}
 .rpg-name{font-family:var(--font-display);font-weight:700;font-size:16px;}
 .rpg-title{font-size:12px;color:#B9C0E8;margin-top:1px;}
@@ -289,6 +307,18 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .rpg-xp-bar{height:10px;border-radius:5px;background:#12173080;overflow:hidden;margin-bottom:6px;}
 .rpg-xp-fill{height:100%;background:linear-gradient(90deg,var(--amber-500),#FFD782);border-radius:5px;transition:width .3s;}
 .rpg-xp-label{font-family:var(--font-mono);font-size:11px;color:#9AA3D6;margin-bottom:10px;}
+
+.rpg-stats{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;}
+.rpg-stat-row{display:flex;align-items:center;gap:6px;font-size:11px;}
+.rpg-stat-icon{width:16px;text-align:center;}
+.rpg-stat-label{width:48px;color:#B9C0E8;flex:none;}
+.rpg-stat-bar{flex:1;height:6px;border-radius:3px;background:#12173080;overflow:hidden;}
+.rpg-stat-fill{height:100%;border-radius:3px;transition:width .3s;}
+.rpg-stat-fill.atk{background:linear-gradient(90deg,#C1521F,#FF8A50);}
+.rpg-stat-fill.def{background:linear-gradient(90deg,#2FA6A6,#7FE0E0);}
+.rpg-stat-fill.spd{background:linear-gradient(90deg,#3FB27F,#8CE8B8);}
+.rpg-stat-val{width:22px;text-align:right;font-family:var(--font-mono);color:#fff;font-size:11px;flex:none;}
+
 .rpg-spec-chips{display:flex;flex-wrap:wrap;gap:6px;}
 .rpg-spec-chip{background:#12173080;border-radius:10px;padding:3px 9px;font-size:11px;color:#DCE1FF;}
 .rpg-spec-chip b{color:var(--amber-500);font-family:var(--font-mono);}
@@ -525,6 +555,10 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-21', items:[
+    '「🎮 累計実績」にキャラクターの見た目の成長を追加。レベル帯(見習い→一人前→ベテラン→エキスパート→マスター)が上がるごとに、アバターの色・星バッジ・マント・盾・王冠などが段階的に追加されるように',
+    '同モードに攻撃・防御・すばやさのステータス表示を追加(攻撃=累計処理量、防御=出勤日数、すばやさ=時間あたりの処理効率から自動算出)'
+  ]},
   { date:'2026-08-21', items:[
     '集計画面に「🎮 累計実績」モードを追加。記録のある全期間のデータから、スタッフごとにこれまで処理した件数(内訳ごと含む)を累計し、ゲーム風のレベル・称号・経験値バーで表示するように'
   ]},
@@ -1967,8 +2001,12 @@ function aggregateLifetime(days){
   days.forEach(function(day){
     if(!day) return;
     day.logs.forEach(function(l){
+      if(!perStaff[l.staffId]) perStaff[l.staffId] = { xp:0, bySpec:{}, workMs:0, workDays:{} };
       if(l.taskId==='BREAK') return;
-      if(!perStaff[l.staffId]) perStaff[l.staffId] = { xp:0, bySpec:{} };
+      var end = l.end ? new Date(l.end).getTime() : Date.now();
+      var dur = Math.max(0, end - new Date(l.start).getTime());
+      perStaff[l.staffId].workMs += dur;
+      perStaff[l.staffId].workDays[day.date] = true;
       if(l.breakdown){
         Object.keys(l.breakdown).forEach(function(k){
           var v = l.breakdown[k]||0;
@@ -2002,6 +2040,42 @@ function rpgTitleForLevel(level){
   if(level>=3) return '一人前';
   return '見習い';
 }
+function rpgAvatarTier(level){
+  if(level>=21) return 4;
+  if(level>=11) return 3;
+  if(level>=6) return 2;
+  if(level>=3) return 1;
+  return 0;
+}
+function rpgStats(info){
+  var workDaysCount = Object.keys(info.workDays||{}).length;
+  var workHours = (info.workMs||0)/3600000;
+  var rate = workHours>0 ? info.xp/workHours : 0;
+  return {
+    atk: Math.min(99, Math.round(Math.sqrt(info.xp)*2)),
+    def: Math.min(99, Math.round(workDaysCount*2.5)),
+    spd: Math.min(99, Math.round(rate*3))
+  };
+}
+function renderRpgAvatar(name, tier){
+  var html = '<div class="rpg-avatar-wrap avatar-tier-'+tier+'">';
+  if(tier>=2) html += '<span class="avatar-cape"></span>';
+  html += '<div class="rpg-avatar">'+esc(name.slice(0,1))+'</div>';
+  if(tier>=1) html += '<span class="avatar-badge avatar-badge-star">⭐</span>';
+  if(tier>=2) html += '<span class="avatar-badge avatar-badge-sword">⚔️</span>';
+  if(tier>=3) html += '<span class="avatar-badge avatar-badge-shield">🛡️</span>';
+  if(tier>=4) html += '<span class="avatar-badge avatar-badge-crown">👑</span>';
+  html += '</div>';
+  return html;
+}
+function rpgStatRow(icon, label, val, cls){
+  return '<div class="rpg-stat-row">'+
+    '<span class="rpg-stat-icon">'+icon+'</span>'+
+    '<span class="rpg-stat-label">'+label+'</span>'+
+    '<div class="rpg-stat-bar"><div class="rpg-stat-fill '+cls+'" style="width:'+val+'%"></div></div>'+
+    '<span class="rpg-stat-val">'+val+'</span>'+
+  '</div>';
+}
 async function runRpgReport(){
   state.reportRpgLoading = true;
   state.reportRpgError = null;
@@ -2016,7 +2090,7 @@ function renderReportRpgBody(){
   if(state.reportRpgLoading) return '<div class="empty-note">これまでの記録をすべて読み込み中...(データ量によっては少し時間がかかります)</div>';
   if(state.reportRpgError) return '<div class="empty-note">'+esc(state.reportRpgError)+'</div>';
   var result = state.reportRpgResult;
-  if(!result) return '<div class="empty-note">「これまでの累計を集計する」を押すと、記録のあるすべての日からスタッフごとの累計件数・レベルを計算します。</div>';
+  if(!result) return '<div class="empty-note">「これまでの累計を集計する」を押すと、記録のあるすべての日からスタッフごとの累計件数・レベル・ステータスを計算します。</div>';
 
   var staffIds = Object.keys(result.perStaff).sort(function(a,b){ return result.perStaff[b].xp - result.perStaff[a].xp; });
   if(!staffIds.length) return '<div class="empty-note">まだ件数の記録がありません。</div>';
@@ -2026,7 +2100,9 @@ function renderReportRpgBody(){
     var s = staffById(sid);
     var info = result.perStaff[sid];
     var lv = rpgLevelInfo(info.xp);
+    var tier = rpgAvatarTier(lv.level);
     var title = rpgTitleForLevel(lv.level);
+    var stats = rpgStats(info);
     var specKeys = Object.keys(info.bySpec).sort(function(a,b){ return info.bySpec[b]-info.bySpec[a]; });
     var topSpec = specKeys[0];
     var specLabel = topSpec ? esc(topSpec)+'の'+title : title;
@@ -2037,7 +2113,7 @@ function renderReportRpgBody(){
     return '<div class="rpg-card">'+
       '<div class="rpg-card-top">'+
         '<div class="rpg-rank">'+medal+'</div>'+
-        '<div class="rpg-avatar">'+esc(s.name.slice(0,1))+'</div>'+
+        renderRpgAvatar(s.name, tier)+
         '<div class="rpg-name-block">'+
           '<div class="rpg-name">'+esc(s.name)+'</div>'+
           '<div class="rpg-title">'+specLabel+'</div>'+
@@ -2046,12 +2122,17 @@ function renderReportRpgBody(){
       '</div>'+
       '<div class="rpg-xp-bar"><div class="rpg-xp-fill" style="width:'+(lv.progress*100).toFixed(0)+'%"></div></div>'+
       '<div class="rpg-xp-label">次のレベルまで '+(lv.nextFloor-lv.xp)+' / 累計 '+lv.xp+'</div>'+
+      '<div class="rpg-stats">'+
+        rpgStatRow('⚔️','攻撃',stats.atk,'atk')+
+        rpgStatRow('🛡️','防御',stats.def,'def')+
+        rpgStatRow('💨','すばやさ',stats.spd,'spd')+
+      '</div>'+
       (specBadges ? '<div class="rpg-spec-chips">'+specBadges+'</div>' : '')+
     '</div>';
   }).join('');
 
   return '<div class="panel-title">🎮 累計実績</div>'+
-    '<div class="report-range-note">記録がある全'+result.dayCount+'日分から集計(休憩は対象外)。数量入力(内訳・件数)がある作業のみカウントされます。</div>'+
+    '<div class="report-range-note">記録がある全'+result.dayCount+'日分から集計(休憩は対象外)。数量入力(内訳・件数)がある作業のみカウントされます。レベルが上がるとキャラクターの見た目も変化します。攻撃=累計処理量、防御=出勤日数、すばやさ=時間あたりの処理効率から算出した目安です。</div>'+
     '<div class="rpg-card-grid">'+cards+'</div>';
 }
 function renderReportSingleBody(){

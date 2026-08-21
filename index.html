@@ -480,6 +480,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-20', items:[
+    '不具合修正: 作業登録画面で本日以外の日付を開いても、4秒ごとの自動更新のタイミングですぐ閉じてしまう問題を修正。開閉状態を記憶し、自動更新をまたいでも開いたままになるように'
+  ]},
+  { date:'2026-08-20', items:[
     '不具合修正: 作業削除時の「元に戻す」ボタンが、4秒ごとの自動更新のタイミングによっては効かないことがあった問題を修正。削除した項目をIDで再取得してから元に戻すよう変更し、確実に復元できるように'
   ]},
   { date:'2026-08-20', items:[
@@ -550,6 +553,7 @@ var state = {
   newTaskColor: TASK_COLORS[0].hex,
   regNewDate: null,
   regSearchQuery: undefined,
+  regExpandedDates: {},
   regDraftName: '',
   regDraftUnit: '件',
   regDraftSubcats: [],
@@ -1473,8 +1477,10 @@ function renderRegister(){
         '<button class="icon-x" data-del-backlog="'+t.id+'" title="削除">&times;</button>'+
       '</div>';
     }).join('');
-    var isToday = dateStr===todayStr();
-    return '<details class="reg-group" '+(isToday?'open':'')+'>'+
+    var isOpen = state.regExpandedDates && Object.prototype.hasOwnProperty.call(state.regExpandedDates, dateStr)
+      ? state.regExpandedDates[dateStr]
+      : dateStr===todayStr();
+    return '<details class="reg-group" data-date-group="'+dateStr+'" '+(isOpen?'open':'')+'>'+
       '<summary class="reg-group-summary"><span class="reg-group-date">'+dateLabelFromStr(dateStr)+'</span><span class="count-badge">'+items.length+'件</span></summary>'+
       '<div class="reg-group-items">'+rows+'</div>'+
     '</details>';
@@ -1708,6 +1714,13 @@ function bindRegister(){
       var id = el.getAttribute('data-edit-template');
       var t = state.templates.find(function(t){ return t.id===id; });
       if(t) openEditTemplateModal(t);
+    });
+  });
+  document.querySelectorAll('[data-date-group]').forEach(function(el){
+    el.addEventListener('toggle', function(){
+      var d = el.getAttribute('data-date-group');
+      if(!state.regExpandedDates) state.regExpandedDates = {};
+      state.regExpandedDates[d] = el.open;
     });
   });
   bindSubcatTagControls();

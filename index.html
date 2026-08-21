@@ -110,6 +110,17 @@ input,select{font-family:inherit;}
 .date-nav-input{border:1px solid var(--paper-line);border-radius:10px;padding:9px 12px;font-size:14px;font-family:var(--font-mono);}
 .date-nav-today-badge{background:var(--green-500);color:#fff;font-size:11px;font-weight:700;padding:4px 12px;border-radius:12px;}
 .date-nav-today-btn{background:var(--ink-900);color:#fff;border:none;border-radius:12px;padding:8px 16px;font-size:12px;font-weight:600;}
+
+.warn-banner{
+  background:#FFF3DE;border:1px solid var(--amber-500);color:#7A4A00;border-radius:10px;
+  padding:12px 16px;font-size:13px;font-weight:600;margin-bottom:16px;
+}
+.chip-warn{border:1px solid var(--amber-500);background:#FFF7E8;}
+.chip-warn-label{font-size:10px;font-weight:700;color:var(--amber-600);}
+.break-toggle-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--ink-900);margin-bottom:12px;cursor:pointer;}
+.break-toggle-row input{width:16px;height:16px;}
+.break-time-row{display:flex;gap:16px;}
+.break-time-row input{border:1px solid var(--paper-line);border-radius:8px;padding:8px 10px;font-size:13px;font-family:var(--font-mono);}
 .date-nav-today-btn:hover{background:var(--ink-700);}
 .log-edit-btn{background:var(--paper-100);border:1px solid var(--paper-line);border-radius:14px;padding:5px 14px;font-size:12px;font-weight:600;color:var(--ink-900);}
 .log-edit-btn:hover{border-color:var(--amber-500);background:#FFF7E8;}
@@ -246,6 +257,8 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .report-field input{border:1px solid var(--paper-line);border-radius:8px;padding:8px 10px;font-size:13px;outline:none;}
 .report-field input:focus{border-color:var(--amber-500);}
 .report-go-btn{background:var(--ink-900);color:#fff;border:none;border-radius:8px;padding:9px 20px;font-size:13px;font-weight:600;}
+.csv-export-btn{background:var(--teal-500);color:#fff;border:none;border-radius:16px;padding:6px 14px;font-size:12px;font-weight:600;margin-left:12px;vertical-align:middle;}
+.csv-export-btn:hover{background:#268888;}
 .report-go-btn:hover{background:var(--ink-700);}
 .report-section-title{font-family:var(--font-display);font-weight:600;font-size:15px;color:var(--ink-900);margin:22px 0 10px;}
 .report-table{width:100%;border-collapse:collapse;}
@@ -323,6 +336,13 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 }
 .end-day-btn:active{background:var(--rust-600);transform:scale(.98);}
 .no-task-note{text-align:center;color:var(--slate-500);font-size:15px;padding:44px 22px;line-height:1.8;}
+.break-banner{
+  background:linear-gradient(135deg,#EEF0FB,#F5F0FF);border:2px solid var(--indigo-500);border-radius:18px;
+  padding:26px 22px;text-align:center;margin-bottom:20px;
+}
+.break-banner-title{font-family:var(--font-display);font-weight:700;font-size:22px;color:var(--indigo-500);margin-bottom:6px;}
+.break-banner-timer{font-family:var(--font-mono);font-size:34px;font-weight:700;color:var(--ink-900);margin-bottom:8px;}
+.break-banner-sub{font-size:13px;color:var(--slate-500);line-height:1.6;}
 
 .summary-wrap{max-width:680px;margin:60px auto;padding:0 22px;text-align:center;}
 .summary-title{font-family:var(--font-display);font-weight:700;font-size:28px;margin-bottom:6px;}
@@ -480,6 +500,12 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-21', items:[
+    '休憩の自動記録を追加。管理者画面で休憩の開始・終了時刻を設定すると、その時間になった時点で出勤中スタッフの作業タイマーが自動的に止まり「休憩」として記録される(終了時刻になると自動的に休憩も終了)',
+    '管理者画面に、出勤しているのにまだどの作業にも割り当てられていないスタッフの警告表示を追加',
+    '集計画面に「生産性ランキング」を追加(休憩時間を除いた実働時間1時間あたりの件数で順位表示)',
+    '集計結果をCSVファイルとしてダウンロードできるボタンを追加(日別・期間別とも)'
+  ]},
   { date:'2026-08-20', items:[
     'モニター画面のレイアウトを見直し。スタッフごとの表示を横一列に引き伸ばす形から、幅を抑えたカード形式にして画面幅に応じて自動で並ぶように変更。全体の最大幅も制限し、横長・大画面のモニターでも間延びしないように調整'
   ]},
@@ -551,6 +577,7 @@ var state = {
   roster: [],
   backlog: [],
   templates: [],
+  breakSettings: { enabled:false, start:'12:00', end:'13:00' },
   day: null,
   activeStaffId: null,
   newTaskColIndex: -1,
@@ -760,6 +787,18 @@ async function saveTemplates(list){
   try{ await window.storage.set('task-templates', JSON.stringify(list), true); }catch(e){}
   finally{ pendingSaves--; }
 }
+async function loadBreakSettings(){
+  try{
+    var r = await window.storage.get('break-settings', true);
+    return r ? JSON.parse(r.value) : { enabled:false, start:'12:00', end:'13:00' };
+  }catch(e){ return { enabled:false, start:'12:00', end:'13:00' }; }
+}
+async function saveBreakSettings(settings){
+  state.breakSettings = settings;
+  pendingSaves++;
+  try{ await window.storage.set('break-settings', JSON.stringify(settings), true); }catch(e){}
+  finally{ pendingSaves--; }
+}
 async function ensureTemplateTasksForDate(dateStr){
   var wd = new Date(dateStr+'T00:00:00').getDay();
   var existingKeys = {};
@@ -870,7 +909,8 @@ function taskOptionsForEdit(dateStr, currentTaskId){
   var list = tasksForDate(dateStr).slice();
   if(currentTaskId && !list.some(function(t){ return t.id===currentTaskId; })){
     var t = taskById(currentTaskId);
-    list.unshift({ id:currentTaskId, name:t.name+'(削除済み)', color:t.color, unit:t.unit });
+    var label = t.isBreak ? t.name : t.name+'(削除済み)';
+    list.unshift({ id:currentTaskId, name:label, color:t.color, unit:t.unit });
   }
   return list;
 }
@@ -887,6 +927,7 @@ function tasksForToday(){
   return tasksForDate(todayStr());
 }
 function taskById(id){
+  if(id==='BREAK') return {id:'BREAK', name:'休憩', color:'#667085', unit:'', archived:false, isBreak:true};
   var t = state.backlog.find(function(t){ return t.id===id; });
   return t || {name:'(削除済み)', color:'#999', unit:''};
 }
@@ -947,8 +988,10 @@ function aggregateDays(days){
       var end = l.end ? new Date(l.end).getTime() : Date.now();
       var dur = Math.max(0, end - new Date(l.start).getTime());
       var qty = l.quantity || 0;
-      if(!perStaff[l.staffId]) perStaff[l.staffId] = { ms:0, byTask:{} };
+      if(!perStaff[l.staffId]) perStaff[l.staffId] = { ms:0, qty:0, breakMs:0, byTask:{} };
       perStaff[l.staffId].ms += dur;
+      perStaff[l.staffId].qty += qty;
+      if(l.taskId==='BREAK') perStaff[l.staffId].breakMs += dur;
       if(!perStaff[l.staffId].byTask[l.taskId]) perStaff[l.staffId].byTask[l.taskId] = { ms:0, qty:0, breakdown:{} };
       perStaff[l.staffId].byTask[l.taskId].ms += dur;
       perStaff[l.staffId].byTask[l.taskId].qty += qty;
@@ -1136,8 +1179,16 @@ function renderManager(){
   }).join('') || '<div class="empty-note">スタッフを登録してください。</div>';
 
   var poolHtml = present.map(function(s){
-    return '<div class="chip" draggable="true" data-staff-chip="'+s.id+'"><span class="chip-dot"></span>'+esc(s.name)+'</div>';
+    var isUnassigned = !(day.assignments[s.id]||[]).length;
+    return '<div class="chip '+(isUnassigned?'chip-warn':'')+'" draggable="true" data-staff-chip="'+s.id+'"><span class="chip-dot"></span>'+esc(s.name)+(isUnassigned?' <span class="chip-warn-label">未割当</span>':'')+'</div>';
   }).join('') || '<div class="pool-hint">出勤中のスタッフがここに表示されます</div>';
+
+  var unassignedStaff = present.filter(function(s){ return !(day.assignments[s.id]||[]).length; });
+  var unassignedBanner = unassignedStaff.length ? (
+    '<div class="warn-banner">⚠️ 未割り当てのスタッフが'+unassignedStaff.length+'人います: '+
+    unassignedStaff.map(function(s){ return esc(s.name); }).join('、')+
+    '</div>'
+  ) : '';
 
   var colsHtml = tasks.map(function(t, idx){
     var assignedNames = roster.filter(function(s){
@@ -1169,7 +1220,7 @@ function renderManager(){
     var s = staffById(l.staffId);
     var t = taskById(l.taskId);
     var endLabel = l.end ? fmtClock(l.end) : '<span style="color:var(--green-500);font-weight:700;">作業中</span>';
-    var qtyLabel = l.end ? (l.quantity||0)+esc(t.unit)+(l.breakdown?' <span style="color:var(--slate-500);font-weight:400;">'+breakdownLabel(l.breakdown, t)+'</span>':'') : '-';
+    var qtyLabel = l.taskId==='BREAK' ? '-' : (l.end ? (l.quantity||0)+esc(t.unit)+(l.breakdown?' <span style="color:var(--slate-500);font-weight:400;">'+breakdownLabel(l.breakdown, t)+'</span>':'') : '-');
     return '<tr>'+
       '<td>'+esc(s.name)+'</td>'+
       '<td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td>'+
@@ -1180,9 +1231,20 @@ function renderManager(){
     '</tr>';
   }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この日の記録はまだありません</td></tr>';
 
+  var breakPanel = '<div class="panel" style="margin-top:14px;">'+
+    '<div class="panel-title">休憩の自動設定</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">設定した時間になると、出勤中スタッフの作業タイマーが自動的に止まり「休憩」として記録されます。</div>'+
+    '<label class="break-toggle-row"><input type="checkbox" id="breakEnabledInput" '+(state.breakSettings.enabled?'checked':'')+'> 自動休憩を有効にする</label>'+
+    '<div class="break-time-row">'+
+      '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">開始</label><input type="time" id="breakStartInput" value="'+esc(state.breakSettings.start)+'"></div>'+
+      '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">終了</label><input type="time" id="breakEndInput" value="'+esc(state.breakSettings.end)+'"></div>'+
+    '</div>'+
+  '</div>';
+
   return ''+
   '<div class="mgr-wrap">'+
     dateNav+
+    unassignedBanner+
     '<div class="mgr-grid">'+
       '<div class="panel">'+
         '<div class="panel-title">出勤スタッフ <span class="count-badge">'+present.length+' / '+roster.length+'</span></div>'+
@@ -1203,6 +1265,7 @@ function renderManager(){
         '</div>'+
       '</div>'+
     '</div>'+
+    breakPanel+
     '<div class="panel" style="margin-top:20px;">'+
       '<div class="panel-title">作業実績(この日の記録) <span class="count-badge">'+logsSorted.length+'件</span></div>'+
       '<div class="pool-hint" style="margin-bottom:10px;">パートさんが入力した内容に誤りがあれば「編集」から修正できます。</div>'+
@@ -1435,6 +1498,24 @@ function bindManager(){
       openEditLogModal(log);
     });
   });
+
+  var breakEnabledInput = document.getElementById('breakEnabledInput');
+  var breakStartInput = document.getElementById('breakStartInput');
+  var breakEndInput = document.getElementById('breakEndInput');
+  function saveBreakSettingsFromInputs(){
+    saveBreakSettings({
+      enabled: !!(breakEnabledInput && breakEnabledInput.checked),
+      start: (breakStartInput && breakStartInput.value) || '12:00',
+      end: (breakEndInput && breakEndInput.value) || '13:00'
+    });
+  }
+  if(breakEnabledInput) breakEnabledInput.addEventListener('change', function(){
+    saveBreakSettingsFromInputs();
+    render();
+  });
+  if(breakStartInput) breakStartInput.addEventListener('change', saveBreakSettingsFromInputs);
+  if(breakEndInput) breakEndInput.addEventListener('change', saveBreakSettingsFromInputs);
+
   bindSubcatTagControls();
 }
 
@@ -1765,6 +1846,66 @@ function renderReport(){
     '<div class="panel">'+body+'</div>'+
   '</div></div>';
 }
+function renderProductivityRanking(agg){
+  var staffIds = Object.keys(agg.perStaff).filter(function(sid){
+    var info = agg.perStaff[sid];
+    var workMs = info.ms - (info.breakMs||0);
+    return workMs > 0;
+  }).sort(function(a,b){
+    var infoA = agg.perStaff[a], infoB = agg.perStaff[b];
+    var rateA = infoA.qty / ((infoA.ms - (infoA.breakMs||0))/3600000);
+    var rateB = infoB.qty / ((infoB.ms - (infoB.breakMs||0))/3600000);
+    return rateB - rateA;
+  });
+  if(!staffIds.length) return '';
+  var rows = staffIds.map(function(sid, idx){
+    var s = staffById(sid);
+    var info = agg.perStaff[sid];
+    var workMs = info.ms - (info.breakMs||0);
+    var rate = info.qty / (workMs/3600000);
+    return '<tr><td class="num">'+(idx+1)+'</td><td>'+esc(s.name)+'</td><td class="num"><b style="color:var(--rust-600);font-family:var(--font-mono);">'+rate.toFixed(1)+'</b> 件/時</td><td class="num">'+info.qty+'件</td><td class="num">'+fmtHM(workMs)+'</td></tr>';
+  }).join('');
+  return '<div class="report-section-title">生産性ランキング(実働1時間あたりの件数)</div>'+
+    '<div class="report-range-note">休憩時間は除いた実働時間で計算しています。作業に内訳(件数)がある場合のみ対象です。</div>'+
+    '<table class="report-table"><thead><tr><th>順位</th><th>名前</th><th>1時間あたり</th><th>合計件数</th><th>実働時間</th></tr></thead><tbody>'+rows+'</tbody></table>';
+}
+function csvEscape(v){
+  var s = String(v==null?'':v);
+  if(/[",\n]/.test(s)) s = '"'+s.replace(/"/g,'""')+'"';
+  return s;
+}
+function downloadCSV(filename, rows){
+  var csv = '\uFEFF'+rows.map(function(r){ return r.map(csvEscape).join(','); }).join('\r\n');
+  var blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ if(a.parentNode) a.parentNode.removeChild(a); URL.revokeObjectURL(url); }, 200);
+}
+function exportAggCSV(agg, label){
+  var rows = [];
+  rows.push(['スタッフ別']);
+  rows.push(['名前','合計時間(分)','実働時間(分)','合計件数','時間あたり件数']);
+  Object.keys(agg.perStaff).forEach(function(sid){
+    var s = staffById(sid);
+    var info = agg.perStaff[sid];
+    var workMs = info.ms - (info.breakMs||0);
+    var rate = workMs>0 ? (info.qty/(workMs/3600000)).toFixed(1) : '';
+    rows.push([s.name, Math.round(info.ms/60000), Math.round(workMs/60000), info.qty, rate]);
+  });
+  rows.push([]);
+  rows.push(['作業別']);
+  rows.push(['作業名','合計時間(分)','合計件数','稼働人数']);
+  Object.keys(agg.perTask).forEach(function(tid){
+    var t = taskById(tid);
+    var info = agg.perTask[tid];
+    rows.push([t.name, Math.round(info.ms/60000), info.qty, Object.keys(info.staff).length]);
+  });
+  downloadCSV('集計_'+label+'.csv', rows);
+}
 function renderReportSingleBody(){
   if(state.reportLoading) return '<div class="empty-note">読み込み中...</div>';
   if(state.reportError) return '<div class="empty-note">'+esc(state.reportError)+'</div>';
@@ -1794,11 +1935,12 @@ function renderReportSingleBody(){
     return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+(bd?'<div style="font-size:11px;color:var(--slate-500);font-weight:400;">'+bd+'</div>':'')+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
-  return '<div class="panel-title">'+esc(dateLabelFromStr(state.reportDate))+' の集計</div>'+
+  return '<div class="panel-title">'+esc(dateLabelFromStr(state.reportDate))+' の集計 <button class="csv-export-btn" id="csvExportSingle">CSVダウンロード</button></div>'+
     '<div class="report-section-title">スタッフ別</div>'+
     '<table class="report-table"><thead><tr><th>名前</th><th>合計時間</th><th>作業内訳</th></tr></thead><tbody>'+staffRows+'</tbody></table>'+
     '<div class="report-section-title">作業別</div>'+
-    '<table class="report-table"><thead><tr><th>作業</th><th>合計時間</th><th>合計件数</th><th>稼働人数</th></tr></thead><tbody>'+taskRows+'</tbody></table>';
+    '<table class="report-table"><thead><tr><th>作業</th><th>合計時間</th><th>合計件数</th><th>稼働人数</th></tr></thead><tbody>'+taskRows+'</tbody></table>'+
+    renderProductivityRanking(agg);
 }
 function renderReportRangeBody(){
   if(state.reportLoading) return '<div class="empty-note">読み込み中...(日数が多いと少し時間がかかります)</div>';
@@ -1826,12 +1968,13 @@ function renderReportRangeBody(){
     return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+(bd?'<div style="font-size:11px;color:var(--slate-500);font-weight:400;">'+bd+'</div>':'')+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
-  return '<div class="panel-title">'+esc(dateLabelFromStr(result.start))+' 〜 '+esc(dateLabelFromStr(result.end))+' の合計</div>'+
+  return '<div class="panel-title">'+esc(dateLabelFromStr(result.start))+' 〜 '+esc(dateLabelFromStr(result.end))+' の合計 <button class="csv-export-btn" id="csvExportRange">CSVダウンロード</button></div>'+
     '<div class="report-range-note">対象'+result.dayCount+'日間のうち、記録があった日: '+result.daysWithData+'日</div>'+
     '<div class="report-section-title">スタッフ別合計</div>'+
     '<table class="report-table"><thead><tr><th>名前</th><th>合計時間</th><th>作業内訳</th></tr></thead><tbody>'+staffRows+'</tbody></table>'+
     '<div class="report-section-title">作業別合計</div>'+
-    '<table class="report-table"><thead><tr><th>作業</th><th>合計時間</th><th>合計件数</th><th>稼働人数</th></tr></thead><tbody>'+taskRows+'</tbody></table>';
+    '<table class="report-table"><thead><tr><th>作業</th><th>合計時間</th><th>合計件数</th><th>稼働人数</th></tr></thead><tbody>'+taskRows+'</tbody></table>'+
+    renderProductivityRanking(agg);
 }
 async function runSingleReport(dateStr){
   state.reportDate = dateStr;
@@ -1895,6 +2038,16 @@ function bindReport(){
     state.suppressRender = false;
     runRangeReport(startInput.value || todayStr(), endInput.value || todayStr());
   });
+  var csvSingle = document.getElementById('csvExportSingle');
+  if(csvSingle) csvSingle.addEventListener('click', function(){
+    if(!state.reportSingleDay) return;
+    exportAggCSV(aggregateDays([state.reportSingleDay]), state.reportDate);
+  });
+  var csvRange = document.getElementById('csvExportRange');
+  if(csvRange) csvRange.addEventListener('click', function(){
+    if(!state.reportRangeResult) return;
+    exportAggCSV(state.reportRangeResult.agg, state.reportRangeResult.start+'_'+state.reportRangeResult.end);
+  });
 }
 
 /* ---------- INPUT (part-timer) ---------- */
@@ -1916,6 +2069,16 @@ function renderInput(){
   }
   var assignedIds = (state.day.assignments[state.activeStaffId] || []).slice().sort(byTaskColor(function(tid){ return taskById(tid).color; }));
   var log = currentLog(state.activeStaffId);
+  var onBreak = log && log.taskId==='BREAK';
+  var breakBanner = '';
+  if(onBreak){
+    var breakElapsed = Date.now() - new Date(log.start).getTime();
+    breakBanner = '<div class="break-banner">'+
+      '<div class="break-banner-title">🍽 休憩中</div>'+
+      '<div class="break-banner-timer" data-live-timer="'+log.start+'">'+fmtElapsed(breakElapsed)+'</div>'+
+      '<div class="break-banner-sub">'+esc(state.breakSettings.start)+'〜'+esc(state.breakSettings.end)+' は自動で休憩になります。作業をタップすると休憩を終えて再開します。</div>'+
+    '</div>';
+  }
   var body;
   if(!assignedIds.length){
     body = '<div class="no-task-note">本日の作業がまだ割り当てられていません。<br>管理者に確認してください。</div>';
@@ -1940,7 +2103,7 @@ function renderInput(){
       '<div><div class="staff-header-name">'+esc(staff.name)+'</div><div class="staff-header-sub">作業をタップすると開始/切替します</div></div>'+
       '<button class="back-link" id="backToNames">戻る</button>'+
     '</div>'+
-    '<div class="task-tile-wrap">'+body+'</div>'+
+    '<div class="task-tile-wrap">'+breakBanner+body+'</div>'+
     '<div class="end-day-bar"><button class="end-day-btn" id="endDayBtn">本日の作業を終了する</button></div>'+
   '</div>';
 }
@@ -1995,19 +2158,39 @@ function bindInput(){
       var tid = el.getAttribute('data-tap-task');
       var log = currentLog(state.activeStaffId);
       if(log && log.taskId===tid) return;
+      if(log && log.taskId==='BREAK'){
+        endBreakAndStart(tid);
+        return;
+      }
       openQuantityModal(tid, false);
     });
   });
   var endDayBtn = document.getElementById('endDayBtn');
   if(endDayBtn) endDayBtn.addEventListener('click', function(){
     var log = currentLog(state.activeStaffId);
-    if(log){
+    if(log && log.taskId==='BREAK'){
+      log.end = new Date().toISOString();
+      log.quantity = null;
+      saveDay(state.day).then(function(){
+        state.day.summaryFor = state.activeStaffId;
+        render();
+      });
+    }else if(log){
       openQuantityModal(null, true);
     }else{
       state.day.summaryFor = state.activeStaffId;
       render();
     }
   });
+}
+async function endBreakAndStart(taskId){
+  var log = currentLog(state.activeStaffId);
+  if(log){
+    log.end = new Date().toISOString();
+    log.quantity = null;
+  }
+  await saveDay(state.day);
+  await startTask(taskId);
 }
 function openQuantityModal(nextTaskId, isEndDay){
   var log = currentLog(state.activeStaffId);
@@ -2034,6 +2217,35 @@ async function startTask(taskId){
   await saveDay(state.day);
   state.suppressRender = false;
   render();
+}
+async function checkAutoBreak(){
+  if(!state.breakSettings || !state.breakSettings.enabled) return;
+  if(!state.day || state.day.date !== todayStr()) return;
+  var now = new Date();
+  var nowStr = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  var inBreak = nowStr >= state.breakSettings.start && nowStr < state.breakSettings.end;
+  var changed = false;
+  presentStaff().forEach(function(s){
+    var log = currentLog(s.id);
+    if(inBreak){
+      if(log && log.taskId!=='BREAK'){
+        log.end = new Date().toISOString();
+        log.quantity = 0;
+        delete log.breakdown;
+        state.day.logs.push({id:uid(), staffId:s.id, taskId:'BREAK', start:new Date().toISOString(), end:null, quantity:null});
+        changed = true;
+      }
+    }else{
+      if(log && log.taskId==='BREAK'){
+        log.end = new Date().toISOString();
+        log.quantity = null;
+        changed = true;
+      }
+    }
+  });
+  if(changed){
+    await saveDay(state.day);
+  }
 }
 async function closeLogAndProceed(qty, breakdown){
   var m = state.modal;
@@ -2682,15 +2894,18 @@ function startPolling(){
     var roster = await loadRoster();
     var backlog = await loadBacklog();
     var templates = await loadTemplates();
+    var breakSettings = await loadBreakSettings();
     if(pendingSaves>0) return;
     state.roster = roster;
     state.backlog = backlog;
     state.templates = templates;
+    state.breakSettings = breakSettings;
     await ensureTemplateTasksForToday();
     var day = await loadDay();
     if(pendingSaves>0) return;
     state.day = day;
     notifyChanges(oldRoster, oldBacklog, oldDay, state.roster, state.backlog, state.day);
+    await checkAutoBreak();
     if(!state.suppressRender) render();
   }, 4000);
 }
@@ -2722,8 +2937,10 @@ async function init(){
   state.roster = await loadRoster();
   state.backlog = await loadBacklog();
   state.templates = await loadTemplates();
+  state.breakSettings = await loadBreakSettings();
   await ensureTemplateTasksForToday();
   state.day = await loadDay();
+  await checkAutoBreak();
   render();
   startTicker();
 }

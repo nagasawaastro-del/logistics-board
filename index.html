@@ -480,6 +480,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-20', items:[
+    '不具合修正: 作業削除時の「元に戻す」ボタンが、4秒ごとの自動更新のタイミングによっては効かないことがあった問題を修正。削除した項目をIDで再取得してから元に戻すよう変更し、確実に復元できるように'
+  ]},
+  { date:'2026-08-20', items:[
     '内訳を使う作業では、作業本体の単位入力欄を非表示にし、内訳ごとの単位だけで運用できるように変更',
     '作業(単発・繰り返し)の削除を、確認ダイアログなしの即時削除+「元に戻す」ボタン付きの通知に変更。誤操作してもすぐ復元できるようにしつつ、削除操作をスムーズに'
   ]},
@@ -1265,13 +1268,17 @@ function bindManager(){
       var id = el.getAttribute('data-del-task');
       var t = state.backlog.find(function(t){ return t.id===id; });
       if(!t) return;
+      var taskName = t.name;
       t.archived = true;
       await saveBacklog(state.backlog);
       render();
-      showToast('「'+t.name+'」を削除しました', '元に戻す', async function(){
-        t.archived = false;
-        await saveBacklog(state.backlog);
-        render();
+      showToast('「'+taskName+'」を削除しました', '元に戻す', async function(){
+        var cur = state.backlog.find(function(x){ return x.id===id; });
+        if(cur){
+          cur.archived = false;
+          await saveBacklog(state.backlog);
+          render();
+        }
       });
     });
   });
@@ -1590,13 +1597,17 @@ function bindRegister(){
       var id = el.getAttribute('data-del-backlog');
       var t = state.backlog.find(function(t){ return t.id===id; });
       if(!t) return;
+      var taskName = t.name;
       t.archived = true;
       await saveBacklog(state.backlog);
       render();
-      showToast('「'+t.name+'」を削除しました', '元に戻す', async function(){
-        t.archived = false;
-        await saveBacklog(state.backlog);
-        render();
+      showToast('「'+taskName+'」を削除しました', '元に戻す', async function(){
+        var cur = state.backlog.find(function(x){ return x.id===id; });
+        if(cur){
+          cur.archived = false;
+          await saveBacklog(state.backlog);
+          render();
+        }
       });
     });
   });
@@ -1666,6 +1677,7 @@ function bindRegister(){
       var id = el.getAttribute('data-del-template');
       var t = state.templates.find(function(t){ return t.id===id; });
       if(!t) return;
+      var tmplName = t.name;
       t.archived = true;
       await saveTemplates(state.templates);
       var today = todayStr();
@@ -1678,8 +1690,9 @@ function bindRegister(){
       });
       if(cascadedIds.length) await saveBacklog(state.backlog);
       render();
-      showToast('繰り返し作業「'+t.name+'」を削除しました', '元に戻す', async function(){
-        t.archived = false;
+      showToast('繰り返し作業「'+tmplName+'」を削除しました', '元に戻す', async function(){
+        var curTmpl = state.templates.find(function(x){ return x.id===id; });
+        if(curTmpl) curTmpl.archived = false;
         await saveTemplates(state.templates);
         cascadedIds.forEach(function(taskId){
           var task = state.backlog.find(function(x){ return x.id===taskId; });
@@ -2141,15 +2154,20 @@ async function deleteEditTask(){
   var m = state.modal;
   var task = state.backlog.find(function(t){ return t.id===m.taskId; });
   if(!task) return;
+  var taskId = task.id;
+  var taskName = task.name;
   task.archived = true;
   state.modal = null;
   state.suppressRender = false;
   await saveBacklog(state.backlog);
   render();
-  showToast('「'+task.name+'」を削除しました', '元に戻す', async function(){
-    task.archived = false;
-    await saveBacklog(state.backlog);
-    render();
+  showToast('「'+taskName+'」を削除しました', '元に戻す', async function(){
+    var cur = state.backlog.find(function(x){ return x.id===taskId; });
+    if(cur){
+      cur.archived = false;
+      await saveBacklog(state.backlog);
+      render();
+    }
   });
 }
 function bindEditTaskModal(m){
@@ -2198,12 +2216,14 @@ async function deleteEditTemplate(){
   var m = state.modal;
   var tmpl = state.templates.find(function(t){ return t.id===m.templateId; });
   if(!tmpl) return;
+  var templateId = tmpl.id;
+  var tmplName = tmpl.name;
   tmpl.archived = true;
   await saveTemplates(state.templates);
   var today = todayStr();
   var cascadedIds = [];
   state.backlog.forEach(function(task){
-    if(task.fromTemplate===m.templateId && task.workDate>=today && !task.archived){
+    if(task.fromTemplate===templateId && task.workDate>=today && !task.archived){
       task.archived = true;
       cascadedIds.push(task.id);
     }
@@ -2212,8 +2232,9 @@ async function deleteEditTemplate(){
   state.modal = null;
   state.suppressRender = false;
   render();
-  showToast('繰り返し作業「'+tmpl.name+'」を削除しました', '元に戻す', async function(){
-    tmpl.archived = false;
+  showToast('繰り返し作業「'+tmplName+'」を削除しました', '元に戻す', async function(){
+    var curTmpl = state.templates.find(function(x){ return x.id===templateId; });
+    if(curTmpl) curTmpl.archived = false;
     await saveTemplates(state.templates);
     cascadedIds.forEach(function(taskId){
       var task = state.backlog.find(function(x){ return x.id===taskId; });

@@ -213,6 +213,22 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .reg-group-date{font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--rust-600);letter-spacing:.03em;}
 .reg-group-items{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px;margin-top:6px;}
 .reg-search{width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:9px 12px;font-size:13px;margin-bottom:14px;outline:none;}
+
+.subcat-tag-wrap{margin-bottom:4px;}
+.subcat-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:20px;}
+.subcat-chip{
+  display:inline-flex;align-items:center;gap:5px;background:var(--paper-100);border:1px solid var(--paper-line);
+  border-radius:14px;padding:4px 6px 4px 12px;font-size:12px;font-weight:600;color:var(--ink-900);
+}
+.subcat-chip button{border:none;background:transparent;color:var(--slate-300);font-size:14px;line-height:1;padding:2px 4px;}
+.subcat-chip button:hover{color:var(--rust-600);}
+.subcat-add-row{display:flex;gap:6px;}
+.subcat-add-row input{
+  flex:1;border:1px solid var(--paper-line);border-radius:8px;padding:8px 10px;font-size:13px;outline:none;
+}
+.subcat-add-row input:focus{border-color:var(--amber-500);}
+.subcat-add-btn{background:var(--ink-900);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;flex:none;}
+.subcat-add-btn:hover{background:var(--ink-700);}
 .reg-search:focus{border-color:var(--amber-500);}
 .reg-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:#fff;border:1px solid var(--paper-line);margin-bottom:0;}
 .reg-row-name{font-size:13px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -455,6 +471,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-20', items:[
+    '作業の「内訳」の入力方法をカンマ区切りのテキストから、1件ずつ入力してEnterまたは追加ボタンで登録するタグ形式(チップ表示)に変更。作業登録・その場追加・編集画面すべてで統一'
+  ]},
+  { date:'2026-08-20', items:[
     '作業に「内訳」(例: 出荷作業のピッキング/梱包)を設定できるように変更。作業登録・編集画面でカンマ区切りで内訳を指定すると、パートさんの実績入力が内訳ごとの件数入力になり、管理者画面の実績一覧・モニター・集計・パートさんの本日サマリーでも内訳が確認できるように'
   ]},
   { date:'2026-08-20', items:[
@@ -514,16 +533,16 @@ var state = {
   regSearchQuery: undefined,
   regDraftName: '',
   regDraftUnit: '件',
-  regDraftSubcats: '',
+  regDraftSubcats: [],
   newStaffDraftName: '',
   newTaskDraftName: '',
   newTaskDraftUnit: '件',
-  newTaskDraftSubcats: '',
+  newTaskDraftSubcats: [],
   newTemplateColor: TASK_COLORS[0].hex,
   newTemplatePattern: null,
   tmplDraftName: '',
   tmplDraftUnit: '件',
-  tmplDraftSubcats: '',
+  tmplDraftSubcats: [],
   reportMode: 'single',
   reportDate: null,
   reportStart: null,
@@ -568,6 +587,72 @@ function breakdownLabel(breakdown, unit){
   var keys = Object.keys(breakdown).filter(function(k){ return breakdown[k]>0; });
   if(!keys.length) return '';
   return '('+keys.map(function(k){ return esc(k)+' '+breakdown[k]+esc(unit); }).join(' / ')+')';
+}
+function renderSubcatTagInput(list, context, textId){
+  var chips = (list||[]).map(function(sc,i){
+    return '<span class="subcat-chip">'+esc(sc)+'<button type="button" data-subcat-remove="'+context+'|'+i+'">&times;</button></span>';
+  }).join('') || '<span class="pool-hint" style="margin:0;">まだ内訳がありません</span>';
+  return '<div class="subcat-tag-wrap">'+
+    '<div class="subcat-chips">'+chips+'</div>'+
+    '<div class="subcat-add-row">'+
+      '<input type="text" id="'+textId+'" placeholder="内訳名を入力してEnter(例: ピッキング)">'+
+      '<button type="button" class="subcat-add-btn" data-subcat-add="'+context+'|'+textId+'">追加</button>'+
+    '</div>'+
+  '</div>';
+}
+function subcatListRef(context){
+  if(context==='reg') return { get:function(){ return state.regDraftSubcats; }, set:function(v){ state.regDraftSubcats=v; } };
+  if(context==='tmpl') return { get:function(){ return state.tmplDraftSubcats; }, set:function(v){ state.tmplDraftSubcats=v; } };
+  if(context==='newTask') return { get:function(){ return state.newTaskDraftSubcats; }, set:function(v){ state.newTaskDraftSubcats=v; } };
+  if(context==='editTask' || context==='editTmpl') return { get:function(){ return state.modal ? state.modal.subcatsList : []; }, set:function(v){ if(state.modal) state.modal.subcatsList=v; } };
+  return null;
+}
+function bindSubcatTagControls(){
+  var inModal = !!state.modal;
+  document.querySelectorAll('[data-subcat-add]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var parts = el.getAttribute('data-subcat-add').split('|');
+      var ctx = parts[0], textId = parts[1];
+      var input = document.getElementById(textId);
+      if(!input) return;
+      var val = (input.value||'').trim();
+      if(!val) return;
+      var ref = subcatListRef(ctx);
+      if(!ref) return;
+      var list = (ref.get()||[]).slice();
+      if(list.indexOf(val)===-1) list.push(val);
+      ref.set(list);
+      if(!inModal) state.suppressRender = false;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-subcat-remove]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var parts = el.getAttribute('data-subcat-remove').split('|');
+      var ctx = parts[0], idx = parseInt(parts[1],10);
+      var ref = subcatListRef(ctx);
+      if(!ref) return;
+      var list = (ref.get()||[]).slice();
+      list.splice(idx,1);
+      ref.set(list);
+      if(!inModal) state.suppressRender = false;
+      render();
+    });
+  });
+  document.querySelectorAll('.subcat-add-row input[type=text]').forEach(function(input){
+    input.addEventListener('focusin', function(){ state.suppressRender = true; });
+    if(!inModal){
+      input.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+    }
+    input.addEventListener('keydown', function(e){
+      if(e.key==='Enter'){
+        e.preventDefault();
+        var wrap = input.closest('.subcat-add-row');
+        var btn = wrap ? wrap.querySelector('[data-subcat-add]') : null;
+        if(btn) btn.click();
+      }
+    });
+  });
 }
 function fmtElapsed(ms){
   if(ms<0) ms=0;
@@ -1090,8 +1175,8 @@ function renderTaskForm(){
     '<input type="text" id="newTaskName" placeholder="例: 検品" value="'+esc(state.newTaskDraftName)+'">'+
     '<label>単位(件・箱・ピース等)</label>'+
     '<input type="text" id="newTaskUnit" placeholder="件" value="'+esc(state.newTaskDraftUnit)+'">'+
-    '<label>内訳(任意・カンマ区切り)</label>'+
-    '<input type="text" id="newTaskSubcats" placeholder="例: ピッキング,梱包" value="'+esc(state.newTaskDraftSubcats)+'">'+
+    '<label>内訳(任意)</label>'+
+    renderSubcatTagInput(state.newTaskDraftSubcats,'newTask','newTaskSubcatText')+
     '<label>カラー</label>'+
     '<div class="swatches">'+swatches+'</div>'+
     '<div class="task-form-actions">'+
@@ -1217,27 +1302,25 @@ function bindManager(){
   });
   var newTaskNameInput = document.getElementById('newTaskName');
   var newTaskUnitInput = document.getElementById('newTaskUnit');
-  var newTaskSubcatsInput = document.getElementById('newTaskSubcats');
-  [newTaskNameInput, newTaskUnitInput, newTaskSubcatsInput].forEach(function(el){
+  [newTaskNameInput, newTaskUnitInput].forEach(function(el){
     if(!el) return;
     el.addEventListener('focusin', function(){ state.suppressRender = true; });
     el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
   });
   if(newTaskNameInput) newTaskNameInput.addEventListener('input', function(){ state.newTaskDraftName = newTaskNameInput.value; });
   if(newTaskUnitInput) newTaskUnitInput.addEventListener('input', function(){ state.newTaskDraftUnit = newTaskUnitInput.value; });
-  if(newTaskSubcatsInput) newTaskSubcatsInput.addEventListener('input', function(){ state.newTaskDraftSubcats = newTaskSubcatsInput.value; });
   var confirmTaskBtn = document.getElementById('confirmTaskBtn');
   if(confirmTaskBtn){
     confirmTaskBtn.addEventListener('click', async function(){
       var name = (newTaskNameInput.value||'').trim();
       if(!name){ newTaskNameInput.style.borderColor = '#C1521F'; newTaskNameInput.focus(); return; }
       var unit = (newTaskUnitInput.value||'件').trim() || '件';
-      var subcats = parseSubcats(newTaskSubcatsInput ? newTaskSubcatsInput.value : '');
+      var subcats = (state.newTaskDraftSubcats||[]).slice();
       state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:managerActiveDate(), archived:false, subcategories:subcats});
       state.newTaskColIndex = -1;
       state.newTaskDraftName = '';
       state.newTaskDraftUnit = '件';
-      state.newTaskDraftSubcats = '';
+      state.newTaskDraftSubcats = [];
       state.suppressRender = false;
       await saveBacklog(state.backlog);
       render();
@@ -1299,6 +1382,7 @@ function bindManager(){
       openEditLogModal(log);
     });
   });
+  bindSubcatTagControls();
 }
 
 /* ---------- REGISTER (task registration by employees) ---------- */
@@ -1386,9 +1470,9 @@ function renderRegister(){
       '<input type="text" id="regName" placeholder="例: 検品" value="'+esc(state.regDraftName)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位(件・箱・ピース等)</label>'+
       '<input type="text" id="regUnit" placeholder="件" value="'+esc(state.regDraftUnit)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意・カンマ区切り。例: 出荷作業ならピッキング,梱包)</label>'+
-      '<input type="text" id="regSubcats" placeholder="例: ピッキング,梱包" value="'+esc(state.regDraftSubcats)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">カラー</label>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意。例: 出荷作業ならピッキング・梱包)</label>'+
+      renderSubcatTagInput(state.regDraftSubcats,'reg','regSubcatText')+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:14px;">'+swatches+'</div>'+
       '<button class="add-btn" id="regSubmitBtn" style="width:100%;padding:11px;">この作業を登録</button>'+
     '</div>'+
@@ -1399,9 +1483,9 @@ function renderRegister(){
       '<input type="text" id="tmplName" placeholder="例: 入荷検品" value="'+esc(state.tmplDraftName)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位</label>'+
       '<input type="text" id="tmplUnit" placeholder="件" value="'+esc(state.tmplDraftUnit)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意・カンマ区切り)</label>'+
-      '<input type="text" id="tmplSubcats" placeholder="例: ピッキング,梱包" value="'+esc(state.tmplDraftSubcats)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">カラー</label>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意)</label>'+
+      renderSubcatTagInput(state.tmplDraftSubcats,'tmpl','tmplSubcatText')+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:10px;">'+tmplSwatches+'</div>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">発生する曜日</label>'+
       '<div class="pattern-row" style="margin-bottom:14px;">'+draftToggles+'</div>'+
@@ -1420,8 +1504,7 @@ function bindRegister(){
   var dateInput = document.getElementById('regDate');
   var nameInput = document.getElementById('regName');
   var unitInput = document.getElementById('regUnit');
-  var subcatsInput = document.getElementById('regSubcats');
-  [dateInput, nameInput, unitInput, subcatsInput].forEach(function(el){
+  [dateInput, nameInput, unitInput].forEach(function(el){
     if(!el) return;
     el.addEventListener('focusin', function(){ state.suppressRender = true; });
     el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
@@ -1431,7 +1514,6 @@ function bindRegister(){
   }
   if(nameInput) nameInput.addEventListener('input', function(){ state.regDraftName = nameInput.value; });
   if(unitInput) unitInput.addEventListener('input', function(){ state.regDraftUnit = unitInput.value; });
-  if(subcatsInput) subcatsInput.addEventListener('input', function(){ state.regDraftSubcats = subcatsInput.value; });
   var searchInput = document.getElementById('regSearchInput');
   if(searchInput){
     searchInput.addEventListener('focusin', function(){ state.suppressRender = true; });
@@ -1457,11 +1539,11 @@ function bindRegister(){
       if(!name){ nameInput.style.borderColor='#C1521F'; nameInput.focus(); return; }
       var unit = (unitInput.value||'件').trim() || '件';
       var workDate = dateInput.value || tomorrowStr();
-      var subcats = parseSubcats(subcatsInput ? subcatsInput.value : '');
+      var subcats = (state.regDraftSubcats||[]).slice();
       state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:workDate, archived:false, subcategories:subcats});
       state.regNewDate = workDate;
       state.regDraftName = '';
-      state.regDraftSubcats = '';
+      state.regDraftSubcats = [];
       state.suppressRender = false;
       await saveBacklog(state.backlog);
       render();
@@ -1487,15 +1569,13 @@ function bindRegister(){
 
   var tmplNameInput = document.getElementById('tmplName');
   var tmplUnitInput = document.getElementById('tmplUnit');
-  var tmplSubcatsInput = document.getElementById('tmplSubcats');
-  [tmplNameInput, tmplUnitInput, tmplSubcatsInput].forEach(function(el){
+  [tmplNameInput, tmplUnitInput].forEach(function(el){
     if(!el) return;
     el.addEventListener('focusin', function(){ state.suppressRender = true; });
     el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
   });
   if(tmplNameInput) tmplNameInput.addEventListener('input', function(){ state.tmplDraftName = tmplNameInput.value; });
   if(tmplUnitInput) tmplUnitInput.addEventListener('input', function(){ state.tmplDraftUnit = tmplUnitInput.value; });
-  if(tmplSubcatsInput) tmplSubcatsInput.addEventListener('input', function(){ state.tmplDraftSubcats = tmplSubcatsInput.value; });
   document.querySelectorAll('[data-tmpl-color-swatch]').forEach(function(el){
     el.addEventListener('click', function(){
       state.newTemplateColor = el.getAttribute('data-tmpl-color-swatch');
@@ -1515,11 +1595,11 @@ function bindRegister(){
       var name = (tmplNameInput.value||'').trim();
       if(!name){ tmplNameInput.style.borderColor='#C1521F'; tmplNameInput.focus(); return; }
       var unit = (tmplUnitInput.value||'件').trim() || '件';
-      var subcats = parseSubcats(tmplSubcatsInput ? tmplSubcatsInput.value : '');
+      var subcats = (state.tmplDraftSubcats||[]).slice();
       state.templates.push({id:uid(), name:name, unit:unit, color:state.newTemplateColor, pattern:state.newTemplatePattern, archived:false, subcategories:subcats});
       state.newTemplatePattern = defaultPattern();
       state.tmplDraftName = '';
-      state.tmplDraftSubcats = '';
+      state.tmplDraftSubcats = [];
       state.suppressRender = false;
       await saveTemplates(state.templates);
       await ensureTemplateTasksForToday();
@@ -1566,6 +1646,7 @@ function bindRegister(){
       if(t) openEditTemplateModal(t);
     });
   });
+  bindSubcatTagControls();
 }
 
 /* ---------- REPORT (集計) ---------- */
@@ -1980,7 +2061,7 @@ function bindEditLogModal(m){
 }
 
 function openEditTaskModal(task){
-  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate, subcatsInput: subcatsToInputValue(task.subcategories) };
+  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate, subcatsList: (task.subcategories||[]).slice() };
   state.suppressRender = true;
   render();
 }
@@ -1991,14 +2072,13 @@ async function saveEditTask(){
   var nameInput = document.getElementById('editTaskName');
   var unitInput = document.getElementById('editTaskUnit');
   var dateInput = document.getElementById('editTaskDate');
-  var subcatsInput = document.getElementById('editTaskSubcats');
   var name = (nameInput.value||'').trim();
   if(!name){ nameInput.style.borderColor='#C1521F'; nameInput.focus(); return; }
   task.name = name;
   task.unit = (unitInput.value||'件').trim() || '件';
   task.color = m.color;
   task.workDate = dateInput.value || task.workDate;
-  task.subcategories = parseSubcats(subcatsInput ? subcatsInput.value : '');
+  task.subcategories = (m.subcatsList||[]).slice();
   state.modal = null;
   state.suppressRender = false;
   await saveBacklog(state.backlog);
@@ -2031,10 +2111,11 @@ function bindEditTaskModal(m){
   if(saveBtn) saveBtn.addEventListener('click', saveEditTask);
   var deleteBtn = document.getElementById('editDeleteBtn');
   if(deleteBtn) deleteBtn.addEventListener('click', deleteEditTask);
+  bindSubcatTagControls();
 }
 
 function openEditTemplateModal(tmpl){
-  state.modal = { kind:'editTemplate', templateId: tmpl.id, name: tmpl.name, unit: tmpl.unit, color: tmpl.color, subcatsInput: subcatsToInputValue(tmpl.subcategories) };
+  state.modal = { kind:'editTemplate', templateId: tmpl.id, name: tmpl.name, unit: tmpl.unit, color: tmpl.color, subcatsList: (tmpl.subcategories||[]).slice() };
   state.suppressRender = true;
   render();
 }
@@ -2044,13 +2125,12 @@ async function saveEditTemplate(){
   if(!tmpl){ state.modal=null; state.suppressRender=false; render(); return; }
   var nameInput = document.getElementById('editTmplName');
   var unitInput = document.getElementById('editTmplUnit');
-  var subcatsInput = document.getElementById('editTmplSubcats');
   var name = (nameInput.value||'').trim();
   if(!name){ nameInput.style.borderColor='#C1521F'; nameInput.focus(); return; }
   tmpl.name = name;
   tmpl.unit = (unitInput.value||'件').trim() || '件';
   tmpl.color = m.color;
-  tmpl.subcategories = parseSubcats(subcatsInput ? subcatsInput.value : '');
+  tmpl.subcategories = (m.subcatsList||[]).slice();
   state.modal = null;
   state.suppressRender = false;
   await saveTemplates(state.templates);
@@ -2092,6 +2172,7 @@ function bindEditTemplateModal(m){
   if(saveBtn) saveBtn.addEventListener('click', saveEditTemplate);
   var deleteBtn = document.getElementById('editDeleteBtn');
   if(deleteBtn) deleteBtn.addEventListener('click', deleteEditTemplate);
+  bindSubcatTagControls();
 }
 
 function bindQtyBreakdownModal(m){
@@ -2229,9 +2310,9 @@ function renderEditTaskModal(m){
       '<input type="text" id="editTaskName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位</label>'+
       '<input type="text" id="editTaskUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意・カンマ区切り)</label>'+
-      '<input type="text" id="editTaskSubcats" value="'+esc(m.subcatsInput)+'" placeholder="例: ピッキング,梱包" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">カラー</label>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意)</label>'+
+      renderSubcatTagInput(m.subcatsList,'editTask','editTaskSubcatText')+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:18px;">'+editFieldSwatches(m.color,'edit-task-color')+'</div>'+
       '<div class="modal-actions">'+
         '<button class="modal-cancel" id="editCancelBtn">キャンセル</button>'+
@@ -2249,9 +2330,9 @@ function renderEditTemplateModal(m){
       '<input type="text" id="editTmplName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位</label>'+
       '<input type="text" id="editTmplUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意・カンマ区切り)</label>'+
-      '<input type="text" id="editTmplSubcats" value="'+esc(m.subcatsInput)+'" placeholder="例: ピッキング,梱包" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">カラー</label>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意)</label>'+
+      renderSubcatTagInput(m.subcatsList,'editTmpl','editTmplSubcatText')+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:8px;">'+editFieldSwatches(m.color,'edit-tmpl-color')+'</div>'+
       '<div class="pool-hint" style="margin-bottom:14px;">発生する曜日は一覧の曜日ボタンから変更できます。</div>'+
       '<div class="modal-actions">'+

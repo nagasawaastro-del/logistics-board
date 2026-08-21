@@ -334,6 +334,16 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .modal-confirm{background:var(--amber-500);color:#4A2C00;font-family:var(--font-display);}
 .modal-confirm:active{transform:scale(.97);background:var(--amber-600);}
 
+.qty-break-list{text-align:left;margin-bottom:16px;max-height:50vh;overflow-y:auto;}
+.qty-break-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 4px;border-bottom:1px solid var(--paper-line);}
+.qty-break-row:last-child{border-bottom:none;}
+.qty-break-label{font-size:14px;font-weight:600;color:var(--ink-900);flex:1;}
+.qty-break-controls{display:flex;align-items:center;gap:6px;}
+.qty-btn-sm{width:44px;min-height:40px;padding:8px 0;font-size:13px;border-radius:9px;}
+.qty-break-value{font-family:var(--font-mono);font-size:18px;font-weight:700;color:var(--ink-900);min-width:32px;text-align:center;}
+.qty-break-total{font-size:14px;font-weight:600;color:var(--slate-500);text-align:center;margin-bottom:18px;}
+.qty-break-total b{font-family:var(--font-mono);font-size:20px;color:var(--rust-600);}
+
 /* ---------- MONITOR VIEW ---------- */
 .monitor{min-height:100vh;background:var(--ink-950);color:#EDEFF3;padding:0;}
 .mon-header{
@@ -445,6 +455,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-20', items:[
+    '作業に「内訳」(例: 出荷作業のピッキング/梱包)を設定できるように変更。作業登録・編集画面でカンマ区切りで内訳を指定すると、パートさんの実績入力が内訳ごとの件数入力になり、管理者画面の実績一覧・モニター・集計・パートさんの本日サマリーでも内訳が確認できるように'
+  ]},
+  { date:'2026-08-20', items:[
     '不具合修正: 作業登録・スタッフ追加・作業追加のテキスト入力欄で、入力中に自動更新(4秒ごとの同期)が重なると入力内容が消えたり空欄に戻ったりすることがあった問題を修正。入力内容を一時的に保持するようにし、途中で画面が再描画されても消えないように変更'
   ]},
   { date:'2026-08-20', items:[
@@ -501,13 +514,16 @@ var state = {
   regSearchQuery: undefined,
   regDraftName: '',
   regDraftUnit: '件',
+  regDraftSubcats: '',
   newStaffDraftName: '',
   newTaskDraftName: '',
   newTaskDraftUnit: '件',
+  newTaskDraftSubcats: '',
   newTemplateColor: TASK_COLORS[0].hex,
   newTemplatePattern: null,
   tmplDraftName: '',
   tmplDraftUnit: '件',
+  tmplDraftSubcats: '',
   reportMode: 'single',
   reportDate: null,
   reportStart: null,
@@ -540,6 +556,18 @@ function esc(s){
   return String(s==null?'':s).replace(/[&<>"']/g, function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
   });
+}
+function parseSubcats(str){
+  return (str||'').split(/[,、]/).map(function(s){ return s.trim(); }).filter(function(s){ return s.length>0; });
+}
+function subcatsToInputValue(arr){
+  return (arr||[]).join(',');
+}
+function breakdownLabel(breakdown, unit){
+  if(!breakdown) return '';
+  var keys = Object.keys(breakdown).filter(function(k){ return breakdown[k]>0; });
+  if(!keys.length) return '';
+  return '('+keys.map(function(k){ return esc(k)+' '+breakdown[k]+esc(unit); }).join(' / ')+')';
 }
 function fmtElapsed(ms){
   if(ms<0) ms=0;
@@ -614,7 +642,7 @@ async function ensureTemplateTasksForDate(dateStr){
     if(!pattern[wd]) return;
     var key = tmpl.id+'|'+dateStr;
     if(existingKeys[key]) return;
-    state.backlog.push({id:uid(), name:tmpl.name, unit:tmpl.unit, color:tmpl.color, workDate:dateStr, archived:false, fromTemplate:tmpl.id});
+    state.backlog.push({id:uid(), name:tmpl.name, unit:tmpl.unit, color:tmpl.color, workDate:dateStr, archived:false, fromTemplate:tmpl.id, subcategories:tmpl.subcategories||[]});
     changed = true;
   });
   if(changed) await saveBacklog(state.backlog);
@@ -753,15 +781,18 @@ function totalsByTask(staffId){
   return totalsByTaskForDay(state.day, staffId);
 }
 function taskAggregateForDay(day, taskId){
-  var ms=0, qty=0, activeCount=0;
+  var ms=0, qty=0, activeCount=0, breakdown={};
   day.logs.forEach(function(l){
     if(l.taskId!==taskId) return;
     var end = l.end ? new Date(l.end).getTime() : Date.now();
     ms += end - new Date(l.start).getTime();
     qty += (l.quantity||0);
     if(l.end===null) activeCount++;
+    if(l.breakdown){
+      Object.keys(l.breakdown).forEach(function(k){ breakdown[k] = (breakdown[k]||0) + (l.breakdown[k]||0); });
+    }
   });
-  return {ms:ms, qty:qty, activeCount:activeCount};
+  return {ms:ms, qty:qty, activeCount:activeCount, breakdown:breakdown};
 }
 function taskAggregate(taskId){
   return taskAggregateForDay(state.day, taskId);
@@ -789,14 +820,20 @@ function aggregateDays(days){
       var qty = l.quantity || 0;
       if(!perStaff[l.staffId]) perStaff[l.staffId] = { ms:0, byTask:{} };
       perStaff[l.staffId].ms += dur;
-      if(!perStaff[l.staffId].byTask[l.taskId]) perStaff[l.staffId].byTask[l.taskId] = { ms:0, qty:0 };
+      if(!perStaff[l.staffId].byTask[l.taskId]) perStaff[l.staffId].byTask[l.taskId] = { ms:0, qty:0, breakdown:{} };
       perStaff[l.staffId].byTask[l.taskId].ms += dur;
       perStaff[l.staffId].byTask[l.taskId].qty += qty;
 
-      if(!perTask[l.taskId]) perTask[l.taskId] = { ms:0, qty:0, staff:{} };
+      if(!perTask[l.taskId]) perTask[l.taskId] = { ms:0, qty:0, staff:{}, breakdown:{} };
       perTask[l.taskId].ms += dur;
       perTask[l.taskId].qty += qty;
       perTask[l.taskId].staff[l.staffId] = true;
+      if(l.breakdown){
+        Object.keys(l.breakdown).forEach(function(k){
+          perTask[l.taskId].breakdown[k] = (perTask[l.taskId].breakdown[k]||0) + (l.breakdown[k]||0);
+          perStaff[l.staffId].byTask[l.taskId].breakdown[k] = (perStaff[l.staffId].byTask[l.taskId].breakdown[k]||0) + (l.breakdown[k]||0);
+        });
+      }
     });
   });
   return { perStaff: perStaff, perTask: perTask };
@@ -1003,7 +1040,7 @@ function renderManager(){
     var s = staffById(l.staffId);
     var t = taskById(l.taskId);
     var endLabel = l.end ? fmtClock(l.end) : '<span style="color:var(--green-500);font-weight:700;">作業中</span>';
-    var qtyLabel = l.end ? (l.quantity||0)+esc(t.unit) : '-';
+    var qtyLabel = l.end ? (l.quantity||0)+esc(t.unit)+(l.breakdown?' <span style="color:var(--slate-500);font-weight:400;">'+breakdownLabel(l.breakdown, t.unit)+'</span>':'') : '-';
     return '<tr>'+
       '<td>'+esc(s.name)+'</td>'+
       '<td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td>'+
@@ -1053,6 +1090,8 @@ function renderTaskForm(){
     '<input type="text" id="newTaskName" placeholder="例: 検品" value="'+esc(state.newTaskDraftName)+'">'+
     '<label>単位(件・箱・ピース等)</label>'+
     '<input type="text" id="newTaskUnit" placeholder="件" value="'+esc(state.newTaskDraftUnit)+'">'+
+    '<label>内訳(任意・カンマ区切り)</label>'+
+    '<input type="text" id="newTaskSubcats" placeholder="例: ピッキング,梱包" value="'+esc(state.newTaskDraftSubcats)+'">'+
     '<label>カラー</label>'+
     '<div class="swatches">'+swatches+'</div>'+
     '<div class="task-form-actions">'+
@@ -1178,23 +1217,27 @@ function bindManager(){
   });
   var newTaskNameInput = document.getElementById('newTaskName');
   var newTaskUnitInput = document.getElementById('newTaskUnit');
-  [newTaskNameInput, newTaskUnitInput].forEach(function(el){
+  var newTaskSubcatsInput = document.getElementById('newTaskSubcats');
+  [newTaskNameInput, newTaskUnitInput, newTaskSubcatsInput].forEach(function(el){
     if(!el) return;
     el.addEventListener('focusin', function(){ state.suppressRender = true; });
     el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
   });
   if(newTaskNameInput) newTaskNameInput.addEventListener('input', function(){ state.newTaskDraftName = newTaskNameInput.value; });
   if(newTaskUnitInput) newTaskUnitInput.addEventListener('input', function(){ state.newTaskDraftUnit = newTaskUnitInput.value; });
+  if(newTaskSubcatsInput) newTaskSubcatsInput.addEventListener('input', function(){ state.newTaskDraftSubcats = newTaskSubcatsInput.value; });
   var confirmTaskBtn = document.getElementById('confirmTaskBtn');
   if(confirmTaskBtn){
     confirmTaskBtn.addEventListener('click', async function(){
       var name = (newTaskNameInput.value||'').trim();
       if(!name){ newTaskNameInput.style.borderColor = '#C1521F'; newTaskNameInput.focus(); return; }
       var unit = (newTaskUnitInput.value||'件').trim() || '件';
-      state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:managerActiveDate(), archived:false});
+      var subcats = parseSubcats(newTaskSubcatsInput ? newTaskSubcatsInput.value : '');
+      state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:managerActiveDate(), archived:false, subcategories:subcats});
       state.newTaskColIndex = -1;
       state.newTaskDraftName = '';
       state.newTaskDraftUnit = '件';
+      state.newTaskDraftSubcats = '';
       state.suppressRender = false;
       await saveBacklog(state.backlog);
       render();
@@ -1343,6 +1386,8 @@ function renderRegister(){
       '<input type="text" id="regName" placeholder="例: 検品" value="'+esc(state.regDraftName)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位(件・箱・ピース等)</label>'+
       '<input type="text" id="regUnit" placeholder="件" value="'+esc(state.regDraftUnit)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意・カンマ区切り。例: 出荷作業ならピッキング,梱包)</label>'+
+      '<input type="text" id="regSubcats" placeholder="例: ピッキング,梱包" value="'+esc(state.regDraftSubcats)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:14px;">'+swatches+'</div>'+
       '<button class="add-btn" id="regSubmitBtn" style="width:100%;padding:11px;">この作業を登録</button>'+
@@ -1354,6 +1399,8 @@ function renderRegister(){
       '<input type="text" id="tmplName" placeholder="例: 入荷検品" value="'+esc(state.tmplDraftName)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位</label>'+
       '<input type="text" id="tmplUnit" placeholder="件" value="'+esc(state.tmplDraftUnit)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意・カンマ区切り)</label>'+
+      '<input type="text" id="tmplSubcats" placeholder="例: ピッキング,梱包" value="'+esc(state.tmplDraftSubcats)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:10px;">'+tmplSwatches+'</div>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">発生する曜日</label>'+
@@ -1373,7 +1420,8 @@ function bindRegister(){
   var dateInput = document.getElementById('regDate');
   var nameInput = document.getElementById('regName');
   var unitInput = document.getElementById('regUnit');
-  [dateInput, nameInput, unitInput].forEach(function(el){
+  var subcatsInput = document.getElementById('regSubcats');
+  [dateInput, nameInput, unitInput, subcatsInput].forEach(function(el){
     if(!el) return;
     el.addEventListener('focusin', function(){ state.suppressRender = true; });
     el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
@@ -1383,6 +1431,7 @@ function bindRegister(){
   }
   if(nameInput) nameInput.addEventListener('input', function(){ state.regDraftName = nameInput.value; });
   if(unitInput) unitInput.addEventListener('input', function(){ state.regDraftUnit = unitInput.value; });
+  if(subcatsInput) subcatsInput.addEventListener('input', function(){ state.regDraftSubcats = subcatsInput.value; });
   var searchInput = document.getElementById('regSearchInput');
   if(searchInput){
     searchInput.addEventListener('focusin', function(){ state.suppressRender = true; });
@@ -1408,9 +1457,11 @@ function bindRegister(){
       if(!name){ nameInput.style.borderColor='#C1521F'; nameInput.focus(); return; }
       var unit = (unitInput.value||'件').trim() || '件';
       var workDate = dateInput.value || tomorrowStr();
-      state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:workDate, archived:false});
+      var subcats = parseSubcats(subcatsInput ? subcatsInput.value : '');
+      state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:workDate, archived:false, subcategories:subcats});
       state.regNewDate = workDate;
       state.regDraftName = '';
+      state.regDraftSubcats = '';
       state.suppressRender = false;
       await saveBacklog(state.backlog);
       render();
@@ -1436,13 +1487,15 @@ function bindRegister(){
 
   var tmplNameInput = document.getElementById('tmplName');
   var tmplUnitInput = document.getElementById('tmplUnit');
-  [tmplNameInput, tmplUnitInput].forEach(function(el){
+  var tmplSubcatsInput = document.getElementById('tmplSubcats');
+  [tmplNameInput, tmplUnitInput, tmplSubcatsInput].forEach(function(el){
     if(!el) return;
     el.addEventListener('focusin', function(){ state.suppressRender = true; });
     el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
   });
   if(tmplNameInput) tmplNameInput.addEventListener('input', function(){ state.tmplDraftName = tmplNameInput.value; });
   if(tmplUnitInput) tmplUnitInput.addEventListener('input', function(){ state.tmplDraftUnit = tmplUnitInput.value; });
+  if(tmplSubcatsInput) tmplSubcatsInput.addEventListener('input', function(){ state.tmplDraftSubcats = tmplSubcatsInput.value; });
   document.querySelectorAll('[data-tmpl-color-swatch]').forEach(function(el){
     el.addEventListener('click', function(){
       state.newTemplateColor = el.getAttribute('data-tmpl-color-swatch');
@@ -1462,9 +1515,11 @@ function bindRegister(){
       var name = (tmplNameInput.value||'').trim();
       if(!name){ tmplNameInput.style.borderColor='#C1521F'; tmplNameInput.focus(); return; }
       var unit = (tmplUnitInput.value||'件').trim() || '件';
-      state.templates.push({id:uid(), name:name, unit:unit, color:state.newTemplateColor, pattern:state.newTemplatePattern, archived:false});
+      var subcats = parseSubcats(tmplSubcatsInput ? tmplSubcatsInput.value : '');
+      state.templates.push({id:uid(), name:name, unit:unit, color:state.newTemplateColor, pattern:state.newTemplatePattern, archived:false, subcategories:subcats});
       state.newTemplatePattern = defaultPattern();
       state.tmplDraftName = '';
+      state.tmplDraftSubcats = '';
       state.suppressRender = false;
       await saveTemplates(state.templates);
       await ensureTemplateTasksForToday();
@@ -1573,7 +1628,8 @@ function renderReportSingleBody(){
   var taskRows = taskIds.map(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
-    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
+    var bd = breakdownLabel(info.breakdown, t.unit);
+    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+(bd?'<div style="font-size:11px;color:var(--slate-500);font-weight:400;">'+bd+'</div>':'')+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
   return '<div class="panel-title">'+esc(dateLabelFromStr(state.reportDate))+' の集計</div>'+
@@ -1604,7 +1660,8 @@ function renderReportRangeBody(){
   var taskRows = taskIds.map(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
-    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
+    var bd = breakdownLabel(info.breakdown, t.unit);
+    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+(bd?'<div style="font-size:11px;color:var(--slate-500);font-weight:400;">'+bd+'</div>':'')+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
   return '<div class="panel-title">'+esc(dateLabelFromStr(result.start))+' 〜 '+esc(dateLabelFromStr(result.end))+' の合計</div>'+
@@ -1730,10 +1787,19 @@ function renderSummary(staff){
   var rows = Object.keys(totals).sort(byTaskColor(function(tid){ return taskById(tid).color; })).map(function(tid){
     var t = taskById(tid);
     var qty = 0;
-    state.day.logs.forEach(function(l){ if(l.staffId===staff.id && l.taskId===tid) qty += (l.quantity||0); });
+    var breakdown = {};
+    state.day.logs.forEach(function(l){
+      if(l.staffId===staff.id && l.taskId===tid){
+        qty += (l.quantity||0);
+        if(l.breakdown){
+          Object.keys(l.breakdown).forEach(function(k){ breakdown[k] = (breakdown[k]||0) + (l.breakdown[k]||0); });
+        }
+      }
+    });
+    var bd = breakdownLabel(breakdown, t.unit);
     return '<div class="summary-row">'+
       '<div class="summary-task"><span class="task-color-dot" style="background:'+t.color+'"></span>'+esc(t.name)+'</div>'+
-      '<div class="summary-vals">'+fmtHM(totals[tid])+' ・ '+qty+esc(t.unit)+'</div>'+
+      '<div class="summary-vals">'+fmtHM(totals[tid])+' ・ '+qty+esc(t.unit)+(bd?' '+bd:'')+'</div>'+
     '</div>';
   }).join('') || '<div class="empty-note">本日の記録はありません。</div>';
   return '<div class="input-wrap"><div class="summary-wrap">'+
@@ -1786,7 +1852,13 @@ function openQuantityModal(nextTaskId, isEndDay){
   state.suppressRender = true;
   if(log){
     var t = taskById(log.taskId);
-    state.modal = {kind:'qty', closingTaskId: log.taskId, closingTaskName: t.name, closingUnit: t.unit, value:0, nextTaskId: nextTaskId, isEndDay: isEndDay};
+    if(t.subcategories && t.subcategories.length){
+      var values = {};
+      t.subcategories.forEach(function(sc){ values[sc] = 0; });
+      state.modal = {kind:'qtyBreakdown', closingTaskId: log.taskId, closingTaskName: t.name, closingUnit: t.unit, subcategories: t.subcategories, values: values, nextTaskId: nextTaskId, isEndDay: isEndDay};
+    }else{
+      state.modal = {kind:'qty', closingTaskId: log.taskId, closingTaskName: t.name, closingUnit: t.unit, value:0, nextTaskId: nextTaskId, isEndDay: isEndDay};
+    }
   }else{
     startTask(nextTaskId);
     return;
@@ -1800,10 +1872,14 @@ async function startTask(taskId){
   state.suppressRender = false;
   render();
 }
-async function closeCurrentAndProceed(qty){
+async function closeLogAndProceed(qty, breakdown){
   var m = state.modal;
   var log = state.day.logs.find(function(l){ return l.staffId===state.activeStaffId && l.taskId===m.closingTaskId && l.end===null; });
-  if(log){ log.end = new Date().toISOString(); log.quantity = qty; }
+  if(log){
+    log.end = new Date().toISOString();
+    log.quantity = qty;
+    if(breakdown){ log.breakdown = breakdown; } else { delete log.breakdown; }
+  }
   await saveDay(state.day);
   state.modal = null;
   if(m.isEndDay){
@@ -1818,8 +1894,13 @@ async function closeCurrentAndProceed(qty){
     render();
   }
 }
+async function closeCurrentAndProceed(qty){
+  return closeLogAndProceed(qty, null);
+}
 
 function openEditLogModal(log){
+  var task = taskById(log.taskId);
+  var hasSubcats = task.subcategories && task.subcategories.length;
   state.modal = {
     kind:'editLog',
     logId: log.id,
@@ -1827,7 +1908,9 @@ function openEditLogModal(log){
     taskId: log.taskId,
     startTime: isoToLocalTimeInput(log.start),
     endTime: isoToLocalTimeInput(log.end),
-    quantity: log.quantity || 0
+    quantity: log.quantity || 0,
+    subcategories: hasSubcats ? task.subcategories : null,
+    breakdownValues: hasSubcats ? Object.assign({}, (task.subcategories||[]).reduce(function(acc,sc){ acc[sc]=0; return acc; }, {}), log.breakdown||{}) : null
   };
   state.suppressRender = true;
   render();
@@ -1840,17 +1923,33 @@ async function saveEditLog(){
   var taskSelect = document.getElementById('editTaskSelect');
   var startInput = document.getElementById('editStartTime');
   var endInput = document.getElementById('editEndTime');
-  var qtyInput = document.getElementById('editQtyInput');
   var dateStr = managerActiveDate();
   log.taskId = taskSelect.value;
   log.start = localDateTimeToISO(dateStr, startInput.value || '00:00');
   if(endInput.value){
     log.end = localDateTimeToISO(dateStr, endInput.value);
-    var q = parseInt(qtyInput.value,10);
-    log.quantity = isNaN(q) ? 0 : q;
+    if(m.subcategories){
+      var breakdown = {};
+      var total = 0;
+      m.subcategories.forEach(function(sc, idx){
+        var input = document.getElementById('editBreakdown-'+idx);
+        var v = input ? parseInt(input.value,10) : 0;
+        if(isNaN(v)) v = 0;
+        breakdown[sc] = v;
+        total += v;
+      });
+      log.quantity = total;
+      log.breakdown = breakdown;
+    }else{
+      var qtyInput = document.getElementById('editQtyInput');
+      var q = parseInt(qtyInput.value,10);
+      log.quantity = isNaN(q) ? 0 : q;
+      delete log.breakdown;
+    }
   }else{
     log.end = null;
     log.quantity = null;
+    delete log.breakdown;
   }
   state.modal = null;
   state.suppressRender = false;
@@ -1881,7 +1980,7 @@ function bindEditLogModal(m){
 }
 
 function openEditTaskModal(task){
-  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate };
+  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate, subcatsInput: subcatsToInputValue(task.subcategories) };
   state.suppressRender = true;
   render();
 }
@@ -1892,12 +1991,14 @@ async function saveEditTask(){
   var nameInput = document.getElementById('editTaskName');
   var unitInput = document.getElementById('editTaskUnit');
   var dateInput = document.getElementById('editTaskDate');
+  var subcatsInput = document.getElementById('editTaskSubcats');
   var name = (nameInput.value||'').trim();
   if(!name){ nameInput.style.borderColor='#C1521F'; nameInput.focus(); return; }
   task.name = name;
   task.unit = (unitInput.value||'件').trim() || '件';
   task.color = m.color;
   task.workDate = dateInput.value || task.workDate;
+  task.subcategories = parseSubcats(subcatsInput ? subcatsInput.value : '');
   state.modal = null;
   state.suppressRender = false;
   await saveBacklog(state.backlog);
@@ -1933,7 +2034,7 @@ function bindEditTaskModal(m){
 }
 
 function openEditTemplateModal(tmpl){
-  state.modal = { kind:'editTemplate', templateId: tmpl.id, name: tmpl.name, unit: tmpl.unit, color: tmpl.color };
+  state.modal = { kind:'editTemplate', templateId: tmpl.id, name: tmpl.name, unit: tmpl.unit, color: tmpl.color, subcatsInput: subcatsToInputValue(tmpl.subcategories) };
   state.suppressRender = true;
   render();
 }
@@ -1943,11 +2044,13 @@ async function saveEditTemplate(){
   if(!tmpl){ state.modal=null; state.suppressRender=false; render(); return; }
   var nameInput = document.getElementById('editTmplName');
   var unitInput = document.getElementById('editTmplUnit');
+  var subcatsInput = document.getElementById('editTmplSubcats');
   var name = (nameInput.value||'').trim();
   if(!name){ nameInput.style.borderColor='#C1521F'; nameInput.focus(); return; }
   tmpl.name = name;
   tmpl.unit = (unitInput.value||'件').trim() || '件';
   tmpl.color = m.color;
+  tmpl.subcategories = parseSubcats(subcatsInput ? subcatsInput.value : '');
   state.modal = null;
   state.suppressRender = false;
   await saveTemplates(state.templates);
@@ -1991,12 +2094,42 @@ function bindEditTemplateModal(m){
   if(deleteBtn) deleteBtn.addEventListener('click', deleteEditTemplate);
 }
 
+function bindQtyBreakdownModal(m){
+  document.querySelectorAll('[data-qtyb-delta]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var parts = el.getAttribute('data-qtyb-delta').split('|');
+      var idx = parseInt(parts[0],10), delta = parseInt(parts[1],10);
+      var sc = m.subcategories[idx];
+      m.values[sc] = Math.max(0, (m.values[sc]||0) + delta);
+      var valEl = document.querySelector('[data-qtyb-value="'+idx+'"]');
+      if(valEl) valEl.textContent = m.values[sc];
+      var totalEl = document.getElementById('qtybTotal');
+      if(totalEl){
+        var total = m.subcategories.reduce(function(a,s){ return a+(m.values[s]||0); },0);
+        totalEl.textContent = total;
+      }
+    });
+  });
+  var cancelBtn = document.getElementById('qtyCancel');
+  if(cancelBtn) cancelBtn.addEventListener('click', function(){
+    state.modal = null;
+    state.suppressRender = false;
+    render();
+  });
+  var confirmBtn = document.getElementById('qtyConfirmBreakdown');
+  if(confirmBtn) confirmBtn.addEventListener('click', function(){
+    var total = m.subcategories.reduce(function(a,s){ return a+(m.values[s]||0); },0);
+    closeLogAndProceed(total, Object.assign({}, m.values));
+  });
+}
+
 /* ---------- MODAL ---------- */
 function renderModal(){
   var m = state.modal;
   if(m.kind==='editLog') return renderEditLogModal(m);
   if(m.kind==='editTask') return renderEditTaskModal(m);
   if(m.kind==='editTemplate') return renderEditTemplateModal(m);
+  if(m.kind==='qtyBreakdown') return renderQtyBreakdownModal(m);
   if(m.kind!=='qty') return '';
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card">'+
@@ -2017,11 +2150,52 @@ function renderModal(){
     '</div>'+
   '</div>';
 }
+function renderQtyBreakdownModal(m){
+  var rows = m.subcategories.map(function(sc, i){
+    var v = m.values[sc]||0;
+    return '<div class="qty-break-row">'+
+      '<div class="qty-break-label">'+esc(sc)+'</div>'+
+      '<div class="qty-break-controls">'+
+        '<button class="qty-btn qty-btn-sm" data-qtyb-delta="'+i+'|-10">-10</button>'+
+        '<button class="qty-btn qty-btn-sm" data-qtyb-delta="'+i+'|-1">-1</button>'+
+        '<div class="qty-break-value" data-qtyb-value="'+i+'">'+v+'</div>'+
+        '<button class="qty-btn qty-btn-sm" data-qtyb-delta="'+i+'|1">+1</button>'+
+        '<button class="qty-btn qty-btn-sm" data-qtyb-delta="'+i+'|10">+10</button>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+  var total = m.subcategories.reduce(function(a,sc){ return a+(m.values[sc]||0); },0);
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card" style="max-width:440px;">'+
+      '<div class="modal-task-name">'+esc(m.closingTaskName)+'</div>'+
+      '<div class="modal-q">内訳ごとに何'+esc(m.closingUnit)+'できましたか?</div>'+
+      '<div class="qty-break-list">'+rows+'</div>'+
+      '<div class="qty-break-total">合計 <b id="qtybTotal">'+total+'</b>'+esc(m.closingUnit)+'</div>'+
+      '<div class="modal-actions">'+
+        '<button class="modal-cancel" id="qtyCancel">キャンセル</button>'+
+        '<button class="modal-confirm" id="qtyConfirmBreakdown">確定'+(m.nextTaskId?'して次へ':'')+'</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
 function renderEditLogModal(m){
   var s = staffById(m.staffId);
   var options = taskOptionsForEdit(managerActiveDate(), m.taskId).map(function(t){
     return '<option value="'+t.id+'" '+(t.id===m.taskId?'selected':'')+'>'+esc(t.name)+'</option>';
   }).join('');
+  var qtySection;
+  if(m.subcategories){
+    var rows = m.subcategories.map(function(sc, idx){
+      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;">'+
+        '<label style="font-size:13px;color:var(--ink-900);">'+esc(sc)+'</label>'+
+        '<input type="number" id="editBreakdown-'+idx+'" value="'+(m.breakdownValues[sc]||0)+'" min="0" style="width:100px;border:2px solid var(--paper-line);border-radius:10px;padding:8px;font-size:14px;text-align:right;">'+
+      '</div>';
+    }).join('');
+    qtySection = '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:6px;">内訳</label>'+rows;
+  }else{
+    qtySection = '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">件数</label>'+
+      '<input type="number" id="editQtyInput" value="'+m.quantity+'" min="0" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:18px;">';
+  }
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" style="max-width:400px;text-align:left;">'+
       '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">実績を編集('+esc(s.name)+'さん)</div>'+
@@ -2031,9 +2205,8 @@ function renderEditLogModal(m){
       '<input type="time" id="editStartTime" value="'+m.startTime+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">終了時刻(空欄=作業中のまま)</label>'+
       '<input type="time" id="editEndTime" value="'+m.endTime+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">件数</label>'+
-      '<input type="number" id="editQtyInput" value="'+m.quantity+'" min="0" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:18px;">'+
-      '<div class="modal-actions">'+
+      qtySection+
+      '<div class="modal-actions" style="margin-top:8px;">'+
         '<button class="modal-cancel" id="editCancelBtn">キャンセル</button>'+
         '<button class="modal-confirm" id="editSaveBtn">保存</button>'+
       '</div>'+
@@ -2056,6 +2229,8 @@ function renderEditTaskModal(m){
       '<input type="text" id="editTaskName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位</label>'+
       '<input type="text" id="editTaskUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意・カンマ区切り)</label>'+
+      '<input type="text" id="editTaskSubcats" value="'+esc(m.subcatsInput)+'" placeholder="例: ピッキング,梱包" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:18px;">'+editFieldSwatches(m.color,'edit-task-color')+'</div>'+
       '<div class="modal-actions">'+
@@ -2074,6 +2249,8 @@ function renderEditTemplateModal(m){
       '<input type="text" id="editTmplName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単位</label>'+
       '<input type="text" id="editTmplUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意・カンマ区切り)</label>'+
+      '<input type="text" id="editTmplSubcats" value="'+esc(m.subcatsInput)+'" placeholder="例: ピッキング,梱包" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:8px;">'+editFieldSwatches(m.color,'edit-tmpl-color')+'</div>'+
       '<div class="pool-hint" style="margin-bottom:14px;">発生する曜日は一覧の曜日ボタンから変更できます。</div>'+
@@ -2090,6 +2267,7 @@ function bindModal(){
   if(m.kind==='editLog'){ bindEditLogModal(m); return; }
   if(m.kind==='editTask'){ bindEditTaskModal(m); return; }
   if(m.kind==='editTemplate'){ bindEditTemplateModal(m); return; }
+  if(m.kind==='qtyBreakdown'){ bindQtyBreakdownModal(m); return; }
   document.querySelectorAll('[data-qty-delta]').forEach(function(el){
     el.addEventListener('click', function(){
       var d = parseInt(el.getAttribute('data-qty-delta'),10);
@@ -2151,9 +2329,11 @@ function renderMonitor(){
 
   var sideCards = tasks.map(function(t){
     var agg = taskAggregate(t.id);
+    var bd = breakdownLabel(agg.breakdown, t.unit);
     return '<div class="mon-task-card" style="border-left-color:'+t.color+'">'+
       '<div class="mon-task-name">'+esc(t.name)+'</div>'+
       '<div class="mon-task-stats"><span>稼働 <b>'+agg.activeCount+'</b>人</span><span>計 <b>'+fmtHM(agg.ms)+'</b></span><span>'+agg.qty+esc(t.unit)+'</span></div>'+
+      (bd ? '<div style="font-size:11px;color:var(--slate-300);margin-top:6px;font-family:var(--font-mono);">'+bd+'</div>' : '')+
     '</div>';
   }).join('') || '<div class="empty-note" style="color:var(--slate-300)">本日の作業が未登録です</div>';
 

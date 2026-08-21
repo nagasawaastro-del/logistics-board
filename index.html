@@ -553,6 +553,10 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-21', items:[
+    '不具合修正: 作業登録中に内訳のカラーを変更すると、内訳名や単位の入力途中の内容が消えてしまうことがあった問題を修正',
+    '繰り返し作業(定型)を編集すると、本日以降にすでに自動生成されている作業内容(作業名・単位・カラー・内訳)も編集後の内容に更新されるように変更(過去の記録には影響しません)'
+  ]},
+  { date:'2026-08-21', items:[
     '「🎮 累計実績」のアバターを、ドット絵(ピクセル配置)から丸・角丸四角形などのシンプルな図形を組み合わせたベクター調のキャラクターに変更。小さいサイズでも輪郭が崩れにくく、体の形がはっきり分かるように改善'
   ]},
   { date:'2026-08-21', items:[
@@ -659,15 +663,18 @@ var state = {
   regDraftName: '',
   regDraftUnit: '件',
   regDraftSubcats: [],
+  regSubcatDraft: {name:'', unit:''},
   newStaffDraftName: '',
   newTaskDraftName: '',
   newTaskDraftUnit: '件',
   newTaskDraftSubcats: [],
+  newTaskSubcatDraft: {name:'', unit:''},
   newTemplateColor: TASK_COLORS[0].hex,
   newTemplatePattern: null,
   tmplDraftName: '',
   tmplDraftUnit: '件',
   tmplDraftSubcats: [],
+  tmplSubcatDraft: {name:'', unit:''},
   reportMode: 'single',
   reportDate: null,
   reportStart: null,
@@ -728,15 +735,26 @@ function breakdownLabel(breakdown, task){
   var unitMap = subcatUnitMap(task);
   return '('+keys.map(function(k){ return esc(k)+' '+breakdown[k]+esc(unitMap[k]||task.unit); }).join(' / ')+')';
 }
+function subcatDraftRef(context){
+  if(context==='reg') return { get:function(){ return state.regSubcatDraft; }, set:function(v){ state.regSubcatDraft=v; } };
+  if(context==='tmpl') return { get:function(){ return state.tmplSubcatDraft; }, set:function(v){ state.tmplSubcatDraft=v; } };
+  if(context==='newTask') return { get:function(){ return state.newTaskSubcatDraft; }, set:function(v){ state.newTaskSubcatDraft=v; } };
+  if(context==='editTask' || context==='editTmpl') return { get:function(){ return state.modal ? state.modal.subcatDraft : null; }, set:function(v){ if(state.modal) state.modal.subcatDraft=v; } };
+  return null;
+}
 function renderSubcatTagInput(list, context, textId, defaultUnit){
   var chips = (list||[]).map(function(sc,i){
     return '<span class="subcat-chip">'+esc(subcatName(sc))+' <span class="subcat-chip-unit">('+esc(subcatUnit(sc, defaultUnit))+')</span><button type="button" data-subcat-remove="'+context+'|'+i+'">&times;</button></span>';
   }).join('') || '<span class="pool-hint" style="margin:0;">まだ内訳がありません</span>';
+  var draftRef = subcatDraftRef(context);
+  var draft = (draftRef && draftRef.get()) || {};
+  var nameVal = draft.name || '';
+  var unitVal = draft.unit!==undefined && draft.unit!==null && draft.unit!=='' ? draft.unit : (defaultUnit||'件');
   return '<div class="subcat-tag-wrap">'+
     '<div class="subcat-chips">'+chips+'</div>'+
     '<div class="subcat-add-row">'+
-      '<input type="text" id="'+textId+'" class="subcat-name-input" placeholder="内訳名(例: ピッキング)">'+
-      '<input type="text" id="'+textId+'-unit" class="subcat-unit-input" placeholder="単位" value="'+esc(defaultUnit||'件')+'">'+
+      '<input type="text" id="'+textId+'" class="subcat-name-input" placeholder="内訳名(例: ピッキング)" value="'+esc(nameVal)+'">'+
+      '<input type="text" id="'+textId+'-unit" class="subcat-unit-input" placeholder="単位" value="'+esc(unitVal)+'">'+
       '<button type="button" class="subcat-add-btn" data-subcat-add="'+context+'|'+textId+'">追加</button>'+
     '</div>'+
   '</div>';
@@ -767,6 +785,8 @@ function bindSubcatTagControls(){
         list.push({name:name, unit:unit});
       }
       ref.set(list);
+      var draftRef = subcatDraftRef(ctx);
+      if(draftRef) draftRef.set({name:'', unit:unit});
       if(!inModal) state.suppressRender = false;
       render();
     });
@@ -782,6 +802,20 @@ function bindSubcatTagControls(){
       ref.set(list);
       if(!inModal) state.suppressRender = false;
       render();
+    });
+  });
+  document.querySelectorAll('.subcat-add-row').forEach(function(wrap){
+    var addBtn = wrap.querySelector('[data-subcat-add]');
+    if(!addBtn) return;
+    var ctx = addBtn.getAttribute('data-subcat-add').split('|')[0];
+    var draftRef = subcatDraftRef(ctx);
+    var nameInput = wrap.querySelector('.subcat-name-input');
+    var unitInput = wrap.querySelector('.subcat-unit-input');
+    if(nameInput) nameInput.addEventListener('input', function(){
+      if(draftRef) draftRef.set({ name:nameInput.value, unit: unitInput?unitInput.value:'件' });
+    });
+    if(unitInput) unitInput.addEventListener('input', function(){
+      if(draftRef) draftRef.set({ name:nameInput?nameInput.value:'', unit:unitInput.value });
     });
   });
   document.querySelectorAll('.subcat-add-row input[type=text]').forEach(function(input){
@@ -1544,6 +1578,7 @@ function bindManager(){
       state.newTaskDraftName = '';
       state.newTaskDraftUnit = '件';
       state.newTaskDraftSubcats = [];
+      state.newTaskSubcatDraft = {name:'', unit:''};
       state.suppressRender = false;
       await saveBacklog(state.backlog);
       render();
@@ -1785,6 +1820,7 @@ function bindRegister(){
       state.regNewDate = workDate;
       state.regDraftName = '';
       state.regDraftSubcats = [];
+      state.regSubcatDraft = {name:'', unit:''};
       state.suppressRender = false;
       await saveBacklog(state.backlog);
       render();
@@ -1850,6 +1886,7 @@ function bindRegister(){
       state.newTemplatePattern = defaultPattern();
       state.tmplDraftName = '';
       state.tmplDraftSubcats = [];
+      state.tmplSubcatDraft = {name:'', unit:''};
       state.suppressRender = false;
       await saveTemplates(state.templates);
       await ensureTemplateTasksForToday();
@@ -2647,7 +2684,7 @@ function bindEditLogModal(m){
 }
 
 function openEditTaskModal(task){
-  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate, subcatsList: (task.subcategories||[]).slice() };
+  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate, subcatsList: (task.subcategories||[]).slice(), subcatDraft: {name:'', unit:''} };
   state.suppressRender = true;
   render();
 }
@@ -2711,7 +2748,7 @@ function bindEditTaskModal(m){
 }
 
 function openEditTemplateModal(tmpl){
-  state.modal = { kind:'editTemplate', templateId: tmpl.id, name: tmpl.name, unit: tmpl.unit, color: tmpl.color, subcatsList: (tmpl.subcategories||[]).slice() };
+  state.modal = { kind:'editTemplate', templateId: tmpl.id, name: tmpl.name, unit: tmpl.unit, color: tmpl.color, subcatsList: (tmpl.subcategories||[]).slice(), subcatDraft: {name:'', unit:''} };
   state.suppressRender = true;
   render();
 }
@@ -2730,6 +2767,20 @@ async function saveEditTemplate(){
   state.modal = null;
   state.suppressRender = false;
   await saveTemplates(state.templates);
+
+  var today = todayStr();
+  var changed = false;
+  state.backlog.forEach(function(task){
+    if(task.fromTemplate===tmpl.id && task.workDate>=today && !task.archived){
+      task.name = tmpl.name;
+      task.unit = tmpl.unit;
+      task.color = tmpl.color;
+      task.subcategories = tmpl.subcategories.slice();
+      changed = true;
+    }
+  });
+  if(changed) await saveBacklog(state.backlog);
+
   render();
 }
 async function deleteEditTemplate(){

@@ -148,6 +148,12 @@ input,select{font-family:inherit;}
   font-size:11px;font-weight:600;color:var(--slate-300);padding:0;
 }
 .pattern-day.on{background:var(--teal-500);color:#fff;border-color:var(--teal-500);}
+.category-toggle-row{display:flex;gap:6px;margin-bottom:10px;}
+.category-toggle-btn{
+  flex:1;padding:7px 0;border-radius:8px;border:1px solid var(--paper-line);background:#fff;
+  font-size:12px;font-weight:600;color:var(--slate-500);
+}
+.category-toggle-btn.sel{background:var(--ink-900);color:#fff;border-color:var(--ink-900);}
 .roster-item.archived{opacity:.4;}
 .roster-name{font-size:14px;font-weight:500;}
 .roster-controls{display:flex;align-items:center;gap:6px;}
@@ -250,6 +256,10 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .reg-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:#fff;border:1px solid var(--paper-line);margin-bottom:0;}
 .reg-row-name{font-size:13px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .reg-row-badge{font-size:10px;font-weight:700;color:var(--teal-500);background:#E9F6F6;border-radius:8px;padding:1px 6px;flex:none;}
+.reg-row-cat{font-size:10px;font-weight:700;border-radius:8px;padding:1px 6px;flex:none;}
+.reg-row-cat-出荷{color:var(--indigo-500);background:#EEF0FB;}
+.reg-row-cat-入庫{color:var(--rust-600);background:#FBEDE6;}
+.reg-row-cat-その他{color:var(--slate-500);background:var(--paper-100);}
 .reg-row-unit{font-size:11px;color:var(--slate-500);flex:none;}
 
 .report-mode-toggle{display:flex;gap:8px;margin-bottom:18px;}
@@ -270,6 +280,61 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .report-table td.num{font-family:var(--font-mono);text-align:right;white-space:nowrap;}
 .task-breakdown-chip{display:inline-flex;align-items:center;gap:4px;background:var(--paper-100);border-radius:12px;padding:2px 8px;font-size:11px;margin:2px 4px 2px 0;}
 .report-range-note{font-size:12px;color:var(--slate-500);margin-bottom:10px;}
+
+.ach-wrap{max-width:820px;margin:0 auto;padding:24px 20px 60px;}
+.ach-header{font-family:var(--font-display);font-weight:700;font-size:24px;color:var(--ink-900);text-align:center;margin-bottom:22px;}
+.ach-section-title{font-family:var(--font-display);font-weight:600;font-size:16px;color:var(--ink-900);margin:26px 0 12px;}
+.ach-stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;}
+.ach-stat-card{background:#fff;border:1px solid var(--paper-line);border-radius:14px;padding:16px 14px;text-align:center;}
+.ach-stat-icon{font-size:22px;margin-bottom:6px;}
+.ach-stat-label{font-size:12px;color:var(--slate-500);margin-bottom:4px;}
+.ach-stat-value{font-family:var(--font-mono);font-weight:700;font-size:24px;color:var(--ink-900);}
+.ach-stat-unit{font-size:13px;color:var(--slate-500);margin-left:2px;}
+.ach-today-sub{text-align:center;font-size:12px;color:var(--slate-500);margin-top:10px;}
+
+.ach-cta{text-align:center;padding:20px 10px;}
+.ach-cta .empty-note{padding-bottom:16px;}
+
+.ach-challenge-card{background:linear-gradient(135deg,#FFF7E8,#FFF3DE);border:1px solid var(--amber-500);border-radius:18px;padding:24px 20px;text-align:center;}
+.ach-challenge-nums{font-family:var(--font-mono);font-weight:700;font-size:32px;color:var(--ink-900);margin-bottom:14px;}
+.ach-challenge-nums b{color:var(--rust-600);font-size:38px;}
+.ach-progress-bar{height:18px;border-radius:9px;background:#fff;border:1px solid var(--paper-line);overflow:hidden;margin-bottom:10px;}
+.ach-progress-fill{height:100%;background:linear-gradient(90deg,var(--amber-500),#FFD782);border-radius:9px;transition:width .4s;}
+.ach-challenge-sub{font-size:14px;font-weight:600;color:var(--ink-900);}
+
+.ach-record-card{background:#fff;border:1px solid var(--paper-line);border-radius:16px;padding:22px 20px;text-align:center;}
+.ach-record-value{font-family:var(--font-mono);font-weight:700;font-size:34px;color:var(--indigo-500);}
+.ach-record-month{font-size:13px;color:var(--slate-500);margin-bottom:12px;}
+.ach-record-remaining{font-size:15px;font-weight:700;color:var(--rust-600);}
+
+.ach-record-banner{border-radius:18px;padding:24px 20px;text-align:center;margin-top:26px;background:linear-gradient(135deg,#FFF3DE,#FFE8C2);border:2px solid var(--amber-500);}
+.ach-new-record-title{font-family:var(--font-display);font-weight:700;font-size:24px;color:var(--rust-600);margin-bottom:6px;animation:achPulse 2.4s infinite;}
+@keyframes achPulse{0%,100%{opacity:1;}50%{opacity:.72;}}
+@media (prefers-reduced-motion:reduce){.ach-new-record-title{animation:none;}}
+.ach-new-record-sub{font-family:var(--font-mono);font-size:20px;font-weight:700;color:var(--ink-900);margin-bottom:6px;}
+.ach-new-record-note{font-size:13px;color:var(--slate-500);}
+
+.ach-message{text-align:center;font-family:var(--font-display);font-weight:700;font-size:17px;color:var(--ink-900);margin:24px 0;padding:14px;background:var(--paper-100);border-radius:14px;}
+
+.ach-yoy-card{background:#fff;border:1px solid var(--paper-line);border-radius:14px;padding:16px 18px;}
+.ach-yoy-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:14px;}
+.ach-yoy-row b{font-family:var(--font-mono);font-size:17px;}
+.ach-yoy-pct{text-align:center;margin-top:10px;padding-top:10px;border-top:1px dashed var(--paper-line);font-weight:700;font-size:15px;}
+.ach-yoy-pct.up{color:var(--green-500);}
+.ach-yoy-pct.down{color:var(--slate-500);}
+
+.ach-daily-chart{display:flex;align-items:flex-end;gap:3px;height:80px;padding:10px 4px 0;background:#fff;border:1px solid var(--paper-line);border-radius:12px;overflow-x:auto;}
+.ach-bar-col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;flex:1;min-width:8px;height:100%;}
+.ach-bar{width:100%;max-width:14px;background:linear-gradient(180deg,#FFD782,var(--amber-500));border-radius:2px 2px 0 0;}
+.ach-bar-label{font-size:8px;color:var(--slate-500);margin-top:2px;}
+.ach-bestday{text-align:center;font-size:13px;font-weight:600;color:var(--rust-600);margin-top:10px;}
+
+.ach-mini-stats{display:flex;justify-content:center;gap:24px;background:#fff;border:1px solid var(--paper-line);border-radius:12px;padding:14px;}
+.ach-mini-stats span{font-size:13px;color:var(--slate-500);}
+.ach-mini-stats b{font-family:var(--font-mono);font-size:18px;color:var(--ink-900);margin-left:4px;}
+
+.ach-refresh-small{display:block;margin:28px auto 8px;}
+.ach-generated-note{text-align:center;font-size:11px;color:var(--slate-300);}
 
 .rpg-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:14px;}
 .rpg-card{
@@ -541,6 +606,16 @@ var TASK_COLORS = [
   {name:'rust', hex:'#C1521F'},
   {name:'slate', hex:'#667085'}
 ];
+var TASK_CATEGORIES = ['出荷','入庫','その他'];
+function taskCategory(t){
+  return (t && t.category && TASK_CATEGORIES.indexOf(t.category)!==-1) ? t.category : 'その他';
+}
+function renderCategoryToggle(context, current){
+  var opts = TASK_CATEGORIES.map(function(c){
+    return '<button type="button" class="category-toggle-btn '+(current===c?'sel':'')+'" data-category-set="'+context+'|'+c+'">'+c+'</button>';
+  }).join('');
+  return '<div class="category-toggle-row">'+opts+'</div>';
+}
 function colorSortIndex(hex){
   var idx = TASK_COLORS.findIndex(function(c){ return c.hex===hex; });
   return idx===-1 ? 999 : idx;
@@ -552,6 +627,12 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-22', items:[
+    '新しく「実績」画面を追加。今日の出荷/入庫件数・個数、今月のチームチャレンジ(目標に対する進捗バー)、過去最高記録との比較、前年同月比較、今月の日別グラフ、達成度に応じた応援メッセージを表示',
+    '過去最高記録を更新すると「NEW RECORD!」の控えめな演出を表示するように',
+    '作業登録画面・管理者画面のその場追加・編集画面に「区分(出荷/入庫/その他)」を追加。実績画面の出荷/入庫集計に使用(未設定は「その他」扱い)',
+    '管理者画面に「実績画面の目標設定」パネルを追加し、月間目標(出荷個数)を後から変更できるように'
+  ]},
   { date:'2026-08-21', items:[
     '不具合修正: 作業登録中に内訳のカラーを変更すると、内訳名や単位の入力途中の内容が消えてしまうことがあった問題を修正',
     '繰り返し作業(定型)を編集すると、本日以降にすでに自動生成されている作業内容(作業名・単位・カラー・内訳)も編集後の内容に更新されるように変更(過去の記録には影響しません)'
@@ -653,10 +734,17 @@ var state = {
   backlog: [],
   templates: [],
   breakSettings: { enabled:false, start:'12:00', end:'13:00' },
+  achievementSettings: { monthlyTargetPieces: 25000 },
+  achievementsResult: null,
+  achievementsLoading: false,
+  achievementsError: null,
   day: null,
   activeStaffId: null,
   newTaskColIndex: -1,
   newTaskColor: TASK_COLORS[0].hex,
+  newTaskDraftCategory: 'その他',
+  regDraftCategory: 'その他',
+  tmplDraftCategory: 'その他',
   regNewDate: null,
   regSearchQuery: undefined,
   regExpandedDates: {},
@@ -765,6 +853,26 @@ function subcatListRef(context){
   if(context==='newTask') return { get:function(){ return state.newTaskDraftSubcats; }, set:function(v){ state.newTaskDraftSubcats=v; } };
   if(context==='editTask' || context==='editTmpl') return { get:function(){ return state.modal ? state.modal.subcatsList : []; }, set:function(v){ if(state.modal) state.modal.subcatsList=v; } };
   return null;
+}
+function categoryDraftRef(context){
+  if(context==='reg') return { get:function(){ return state.regDraftCategory; }, set:function(v){ state.regDraftCategory=v; } };
+  if(context==='tmpl') return { get:function(){ return state.tmplDraftCategory; }, set:function(v){ state.tmplDraftCategory=v; } };
+  if(context==='newTask') return { get:function(){ return state.newTaskDraftCategory; }, set:function(v){ state.newTaskDraftCategory=v; } };
+  if(context==='editTask' || context==='editTmpl') return { get:function(){ return state.modal ? state.modal.category : 'その他'; }, set:function(v){ if(state.modal) state.modal.category=v; } };
+  return null;
+}
+function bindCategoryToggle(){
+  document.querySelectorAll('[data-category-set]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var parts = el.getAttribute('data-category-set').split('|');
+      var ctx = parts[0], cat = parts[1];
+      var ref = categoryDraftRef(ctx);
+      if(!ref) return;
+      ref.set(cat);
+      if(!state.modal) state.suppressRender = false;
+      render();
+    });
+  });
 }
 function bindSubcatTagControls(){
   var inModal = !!state.modal;
@@ -907,6 +1015,18 @@ async function saveBreakSettings(settings){
   try{ await window.storage.set('break-settings', JSON.stringify(settings), true); }catch(e){}
   finally{ pendingSaves--; }
 }
+async function loadAchievementSettings(){
+  try{
+    var r = await window.storage.get('achievement-settings', true);
+    return r ? JSON.parse(r.value) : { monthlyTargetPieces: 25000 };
+  }catch(e){ return { monthlyTargetPieces: 25000 }; }
+}
+async function saveAchievementSettings(settings){
+  state.achievementSettings = settings;
+  pendingSaves++;
+  try{ await window.storage.set('achievement-settings', JSON.stringify(settings), true); }catch(e){}
+  finally{ pendingSaves--; }
+}
 async function ensureTemplateTasksForDate(dateStr){
   var wd = new Date(dateStr+'T00:00:00').getDay();
   var existingKeys = {};
@@ -918,7 +1038,7 @@ async function ensureTemplateTasksForDate(dateStr){
     if(!pattern[wd]) return;
     var key = tmpl.id+'|'+dateStr;
     if(existingKeys[key]) return;
-    state.backlog.push({id:uid(), name:tmpl.name, unit:tmpl.unit, color:tmpl.color, workDate:dateStr, archived:false, fromTemplate:tmpl.id, subcategories:tmpl.subcategories||[]});
+    state.backlog.push({id:uid(), name:tmpl.name, unit:tmpl.unit, color:tmpl.color, workDate:dateStr, archived:false, fromTemplate:tmpl.id, subcategories:tmpl.subcategories||[], category:taskCategory(tmpl)});
     changed = true;
   });
   if(changed) await saveBacklog(state.backlog);
@@ -1156,6 +1276,7 @@ function render(){
   else if(state.role==='report') html += renderReport();
   else if(state.role==='input') html += renderInput();
   else if(state.role==='monitor') html += renderMonitor();
+  else if(state.role==='achievements') html += renderAchievements();
   if(state.modal) html += renderModal();
   root.innerHTML = html;
   bindCommon();
@@ -1164,6 +1285,7 @@ function render(){
   if(state.role==='report') bindReport();
   if(state.role==='input') bindInput();
   if(state.role==='monitor') bindMonitor();
+  if(state.role==='achievements') bindAchievements();
   if(state.modal) bindModal();
 }
 
@@ -1199,6 +1321,11 @@ function renderGate(){
         '<div class="gate-icon" style="background:#EEF0FB;color:#4C5FD5;">&#128202;</div>'+
         '<div class="gate-card-title">集計</div>'+
         '<div class="gate-card-desc">日別・期間別にスタッフ/作業ごとの実績を集計</div>'+
+      '</button>'+
+      '<button class="gate-card" data-role="achievements">'+
+        '<div class="gate-icon" style="background:#FFF3DE;color:#C1521F;">&#127942;</div>'+
+        '<div class="gate-card-title">実績</div>'+
+        '<div class="gate-card-desc">今月のチーム記録・過去最高・前年比をチームで見る</div>'+
       '</button>'+
     '</div>'+
     '<button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
@@ -1248,7 +1375,7 @@ function bindChangelogModal(){
 
 /* ---------- TOPBAR ---------- */
 function renderTopbar(){
-  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業実績入力', monitor:'モニター'}[state.role];
+  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業実績入力', monitor:'モニター', achievements:'実績'}[state.role];
   return ''+
   '<div class="topbar">'+
     '<div class="topbar-left">'+
@@ -1371,6 +1498,13 @@ function renderManager(){
     '</div>'+
   '</div>';
 
+  var achievementPanel = '<div class="panel" style="margin-top:14px;">'+
+    '<div class="panel-title">🏆 実績画面の目標設定</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">「実績」画面のチームチャレンジで使う、今月の出荷個数の目標値です。</div>'+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">月間目標(出荷個数)</label>'+
+    '<input type="number" id="achievementTargetInput" min="0" step="100" value="'+((state.achievementSettings&&state.achievementSettings.monthlyTargetPieces)||25000)+'" style="width:200px;border:1px solid var(--paper-line);border-radius:8px;padding:8px 10px;font-size:14px;font-family:var(--font-mono);">'+
+  '</div>';
+
   return ''+
   '<div class="mgr-wrap">'+
     dateNav+
@@ -1396,6 +1530,7 @@ function renderManager(){
       '</div>'+
     '</div>'+
     breakPanel+
+    achievementPanel+
     '<div class="panel" style="margin-top:20px;">'+
       '<div class="panel-title">作業実績(この日の記録) <span class="count-badge">'+logsSorted.length+'件</span></div>'+
       '<div class="pool-hint" style="margin-bottom:10px;">パートさんが入力した内容に誤りがあれば「編集」から修正できます。</div>'+
@@ -1411,6 +1546,8 @@ function renderTaskForm(){
   return '<div class="task-form">'+
     '<label>作業名</label>'+
     '<input type="text" id="newTaskName" placeholder="例: 検品" value="'+esc(state.newTaskDraftName)+'">'+
+    '<label>区分</label>'+
+    renderCategoryToggle('newTask', state.newTaskDraftCategory)+
     '<label>内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
     renderSubcatTagInput(state.newTaskDraftSubcats,'newTask','newTaskSubcatText',state.newTaskDraftUnit)+
     (hasSubcats ? '' : '<label>単位(件・箱・ピース等)</label><input type="text" id="newTaskUnit" placeholder="件" value="'+esc(state.newTaskDraftUnit)+'">')+
@@ -1573,7 +1710,7 @@ function bindManager(){
       if(!name){ newTaskNameInput.style.borderColor = '#C1521F'; newTaskNameInput.focus(); return; }
       var unit = newTaskUnitInput ? ((newTaskUnitInput.value||'件').trim() || '件') : '件';
       var subcats = (state.newTaskDraftSubcats||[]).slice();
-      state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:managerActiveDate(), archived:false, subcategories:subcats});
+      state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:managerActiveDate(), archived:false, subcategories:subcats, category:state.newTaskDraftCategory});
       state.newTaskColIndex = -1;
       state.newTaskDraftName = '';
       state.newTaskDraftUnit = '件';
@@ -1658,6 +1795,18 @@ function bindManager(){
   if(breakStartInput) breakStartInput.addEventListener('change', saveBreakSettingsFromInputs);
   if(breakEndInput) breakEndInput.addEventListener('change', saveBreakSettingsFromInputs);
 
+  var achievementTargetInput = document.getElementById('achievementTargetInput');
+  if(achievementTargetInput){
+    achievementTargetInput.addEventListener('focusin', function(){ state.suppressRender = true; });
+    achievementTargetInput.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+    achievementTargetInput.addEventListener('change', function(){
+      var v = parseInt(achievementTargetInput.value,10);
+      if(isNaN(v) || v<0) v = 0;
+      saveAchievementSettings({ monthlyTargetPieces: v });
+    });
+  }
+
+  bindCategoryToggle();
   bindSubcatTagControls();
 }
 
@@ -1695,9 +1844,11 @@ function renderRegister(){
     var items = groups[dateStr].slice().sort(byTaskColor(function(t){ return t.color; }));
     var rows = items.map(function(t){
       var badge = t.fromTemplate ? '<span class="reg-row-badge">定型</span>' : '';
+      var catBadge = '<span class="reg-row-cat reg-row-cat-'+taskCategory(t)+'">'+esc(taskCategory(t))+'</span>';
       return '<div class="reg-row">'+
         '<span class="task-color-dot" style="background:'+t.color+'"></span>'+
         '<span class="reg-row-name">'+esc(t.name)+'</span>'+
+        catBadge+
         badge+
         '<span class="reg-row-unit">'+esc(t.unit)+'</span>'+
         '<button class="log-edit-btn" data-edit-backlog="'+t.id+'">編集</button>'+
@@ -1746,7 +1897,9 @@ function renderRegister(){
       '<input type="date" id="regDate" value="'+state.regNewDate+'" min="'+todayStr()+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
       '<input type="text" id="regName" placeholder="例: 検品" value="'+esc(state.regDraftName)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意。例: 出荷作業ならピッキング・梱包。使う場合は単位はここで内訳ごとに設定)</label>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">区分(実績画面の出荷/入庫集計に使われます)</label>'+
+      renderCategoryToggle('reg', state.regDraftCategory)+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">内訳(任意。例: 出荷作業ならピッキング・梱包。使う場合は単位はここで内訳ごとに設定)</label>'+
       renderSubcatTagInput(state.regDraftSubcats,'reg','regSubcatText',state.regDraftUnit)+
       ((state.regDraftSubcats||[]).length ? '' : '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">単位(件・箱・ピース等)</label><input type="text" id="regUnit" placeholder="件" value="'+esc(state.regDraftUnit)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;">')+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
@@ -1758,7 +1911,9 @@ function renderRegister(){
       '<div class="pool-hint" style="margin-bottom:10px;">該当する曜日になると、自動でその日の作業として登録されます。</div>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
       '<input type="text" id="tmplName" placeholder="例: 入荷検品" value="'+esc(state.tmplDraftName)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">区分(実績画面の出荷/入庫集計に使われます)</label>'+
+      renderCategoryToggle('tmpl', state.tmplDraftCategory)+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
       renderSubcatTagInput(state.tmplDraftSubcats,'tmpl','tmplSubcatText',state.tmplDraftUnit)+
       ((state.tmplDraftSubcats||[]).length ? '' : '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">単位</label><input type="text" id="tmplUnit" placeholder="件" value="'+esc(state.tmplDraftUnit)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;">')+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
@@ -1816,7 +1971,7 @@ function bindRegister(){
       var unit = unitInput ? ((unitInput.value||'件').trim() || '件') : '件';
       var workDate = dateInput.value || tomorrowStr();
       var subcats = (state.regDraftSubcats||[]).slice();
-      state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:workDate, archived:false, subcategories:subcats});
+      state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:workDate, archived:false, subcategories:subcats, category:state.regDraftCategory});
       state.regNewDate = workDate;
       state.regDraftName = '';
       state.regDraftSubcats = [];
@@ -1882,7 +2037,7 @@ function bindRegister(){
       if(!name){ tmplNameInput.style.borderColor='#C1521F'; tmplNameInput.focus(); return; }
       var unit = tmplUnitInput ? ((tmplUnitInput.value||'件').trim() || '件') : '件';
       var subcats = (state.tmplDraftSubcats||[]).slice();
-      state.templates.push({id:uid(), name:name, unit:unit, color:state.newTemplateColor, pattern:state.newTemplatePattern, archived:false, subcategories:subcats});
+      state.templates.push({id:uid(), name:name, unit:unit, color:state.newTemplateColor, pattern:state.newTemplatePattern, archived:false, subcategories:subcats, category:state.tmplDraftCategory});
       state.newTemplatePattern = defaultPattern();
       state.tmplDraftName = '';
       state.tmplDraftSubcats = [];
@@ -1952,6 +2107,7 @@ function bindRegister(){
       state.regExpandedDates[d] = el.open;
     });
   });
+  bindCategoryToggle();
   bindSubcatTagControls();
 }
 
@@ -2058,6 +2214,250 @@ function exportAggCSV(agg, label){
 }
 
 /* ---------- RPG-style lifetime achievements ---------- */
+/* ---------- Achievements (実績) data helpers ---------- */
+function isPieceUnit(unit){
+  return unit==='ピース' || unit==='個';
+}
+function isCountUnit(unit){
+  return unit==='件';
+}
+function freshCategoryBucket(){
+  return { pieces:0, count:0, other:{}, logCount:0 };
+}
+function addQtyToBucket(bucket, unit, v){
+  if(v<=0) return;
+  if(isPieceUnit(unit)) bucket.pieces += v;
+  else if(isCountUnit(unit)) bucket.count += v;
+  else bucket.other[unit] = (bucket.other[unit]||0) + v;
+}
+function classifyDayIntoBuckets(day, buckets){
+  if(!day) return;
+  day.logs.forEach(function(l){
+    if(l.taskId==='BREAK') return;
+    var task = taskById(l.taskId);
+    var cat = taskCategory(task);
+    if(!buckets[cat]) buckets[cat] = freshCategoryBucket();
+    buckets[cat].logCount++;
+    if(l.breakdown){
+      var unitMap = subcatUnitMap(task);
+      Object.keys(l.breakdown).forEach(function(k){
+        addQtyToBucket(buckets[cat], unitMap[k]||task.unit, l.breakdown[k]||0);
+      });
+    }else if(l.quantity){
+      addQtyToBucket(buckets[cat], task.unit, l.quantity);
+    }
+  });
+}
+function aggregateBucketsForDays(days){
+  var buckets = {};
+  (days||[]).forEach(function(day){ classifyDayIntoBuckets(day, buckets); });
+  return buckets;
+}
+function monthKeyOf(dateStr){ return dateStr.slice(0,7); }
+function aggregateByMonth(days){
+  var byMonth = {};
+  (days||[]).forEach(function(day){
+    if(!day) return;
+    var mk = monthKeyOf(day.date);
+    if(!byMonth[mk]) byMonth[mk] = {};
+    classifyDayIntoBuckets(day, byMonth[mk]);
+  });
+  return byMonth;
+}
+function shipmentPieces(buckets){
+  return (buckets && buckets['出荷']) ? buckets['出荷'].pieces : 0;
+}
+async function runAchievementsReport(){
+  state.achievementsLoading = true;
+  state.achievementsError = null;
+  render();
+  try{
+    var allDays = await loadAllDaysForLifetime();
+    var byMonth = aggregateByMonth(allDays);
+    var now = new Date();
+    var curMonthKey = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+    var curBuckets = byMonth[curMonthKey] || {};
+
+    var bestMonthKey = null, bestPieces = 0;
+    Object.keys(byMonth).forEach(function(mk){
+      if(mk===curMonthKey) return;
+      var p = shipmentPieces(byMonth[mk]);
+      if(p>bestPieces){ bestPieces=p; bestMonthKey=mk; }
+    });
+
+    var lastYearKey = (now.getFullYear()-1)+'-'+String(now.getMonth()+1).padStart(2,'0');
+    var lastYearBuckets = byMonth[lastYearKey] || null;
+
+    var dailyPieces = {};
+    var bestDay = null, bestDayPieces = 0;
+    allDays.forEach(function(day){
+      if(!day || monthKeyOf(day.date)!==curMonthKey) return;
+      var b = {};
+      classifyDayIntoBuckets(day, b);
+      var p = shipmentPieces(b);
+      dailyPieces[day.date] = p;
+      if(p>bestDayPieces){ bestDayPieces=p; bestDay=day.date; }
+    });
+
+    state.achievementsResult = {
+      generatedAt: Date.now(),
+      curMonthKey: curMonthKey,
+      curBuckets: curBuckets,
+      bestMonthKey: bestMonthKey,
+      bestPieces: bestPieces,
+      lastYearKey: lastYearKey,
+      lastYearBuckets: lastYearBuckets,
+      dailyPieces: dailyPieces,
+      bestDay: bestDay,
+      bestDayPieces: bestDayPieces,
+      dayCount: allDays.length
+    };
+  }catch(e){
+    state.achievementsError = 'データの読み込みに失敗しました。もう一度お試しください。';
+  }
+  state.achievementsLoading = false;
+  render();
+}
+function formatNum(n){
+  return Math.round(n||0).toLocaleString('ja-JP');
+}
+function monthLabel(monthKey){
+  if(!monthKey) return '';
+  var parts = monthKey.split('-');
+  return parts[0]+'年'+parseInt(parts[1],10)+'月';
+}
+function dateLabelShort(dateStr){
+  if(!dateStr) return '';
+  var d = new Date(dateStr+'T00:00:00');
+  return (d.getMonth()+1)+'月'+d.getDate()+'日';
+}
+function todaysBuckets(){
+  var b = {};
+  if(state.day) classifyDayIntoBuckets(state.day, b);
+  return b;
+}
+function achievementMessage(rate, isNewRecord){
+  if(isNewRecord) return '🏆 NEW RECORD!';
+  if(rate>=1) return '🎉 目標達成！';
+  if(rate>=0.9) return '過去最高が見えてきました！';
+  if(rate>=0.8) return 'あと少し！';
+  if(rate>=0.5) return '順調です！';
+  return 'まだまだこれから！';
+}
+function renderAchStatCard(icon, label, value, unit){
+  return '<div class="ach-stat-card"><div class="ach-stat-icon">'+icon+'</div><div class="ach-stat-label">'+esc(label)+'</div><div class="ach-stat-value">'+value+'<span class="ach-stat-unit">'+esc(unit)+'</span></div></div>';
+}
+function renderAchievements(){
+  var todayB = todaysBuckets();
+  var shipToday = todayB['出荷'] || freshCategoryBucket();
+  var inboundToday = todayB['入庫'] || freshCategoryBucket();
+  var totalLogsToday = Object.keys(todayB).reduce(function(a,k){ return a+todayB[k].logCount; }, 0);
+
+  var todaySection =
+    '<div class="ach-section-title">📅 今日の実績</div>'+
+    '<div class="ach-stat-grid">'+
+      renderAchStatCard('🚚','出荷件数', formatNum(shipToday.count), '件')+
+      renderAchStatCard('📦','出荷個数', formatNum(shipToday.pieces), '個')+
+      renderAchStatCard('📥','入庫件数', formatNum(inboundToday.count), '件')+
+      renderAchStatCard('📥','入庫個数', formatNum(inboundToday.pieces), '個')+
+    '</div>'+
+    '<div class="ach-today-sub">本日の作業件数(全体): '+totalLogsToday+'件</div>';
+
+  var result = state.achievementsResult;
+  var bodyRest;
+  if(state.achievementsLoading){
+    bodyRest = '<div class="ach-cta"><div class="empty-note">今月・過去の記録を集計中です...(データ量によっては少し時間がかかります)</div></div>';
+  }else if(state.achievementsError){
+    bodyRest = '<div class="ach-cta"><div class="empty-note">'+esc(state.achievementsError)+'</div><button class="report-go-btn" id="achRefreshBtn">もう一度読み込む</button></div>';
+  }else if(!result){
+    bodyRest = '<div class="ach-cta">'+
+      '<div class="empty-note">「更新する」を押すと、今月のチーム記録・過去最高記録・前年比較を表示します。</div>'+
+      '<button class="report-go-btn" id="achRefreshBtn">更新する</button>'+
+    '</div>';
+  }else{
+    var curPieces = shipmentPieces(result.curBuckets);
+    var target = (state.achievementSettings && state.achievementSettings.monthlyTargetPieces) || 25000;
+    var rate = target>0 ? curPieces/target : 0;
+    var remaining = Math.max(0, target-curPieces);
+    var isNewRecord = !!(result.bestMonthKey && curPieces > result.bestPieces);
+    var toRecord = Math.max(0, result.bestPieces - curPieces);
+
+    var challengeSection =
+      '<div class="ach-section-title">🚚 今月のチームチャレンジ</div>'+
+      '<div class="ach-challenge-card">'+
+        '<div class="ach-challenge-nums"><b>'+formatNum(curPieces)+'</b> / '+formatNum(target)+'個</div>'+
+        '<div class="ach-progress-bar"><div class="ach-progress-fill" style="width:'+Math.min(100,rate*100).toFixed(1)+'%"></div></div>'+
+        '<div class="ach-challenge-sub">達成率 '+(rate*100).toFixed(1)+'%'+(remaining>0 ? ' ・ 残り '+formatNum(remaining)+'個' : '')+'</div>'+
+      '</div>';
+
+    var recordSection;
+    if(isNewRecord){
+      recordSection = '<div class="ach-record-banner ach-new-record">'+
+        '<div class="ach-new-record-title">🎉 NEW RECORD!</div>'+
+        '<div class="ach-new-record-sub">月間出荷個数 <b>'+formatNum(curPieces)+'個</b></div>'+
+        '<div class="ach-new-record-note">過去最高記録'+(result.bestMonthKey ? '('+monthLabel(result.bestMonthKey)+' '+formatNum(result.bestPieces)+'個)' : '')+'を更新しました！</div>'+
+      '</div>';
+    }else if(result.bestMonthKey){
+      recordSection = '<div class="ach-section-title">🏆 過去最高記録</div>'+
+        '<div class="ach-record-card">'+
+          '<div class="ach-record-value">'+formatNum(result.bestPieces)+'個</div>'+
+          '<div class="ach-record-month">'+monthLabel(result.bestMonthKey)+'</div>'+
+          (toRecord>0 ? '<div class="ach-record-remaining">🔥 過去最高まであと '+formatNum(toRecord)+'個！</div>' : '<div class="ach-record-remaining">🔥 記録が見えてきました！</div>')+
+        '</div>';
+    }else{
+      recordSection = '<div class="ach-section-title">🏆 過去最高記録</div>'+
+        '<div class="empty-note">まだ比較できる過去の月のデータがありません。今月が最初の記録になります!</div>';
+    }
+
+    var yoySection;
+    if(result.lastYearBuckets){
+      var lastYearPieces = shipmentPieces(result.lastYearBuckets);
+      var diffPct = lastYearPieces>0 ? ((curPieces-lastYearPieces)/lastYearPieces*100) : null;
+      yoySection = '<div class="ach-section-title">📈 前年同月比較</div>'+
+        '<div class="ach-yoy-card">'+
+          '<div class="ach-yoy-row"><span>'+result.lastYearKey.split('-')[0]+'年</span><b>'+formatNum(lastYearPieces)+'個</b></div>'+
+          '<div class="ach-yoy-row"><span>'+result.curMonthKey.split('-')[0]+'年</span><b>'+formatNum(curPieces)+'個</b></div>'+
+          (diffPct!==null ? '<div class="ach-yoy-pct '+(diffPct>=0?'up':'down')+'">前年比 '+(diffPct>=0?'+':'')+diffPct.toFixed(1)+'%'+(diffPct>=0?' 前年よりアップ！':'')+'</div>' : '')+
+        '</div>';
+    }else{
+      yoySection = '<div class="ach-section-title">📈 前年同月比較</div>'+
+        '<div class="empty-note">昨年同時期のデータがまだありません。</div>';
+    }
+
+    var dayNums = Object.keys(result.dailyPieces).sort();
+    var maxDay = dayNums.reduce(function(a,d){ return Math.max(a, result.dailyPieces[d]); }, 1);
+    var bars = dayNums.map(function(d){
+      var v = result.dailyPieces[d];
+      var h = Math.max(2, Math.round(v/maxDay*60));
+      var dayNum = parseInt(d.split('-')[2],10);
+      return '<div class="ach-bar-col" title="'+dayNum+'日: '+formatNum(v)+'個"><div class="ach-bar" style="height:'+h+'px;"></div><div class="ach-bar-label">'+dayNum+'</div></div>';
+    }).join('');
+    var dailySection = '<div class="ach-section-title">📊 今月の日別実績(出荷個数)</div>'+
+      '<div class="ach-daily-chart">'+(bars||'<div class="empty-note">まだ記録がありません</div>')+'</div>'+
+      (result.bestDay ? '<div class="ach-bestday">🔥 今月最高日: <b>'+dateLabelShort(result.bestDay)+'</b> '+formatNum(result.bestDayPieces)+'個</div>' : '');
+
+    var msg = achievementMessage(rate, isNewRecord);
+    var msgSection = '<div class="ach-message">'+esc(msg)+'</div>';
+
+    var inboundB = result.curBuckets['入庫'] || freshCategoryBucket();
+    var inboundSection = '<div class="ach-section-title">📥 今月の入庫実績</div>'+
+      '<div class="ach-mini-stats"><span>件数 <b>'+formatNum(inboundB.count)+'</b>件</span><span>個数 <b>'+formatNum(inboundB.pieces)+'</b>個</span></div>';
+
+    bodyRest = challengeSection + recordSection + msgSection + yoySection + dailySection + inboundSection +
+      '<button class="report-go-btn ach-refresh-small" id="achRefreshBtn">最新の状態に更新する</button>'+
+      '<div class="ach-generated-note">対象'+result.dayCount+'日分のデータから算出(最大400日分)</div>';
+  }
+
+  return '<div class="mgr-wrap"><div class="ach-wrap">'+
+    '<div class="ach-header">🏆 物流センター実績</div>'+
+    todaySection+
+    bodyRest+
+  '</div></div>';
+}
+function bindAchievements(){
+  var btn = document.getElementById('achRefreshBtn');
+  if(btn) btn.addEventListener('click', function(){ runAchievementsReport(); });
+}
 function aggregateLifetime(days){
   var perStaff = {};
   days.forEach(function(day){
@@ -2684,7 +3084,7 @@ function bindEditLogModal(m){
 }
 
 function openEditTaskModal(task){
-  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate, subcatsList: (task.subcategories||[]).slice(), subcatDraft: {name:'', unit:''} };
+  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate, subcatsList: (task.subcategories||[]).slice(), subcatDraft: {name:'', unit:''}, category: taskCategory(task) };
   state.suppressRender = true;
   render();
 }
@@ -2702,6 +3102,7 @@ async function saveEditTask(){
   task.color = m.color;
   task.workDate = dateInput.value || task.workDate;
   task.subcategories = (m.subcatsList||[]).slice();
+  task.category = m.category || 'その他';
   state.modal = null;
   state.suppressRender = false;
   await saveBacklog(state.backlog);
@@ -2744,11 +3145,12 @@ function bindEditTaskModal(m){
   if(saveBtn) saveBtn.addEventListener('click', saveEditTask);
   var deleteBtn = document.getElementById('editDeleteBtn');
   if(deleteBtn) deleteBtn.addEventListener('click', deleteEditTask);
+  bindCategoryToggle();
   bindSubcatTagControls();
 }
 
 function openEditTemplateModal(tmpl){
-  state.modal = { kind:'editTemplate', templateId: tmpl.id, name: tmpl.name, unit: tmpl.unit, color: tmpl.color, subcatsList: (tmpl.subcategories||[]).slice(), subcatDraft: {name:'', unit:''} };
+  state.modal = { kind:'editTemplate', templateId: tmpl.id, name: tmpl.name, unit: tmpl.unit, color: tmpl.color, subcatsList: (tmpl.subcategories||[]).slice(), subcatDraft: {name:'', unit:''}, category: taskCategory(tmpl) };
   state.suppressRender = true;
   render();
 }
@@ -2764,6 +3166,7 @@ async function saveEditTemplate(){
   tmpl.unit = unitInput ? ((unitInput.value||'件').trim() || '件') : '件';
   tmpl.color = m.color;
   tmpl.subcategories = (m.subcatsList||[]).slice();
+  tmpl.category = m.category || 'その他';
   state.modal = null;
   state.suppressRender = false;
   await saveTemplates(state.templates);
@@ -2776,6 +3179,7 @@ async function saveEditTemplate(){
       task.unit = tmpl.unit;
       task.color = tmpl.color;
       task.subcategories = tmpl.subcategories.slice();
+      task.category = tmpl.category;
       changed = true;
     }
   });
@@ -2832,6 +3236,7 @@ function bindEditTemplateModal(m){
   if(saveBtn) saveBtn.addEventListener('click', saveEditTemplate);
   var deleteBtn = document.getElementById('editDeleteBtn');
   if(deleteBtn) deleteBtn.addEventListener('click', deleteEditTemplate);
+  bindCategoryToggle();
   bindSubcatTagControls();
 }
 
@@ -2971,7 +3376,9 @@ function renderEditTaskModal(m){
       '<input type="date" id="editTaskDate" value="'+m.workDate+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
       '<input type="text" id="editTaskName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">区分(実績画面の出荷/入庫集計に使われます)</label>'+
+      renderCategoryToggle('editTask', m.category)+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
       renderSubcatTagInput(m.subcatsList,'editTask','editTaskSubcatText',m.unit)+
       (hasSubcats ? '' : '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">単位</label><input type="text" id="editTaskUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;">')+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
@@ -2991,7 +3398,9 @@ function renderEditTemplateModal(m){
       '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">繰り返し作業を編集</div>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
       '<input type="text" id="editTmplName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">区分(実績画面の出荷/入庫集計に使われます)</label>'+
+      renderCategoryToggle('editTmpl', m.category)+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
       renderSubcatTagInput(m.subcatsList,'editTmpl','editTmplSubcatText',m.unit)+
       (hasSubcats ? '' : '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">単位</label><input type="text" id="editTmplUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;">')+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
@@ -3237,11 +3646,13 @@ function startPolling(){
     var backlog = await loadBacklog();
     var templates = await loadTemplates();
     var breakSettings = await loadBreakSettings();
+    var achievementSettings = await loadAchievementSettings();
     if(pendingSaves>0) return;
     state.roster = roster;
     state.backlog = backlog;
     state.templates = templates;
     state.breakSettings = breakSettings;
+    state.achievementSettings = achievementSettings;
     await ensureTemplateTasksForToday();
     var day = await loadDay();
     if(pendingSaves>0) return;
@@ -3280,6 +3691,7 @@ async function init(){
   state.backlog = await loadBacklog();
   state.templates = await loadTemplates();
   state.breakSettings = await loadBreakSettings();
+  state.achievementSettings = await loadAchievementSettings();
   await ensureTemplateTasksForToday();
   state.day = await loadDay();
   await checkAutoBreak();

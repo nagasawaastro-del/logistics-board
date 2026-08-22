@@ -123,6 +123,15 @@ input,select{font-family:inherit;}
 .cal-cell-empty{border:none;background:transparent;cursor:default;}
 .cal-cell-empty:hover{border:none;background:transparent;}
 .cal-cell-today{border-color:var(--ink-900);border-width:2px;}
+.cal-cell-sun{background:#FDEEF2;}
+.cal-cell-sun:hover{background:#FBE0E8;}
+.cal-cell-sat{background:#EEF0FB;}
+.cal-cell-sat:hover{background:#E2E5F8;}
+.cal-cell-holiday{background:#FDEEF2;border-color:#F0A9BE;}
+.cal-cell-holiday:hover{background:#FBE0E8;}
+.cal-cell-holiday-name{font-size:9px;color:#C1466A;line-height:1.15;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cal-weekday-sun{color:#D6577E;}
+.cal-weekday-sat{color:#4C5FD5;}
 .cal-cell-day{font-family:var(--font-mono);font-weight:700;font-size:13px;color:var(--ink-900);}
 .cal-cell-stat{font-size:10.5px;color:var(--slate-500);}
 @media (max-width:640px){
@@ -160,6 +169,11 @@ input,select{font-family:inherit;}
 }
 .pattern-row{display:flex;gap:4px;}
 .avatar-swatch-row{display:flex;gap:5px;margin-top:6px;}
+.holiday-off-toggle{
+  margin-top:6px;font-size:11px;font-weight:600;color:var(--slate-500);background:#fff;
+  border:1px solid var(--paper-line);border-radius:12px;padding:4px 10px;
+}
+.holiday-off-toggle.on{background:#FDEEF2;border-color:#D6577E;color:#B33C63;}
 .avatar-swatch{width:16px;height:16px;border-radius:4px;border:2px solid transparent;cursor:pointer;}
 .avatar-swatch.sel{border-color:var(--ink-900);}
 .pattern-day{
@@ -647,6 +661,10 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-22', items:[
+    'カレンダー画面で土曜(青)・日曜(赤)・祝日(赤+祝日名)を色分けして表示するように変更(公開の祝日データを使用)',
+    '管理者画面のスタッフごとの出勤パターンに「🎌 祝日も休みにする」設定を追加。曜日パターンでは表現できない祝日(平日にあたる祝日)の休みも自動反映されるように'
+  ]},
+  { date:'2026-08-22', items:[
     '新しく「カレンダー」画面を追加。月表示で日ごとの登録作業件数・出勤予定人数(曜日パターンからの見込み、または実際の出勤登録数)を確認でき、日付をタップするとその日の管理者画面に移動してそのまま編集・追加できるように'
   ]},
   { date:'2026-08-22', items:[
@@ -763,6 +781,7 @@ var state = {
   calendarMonth: null,
   calendarData: null,
   calendarLoading: false,
+  jpHolidays: { fetchedAt:0, data:{} },
   day: null,
   activeStaffId: null,
   newTaskColIndex: -1,
@@ -1074,13 +1093,38 @@ async function ensureTemplateTasksForToday(){
 function defaultPattern(){
   return [false,true,true,true,true,true,false];
 }
+async function loadJpHolidays(){
+  var cached = null;
+  try{
+    var r = await window.storage.get('jp-holidays', true);
+    if(r && r.value) cached = JSON.parse(r.value);
+  }catch(e){}
+  var isFresh = cached && cached.fetchedAt && (Date.now()-cached.fetchedAt < 14*24*60*60*1000);
+  if(isFresh) return cached;
+  try{
+    var res = await fetch('https://holidays-jp.github.io/api/v1/date.json');
+    if(res.ok){
+      var data = await res.json();
+      var fresh = { fetchedAt: Date.now(), data: data };
+      try{ await window.storage.set('jp-holidays', JSON.stringify(fresh), true); }catch(e){}
+      return fresh;
+    }
+  }catch(e){}
+  return cached || { fetchedAt:0, data:{} };
+}
+function holidayName(dateStr){
+  return (state.jpHolidays && state.jpHolidays.data && state.jpHolidays.data[dateStr]) || null;
+}
 function freshDay(dateStr){
   var attendance = {};
   var weekday = new Date(dateStr+'T00:00:00').getDay();
+  var holiday = holidayName(dateStr);
   state.roster.forEach(function(s){
     if(s.archived) return;
     var pattern = s.pattern || defaultPattern();
-    attendance[s.id] = !!pattern[weekday];
+    var on = !!pattern[weekday];
+    if(on && s.offOnHolidays && holiday) on = false;
+    attendance[s.id] = on;
   });
   return { date: dateStr, attendance: attendance, assignments:{}, logs:[] };
 }
@@ -1236,13 +1280,24 @@ function renderCalendar(){
       var dateStr = monthKey+'-'+String(d).padStart(2,'0');
       var info = state.calendarData[dateStr] || {taskCount:0, presentCount:0, isActual:false};
       var isToday = dateStr===todayStr();
-      cells += '<div class="cal-cell '+(isToday?'cal-cell-today':'')+'" data-cal-date="'+dateStr+'">'+
+      var wd = (firstWd + d - 1) % 7;
+      var holiday = holidayName(dateStr);
+      var cellClass = 'cal-cell';
+      if(isToday) cellClass += ' cal-cell-today';
+      if(holiday) cellClass += ' cal-cell-holiday';
+      else if(wd===0) cellClass += ' cal-cell-sun';
+      else if(wd===6) cellClass += ' cal-cell-sat';
+      cells += '<div class="'+cellClass+'" data-cal-date="'+dateStr+'">'+
         '<div class="cal-cell-day">'+d+'</div>'+
+        (holiday ? '<div class="cal-cell-holiday-name" title="'+esc(holiday)+'">'+esc(holiday)+'</div>' : '')+
         '<div class="cal-cell-stat">📋 '+info.taskCount+'件</div>'+
         '<div class="cal-cell-stat">'+(info.isActual?'👤 ':'👤予定 ')+info.presentCount+'人</div>'+
       '</div>';
     }
-    var headerRow = WD.map(function(w){ return '<div class="cal-weekday">'+w+'</div>'; }).join('');
+    var headerRow = WD.map(function(w,i){
+      var cls = i===0 ? 'cal-weekday cal-weekday-sun' : (i===6 ? 'cal-weekday cal-weekday-sat' : 'cal-weekday');
+      return '<div class="'+cls+'">'+w+'</div>';
+    }).join('');
     body = '<div class="cal-grid-header">'+headerRow+'</div>'+
       '<div class="cal-grid">'+cells+'</div>'+
       '<div class="pool-hint" style="margin-top:12px;">日付をタップすると、その日の管理者画面(出勤・作業割り当て)に移動して編集・追加できます。「👤予定」は曜日パターンからの見込み人数、「👤」は実際に出勤登録された人数です。</div>';
@@ -1589,6 +1644,7 @@ function renderManager(){
         '</div>'+
       '</div>'+
       '<div class="pattern-row">'+dayToggles+'</div>'+
+      '<button class="holiday-off-toggle '+(s.offOnHolidays?'on':'')+'" data-holiday-off-toggle="'+s.id+'">🎌 祝日も休みにする</button>'+
       '<div class="avatar-swatch-row" title="アバターカラー(累計実績画面のキャラクターの色)">'+avatarSwatches+'</div>'+
     '</div>';
   }).join('') || '<div class="empty-note">スタッフを登録してください。</div>';
@@ -1798,6 +1854,16 @@ function bindManager(){
       var s = state.roster.find(function(s){ return s.id===sid; });
       if(!s) return;
       s.avatarColor = color;
+      await saveRoster(state.roster);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-holiday-off-toggle]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var sid = el.getAttribute('data-holiday-off-toggle');
+      var s = state.roster.find(function(s){ return s.id===sid; });
+      if(!s) return;
+      s.offOnHolidays = !s.offOnHolidays;
       await saveRoster(state.roster);
       render();
     });
@@ -3850,6 +3916,7 @@ async function init(){
   state.templates = await loadTemplates();
   state.breakSettings = await loadBreakSettings();
   state.achievementSettings = await loadAchievementSettings();
+  state.jpHolidays = await loadJpHolidays();
   await ensureTemplateTasksForToday();
   state.day = await loadDay();
   await checkAutoBreak();

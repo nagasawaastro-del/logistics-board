@@ -111,6 +111,25 @@ input,select{font-family:inherit;}
 .date-nav-today-badge{background:var(--green-500);color:#fff;font-size:11px;font-weight:700;padding:4px 12px;border-radius:12px;}
 .date-nav-today-btn{background:var(--ink-900);color:#fff;border:none;border-radius:12px;padding:8px 16px;font-size:12px;font-weight:600;}
 
+.cal-month-label{font-family:var(--font-display);font-weight:600;font-size:16px;color:var(--ink-900);padding:0 6px;}
+.cal-grid-header{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px;}
+.cal-weekday{text-align:center;font-size:11px;color:var(--slate-500);font-weight:700;}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
+.cal-cell{
+  min-height:74px;border:1px solid var(--paper-line);border-radius:10px;padding:6px 7px;background:var(--paper-50);
+  cursor:pointer;display:flex;flex-direction:column;gap:2px;
+}
+.cal-cell:hover{border-color:var(--amber-500);background:#FFF9EE;}
+.cal-cell-empty{border:none;background:transparent;cursor:default;}
+.cal-cell-empty:hover{border:none;background:transparent;}
+.cal-cell-today{border-color:var(--ink-900);border-width:2px;}
+.cal-cell-day{font-family:var(--font-mono);font-weight:700;font-size:13px;color:var(--ink-900);}
+.cal-cell-stat{font-size:10.5px;color:var(--slate-500);}
+@media (max-width:640px){
+  .cal-cell{min-height:58px;padding:4px 5px;}
+  .cal-cell-stat{font-size:9.5px;}
+}
+
 .warn-banner{
   background:#FFF3DE;border:1px solid var(--amber-500);color:#7A4A00;border-radius:10px;
   padding:12px 16px;font-size:13px;font-weight:600;margin-bottom:16px;
@@ -628,6 +647,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-22', items:[
+    '新しく「カレンダー」画面を追加。月表示で日ごとの登録作業件数・出勤予定人数(曜日パターンからの見込み、または実際の出勤登録数)を確認でき、日付をタップするとその日の管理者画面に移動してそのまま編集・追加できるように'
+  ]},
+  { date:'2026-08-22', items:[
     '新しく「実績」画面を追加。今日の出荷/入庫件数・個数、今月のチームチャレンジ(目標に対する進捗バー)、過去最高記録との比較、前年同月比較、今月の日別グラフ、達成度に応じた応援メッセージを表示',
     '過去最高記録を更新すると「NEW RECORD!」の控えめな演出を表示するように',
     '作業登録画面・管理者画面のその場追加・編集画面に「区分(出荷/入庫/その他)」を追加。実績画面の出荷/入庫集計に使用(未設定は「その他」扱い)',
@@ -738,6 +760,9 @@ var state = {
   achievementsResult: null,
   achievementsLoading: false,
   achievementsError: null,
+  calendarMonth: null,
+  calendarData: null,
+  calendarLoading: false,
   day: null,
   activeStaffId: null,
   newTaskColIndex: -1,
@@ -1134,6 +1159,132 @@ async function switchManagerDate(dateStr){
   if(refreshed && state.managerDate===dateStr) state.managerDay = refreshed;
   render();
 }
+
+/* ---------- CALENDAR (登録内容・出勤予定の月表示) ---------- */
+function daysInMonth(monthKey){
+  var p = monthKey.split('-').map(Number);
+  return new Date(p[0], p[1], 0).getDate();
+}
+function firstWeekdayOfMonth(monthKey){
+  var p = monthKey.split('-').map(Number);
+  return new Date(p[0], p[1]-1, 1).getDay();
+}
+function shiftMonthKey(monthKey, delta){
+  var p = monthKey.split('-').map(Number);
+  var d = new Date(p[0], p[1]-1+delta, 1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
+function monthKeyLabel(monthKey){
+  var p = monthKey.split('-');
+  return p[0]+'年'+parseInt(p[1],10)+'月';
+}
+function predictedAttendanceCount(dateStr){
+  var wd = new Date(dateStr+'T00:00:00').getDay();
+  return activeRoster().filter(function(s){
+    var pattern = s.pattern || defaultPattern();
+    return !!pattern[wd];
+  }).length;
+}
+function actualAttendanceCount(day){
+  var roster = activeRoster();
+  return roster.filter(function(s){ return !!day.attendance[s.id]; }).length;
+}
+async function runCalendarMonth(monthKey){
+  state.calendarLoading = true;
+  render();
+  var n = daysInMonth(monthKey);
+  var data = {};
+  for(var d=1; d<=n; d++){
+    var dateStr = monthKey+'-'+String(d).padStart(2,'0');
+    var day = await loadDayByDate(dateStr);
+    data[dateStr] = {
+      taskCount: tasksForDate(dateStr).length,
+      presentCount: day ? actualAttendanceCount(day) : predictedAttendanceCount(dateStr),
+      isActual: !!day
+    };
+  }
+  if(state.calendarMonth===monthKey){
+    state.calendarData = data;
+  }
+  state.calendarLoading = false;
+  render();
+}
+function renderCalendar(){
+  if(!state.calendarMonth) state.calendarMonth = todayStr().slice(0,7);
+  var monthKey = state.calendarMonth;
+
+  var nav = '<div class="date-nav">'+
+    '<button class="date-nav-btn" id="calPrevBtn" title="前の月">&#8592;</button>'+
+    '<div class="cal-month-label">'+monthKeyLabel(monthKey)+'</div>'+
+    '<button class="date-nav-btn" id="calNextBtn" title="次の月">&#8594;</button>'+
+    '<button class="date-nav-today-btn" id="calTodayBtn">今月</button>'+
+    '<button class="report-go-btn" id="calRefreshBtn">'+(state.calendarData?'更新する':'この月を読み込む')+'</button>'+
+  '</div>';
+
+  var body;
+  if(state.calendarLoading){
+    body = '<div class="empty-note">この月の作業件数・出勤予定人数を読み込み中です...</div>';
+  }else if(!state.calendarData){
+    body = '<div class="empty-note">「この月を読み込む」を押すと、日ごとの登録作業件数・出勤予定人数を表示します。</div>';
+  }else{
+    var WD = ['日','月','火','水','木','金','土'];
+    var firstWd = firstWeekdayOfMonth(monthKey);
+    var totalDays = daysInMonth(monthKey);
+    var cells = '';
+    for(var i=0;i<firstWd;i++){ cells += '<div class="cal-cell cal-cell-empty"></div>'; }
+    for(var d=1; d<=totalDays; d++){
+      var dateStr = monthKey+'-'+String(d).padStart(2,'0');
+      var info = state.calendarData[dateStr] || {taskCount:0, presentCount:0, isActual:false};
+      var isToday = dateStr===todayStr();
+      cells += '<div class="cal-cell '+(isToday?'cal-cell-today':'')+'" data-cal-date="'+dateStr+'">'+
+        '<div class="cal-cell-day">'+d+'</div>'+
+        '<div class="cal-cell-stat">📋 '+info.taskCount+'件</div>'+
+        '<div class="cal-cell-stat">'+(info.isActual?'👤 ':'👤予定 ')+info.presentCount+'人</div>'+
+      '</div>';
+    }
+    var headerRow = WD.map(function(w){ return '<div class="cal-weekday">'+w+'</div>'; }).join('');
+    body = '<div class="cal-grid-header">'+headerRow+'</div>'+
+      '<div class="cal-grid">'+cells+'</div>'+
+      '<div class="pool-hint" style="margin-top:12px;">日付をタップすると、その日の管理者画面(出勤・作業割り当て)に移動して編集・追加できます。「👤予定」は曜日パターンからの見込み人数、「👤」は実際に出勤登録された人数です。</div>';
+  }
+
+  return '<div class="mgr-wrap"><div style="max-width:900px;margin:0 auto;">'+
+    '<div class="panel-title" style="margin-bottom:14px;">📅 カレンダー</div>'+
+    nav+
+    '<div class="panel">'+body+'</div>'+
+  '</div></div>';
+}
+function bindCalendar(){
+  var prevBtn = document.getElementById('calPrevBtn');
+  if(prevBtn) prevBtn.addEventListener('click', function(){
+    state.calendarMonth = shiftMonthKey(state.calendarMonth, -1);
+    state.calendarData = null;
+    render();
+  });
+  var nextBtn = document.getElementById('calNextBtn');
+  if(nextBtn) nextBtn.addEventListener('click', function(){
+    state.calendarMonth = shiftMonthKey(state.calendarMonth, 1);
+    state.calendarData = null;
+    render();
+  });
+  var todayBtn = document.getElementById('calTodayBtn');
+  if(todayBtn) todayBtn.addEventListener('click', function(){
+    state.calendarMonth = todayStr().slice(0,7);
+    state.calendarData = null;
+    render();
+  });
+  var refreshBtn = document.getElementById('calRefreshBtn');
+  if(refreshBtn) refreshBtn.addEventListener('click', function(){
+    runCalendarMonth(state.calendarMonth);
+  });
+  document.querySelectorAll('[data-cal-date]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var dateStr = el.getAttribute('data-cal-date');
+      state.role = 'manager';
+      switchManagerDate(dateStr);
+    });
+  });
+}
 function shiftDateStr(dateStr, deltaDays){
   var d = new Date(dateStr+'T00:00:00');
   d.setDate(d.getDate()+deltaDays);
@@ -1277,6 +1428,7 @@ function render(){
   else if(state.role==='input') html += renderInput();
   else if(state.role==='monitor') html += renderMonitor();
   else if(state.role==='achievements') html += renderAchievements();
+  else if(state.role==='calendar') html += renderCalendar();
   if(state.modal) html += renderModal();
   root.innerHTML = html;
   bindCommon();
@@ -1286,6 +1438,7 @@ function render(){
   if(state.role==='input') bindInput();
   if(state.role==='monitor') bindMonitor();
   if(state.role==='achievements') bindAchievements();
+  if(state.role==='calendar') bindCalendar();
   if(state.modal) bindModal();
 }
 
@@ -1326,6 +1479,11 @@ function renderGate(){
         '<div class="gate-icon" style="background:#FFF3DE;color:#C1521F;">&#127942;</div>'+
         '<div class="gate-card-title">実績</div>'+
         '<div class="gate-card-desc">今月のチーム記録・過去最高・前年比をチームで見る</div>'+
+      '</button>'+
+      '<button class="gate-card" data-role="calendar">'+
+        '<div class="gate-icon" style="background:#E9F2F0;color:#0F6E56;">&#128197;</div>'+
+        '<div class="gate-card-title">カレンダー</div>'+
+        '<div class="gate-card-desc">登録済みの作業・出勤予定を月ごとに確認して編集</div>'+
       '</button>'+
     '</div>'+
     '<button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
@@ -1375,7 +1533,7 @@ function bindChangelogModal(){
 
 /* ---------- TOPBAR ---------- */
 function renderTopbar(){
-  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業実績入力', monitor:'モニター', achievements:'実績'}[state.role];
+  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業実績入力', monitor:'モニター', achievements:'実績', calendar:'カレンダー'}[state.role];
   return ''+
   '<div class="topbar">'+
     '<div class="topbar-left">'+

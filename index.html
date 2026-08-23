@@ -174,6 +174,9 @@ input,select{font-family:inherit;}
   border:1px solid var(--paper-line);border-radius:12px;padding:4px 10px;
 }
 .holiday-off-toggle.on{background:#FDEEF2;border-color:#D6577E;color:#B33C63;}
+.overtime-row{display:flex;align-items:center;gap:6px;margin-top:6px;}
+.overtime-label{font-size:11px;color:var(--slate-500);}
+.overtime-input{border:1px solid var(--paper-line);border-radius:8px;padding:3px 6px;font-size:11px;font-family:var(--font-mono);}
 .avatar-swatch{width:16px;height:16px;border-radius:4px;border:2px solid transparent;cursor:pointer;}
 .avatar-swatch.sel{border-color:var(--ink-900);}
 .pattern-day{
@@ -661,6 +664,11 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-22', items:[
+    '出退勤の自動設定を追加。始業時間になると出勤予定のスタッフを自動的に「出勤中」に、終業時間になると自動的に「欠勤(退勤済み)」に切り替えるように(管理者画面で有効化・時間設定)',
+    '残業などで個別に終業時間を延ばしたい場合、その日だけ個人ごとに終業時間を延長できる設定を追加',
+    '自動退勤の後に手動で「出勤中」に戻したスタッフは、その日は自動退勤が再度上書きしないように配慮(急な残業対応にも柔軟に)'
+  ]},
+  { date:'2026-08-22', items:[
     'カレンダー画面で土曜(青)・日曜(赤)・祝日(赤+祝日名)を色分けして表示するように変更(公開の祝日データを使用)',
     '管理者画面のスタッフごとの出勤パターンに「🎌 祝日も休みにする」設定を追加。曜日パターンでは表現できない祝日(平日にあたる祝日)の休みも自動反映されるように'
   ]},
@@ -774,6 +782,7 @@ var state = {
   backlog: [],
   templates: [],
   breakSettings: { enabled:false, start:'12:00', end:'13:00' },
+  shiftSettings: { enabled:false, start:'09:00', end:'18:00' },
   achievementSettings: { monthlyTargetPieces: 25000 },
   achievementsResult: null,
   achievementsLoading: false,
@@ -1057,6 +1066,18 @@ async function saveBreakSettings(settings){
   state.breakSettings = settings;
   pendingSaves++;
   try{ await window.storage.set('break-settings', JSON.stringify(settings), true); }catch(e){}
+  finally{ pendingSaves--; }
+}
+async function loadShiftSettings(){
+  try{
+    var r = await window.storage.get('shift-settings', true);
+    return r ? JSON.parse(r.value) : { enabled:false, start:'09:00', end:'18:00' };
+  }catch(e){ return { enabled:false, start:'09:00', end:'18:00' }; }
+}
+async function saveShiftSettings(settings){
+  state.shiftSettings = settings;
+  pendingSaves++;
+  try{ await window.storage.set('shift-settings', JSON.stringify(settings), true); }catch(e){}
   finally{ pendingSaves--; }
 }
 async function loadAchievementSettings(){
@@ -1635,6 +1656,14 @@ function renderManager(){
     var avatarSwatches = TASK_COLORS.map(function(c){
       return '<div class="avatar-swatch '+(currentAvatarColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-avatar-color="'+s.id+'|'+c.hex+'"></div>';
     }).join('');
+    var overtimeRow = '';
+    if(state.shiftSettings && state.shiftSettings.enabled){
+      var overrideVal = (day.shiftEndOverrides && day.shiftEndOverrides[s.id]) || '';
+      overtimeRow = '<div class="overtime-row">'+
+        '<span class="overtime-label">🕐 この日の終業を延長</span>'+
+        '<input type="time" class="overtime-input" data-overtime-end="'+s.id+'" value="'+esc(overrideVal)+'">'+
+      '</div>';
+    }
     return '<div class="roster-item">'+
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
         '<span class="roster-name">'+esc(s.name)+'</span>'+
@@ -1645,6 +1674,7 @@ function renderManager(){
       '</div>'+
       '<div class="pattern-row">'+dayToggles+'</div>'+
       '<button class="holiday-off-toggle '+(s.offOnHolidays?'on':'')+'" data-holiday-off-toggle="'+s.id+'">🎌 祝日も休みにする</button>'+
+      overtimeRow+
       '<div class="avatar-swatch-row" title="アバターカラー(累計実績画面のキャラクターの色)">'+avatarSwatches+'</div>'+
     '</div>';
   }).join('') || '<div class="empty-note">スタッフを登録してください。</div>';
@@ -1702,6 +1732,16 @@ function renderManager(){
     '</tr>';
   }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この日の記録はまだありません</td></tr>';
 
+  var shiftPanel = '<div class="panel" style="margin-top:14px;">'+
+    '<div class="panel-title">出退勤の自動設定</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">曜日パターンで出勤予定になっているスタッフを、設定した始業時間に自動で「出勤中」に、終業時間に自動で「欠勤(退勤済み)」にします。一度手動で切り替えた後は、その日はその状態を優先し、自動処理は再度上書きしません。</div>'+
+    '<label class="break-toggle-row"><input type="checkbox" id="shiftEnabledInput" '+(state.shiftSettings.enabled?'checked':'')+'> 自動出退勤を有効にする</label>'+
+    '<div class="break-time-row">'+
+      '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">始業時間</label><input type="time" id="shiftStartInput" value="'+esc(state.shiftSettings.start)+'"></div>'+
+      '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">終業時間</label><input type="time" id="shiftEndInput" value="'+esc(state.shiftSettings.end)+'"></div>'+
+    '</div>'+
+  '</div>';
+
   var breakPanel = '<div class="panel" style="margin-top:14px;">'+
     '<div class="panel-title">休憩の自動設定</div>'+
     '<div class="pool-hint" style="margin-bottom:10px;">設定した時間になると、出勤中スタッフの作業タイマーが自動的に止まり「休憩」として記録されます。</div>'+
@@ -1743,6 +1783,7 @@ function renderManager(){
         '</div>'+
       '</div>'+
     '</div>'+
+    shiftPanel+
     breakPanel+
     achievementPanel+
     '<div class="panel" style="margin-top:20px;">'+
@@ -2002,6 +2043,23 @@ function bindManager(){
     });
   });
 
+  var shiftEnabledInput = document.getElementById('shiftEnabledInput');
+  var shiftStartInput = document.getElementById('shiftStartInput');
+  var shiftEndInput = document.getElementById('shiftEndInput');
+  function saveShiftSettingsFromInputs(){
+    saveShiftSettings({
+      enabled: !!(shiftEnabledInput && shiftEnabledInput.checked),
+      start: (shiftStartInput && shiftStartInput.value) || '09:00',
+      end: (shiftEndInput && shiftEndInput.value) || '18:00'
+    });
+  }
+  if(shiftEnabledInput) shiftEnabledInput.addEventListener('change', function(){
+    saveShiftSettingsFromInputs();
+    render();
+  });
+  if(shiftStartInput) shiftStartInput.addEventListener('change', saveShiftSettingsFromInputs);
+  if(shiftEndInput) shiftEndInput.addEventListener('change', saveShiftSettingsFromInputs);
+
   var breakEnabledInput = document.getElementById('breakEnabledInput');
   var breakStartInput = document.getElementById('breakStartInput');
   var breakEndInput = document.getElementById('breakEndInput');
@@ -2018,6 +2076,24 @@ function bindManager(){
   });
   if(breakStartInput) breakStartInput.addEventListener('change', saveBreakSettingsFromInputs);
   if(breakEndInput) breakEndInput.addEventListener('change', saveBreakSettingsFromInputs);
+
+  document.querySelectorAll('[data-overtime-end]').forEach(function(el){
+    el.addEventListener('focusin', function(){ state.suppressRender = true; });
+    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+    el.addEventListener('change', async function(){
+      var sid = el.getAttribute('data-overtime-end');
+      var day = managerActiveDay();
+      if(!day.shiftEndOverrides) day.shiftEndOverrides = {};
+      if(el.value){
+        day.shiftEndOverrides[sid] = el.value;
+      }else{
+        delete day.shiftEndOverrides[sid];
+      }
+      state.suppressRender = false;
+      await saveDay(day);
+      render();
+    });
+  });
 
   var achievementTargetInput = document.getElementById('achievementTargetInput');
   if(achievementTargetInput){
@@ -3199,6 +3275,50 @@ async function checkAutoBreak(){
     await saveDay(state.day);
   }
 }
+async function checkAutoShift(){
+  if(!state.shiftSettings || !state.shiftSettings.enabled) return;
+  if(!state.day || state.day.date !== todayStr()) return;
+  var day = state.day;
+  var now = new Date();
+  var wd = now.getDay();
+  var nowStr = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  if(!day.autoShiftStarted) day.autoShiftStarted = {};
+  if(!day.autoShiftEnded) day.autoShiftEnded = {};
+  if(!day.shiftEndOverrides) day.shiftEndOverrides = {};
+  var changed = false;
+  activeRoster().forEach(function(s){
+    var pattern = s.pattern || defaultPattern();
+    if(!pattern[wd]) return;
+    var endTime = day.shiftEndOverrides[s.id] || state.shiftSettings.end;
+    var isOn = !!day.attendance[s.id];
+
+    if(!isOn && !day.autoShiftStarted[s.id] && nowStr >= state.shiftSettings.start && nowStr < endTime){
+      day.attendance[s.id] = true;
+      day.autoShiftStarted[s.id] = true;
+      changed = true;
+      isOn = true;
+    }
+
+    if(isOn && !day.autoShiftEnded[s.id] && nowStr >= endTime){
+      day.attendance[s.id] = false;
+      day.autoShiftEnded[s.id] = true;
+      changed = true;
+      var log = currentLog(s.id);
+      if(log && log.end===null){
+        log.end = new Date().toISOString();
+        if(log.taskId==='BREAK'){
+          log.quantity = null;
+        }else{
+          log.quantity = 0;
+          delete log.breakdown;
+        }
+      }
+    }
+  });
+  if(changed){
+    await saveDay(day);
+  }
+}
 async function closeLogAndProceed(qty, breakdown){
   var m = state.modal;
   var log = state.day.logs.find(function(l){ return l.staffId===state.activeStaffId && l.taskId===m.closingTaskId && l.end===null; });
@@ -3870,12 +3990,14 @@ function startPolling(){
     var backlog = await loadBacklog();
     var templates = await loadTemplates();
     var breakSettings = await loadBreakSettings();
+    var shiftSettings = await loadShiftSettings();
     var achievementSettings = await loadAchievementSettings();
     if(pendingSaves>0) return;
     state.roster = roster;
     state.backlog = backlog;
     state.templates = templates;
     state.breakSettings = breakSettings;
+    state.shiftSettings = shiftSettings;
     state.achievementSettings = achievementSettings;
     await ensureTemplateTasksForToday();
     var day = await loadDay();
@@ -3883,6 +4005,7 @@ function startPolling(){
     state.day = day;
     notifyChanges(oldRoster, oldBacklog, oldDay, state.roster, state.backlog, state.day);
     await checkAutoBreak();
+    await checkAutoShift();
     if(!state.suppressRender) render();
   }, 4000);
 }
@@ -3915,11 +4038,13 @@ async function init(){
   state.backlog = await loadBacklog();
   state.templates = await loadTemplates();
   state.breakSettings = await loadBreakSettings();
+  state.shiftSettings = await loadShiftSettings();
   state.achievementSettings = await loadAchievementSettings();
   state.jpHolidays = await loadJpHolidays();
   await ensureTemplateTasksForToday();
   state.day = await loadDay();
   await checkAutoBreak();
+  await checkAutoShift();
   render();
   startTicker();
 }

@@ -700,6 +700,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-23', items:[
+    '不具合修正: 繰り返し作業を新規登録・曜日パターン変更しても、本日が対象曜日でないと何も反映されず「登録しても反映されない」ように見えていた問題を修正。登録・変更した時点で直近14日分の作業をまとめて生成するように変更'
+  ]},
+  { date:'2026-08-23', items:[
     '不具合修正: 自動休憩の開始・終了それぞれについて「1日1回だけ」の歯止めを追加。端末やタイミング次第で同じスタッフに休憩の記録が重複して作られてしまうことがあった問題に対処',
     '不具合修正: 実績の編集画面・実績を手動で追加する画面で、終了時刻に開始時刻より前の時刻を入力しても保存できてしまっていた問題を修正。矛盾する時刻は保存前にエラー表示するように'
   ]},
@@ -1184,7 +1187,7 @@ async function saveAchievementSettings(settings){
   try{ await window.storage.set('achievement-settings', JSON.stringify(settings), true); }catch(e){}
   finally{ pendingSaves--; }
 }
-async function ensureTemplateTasksForDate(dateStr){
+function ensureTemplateTasksForDateSync(dateStr){
   var wd = new Date(dateStr+'T00:00:00').getDay();
   var existingKeys = {};
   state.backlog.forEach(function(t){ if(t.fromTemplate) existingKeys[t.fromTemplate+'|'+t.workDate] = true; });
@@ -1196,12 +1199,27 @@ async function ensureTemplateTasksForDate(dateStr){
     var key = tmpl.id+'|'+dateStr;
     if(existingKeys[key]) return;
     state.backlog.push({id:uid(), name:tmpl.name, unit:tmpl.unit, color:tmpl.color, workDate:dateStr, archived:false, fromTemplate:tmpl.id, subcategories:tmpl.subcategories||[], category:taskCategory(tmpl)});
+    existingKeys[key] = true;
     changed = true;
   });
+  return changed;
+}
+async function ensureTemplateTasksForDate(dateStr){
+  var changed = ensureTemplateTasksForDateSync(dateStr);
   if(changed) await saveBacklog(state.backlog);
 }
 async function ensureTemplateTasksForToday(){
   return ensureTemplateTasksForDate(todayStr());
+}
+async function ensureTemplateTasksForUpcoming(numDays){
+  var base = new Date();
+  var anyChanged = false;
+  for(var i=0;i<numDays;i++){
+    var d = new Date(base.getFullYear(), base.getMonth(), base.getDate()+i);
+    var dateStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    if(ensureTemplateTasksForDateSync(dateStr)) anyChanged = true;
+  }
+  if(anyChanged) await saveBacklog(state.backlog);
 }
 function defaultPattern(){
   return [false,true,true,true,true,true,false];
@@ -2488,7 +2506,7 @@ function bindRegister(){
       state.tmplSubcatDraft = {name:'', unit:''};
       state.suppressRender = false;
       await saveTemplates(state.templates);
-      await ensureTemplateTasksForToday();
+      await ensureTemplateTasksForUpcoming(14);
       render();
     });
   }
@@ -2502,7 +2520,7 @@ function bindRegister(){
       pattern[idx] = !pattern[idx];
       tmpl.pattern = pattern;
       await saveTemplates(state.templates);
-      await ensureTemplateTasksForToday();
+      await ensureTemplateTasksForUpcoming(14);
       render();
     });
   });

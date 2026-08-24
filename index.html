@@ -478,6 +478,12 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .status-dot.working{background:var(--green-500);animation:pulse 1.6s infinite;}
 .status-dot.idle{background:var(--slate-300);}
 .task-tile-timer{font-family:var(--font-mono);font-size:28px;font-weight:700;color:var(--rust-600);margin-top:6px;}
+.task-tile-coworkers{display:flex;flex-wrap:wrap;gap:5px;margin-top:12px;padding-top:12px;border-top:1px dashed var(--paper-line);}
+.coworker-chip{font-size:11px;font-weight:600;padding:3px 9px;border-radius:12px;background:var(--paper-100);color:var(--slate-500);white-space:nowrap;}
+.coworker-chip.coworker-working{background:#E6F7EE;color:#2A8F63;}
+.coworker-chip.coworker-brk{background:#EEF0FB;color:var(--indigo-500);}
+.coworker-chip.coworker-other{background:var(--paper-100);color:var(--slate-500);}
+.coworker-chip.coworker-idle{background:var(--paper-100);color:var(--slate-300);}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
 @media (prefers-reduced-motion:reduce){.status-dot.working{animation:none;}}
 
@@ -663,6 +669,10 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-22', items:[
+    '不具合修正: 出退勤・休憩の自動設定にある時間入力欄で、入力中に自動更新が重なると時刻が消えてしまうことがあった問題を修正',
+    '作業実績入力画面(パートさんの画面)で、各作業タイルに同じ作業に割り当てられている他のスタッフの名前と状況(作業中・休憩中・別作業中・待機中)を表示するように変更'
+  ]},
   { date:'2026-08-22', items:[
     '出退勤の自動設定を追加。始業時間になると出勤予定のスタッフを自動的に「出勤中」に、終業時間になると自動的に「欠勤(退勤済み)」に切り替えるように(管理者画面で有効化・時間設定)',
     '残業などで個別に終業時間を延ばしたい場合、その日だけ個人ごとに終業時間を延長できる設定を追加',
@@ -1410,6 +1420,24 @@ function staffById(id){
 function currentLog(staffId){
   return state.day.logs.find(function(l){ return l.staffId===staffId && l.end===null; }) || null;
 }
+function coworkersForTask(taskId, excludeStaffId){
+  return activeRoster().filter(function(s){
+    if(s.id===excludeStaffId) return false;
+    if(!state.day.attendance[s.id]) return false;
+    return (state.day.assignments[s.id]||[]).indexOf(taskId)!==-1;
+  }).map(function(s){
+    var log = currentLog(s.id);
+    var working = !!(log && log.taskId===taskId);
+    var onBreak = !!(log && log.taskId==='BREAK');
+    var onOther = !!(log && !working && !onBreak);
+    var statusLabel = working ? '作業中' : onBreak ? '休憩中' : onOther ? '別作業中' : '待機中';
+    var statusClass = working ? 'working' : onBreak ? 'brk' : onOther ? 'other' : 'idle';
+    return { name: s.name, statusLabel: statusLabel, statusClass: statusClass };
+  }).sort(function(a,b){
+    var order = {working:0, other:1, brk:2, idle:3};
+    return order[a.statusClass]-order[b.statusClass];
+  });
+}
 function totalsByTaskForDay(day, staffId){
   var map = {};
   day.logs.filter(function(l){ return l.staffId===staffId; }).forEach(function(l){
@@ -2057,8 +2085,15 @@ function bindManager(){
     saveShiftSettingsFromInputs();
     render();
   });
-  if(shiftStartInput) shiftStartInput.addEventListener('change', saveShiftSettingsFromInputs);
-  if(shiftEndInput) shiftEndInput.addEventListener('change', saveShiftSettingsFromInputs);
+  [shiftStartInput, shiftEndInput].forEach(function(el){
+    if(!el) return;
+    el.addEventListener('focusin', function(){ state.suppressRender = true; });
+    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+    el.addEventListener('change', function(){
+      state.suppressRender = false;
+      saveShiftSettingsFromInputs();
+    });
+  });
 
   var breakEnabledInput = document.getElementById('breakEnabledInput');
   var breakStartInput = document.getElementById('breakStartInput');
@@ -2074,8 +2109,15 @@ function bindManager(){
     saveBreakSettingsFromInputs();
     render();
   });
-  if(breakStartInput) breakStartInput.addEventListener('change', saveBreakSettingsFromInputs);
-  if(breakEndInput) breakEndInput.addEventListener('change', saveBreakSettingsFromInputs);
+  [breakStartInput, breakEndInput].forEach(function(el){
+    if(!el) return;
+    el.addEventListener('focusin', function(){ state.suppressRender = true; });
+    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+    el.addEventListener('change', function(){
+      state.suppressRender = false;
+      saveBreakSettingsFromInputs();
+    });
+  });
 
   document.querySelectorAll('[data-overtime-end]').forEach(function(el){
     el.addEventListener('focusin', function(){ state.suppressRender = true; });
@@ -3115,12 +3157,19 @@ function renderInput(){
       var t = taskById(tid);
       var isActive = log && log.taskId===tid;
       var elapsed = isActive ? (Date.now() - new Date(log.start).getTime()) : 0;
+      var coworkers = coworkersForTask(tid, state.activeStaffId);
+      var coworkerHtml = coworkers.length ? '<div class="task-tile-coworkers">'+
+        coworkers.map(function(c){
+          return '<span class="coworker-chip coworker-'+c.statusClass+'">'+esc(c.name)+' '+esc(c.statusLabel)+'</span>';
+        }).join('')+
+      '</div>' : '';
       return '<button class="task-tile '+(isActive?'active-task':'')+'" data-tap-task="'+tid+'" style="border-left:6px solid '+t.color+'">'+
         '<div><div class="task-tile-name">'+esc(t.name)+'</div><div class="task-tile-unit">単位: '+esc(t.unit)+'</div></div>'+
         '<div>'+
           '<div class="task-tile-status"><span class="status-dot '+(isActive?'working':'idle')+'"></span>'+(isActive?'作業中':'タップして開始')+'</div>'+
           (isActive ? '<div class="task-tile-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsed)+'</div>' : '')+
         '</div>'+
+        coworkerHtml+
       '</button>';
     }).join('');
     body = '<div class="task-tile-grid">'+tiles+'</div>';

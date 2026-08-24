@@ -700,6 +700,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-23', items:[
+    '集計画面(日別・期間別)の「作業別」テーブルで、内訳(ピッキング・梱包など)の件数を1行ずつ分けて見やすく表示するように変更。CSVダウンロードにも内訳の列を追加'
+  ]},
+  { date:'2026-08-23', items:[
     '不具合修正: 繰り返し作業を新規登録・曜日パターン変更しても、本日が対象曜日でないと何も反映されず「登録しても反映されない」ように見えていた問題を修正。登録・変更した時点で直近14日分の作業をまとめて生成するように変更'
   ]},
   { date:'2026-08-23', items:[
@@ -2666,11 +2669,14 @@ function exportAggCSV(agg, label){
   });
   rows.push([]);
   rows.push(['作業別']);
-  rows.push(['作業名','合計時間(分)','合計件数','稼働人数']);
+  rows.push(['作業名','合計時間(分)','合計件数','稼働人数','内訳']);
   Object.keys(agg.perTask).forEach(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
-    rows.push([t.name, Math.round(info.ms/60000), info.qty, Object.keys(info.staff).length]);
+    var unitMap = subcatUnitMap(t);
+    var bdKeys = Object.keys(info.breakdown||{}).filter(function(k){ return info.breakdown[k]>0; });
+    var bdStr = bdKeys.map(function(k){ return k+':'+info.breakdown[k]+(unitMap[k]||t.unit); }).join(' / ');
+    rows.push([t.name, Math.round(info.ms/60000), info.qty, Object.keys(info.staff).length, bdStr]);
   });
   downloadCSV('集計_'+label+'.csv', rows);
 }
@@ -3092,6 +3098,16 @@ function renderReportRpgBody(){
     '<div class="report-range-note">記録がある全'+result.dayCount+'日分から集計(休憩は対象外)。数量入力(内訳・件数)がある作業のみカウントされます。レベルが上がるとキャラクターの見た目も変化します。攻撃=累計処理量、防御=出勤日数、すばやさ=時間あたりの処理効率から算出した目安です。</div>'+
     '<div class="rpg-card-grid">'+cards+'</div>';
 }
+function taskBreakdownRows(info, task){
+  var breakdown = info.breakdown || {};
+  var keys = Object.keys(breakdown).filter(function(k){ return breakdown[k]>0; });
+  if(!keys.length) return '';
+  var unitMap = subcatUnitMap(task);
+  var rows = keys.map(function(k){
+    return '<div class="breakdown-detail-row"><span class="breakdown-detail-name">'+esc(k)+'</span><span class="breakdown-detail-qty">'+breakdown[k]+esc(unitMap[k]||task.unit)+'</span></div>';
+  }).join('');
+  return '<div class="breakdown-detail-list">'+rows+'</div>';
+}
 function renderReportSingleBody(){
   if(state.reportLoading) return '<div class="empty-note">読み込み中...</div>';
   if(state.reportError) return '<div class="empty-note">'+esc(state.reportError)+'</div>';
@@ -3117,8 +3133,8 @@ function renderReportSingleBody(){
   var taskRows = taskIds.map(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
-    var bd = breakdownLabel(info.breakdown, t);
-    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+(bd?'<div style="font-size:11px;color:var(--slate-500);font-weight:400;">'+bd+'</div>':'')+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
+    var bdRows = taskBreakdownRows(info, t);
+    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+bdRows+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
   return '<div class="panel-title">'+esc(dateLabelFromStr(state.reportDate))+' の集計 <button class="csv-export-btn" id="csvExportSingle">CSVダウンロード</button></div>'+
@@ -3150,8 +3166,8 @@ function renderReportRangeBody(){
   var taskRows = taskIds.map(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
-    var bd = breakdownLabel(info.breakdown, t);
-    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+(bd?'<div style="font-size:11px;color:var(--slate-500);font-weight:400;">'+bd+'</div>':'')+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
+    var bdRows = taskBreakdownRows(info, t);
+    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+bdRows+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
   return '<div class="panel-title">'+esc(dateLabelFromStr(result.start))+' 〜 '+esc(dateLabelFromStr(result.end))+' の合計 <button class="csv-export-btn" id="csvExportRange">CSVダウンロード</button></div>'+

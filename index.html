@@ -699,6 +699,10 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-23', items:[
+    '不具合修正: 自動休憩の開始・終了それぞれについて「1日1回だけ」の歯止めを追加。端末やタイミング次第で同じスタッフに休憩の記録が重複して作られてしまうことがあった問題に対処',
+    '不具合修正: 実績の編集画面・実績を手動で追加する画面で、終了時刻に開始時刻より前の時刻を入力しても保存できてしまっていた問題を修正。矛盾する時刻は保存前にエラー表示するように'
+  ]},
   { date:'2026-08-22', items:[
     '管理者画面の「作業実績」一覧で、内訳がある記録の件数と計測時間を、内訳ごとに1行ずつ分けて見やすく表示するように変更',
     '同画面に「+ 実績を手動で追加」ボタンを追加。パートさんが入力し忘れた実績を、管理者がスタッフ・作業・時間・件数(内訳)を指定して手動で追加できるように'
@@ -3467,30 +3471,35 @@ async function startTask(taskId){
 async function checkAutoBreak(){
   if(!state.breakSettings || !state.breakSettings.enabled) return;
   if(!state.day || state.day.date !== todayStr()) return;
+  var day = state.day;
   var now = new Date();
   var nowStr = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
   var inBreak = nowStr >= state.breakSettings.start && nowStr < state.breakSettings.end;
+  if(!day.autoBreakStarted) day.autoBreakStarted = {};
+  if(!day.autoBreakEnded) day.autoBreakEnded = {};
   var changed = false;
   presentStaff().forEach(function(s){
     var log = currentLog(s.id);
     if(inBreak){
-      if(log && log.taskId!=='BREAK'){
+      if(!day.autoBreakStarted[s.id] && log && log.taskId!=='BREAK'){
         finalizeActiveSubTimer(log);
         log.end = new Date().toISOString();
         if(log.quantity==null && !log.breakdown) log.quantity = 0;
-        state.day.logs.push({id:uid(), staffId:s.id, taskId:'BREAK', start:new Date().toISOString(), end:null, quantity:null});
+        day.logs.push({id:uid(), staffId:s.id, taskId:'BREAK', start:new Date().toISOString(), end:null, quantity:null});
+        day.autoBreakStarted[s.id] = true;
         changed = true;
       }
     }else{
-      if(log && log.taskId==='BREAK'){
+      if(!day.autoBreakEnded[s.id] && log && log.taskId==='BREAK'){
         log.end = new Date().toISOString();
         log.quantity = null;
+        day.autoBreakEnded[s.id] = true;
         changed = true;
       }
     }
   });
   if(changed){
-    await saveDay(state.day);
+    await saveDay(day);
   }
 }
 async function checkAutoShift(){
@@ -3604,6 +3613,11 @@ async function saveAddLog(){
   var start = localDateTimeToISO(dateStr, (startInput&&startInput.value) || '09:00');
   var endVal = endInput ? endInput.value : '';
   var end = endVal ? localDateTimeToISO(dateStr, endVal) : null;
+  if(end && new Date(end).getTime() <= new Date(start).getTime()){
+    if(endInput) endInput.style.borderColor = '#C1521F';
+    showToast('終了時刻は開始時刻より後にしてください');
+    return;
+  }
   var task = taskById(taskId);
   var hasSubcats = task.subcategories && task.subcategories.length;
   var quantity = null, breakdown = null;
@@ -3662,10 +3676,15 @@ async function saveEditLog(){
   var startInput = document.getElementById('editStartTime');
   var endInput = document.getElementById('editEndTime');
   var dateStr = managerActiveDate();
-  log.taskId = taskSelect.value;
-  log.start = localDateTimeToISO(dateStr, startInput.value || '00:00');
+  var newStart = localDateTimeToISO(dateStr, startInput.value || '00:00');
   if(endInput.value){
-    log.end = localDateTimeToISO(dateStr, endInput.value);
+    var newEnd = localDateTimeToISO(dateStr, endInput.value);
+    if(new Date(newEnd).getTime() <= new Date(newStart).getTime()){
+      endInput.style.borderColor = '#C1521F';
+      showToast('終了時刻は開始時刻より後にしてください');
+      return;
+    }
+    log.end = newEnd;
     if(m.subcategories){
       var breakdown = {};
       var total = 0;
@@ -3689,6 +3708,8 @@ async function saveEditLog(){
     log.quantity = null;
     delete log.breakdown;
   }
+  log.taskId = taskSelect.value;
+  log.start = newStart;
   state.modal = null;
   state.suppressRender = false;
   await saveDay(day);

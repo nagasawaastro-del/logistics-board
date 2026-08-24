@@ -151,6 +151,8 @@ input,select{font-family:inherit;}
 .break-time-row input{border:1px solid var(--paper-line);border-radius:8px;padding:8px 10px;font-size:13px;font-family:var(--font-mono);}
 .date-nav-today-btn:hover{background:var(--ink-700);}
 .log-edit-btn{background:var(--paper-100);border:1px solid var(--paper-line);border-radius:14px;padding:5px 14px;font-size:12px;font-weight:600;color:var(--ink-900);}
+.log-stop-btn{background:#FDEEF2;border:1px solid #D6577E;border-radius:14px;padding:5px 12px;font-size:12px;font-weight:700;color:#B33C63;margin-right:6px;}
+.log-stop-btn:hover{background:#F9DCE5;}
 .log-edit-btn:hover{border-color:var(--amber-500);background:#FFF7E8;}
 .mgr-grid{display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start;min-width:0;}
 @media (max-width:900px){.mgr-grid{grid-template-columns:1fr;}}
@@ -693,6 +695,10 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-22', items:[
+    '管理者画面の「作業実績」一覧に、作業中(未終了)の記録をその場で終了させる「■ ストップ」ボタンを追加。件数の修正は引き続き「編集」から行えます',
+    '不具合修正: 作業実績一覧の内訳ごとの計測時間が、計測中でも更新されず古い値のまま止まって見えていた問題を修正。計測中は他の作業時間タイマーと同様にリアルタイムで進むように'
+  ]},
+  { date:'2026-08-22', items:[
     '繰り返し作業から自動生成された「その日だけの複製」を編集する画面に、元になった繰り返し設定へワンタップで移動できる案内とボタンを追加。複製をいくら編集しても他の日には反映されない(元の繰り返し設定を編集する必要がある)ことが分かりやすくなるように改善'
   ]},
   { date:'2026-08-22', items:[
@@ -921,11 +927,21 @@ function breakdownLabel(breakdown, task){
   var unitMap = subcatUnitMap(task);
   return '('+keys.map(function(k){ return esc(k)+' '+breakdown[k]+esc(unitMap[k]||task.unit); }).join(' / ')+')';
 }
-function subTimeLabel(subTimes){
-  if(!subTimes) return '';
+function subTimeLabel(log){
+  if(!log) return '';
+  var subTimes = log.subTimes || {};
   var keys = Object.keys(subTimes).filter(function(k){ return subTimes[k]>0; });
+  if(log.activeSubcat && keys.indexOf(log.activeSubcat)===-1) keys.push(log.activeSubcat);
   if(!keys.length) return '';
-  return '<div style="font-size:11px;color:var(--slate-400);margin-top:2px;">⏱ '+keys.map(function(k){ return esc(k)+' '+fmtHM(subTimes[k]); }).join(' / ')+'</div>';
+  var parts = keys.map(function(k){
+    var base = subTimes[k]||0;
+    if(log.activeSubcat===k && log.activeSubcatStart){
+      var live = base + (Date.now()-new Date(log.activeSubcatStart).getTime());
+      return '<span data-live-subtimer-start="'+log.activeSubcatStart+'" data-live-subtimer-base="'+base+'" style="color:var(--rust-600);font-weight:700;">'+esc(k)+' '+fmtElapsed(live)+'</span>';
+    }
+    return esc(k)+' '+fmtHM(base);
+  });
+  return '<div style="font-size:11px;color:var(--slate-400);margin-top:2px;">⏱ '+parts.join(' / ')+'</div>';
 }
 function subcatDraftRef(context){
   if(context==='reg') return { get:function(){ return state.regSubcatDraft; }, set:function(v){ state.regSubcatDraft=v; } };
@@ -1800,15 +1816,16 @@ function renderManager(){
     }else{
       qtyLabel = '-';
     }
-    var subTimeStr = subTimeLabel(l.subTimes);
+    var subTimeStr = subTimeLabel(l);
     if(subTimeStr) qtyLabel += subTimeStr;
+    var stopBtn = l.end ? '' : '<button class="log-stop-btn" data-stop-log="'+l.id+'">■ ストップ</button>';
     return '<tr>'+
       '<td>'+esc(s.name)+'</td>'+
       '<td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td>'+
       '<td class="num">'+fmtClock(l.start)+'</td>'+
       '<td class="num">'+endLabel+'</td>'+
       '<td class="num">'+qtyLabel+'</td>'+
-      '<td class="num"><button class="log-edit-btn" data-edit-log="'+l.id+'">編集</button></td>'+
+      '<td class="num">'+stopBtn+'<button class="log-edit-btn" data-edit-log="'+l.id+'">編集</button></td>'+
     '</tr>';
   }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この日の記録はまだありません</td></tr>';
 
@@ -2120,6 +2137,12 @@ function bindManager(){
       var log = (day.logs||[]).find(function(l){ return l.id===logId; });
       if(!log) return;
       openEditLogModal(log);
+    });
+  });
+  document.querySelectorAll('[data-stop-log]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var logId = el.getAttribute('data-stop-log');
+      stopLogAsManager(logId);
     });
   });
 
@@ -3518,6 +3541,22 @@ async function closeCurrentAndProceed(qty){
   return closeLogAndProceed(qty, null);
 }
 
+async function stopLogAsManager(logId){
+  var day = managerActiveDay();
+  var log = (day.logs||[]).find(function(l){ return l.id===logId; });
+  if(!log || log.end) return;
+  var t = taskById(log.taskId);
+  finalizeActiveSubTimer(log);
+  log.end = new Date().toISOString();
+  if(log.taskId==='BREAK'){
+    log.quantity = null;
+  }else if(log.quantity==null && !log.breakdown){
+    log.quantity = 0;
+  }
+  await saveDay(day);
+  render();
+  showToast('「'+t.name+'」('+staffById(log.staffId).name+')を停止しました。件数の修正は「編集」から行えます。');
+}
 function openEditLogModal(log){
   var task = taskById(log.taskId);
   var hasSubcats = task.subcategories && task.subcategories.length;

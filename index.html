@@ -550,6 +550,17 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .modal-confirm{background:var(--amber-500);color:#4A2C00;font-family:var(--font-display);}
 .modal-confirm:active{transform:scale(.97);background:var(--amber-600);}
 
+.template-notice{
+  background:#EEF0FB;border:1px solid var(--indigo-500);border-radius:12px;padding:12px 14px;
+  font-size:12px;color:var(--ink-text);line-height:1.6;margin-bottom:16px;
+}
+.template-notice b{color:var(--indigo-500);}
+.template-notice button{
+  display:block;width:100%;margin-top:10px;background:var(--indigo-500);color:#fff;border:none;
+  border-radius:10px;padding:10px;font-size:13px;font-weight:700;
+}
+.template-notice button:hover{background:#3B4BB8;}
+
 .qty-break-list{text-align:left;margin-bottom:16px;max-height:50vh;overflow-y:auto;}
 .qty-break-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 4px;border-bottom:1px solid var(--paper-line);}
 .qty-break-row:last-child{border-bottom:none;}
@@ -681,6 +692,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-22', items:[
+    '繰り返し作業から自動生成された「その日だけの複製」を編集する画面に、元になった繰り返し設定へワンタップで移動できる案内とボタンを追加。複製をいくら編集しても他の日には反映されない(元の繰り返し設定を編集する必要がある)ことが分かりやすくなるように改善'
+  ]},
   { date:'2026-08-22', items:[
     '内訳ごとに作業時間も計測できるように追加。各内訳に「▶ 計測開始/■ 計測終了」ボタンが付き、件数と同時に内訳ごとの実働時間も記録できるように(1つの作業内で同時に計測できるのは1つの内訳のみ)',
     '休憩・終業時間による自動中断が起きても、それまでに記録した件数・内訳・計測時間が失われず引き継がれるように修正',
@@ -3587,7 +3601,7 @@ function bindEditLogModal(m){
 }
 
 function openEditTaskModal(task){
-  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate, subcatsList: (task.subcategories||[]).slice(), subcatDraft: {name:'', unit:''}, category: taskCategory(task) };
+  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate, subcatsList: (task.subcategories||[]).slice(), subcatDraft: {name:'', unit:''}, category: taskCategory(task), fromTemplate: task.fromTemplate || null };
   state.suppressRender = true;
   render();
 }
@@ -3648,6 +3662,17 @@ function bindEditTaskModal(m){
   if(saveBtn) saveBtn.addEventListener('click', saveEditTask);
   var deleteBtn = document.getElementById('editDeleteBtn');
   if(deleteBtn) deleteBtn.addEventListener('click', deleteEditTask);
+  var jumpBtn = document.getElementById('jumpToTemplateBtn');
+  if(jumpBtn) jumpBtn.addEventListener('click', function(){
+    var tmpl = state.templates.find(function(t){ return t.id===m.fromTemplate; });
+    state.modal = null;
+    state.suppressRender = false;
+    if(tmpl){
+      openEditTemplateModal(tmpl);
+    }else{
+      render();
+    }
+  });
   bindCategoryToggle();
   bindSubcatTagControls();
 }
@@ -3872,9 +3897,19 @@ function editFieldSwatches(colorState, dataAttr){
 }
 function renderEditTaskModal(m){
   var hasSubcats = (m.subcatsList||[]).length > 0;
+  var templateNotice = '';
+  if(m.fromTemplate){
+    var srcTmpl = state.templates.find(function(t){ return t.id===m.fromTemplate; });
+    templateNotice = '<div class="template-notice">'+
+      'この作業は繰り返し設定'+(srcTmpl?'「'+esc(srcTmpl.name)+'」':'')+'から自動生成された、<b>'+esc(m.workDate)+'だけの複製</b>です。ここでの変更はこの日にしか反映されません。'+
+      '<br>すべての繰り返し予定に反映したい場合は下のボタンから元の繰り返し設定を編集してください。'+
+      '<button type="button" id="jumpToTemplateBtn">🔁 繰り返し設定を編集する</button>'+
+    '</div>';
+  }
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" style="max-width:400px;text-align:left;">'+
       '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">作業を編集</div>'+
+      templateNotice+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業日</label>'+
       '<input type="date" id="editTaskDate" value="'+m.workDate+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+

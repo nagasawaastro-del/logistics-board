@@ -152,6 +152,11 @@ input,select{font-family:inherit;}
 .date-nav-today-btn:hover{background:var(--ink-700);}
 .log-edit-btn{background:var(--paper-100);border:1px solid var(--paper-line);border-radius:14px;padding:5px 14px;font-size:12px;font-weight:600;color:var(--ink-900);}
 .log-stop-btn{background:#FDEEF2;border:1px solid #D6577E;border-radius:14px;padding:5px 12px;font-size:12px;font-weight:700;color:#B33C63;margin-right:6px;}
+.breakdown-detail-list{margin-top:6px;text-align:left;display:inline-block;}
+.breakdown-detail-row{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--slate-500);padding:2px 0;}
+.breakdown-detail-name{font-weight:600;color:var(--ink-900);min-width:64px;}
+.breakdown-detail-qty{font-family:var(--font-mono);min-width:48px;text-align:right;}
+.breakdown-detail-time{font-family:var(--font-mono);min-width:56px;text-align:right;}
 .log-stop-btn:hover{background:#F9DCE5;}
 .log-edit-btn:hover{border-color:var(--amber-500);background:#FFF7E8;}
 .mgr-grid{display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start;min-width:0;}
@@ -695,6 +700,10 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-22', items:[
+    '管理者画面の「作業実績」一覧で、内訳がある記録の件数と計測時間を、内訳ごとに1行ずつ分けて見やすく表示するように変更',
+    '同画面に「+ 実績を手動で追加」ボタンを追加。パートさんが入力し忘れた実績を、管理者がスタッフ・作業・時間・件数(内訳)を指定して手動で追加できるように'
+  ]},
+  { date:'2026-08-22', items:[
     '管理者画面の「作業実績」一覧に、作業中(未終了)の記録をその場で終了させる「■ ストップ」ボタンを追加。件数の修正は引き続き「編集」から行えます',
     '不具合修正: 作業実績一覧の内訳ごとの計測時間が、計測中でも更新されず古い値のまま止まって見えていた問題を修正。計測中は他の作業時間タイマーと同様にリアルタイムで進むように'
   ]},
@@ -927,21 +936,33 @@ function breakdownLabel(breakdown, task){
   var unitMap = subcatUnitMap(task);
   return '('+keys.map(function(k){ return esc(k)+' '+breakdown[k]+esc(unitMap[k]||task.unit); }).join(' / ')+')';
 }
-function subTimeLabel(log){
-  if(!log) return '';
-  var subTimes = log.subTimes || {};
-  var keys = Object.keys(subTimes).filter(function(k){ return subTimes[k]>0; });
-  if(log.activeSubcat && keys.indexOf(log.activeSubcat)===-1) keys.push(log.activeSubcat);
+function breakdownDetailRows(l, t){
+  if(!l.breakdown && !l.activeSubcat) return '';
+  var breakdown = l.breakdown || {};
+  var subTimes = l.subTimes || {};
+  var unitMap = subcatUnitMap(t);
+  var keys = Object.keys(breakdown).filter(function(k){ return breakdown[k]>0; });
+  if(l.activeSubcat && keys.indexOf(l.activeSubcat)===-1) keys.push(l.activeSubcat);
+  Object.keys(subTimes).forEach(function(k){ if(subTimes[k]>0 && keys.indexOf(k)===-1) keys.push(k); });
   if(!keys.length) return '';
-  var parts = keys.map(function(k){
+  var rows = keys.map(function(k){
+    var qty = breakdown[k]||0;
+    var unit = unitMap[k]||t.unit;
     var base = subTimes[k]||0;
-    if(log.activeSubcat===k && log.activeSubcatStart){
-      var live = base + (Date.now()-new Date(log.activeSubcatStart).getTime());
-      return '<span data-live-subtimer-start="'+log.activeSubcatStart+'" data-live-subtimer-base="'+base+'" style="color:var(--rust-600);font-weight:700;">'+esc(k)+' '+fmtElapsed(live)+'</span>';
+    var timeHtml;
+    if(l.activeSubcat===k && l.activeSubcatStart){
+      var live = base + (Date.now()-new Date(l.activeSubcatStart).getTime());
+      timeHtml = '<span data-live-subtimer-start="'+l.activeSubcatStart+'" data-live-subtimer-base="'+base+'" style="color:var(--rust-600);font-weight:700;">'+fmtElapsed(live)+'</span>';
+    }else{
+      timeHtml = base>0 ? fmtHM(base) : '-';
     }
-    return esc(k)+' '+fmtHM(base);
-  });
-  return '<div style="font-size:11px;color:var(--slate-400);margin-top:2px;">⏱ '+parts.join(' / ')+'</div>';
+    return '<div class="breakdown-detail-row">'+
+      '<span class="breakdown-detail-name">'+esc(k)+'</span>'+
+      '<span class="breakdown-detail-qty">'+qty+esc(unit)+'</span>'+
+      '<span class="breakdown-detail-time">⏱ '+timeHtml+'</span>'+
+    '</div>';
+  }).join('');
+  return '<div class="breakdown-detail-list">'+rows+'</div>';
 }
 function subcatDraftRef(context){
   if(context==='reg') return { get:function(){ return state.regSubcatDraft; }, set:function(v){ state.regSubcatDraft=v; } };
@@ -1810,21 +1831,20 @@ function renderManager(){
     if(l.taskId==='BREAK'){
       qtyLabel = '-';
     }else if(l.end){
-      qtyLabel = (l.quantity||0)+esc(t.unit)+(l.breakdown?' <span style="color:var(--slate-500);font-weight:400;">'+breakdownLabel(l.breakdown, t)+'</span>':'');
+      qtyLabel = (l.quantity||0)+esc(t.unit);
     }else if(l.quantity || l.breakdown){
-      qtyLabel = '<span style="color:var(--rust-600);">'+(l.quantity||0)+esc(t.unit)+' (進行中)</span>'+(l.breakdown?' <span style="color:var(--slate-500);font-weight:400;">'+breakdownLabel(l.breakdown, t)+'</span>':'');
+      qtyLabel = '<span style="color:var(--rust-600);">'+(l.quantity||0)+esc(t.unit)+' (進行中)</span>';
     }else{
       qtyLabel = '-';
     }
-    var subTimeStr = subTimeLabel(l);
-    if(subTimeStr) qtyLabel += subTimeStr;
+    var detailHtml = breakdownDetailRows(l, t);
     var stopBtn = l.end ? '' : '<button class="log-stop-btn" data-stop-log="'+l.id+'">■ ストップ</button>';
     return '<tr>'+
       '<td>'+esc(s.name)+'</td>'+
       '<td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td>'+
       '<td class="num">'+fmtClock(l.start)+'</td>'+
       '<td class="num">'+endLabel+'</td>'+
-      '<td class="num">'+qtyLabel+'</td>'+
+      '<td class="num">'+qtyLabel+detailHtml+'</td>'+
       '<td class="num">'+stopBtn+'<button class="log-edit-btn" data-edit-log="'+l.id+'">編集</button></td>'+
     '</tr>';
   }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この日の記録はまだありません</td></tr>';
@@ -1885,7 +1905,8 @@ function renderManager(){
     achievementPanel+
     '<div class="panel" style="margin-top:20px;">'+
       '<div class="panel-title">作業実績(この日の記録) <span class="count-badge">'+logsSorted.length+'件</span></div>'+
-      '<div class="pool-hint" style="margin-bottom:10px;">パートさんが入力した内容に誤りがあれば「編集」から修正できます。</div>'+
+      '<div class="pool-hint" style="margin-bottom:10px;">パートさんが入力した内容に誤りがあれば「編集」から修正できます。パートさんが入力し忘れた実績は「+ 実績を手動で追加」から入力できます。</div>'+
+      '<button class="add-btn" id="openAddLogBtn" style="margin-bottom:12px;">+ 実績を手動で追加</button>'+
       '<table class="report-table"><thead><tr><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>件数</th><th></th></tr></thead><tbody>'+logRows+'</tbody></table>'+
     '</div>'+
   '</div>';
@@ -2145,6 +2166,8 @@ function bindManager(){
       stopLogAsManager(logId);
     });
   });
+  var openAddLogBtn = document.getElementById('openAddLogBtn');
+  if(openAddLogBtn) openAddLogBtn.addEventListener('click', openAddLogModal);
 
   var shiftEnabledInput = document.getElementById('shiftEnabledInput');
   var shiftStartInput = document.getElementById('shiftStartInput');
@@ -3557,6 +3580,61 @@ async function stopLogAsManager(logId){
   render();
   showToast('「'+t.name+'」('+staffById(log.staffId).name+')を停止しました。件数の修正は「編集」から行えます。');
 }
+function openAddLogModal(){
+  var day = managerActiveDay();
+  var present = presentStaffForDay(day);
+  var tasks = tasksForDate(managerActiveDate());
+  var defaultStaff = present[0] ? present[0].id : (activeRoster()[0] ? activeRoster()[0].id : '');
+  var defaultTask = tasks[0] ? tasks[0].id : '';
+  state.modal = { kind:'addLog', staffId: defaultStaff, taskId: defaultTask, startTime:'09:00', endTime:'10:00' };
+  state.suppressRender = true;
+  render();
+}
+async function saveAddLog(){
+  var m = state.modal;
+  var staffSelect = document.getElementById('addLogStaffSelect');
+  var taskSelect = document.getElementById('addLogTaskSelect');
+  var startInput = document.getElementById('addLogStartTime');
+  var endInput = document.getElementById('addLogEndTime');
+  var staffId = staffSelect ? staffSelect.value : '';
+  var taskId = taskSelect ? taskSelect.value : '';
+  if(!staffId){ if(staffSelect) staffSelect.style.borderColor='#C1521F'; return; }
+  if(!taskId){ if(taskSelect) taskSelect.style.borderColor='#C1521F'; return; }
+  var dateStr = managerActiveDate();
+  var start = localDateTimeToISO(dateStr, (startInput&&startInput.value) || '09:00');
+  var endVal = endInput ? endInput.value : '';
+  var end = endVal ? localDateTimeToISO(dateStr, endVal) : null;
+  var task = taskById(taskId);
+  var hasSubcats = task.subcategories && task.subcategories.length;
+  var quantity = null, breakdown = null;
+  if(end){
+    if(hasSubcats){
+      var subcatObjs = task.subcategories.map(function(sc){ return subcatName(sc); });
+      breakdown = {};
+      var total = 0;
+      subcatObjs.forEach(function(name, idx){
+        var input = document.getElementById('addLogBreakdown-'+idx);
+        var v = input ? parseInt(input.value,10) : 0;
+        if(isNaN(v)) v = 0;
+        breakdown[name] = v;
+        total += v;
+      });
+      quantity = total;
+    }else{
+      var qtyInput = document.getElementById('addLogQty');
+      var q = qtyInput ? parseInt(qtyInput.value,10) : 0;
+      quantity = isNaN(q) ? 0 : q;
+    }
+  }
+  var day = managerActiveDay();
+  var entry = { id: uid(), staffId: staffId, taskId: taskId, start: start, end: end, quantity: quantity };
+  if(breakdown) entry.breakdown = breakdown;
+  day.logs.push(entry);
+  state.modal = null;
+  state.suppressRender = false;
+  await saveDay(day);
+  render();
+}
 function openEditLogModal(log){
   var task = taskById(log.taskId);
   var hasSubcats = task.subcategories && task.subcategories.length;
@@ -3843,6 +3921,7 @@ function renderModal(){
   if(m.kind==='editTask') return renderEditTaskModal(m);
   if(m.kind==='editTemplate') return renderEditTemplateModal(m);
   if(m.kind==='qtyBreakdown') return renderQtyBreakdownModal(m);
+  if(m.kind==='addLog') return renderAddLogModal(m);
   if(m.kind!=='qty') return '';
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card">'+
@@ -3929,6 +4008,79 @@ function renderEditLogModal(m){
     '</div>'+
   '</div>';
 }
+function renderAddLogModal(m){
+  var day = managerActiveDay();
+  var present = presentStaffForDay(day);
+  var staffOptions = present.map(function(s){
+    return '<option value="'+s.id+'" '+(s.id===m.staffId?'selected':'')+'>'+esc(s.name)+'</option>';
+  }).join('') || '<option value="">出勤中のスタッフがいません</option>';
+  var tasks = tasksForDate(managerActiveDate());
+  var taskOptions = tasks.map(function(t){
+    return '<option value="'+t.id+'" '+(t.id===m.taskId?'selected':'')+'>'+esc(t.name)+'</option>';
+  }).join('') || '<option value="">この日の作業がありません</option>';
+  var task = taskById(m.taskId);
+  var hasSubcats = task.subcategories && task.subcategories.length;
+  var qtySection;
+  if(hasSubcats){
+    var subcatObjs = task.subcategories.map(function(sc){ return { name: subcatName(sc), unit: subcatUnit(sc, task.unit) }; });
+    var rows = subcatObjs.map(function(sc, idx){
+      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;">'+
+        '<label style="font-size:13px;color:var(--ink-900);">'+esc(sc.name)+' <span style="color:var(--slate-500);font-weight:400;">('+esc(sc.unit)+')</span></label>'+
+        '<input type="number" id="addLogBreakdown-'+idx+'" value="0" min="0" style="width:100px;border:2px solid var(--paper-line);border-radius:10px;padding:8px;font-size:14px;text-align:right;">'+
+      '</div>';
+    }).join('');
+    qtySection = '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:6px;">内訳</label>'+rows;
+  }else{
+    qtySection = '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">件数</label>'+
+      '<input type="number" id="addLogQty" value="0" min="0" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">';
+  }
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card" style="max-width:400px;text-align:left;">'+
+      '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">実績を手動で追加('+esc(dateLabelFromStr(managerActiveDate()))+')</div>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">スタッフ</label>'+
+      '<select id="addLogStaffSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+staffOptions+'</select>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業</label>'+
+      '<select id="addLogTaskSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+taskOptions+'</select>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">開始時刻</label>'+
+      '<input type="time" id="addLogStartTime" value="'+m.startTime+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">終了時刻(空欄=作業中として登録)</label>'+
+      '<input type="time" id="addLogEndTime" value="'+m.endTime+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
+      qtySection+
+      '<div class="modal-actions" style="margin-top:8px;">'+
+        '<button class="modal-cancel" id="addLogCancelBtn">キャンセル</button>'+
+        '<button class="modal-confirm" id="addLogSaveBtn">追加</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+function bindAddLogModal(m){
+  var cancelBtn = document.getElementById('addLogCancelBtn');
+  if(cancelBtn) cancelBtn.addEventListener('click', function(){
+    state.modal = null;
+    state.suppressRender = false;
+    render();
+  });
+  var staffSelect = document.getElementById('addLogStaffSelect');
+  if(staffSelect) staffSelect.addEventListener('change', function(){ m.staffId = staffSelect.value; });
+  var taskSelect = document.getElementById('addLogTaskSelect');
+  if(taskSelect) taskSelect.addEventListener('change', function(){
+    m.taskId = taskSelect.value;
+    render();
+  });
+  var startInput = document.getElementById('addLogStartTime');
+  var endInput = document.getElementById('addLogEndTime');
+  [startInput, endInput].forEach(function(el){
+    if(!el) return;
+    el.addEventListener('focusin', function(){ state.suppressRender = true; });
+    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+    el.addEventListener('change', function(){
+      if(el===startInput) m.startTime = startInput.value;
+      if(el===endInput) m.endTime = endInput.value;
+    });
+  });
+  var saveBtn = document.getElementById('addLogSaveBtn');
+  if(saveBtn) saveBtn.addEventListener('click', saveAddLog);
+}
 function editFieldSwatches(colorState, dataAttr){
   return TASK_COLORS.map(function(c){
     return '<div class="swatch '+(colorState===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-'+dataAttr+'="'+c.hex+'"></div>';
@@ -3997,6 +4149,7 @@ function bindModal(){
   if(m.kind==='editTask'){ bindEditTaskModal(m); return; }
   if(m.kind==='editTemplate'){ bindEditTemplateModal(m); return; }
   if(m.kind==='qtyBreakdown'){ bindQtyBreakdownModal(m); return; }
+  if(m.kind==='addLog'){ bindAddLogModal(m); return; }
   document.querySelectorAll('[data-qty-delta]').forEach(function(el){
     el.addEventListener('click', function(){
       var d = parseInt(el.getAttribute('data-qty-delta'),10);

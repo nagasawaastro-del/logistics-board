@@ -467,7 +467,7 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .task-tile{
   position:relative;border-radius:18px;padding:26px 22px;min-height:150px;display:flex;flex-direction:column;
   justify-content:space-between;border:3px solid transparent;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.07);
-  transition:transform .1s;-webkit-user-select:none;user-select:none;
+  transition:transform .1s;-webkit-user-select:none;user-select:none;cursor:pointer;
 }
 .task-tile:active{transform:scale(.96);}
 .task-tile.active-task{border-color:var(--amber-500);background:#FFF9EE;box-shadow:0 2px 8px rgba(242,169,59,.25);}
@@ -478,6 +478,18 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .status-dot.working{background:var(--green-500);animation:pulse 1.6s infinite;}
 .status-dot.idle{background:var(--slate-300);}
 .task-tile-timer{font-family:var(--font-mono);font-size:28px;font-weight:700;color:var(--rust-600);margin-top:6px;}
+.task-tile-live-counters{margin-top:12px;padding-top:12px;border-top:1px dashed var(--amber-500);}
+.task-tile-live-title{font-size:11px;font-weight:700;color:var(--rust-600);margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em;}
+.live-count-row{padding:6px 0;}
+.sub-timer-row{display:flex;align-items:center;gap:8px;margin:4px 0 6px;}
+.sub-timer-btn{
+  font-size:11px;font-weight:700;padding:5px 10px;border-radius:10px;border:1px solid var(--paper-line);
+  background:#fff;color:var(--slate-500);
+}
+.sub-timer-btn.active{background:var(--rust-600);border-color:var(--rust-600);color:#fff;}
+.sub-timer-display{font-family:var(--font-mono);font-size:13px;color:var(--slate-500);}
+.sub-timer-display.active{color:var(--rust-600);font-weight:700;}
+.live-count-row .qty-break-label{font-size:13px;}
 .task-tile-coworkers{display:flex;flex-wrap:wrap;gap:5px;margin-top:12px;padding-top:12px;border-top:1px dashed var(--paper-line);}
 .coworker-chip{font-size:11px;font-weight:600;padding:3px 9px;border-radius:12px;background:var(--paper-100);color:var(--slate-500);white-space:nowrap;}
 .coworker-chip.coworker-working{background:#E6F7EE;color:#2A8F63;}
@@ -669,6 +681,15 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-22', items:[
+    '内訳ごとに作業時間も計測できるように追加。各内訳に「▶ 計測開始/■ 計測終了」ボタンが付き、件数と同時に内訳ごとの実働時間も記録できるように(1つの作業内で同時に計測できるのは1つの内訳のみ)',
+    '休憩・終業時間による自動中断が起きても、それまでに記録した件数・内訳・計測時間が失われず引き継がれるように修正',
+    '管理者画面の「作業実績」一覧に、内訳ごとの計測時間も表示するように変更'
+  ]},
+  { date:'2026-08-22', items:[
+    '内訳がある作業では、作業を切り替えるタイミングだけでなく、作業中いつでも内訳ごとに件数を+1/-1で記録できるように変更。作業を切り替える際の確認画面には、作業中に記録した件数がそのまま引き継がれるように',
+    '管理者画面の「作業実績」一覧で、作業中(未終了)の記録にも入力済みの件数を表示するように変更(進行中の件数として表示)'
+  ]},
   { date:'2026-08-22', items:[
     '不具合修正: 出退勤・休憩の自動設定にある時間入力欄で、入力中に自動更新が重なると時刻が消えてしまうことがあった問題を修正',
     '作業実績入力画面(パートさんの画面)で、各作業タイルに同じ作業に割り当てられている他のスタッフの名前と状況(作業中・休憩中・別作業中・待機中)を表示するように変更'
@@ -885,6 +906,12 @@ function breakdownLabel(breakdown, task){
   if(!keys.length) return '';
   var unitMap = subcatUnitMap(task);
   return '('+keys.map(function(k){ return esc(k)+' '+breakdown[k]+esc(unitMap[k]||task.unit); }).join(' / ')+')';
+}
+function subTimeLabel(subTimes){
+  if(!subTimes) return '';
+  var keys = Object.keys(subTimes).filter(function(k){ return subTimes[k]>0; });
+  if(!keys.length) return '';
+  return '<div style="font-size:11px;color:var(--slate-400);margin-top:2px;">⏱ '+keys.map(function(k){ return esc(k)+' '+fmtHM(subTimes[k]); }).join(' / ')+'</div>';
 }
 function subcatDraftRef(context){
   if(context==='reg') return { get:function(){ return state.regSubcatDraft; }, set:function(v){ state.regSubcatDraft=v; } };
@@ -1749,7 +1776,18 @@ function renderManager(){
     var s = staffById(l.staffId);
     var t = taskById(l.taskId);
     var endLabel = l.end ? fmtClock(l.end) : '<span style="color:var(--green-500);font-weight:700;">作業中</span>';
-    var qtyLabel = l.taskId==='BREAK' ? '-' : (l.end ? (l.quantity||0)+esc(t.unit)+(l.breakdown?' <span style="color:var(--slate-500);font-weight:400;">'+breakdownLabel(l.breakdown, t)+'</span>':'') : '-');
+    var qtyLabel;
+    if(l.taskId==='BREAK'){
+      qtyLabel = '-';
+    }else if(l.end){
+      qtyLabel = (l.quantity||0)+esc(t.unit)+(l.breakdown?' <span style="color:var(--slate-500);font-weight:400;">'+breakdownLabel(l.breakdown, t)+'</span>':'');
+    }else if(l.quantity || l.breakdown){
+      qtyLabel = '<span style="color:var(--rust-600);">'+(l.quantity||0)+esc(t.unit)+' (進行中)</span>'+(l.breakdown?' <span style="color:var(--slate-500);font-weight:400;">'+breakdownLabel(l.breakdown, t)+'</span>':'');
+    }else{
+      qtyLabel = '-';
+    }
+    var subTimeStr = subTimeLabel(l.subTimes);
+    if(subTimeStr) qtyLabel += subTimeStr;
     return '<tr>'+
       '<td>'+esc(s.name)+'</td>'+
       '<td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td>'+
@@ -3163,14 +3201,39 @@ function renderInput(){
           return '<span class="coworker-chip coworker-'+c.statusClass+'">'+esc(c.name)+' '+esc(c.statusLabel)+'</span>';
         }).join('')+
       '</div>' : '';
-      return '<button class="task-tile '+(isActive?'active-task':'')+'" data-tap-task="'+tid+'" style="border-left:6px solid '+t.color+'">'+
+      var liveCountersHtml = '';
+      if(isActive && t.subcategories && t.subcategories.length){
+        var subcatObjs = t.subcategories.map(function(sc){ return { name: subcatName(sc), unit: subcatUnit(sc, t.unit) }; });
+        var liveRows = subcatObjs.map(function(sc){
+          var v = (log.breakdown && log.breakdown[sc.name]) || 0;
+          var subAccum = (log.subTimes && log.subTimes[sc.name]) || 0;
+          var subActive = log.activeSubcat === sc.name;
+          var timerAttrs = subActive ? ' data-live-subtimer-start="'+log.activeSubcatStart+'" data-live-subtimer-base="'+subAccum+'"' : '';
+          var timerText = subActive ? fmtElapsed(subAccum + (Date.now()-new Date(log.activeSubcatStart).getTime())) : fmtElapsed(subAccum);
+          return '<div class="qty-break-row live-count-row">'+
+            '<div class="qty-break-label">'+esc(sc.name)+' <span style="font-weight:400;color:var(--slate-500);">('+esc(sc.unit)+')</span></div>'+
+            '<div class="sub-timer-row">'+
+              '<button type="button" class="sub-timer-btn '+(subActive?'active':'')+'" data-sub-timer="'+esc(tid)+'|'+esc(sc.name)+'">'+(subActive?'■ 計測終了':'▶ 計測開始')+'</button>'+
+              '<span class="sub-timer-display'+(subActive?' active':'')+'"'+timerAttrs+'>'+timerText+'</span>'+
+            '</div>'+
+            '<div class="qty-break-controls">'+
+              '<button type="button" class="qty-btn qty-btn-sm" data-live-count="'+esc(tid)+'|'+esc(sc.name)+'|-1">-1</button>'+
+              '<div class="qty-break-value" data-live-count-val="'+esc(tid)+'|'+esc(sc.name)+'">'+v+'</div>'+
+              '<button type="button" class="qty-btn qty-btn-sm" data-live-count="'+esc(tid)+'|'+esc(sc.name)+'|1">+1</button>'+
+            '</div>'+
+          '</div>';
+        }).join('');
+        liveCountersHtml = '<div class="task-tile-live-counters"><div class="task-tile-live-title">作業中に件数・時間を記録</div>'+liveRows+'</div>';
+      }
+      return '<div class="task-tile '+(isActive?'active-task':'')+'" data-tap-task="'+tid+'" style="border-left:6px solid '+t.color+'">'+
         '<div><div class="task-tile-name">'+esc(t.name)+'</div><div class="task-tile-unit">単位: '+esc(t.unit)+'</div></div>'+
         '<div>'+
           '<div class="task-tile-status"><span class="status-dot '+(isActive?'working':'idle')+'"></span>'+(isActive?'作業中':'タップして開始')+'</div>'+
           (isActive ? '<div class="task-tile-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsed)+'</div>' : '')+
         '</div>'+
+        liveCountersHtml+
         coworkerHtml+
-      '</button>';
+      '</div>';
     }).join('');
     body = '<div class="task-tile-grid">'+tiles+'</div>';
   }
@@ -3242,6 +3305,22 @@ function bindInput(){
       openQuantityModal(tid, false);
     });
   });
+  document.querySelectorAll('[data-live-count]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      var parts = el.getAttribute('data-live-count').split('|');
+      var tid = parts[0], scName = parts[1], delta = parseInt(parts[2],10);
+      liveCountAdjust(tid, scName, delta);
+    });
+  });
+  document.querySelectorAll('[data-sub-timer]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      var parts = el.getAttribute('data-sub-timer').split('|');
+      var tid = parts[0], scName = parts[1];
+      toggleSubTimer(tid, scName);
+    });
+  });
   var endDayBtn = document.getElementById('endDayBtn');
   if(endDayBtn) endDayBtn.addEventListener('click', function(){
     var log = currentLog(state.activeStaffId);
@@ -3269,6 +3348,36 @@ async function endBreakAndStart(taskId){
   await saveDay(state.day);
   await startTask(taskId);
 }
+async function liveCountAdjust(taskId, subcatName, delta){
+  var log = currentLog(state.activeStaffId);
+  if(!log || log.taskId!==taskId) return;
+  if(!log.breakdown) log.breakdown = {};
+  log.breakdown[subcatName] = Math.max(0, (log.breakdown[subcatName]||0) + delta);
+  log.quantity = Object.keys(log.breakdown).reduce(function(a,k){ return a+(log.breakdown[k]||0); }, 0);
+  await saveDay(state.day);
+  render();
+}
+function finalizeActiveSubTimer(log){
+  if(!log || !log.activeSubcat || !log.activeSubcatStart) return;
+  if(!log.subTimes) log.subTimes = {};
+  var start = new Date(log.activeSubcatStart).getTime();
+  log.subTimes[log.activeSubcat] = (log.subTimes[log.activeSubcat]||0) + Math.max(0, Date.now()-start);
+  log.activeSubcat = null;
+  log.activeSubcatStart = null;
+}
+async function toggleSubTimer(taskId, subcatName){
+  var log = currentLog(state.activeStaffId);
+  if(!log || log.taskId!==taskId) return;
+  if(log.activeSubcat === subcatName){
+    finalizeActiveSubTimer(log);
+  }else{
+    finalizeActiveSubTimer(log);
+    log.activeSubcat = subcatName;
+    log.activeSubcatStart = new Date().toISOString();
+  }
+  await saveDay(state.day);
+  render();
+}
 function openQuantityModal(nextTaskId, isEndDay){
   var log = currentLog(state.activeStaffId);
   state.suppressRender = true;
@@ -3277,7 +3386,7 @@ function openQuantityModal(nextTaskId, isEndDay){
     if(t.subcategories && t.subcategories.length){
       var subcatObjs = t.subcategories.map(function(sc){ return { name: subcatName(sc), unit: subcatUnit(sc, t.unit) }; });
       var values = {};
-      subcatObjs.forEach(function(sc){ values[sc.name] = 0; });
+      subcatObjs.forEach(function(sc){ values[sc.name] = (log.breakdown && log.breakdown[sc.name]) || 0; });
       state.modal = {kind:'qtyBreakdown', closingTaskId: log.taskId, closingTaskName: t.name, closingUnit: t.unit, subcategories: subcatObjs, values: values, nextTaskId: nextTaskId, isEndDay: isEndDay};
     }else{
       state.modal = {kind:'qty', closingTaskId: log.taskId, closingTaskName: t.name, closingUnit: t.unit, value:0, nextTaskId: nextTaskId, isEndDay: isEndDay};
@@ -3306,9 +3415,9 @@ async function checkAutoBreak(){
     var log = currentLog(s.id);
     if(inBreak){
       if(log && log.taskId!=='BREAK'){
+        finalizeActiveSubTimer(log);
         log.end = new Date().toISOString();
-        log.quantity = 0;
-        delete log.breakdown;
+        if(log.quantity==null && !log.breakdown) log.quantity = 0;
         state.day.logs.push({id:uid(), staffId:s.id, taskId:'BREAK', start:new Date().toISOString(), end:null, quantity:null});
         changed = true;
       }
@@ -3354,12 +3463,12 @@ async function checkAutoShift(){
       changed = true;
       var log = currentLog(s.id);
       if(log && log.end===null){
+        finalizeActiveSubTimer(log);
         log.end = new Date().toISOString();
         if(log.taskId==='BREAK'){
           log.quantity = null;
-        }else{
+        }else if(log.quantity==null && !log.breakdown){
           log.quantity = 0;
-          delete log.breakdown;
         }
       }
     }
@@ -3372,6 +3481,7 @@ async function closeLogAndProceed(qty, breakdown){
   var m = state.modal;
   var log = state.day.logs.find(function(l){ return l.staffId===state.activeStaffId && l.taskId===m.closingTaskId && l.end===null; });
   if(log){
+    finalizeActiveSubTimer(log);
     log.end = new Date().toISOString();
     log.quantity = qty;
     if(breakdown){ log.breakdown = breakdown; } else { delete log.breakdown; }
@@ -3911,6 +4021,11 @@ function startTicker(){
     document.querySelectorAll('[data-live-timer]').forEach(function(el){
       var start = new Date(el.getAttribute('data-live-timer')).getTime();
       el.textContent = fmtElapsed(Date.now()-start);
+    });
+    document.querySelectorAll('[data-live-subtimer-start]').forEach(function(el){
+      var base = parseInt(el.getAttribute('data-live-subtimer-base'),10) || 0;
+      var start = new Date(el.getAttribute('data-live-subtimer-start')).getTime();
+      el.textContent = fmtElapsed(base + (Date.now()-start));
     });
     var clockEl = document.getElementById('monClock');
     if(clockEl){

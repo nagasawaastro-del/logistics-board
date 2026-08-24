@@ -152,7 +152,7 @@ input,select{font-family:inherit;}
 .date-nav-today-btn:hover{background:var(--ink-700);}
 .log-edit-btn{background:var(--paper-100);border:1px solid var(--paper-line);border-radius:14px;padding:5px 14px;font-size:12px;font-weight:600;color:var(--ink-900);}
 .log-stop-btn{background:#FDEEF2;border:1px solid #D6577E;border-radius:14px;padding:5px 12px;font-size:12px;font-weight:700;color:#B33C63;margin-right:6px;}
-.breakdown-detail-list{margin-top:6px;text-align:left;display:inline-block;}
+.breakdown-detail-list{margin-top:6px;text-align:left;display:block;}
 .breakdown-detail-row{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--slate-500);padding:2px 0;}
 .breakdown-detail-name{font-weight:600;color:var(--ink-900);min-width:64px;}
 .breakdown-detail-qty{font-family:var(--font-mono);min-width:48px;text-align:right;}
@@ -699,6 +699,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-23', items:[
+    '不具合修正: 集計画面・作業実績一覧の内訳表示が、合計件数の数字と横並びに重なって表示崩れすることがあった問題を修正。内訳は常に合計の下に改行して表示されるように'
+  ]},
   { date:'2026-08-23', items:[
     '集計画面(日別・期間別)の「作業別」テーブルで、内訳(ピッキング・梱包など)の件数を1行ずつ分けて見やすく表示するように変更。CSVダウンロードにも内訳の列を追加'
   ]},

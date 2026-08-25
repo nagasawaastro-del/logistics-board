@@ -700,6 +700,12 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-23', items:[
+    '重要な不具合修正: 通信の一時的な失敗(自動更新のタイミングで発生することがある)が起きた際、作業一覧やスタッフ一覧、本日の記録が一時的に空の状態として扱われ、その直後に何か保存すると実際のデータが消えてしまう可能性があった問題を修正。通信エラー時は直前の内容を保持し、空のデータで上書きしないように変更。すでに「(削除済み)」と表示されてしまっている記録は、恐れ入りますが元のデータが失われている可能性があるため、この修正では復元されません'
+  ]},
+  { date:'2026-08-23', items:[
+    '内訳(単位が異なる場合がある)を持つ作業について、単位の異なる数値を単純合算した「合計件数」の表示をやめ、内訳ごとの件数のみを表示するように変更。対象: 管理者の作業実績一覧、集計画面の作業別テーブル、作業切替時の内訳入力確認画面'
+  ]},
+  { date:'2026-08-23', items:[
     '不具合修正: 集計画面・作業実績一覧の内訳表示が、合計件数の数字と横並びに重なって表示崩れすることがあった問題を修正。内訳は常に合計の下に改行して表示されるように'
   ]},
   { date:'2026-08-23', items:[
@@ -1121,11 +1127,12 @@ var pendingSaves = 0;
 function storageAvailable(){
   return !!(window.storage && typeof window.storage.get==='function' && typeof window.storage.set==='function');
 }
+async function fetchRosterRaw(){
+  var r = await window.storage.get('roster', true);
+  return r ? JSON.parse(r.value) : [];
+}
 async function loadRoster(){
-  try{
-    var r = await window.storage.get('roster', true);
-    return r ? JSON.parse(r.value) : [];
-  }catch(e){ return []; }
+  try{ return await fetchRosterRaw(); }catch(e){ return []; }
 }
 async function saveRoster(list){
   state.roster = list;
@@ -1133,11 +1140,12 @@ async function saveRoster(list){
   try{ await window.storage.set('roster', JSON.stringify(list), true); }catch(e){}
   finally{ pendingSaves--; }
 }
+async function fetchBacklogRaw(){
+  var r = await window.storage.get('task-backlog', true);
+  return r ? JSON.parse(r.value) : [];
+}
 async function loadBacklog(){
-  try{
-    var r = await window.storage.get('task-backlog', true);
-    return r ? JSON.parse(r.value) : [];
-  }catch(e){ return []; }
+  try{ return await fetchBacklogRaw(); }catch(e){ return []; }
 }
 async function saveBacklog(list){
   state.backlog = list;
@@ -1145,11 +1153,12 @@ async function saveBacklog(list){
   try{ await window.storage.set('task-backlog', JSON.stringify(list), true); }catch(e){}
   finally{ pendingSaves--; }
 }
+async function fetchTemplatesRaw(){
+  var r = await window.storage.get('task-templates', true);
+  return r ? JSON.parse(r.value) : [];
+}
 async function loadTemplates(){
-  try{
-    var r = await window.storage.get('task-templates', true);
-    return r ? JSON.parse(r.value) : [];
-  }catch(e){ return []; }
+  try{ return await fetchTemplatesRaw(); }catch(e){ return []; }
 }
 async function saveTemplates(list){
   state.templates = list;
@@ -1855,12 +1864,15 @@ function renderManager(){
     var s = staffById(l.staffId);
     var t = taskById(l.taskId);
     var endLabel = l.end ? fmtClock(l.end) : '<span style="color:var(--green-500);font-weight:700;">作業中</span>';
+    var hasSubcats = t.subcategories && t.subcategories.length;
     var qtyLabel;
     if(l.taskId==='BREAK'){
       qtyLabel = '-';
+    }else if(hasSubcats){
+      qtyLabel = l.end ? '' : '<span style="color:var(--rust-600);font-size:12px;font-weight:700;">進行中</span>';
     }else if(l.end){
       qtyLabel = (l.quantity||0)+esc(t.unit);
-    }else if(l.quantity || l.breakdown){
+    }else if(l.quantity){
       qtyLabel = '<span style="color:var(--rust-600);">'+(l.quantity||0)+esc(t.unit)+' (進行中)</span>';
     }else{
       qtyLabel = '-';
@@ -3136,8 +3148,10 @@ function renderReportSingleBody(){
   var taskRows = taskIds.map(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
+    var hasSubcats = t.subcategories && t.subcategories.length;
     var bdRows = taskBreakdownRows(info, t);
-    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+bdRows+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
+    var qtyCell = hasSubcats ? '' : (info.qty+esc(t.unit));
+    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+qtyCell+bdRows+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
   return '<div class="panel-title">'+esc(dateLabelFromStr(state.reportDate))+' の集計 <button class="csv-export-btn" id="csvExportSingle">CSVダウンロード</button></div>'+
@@ -3169,8 +3183,10 @@ function renderReportRangeBody(){
   var taskRows = taskIds.map(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
+    var hasSubcats = t.subcategories && t.subcategories.length;
     var bdRows = taskBreakdownRows(info, t);
-    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+info.qty+esc(t.unit)+bdRows+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
+    var qtyCell = hasSubcats ? '' : (info.qty+esc(t.unit));
+    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+qtyCell+bdRows+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
   return '<div class="panel-title">'+esc(dateLabelFromStr(result.start))+' 〜 '+esc(dateLabelFromStr(result.end))+' の合計 <button class="csv-export-btn" id="csvExportRange">CSVダウンロード</button></div>'+
@@ -4016,13 +4032,13 @@ function renderQtyBreakdownModal(m){
   }).join('');
   var total = m.subcategories.reduce(function(a,sc){ return a+(m.values[sc.name]||0); },0);
   var allSameUnit = m.subcategories.length && m.subcategories.every(function(sc){ return sc.unit===m.subcategories[0].unit; });
-  var totalUnitLabel = allSameUnit ? esc(m.subcategories[0].unit) : '';
+  var totalLine = allSameUnit ? '<div class="qty-break-total">合計 <b id="qtybTotal">'+total+'</b>'+esc(m.subcategories[0].unit)+'</div>' : '';
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" style="max-width:440px;">'+
       '<div class="modal-task-name">'+esc(m.closingTaskName)+'</div>'+
       '<div class="modal-q">内訳ごとに何個できましたか?</div>'+
       '<div class="qty-break-list">'+rows+'</div>'+
-      '<div class="qty-break-total">合計 <b id="qtybTotal">'+total+'</b>'+totalUnitLabel+'</div>'+
+      totalLine+
       '<div class="modal-actions">'+
         '<button class="modal-cancel" id="qtyCancel">キャンセル</button>'+
         '<button class="modal-confirm" id="qtyConfirmBreakdown">確定'+(m.nextTaskId?'して次へ':'')+'</button>'+
@@ -4435,9 +4451,10 @@ function startPolling(){
     var oldRoster = state.roster;
     var oldBacklog = state.backlog;
     var oldDay = state.day;
-    var roster = await loadRoster();
-    var backlog = await loadBacklog();
-    var templates = await loadTemplates();
+    var roster = state.roster, backlog = state.backlog, templates = state.templates;
+    try{ roster = await fetchRosterRaw(); }catch(e){}
+    try{ backlog = await fetchBacklogRaw(); }catch(e){}
+    try{ templates = await fetchTemplatesRaw(); }catch(e){}
     var breakSettings = await loadBreakSettings();
     var shiftSettings = await loadShiftSettings();
     var achievementSettings = await loadAchievementSettings();
@@ -4449,7 +4466,16 @@ function startPolling(){
     state.shiftSettings = shiftSettings;
     state.achievementSettings = achievementSettings;
     await ensureTemplateTasksForToday();
-    var day = await loadDay();
+    var day;
+    if(state.day && state.day.date===todayStr()){
+      day = state.day;
+      try{
+        var r = await window.storage.get('day:'+todayStr(), true);
+        if(r && r.value) day = JSON.parse(r.value);
+      }catch(e){ /* keep existing day data on transient fetch failure */ }
+    }else{
+      day = await loadDay();
+    }
     if(pendingSaves>0) return;
     state.day = day;
     notifyChanges(oldRoster, oldBacklog, oldDay, state.roster, state.backlog, state.day);

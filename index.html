@@ -722,6 +722,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-23', items:[
+    '不具合修正(前回の安全対策の副作用): 本日より先の、まだ一度も触っていない日付を管理者画面で開くと、データが存在しないだけなのに「読み込みに失敗しました」というエラー画面が表示されてしまっていた問題を修正。「データが元から存在しない」場合と「本当の通信エラー」を区別するように変更し、未来日の閲覧は通常通りすぐに開けるように'
+  ]},
+  { date:'2026-08-23', items:[
     '安全対策を追加: 今まさに計測中(作業中)の作業が、何らかの理由で作業一覧の保存データから失われそうになった場合、自動的にその作業データを保護して保存するように変更。原因を問わず、進行中の作業が「削除済み」になることを防ぐ最終防波堤として機能します'
   ]},
   { date:'2026-08-23', items:[
@@ -1339,9 +1342,14 @@ function freshDay(dateStr){
   return { date: dateStr, attendance: attendance, assignments:{}, logs:[] };
 }
 async function fetchDayRaw(dateStr){
-  var r = await window.storage.get('day:'+dateStr, true);
-  if(r && r.value) return JSON.parse(r.value);
-  return null;
+  try{
+    var r = await window.storage.get('day:'+dateStr, true);
+    return r && r.value ? JSON.parse(r.value) : null;
+  }catch(e){
+    var msg = (e && e.message) ? String(e.message).toLowerCase() : '';
+    if(msg.indexOf('not found')!==-1 || msg.indexOf('does not exist')!==-1 || msg.indexOf('no such key')!==-1) return null;
+    throw e;
+  }
 }
 async function loadDayByDate(dateStr){
   try{

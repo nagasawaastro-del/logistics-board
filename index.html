@@ -624,6 +624,22 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .mon-task-name{font-family:var(--font-display);font-weight:600;font-size:15px;color:#fff;margin-bottom:8px;}
 .mon-task-stats{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:12px;color:var(--slate-300);}
 .mon-task-stats b{color:var(--amber-500);font-size:14px;}
+
+.mon-footer{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:2px solid var(--ink-700);}
+@media (max-width:900px){.mon-footer{grid-template-columns:1fr;}}
+.mon-footer-col{padding:22px 26px;}
+.mon-footer-col:first-child{border-right:2px solid var(--ink-700);}
+@media (max-width:900px){.mon-footer-col:first-child{border-right:none;border-bottom:2px solid var(--ink-700);}}
+.mon-footer-title{font-family:var(--font-display);font-weight:700;font-size:15px;color:#fff;margin-bottom:14px;}
+.mon-footer-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:14px;}
+.mon-footer-stats div{display:flex;flex-direction:column;gap:4px;}
+.mon-footer-stats span{font-size:11px;color:var(--slate-300);}
+.mon-footer-stats b{font-family:var(--font-mono);font-size:22px;color:var(--amber-500);}
+.mon-challenge-nums{font-family:var(--font-mono);font-weight:700;font-size:26px;color:#fff;margin-bottom:10px;}
+.mon-challenge-nums span{font-size:15px;color:var(--slate-300);font-weight:400;}
+.mon-challenge-bar{height:14px;border-radius:7px;background:var(--ink-700);overflow:hidden;margin-bottom:8px;}
+.mon-challenge-fill{height:100%;background:linear-gradient(90deg,var(--amber-500),#FFD782);border-radius:7px;transition:width .4s;}
+.mon-challenge-sub{font-size:13px;font-weight:600;color:var(--amber-500);}
 </style>
 </head>
 <body>
@@ -705,6 +721,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-23', items:[
+    'モニター画面の下部に「本日の実績(出荷/入庫の件数・個数)」と「今月のチームチャレンジ」を追加。空いていたスペースを活用し、常時表示のモニターでもチームの実績が確認できるように'
+  ]},
   { date:'2026-08-23', items:[
     '重要な不具合修正: 管理者画面で本日以外の日付に切り替える際、通信エラーで読み込みに失敗すると空のデータとして扱われ、その後の操作で本当のデータを上書きしてしまう可能性があった問題を修正。読み込みは自動的に再試行し、それでも失敗した場合は空のデータを表示せず、はっきりとエラー表示+再読み込みボタンを出すように変更',
     '不具合修正: カレンダー画面の「予定人数」が、祝日も休みに設定しているスタッフを考慮せず、祝日でも通常通りの人数を表示していた問題を修正'
@@ -4402,6 +4421,22 @@ function renderMonitor(){
   var now = new Date();
   var clock = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
 
+  var todayB = todaysBuckets();
+  var shipToday = todayB['出荷'] || freshCategoryBucket();
+  var inboundToday = todayB['入庫'] || freshCategoryBucket();
+
+  var challengeHtml;
+  if(state.achievementsResult){
+    var curPieces = shipmentPieces(state.achievementsResult.curBuckets);
+    var target = (state.achievementSettings && state.achievementSettings.monthlyTargetPieces) || 25000;
+    var rate = target>0 ? curPieces/target : 0;
+    challengeHtml = '<div class="mon-challenge-nums">'+formatNum(curPieces)+' <span>/ '+formatNum(target)+'個</span></div>'+
+      '<div class="mon-challenge-bar"><div class="mon-challenge-fill" style="width:'+Math.min(100,rate*100).toFixed(1)+'%"></div></div>'+
+      '<div class="mon-challenge-sub">達成率 '+(rate*100).toFixed(1)+'%</div>';
+  }else{
+    challengeHtml = '<div class="empty-note" style="color:var(--slate-300)">集計中...</div>';
+  }
+
   return '<div class="monitor"><div class="mon-inner">'+
     '<div class="mon-header">'+
       '<div class="mon-title-block"><span class="mon-title">本日の稼働状況</span><span class="mon-date">'+todayLabel()+'</span></div>'+
@@ -4414,9 +4449,28 @@ function renderMonitor(){
       '<div class="mon-staff-list">'+rows+'</div>'+
       '<div class="mon-side"><div class="mon-side-title">作業別サマリー</div>'+sideCards+'</div>'+
     '</div>'+
+    '<div class="mon-footer">'+
+      '<div class="mon-footer-col">'+
+        '<div class="mon-footer-title">📅 本日の実績</div>'+
+        '<div class="mon-footer-stats">'+
+          '<div><span>出荷件数</span><b>'+formatNum(shipToday.count)+'件</b></div>'+
+          '<div><span>出荷個数</span><b>'+formatNum(shipToday.pieces)+'個</b></div>'+
+          '<div><span>入庫件数</span><b>'+formatNum(inboundToday.count)+'件</b></div>'+
+          '<div><span>入庫個数</span><b>'+formatNum(inboundToday.pieces)+'個</b></div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="mon-footer-col">'+
+        '<div class="mon-footer-title">🚚 今月のチームチャレンジ</div>'+
+        challengeHtml+
+      '</div>'+
+    '</div>'+
   '</div></div>';
 }
-function bindMonitor(){}
+function bindMonitor(){
+  if(!state.achievementsResult && !state.achievementsLoading){
+    runAchievementsReport();
+  }
+}
 
 /* ---------- ticking / polling ---------- */
 var tickerHandle = null;

@@ -706,6 +706,10 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-23', items:[
+    '重要な不具合修正: 管理者画面で本日以外の日付に切り替える際、通信エラーで読み込みに失敗すると空のデータとして扱われ、その後の操作で本当のデータを上書きしてしまう可能性があった問題を修正。読み込みは自動的に再試行し、それでも失敗した場合は空のデータを表示せず、はっきりとエラー表示+再読み込みボタンを出すように変更',
+    '不具合修正: カレンダー画面の「予定人数」が、祝日も休みに設定しているスタッフを考慮せず、祝日でも通常通りの人数を表示していた問題を修正'
+  ]},
+  { date:'2026-08-23', items:[
     '管理者画面に、存在しない作業を指したままになっているスタッフの割り当て(以前のデータ消失の影響などで発生)を検知して警告表示する機能を追加。「この不整合な割り当てだけを一括で外す」ボタンで、壊れた割り当てだけをまとめて解除できるように'
   ]},
   { date:'2026-08-23', items:[
@@ -920,6 +924,7 @@ var state = {
   reportError: null,
   managerDate: null,
   managerDay: null,
+  managerDateLoadError: false,
   modal: null,
   suppressRender: false,
   dragStaffId: null
@@ -1286,12 +1291,14 @@ function freshDay(dateStr){
   });
   return { date: dateStr, attendance: attendance, assignments:{}, logs:[] };
 }
+async function fetchDayRaw(dateStr){
+  var r = await window.storage.get('day:'+dateStr, true);
+  if(r && r.value) return JSON.parse(r.value);
+  return null;
+}
 async function loadDayByDate(dateStr){
   try{
-    var r = await window.storage.get('day:'+dateStr, true);
-    if(r && r.value){
-      return JSON.parse(r.value);
-    }
+    return await fetchDayRaw(dateStr);
   }catch(e){}
   return null;
 }
@@ -1345,14 +1352,33 @@ function managerActiveDate(){
 function managerActiveDay(){
   return managerActiveDate()===todayStr() ? state.day : state.managerDay;
 }
+async function loadDayByDateWithRetry(dateStr, retries){
+  for(var i=0;i<=retries;i++){
+    try{
+      return await fetchDayRaw(dateStr);
+    }catch(e){
+      if(i<retries) await new Promise(function(res){ setTimeout(res, 400); });
+    }
+  }
+  throw new Error('day fetch failed after retries');
+}
 async function switchManagerDate(dateStr){
   state.managerDate = dateStr;
+  state.managerDateLoadError = false;
   if(dateStr===todayStr()){
     state.managerDay = null;
     render();
     return;
   }
-  var day = await loadDayByDate(dateStr);
+  var day;
+  try{
+    day = await loadDayByDateWithRetry(dateStr, 2);
+  }catch(e){
+    state.managerDay = null;
+    state.managerDateLoadError = true;
+    render();
+    return;
+  }
   if(!day) day = freshDay(dateStr);
   state.managerDay = day;
   render();
@@ -1382,9 +1408,12 @@ function monthKeyLabel(monthKey){
 }
 function predictedAttendanceCount(dateStr){
   var wd = new Date(dateStr+'T00:00:00').getDay();
+  var holiday = holidayName(dateStr);
   return activeRoster().filter(function(s){
     var pattern = s.pattern || defaultPattern();
-    return !!pattern[wd];
+    if(!pattern[wd]) return false;
+    if(s.offOnHolidays && holiday) return false;
+    return true;
   }).length;
 }
 function actualAttendanceCount(day){
@@ -1789,6 +1818,23 @@ function renderManager(){
   var viewDate = managerActiveDate();
   var day = managerActiveDay();
   var isToday = viewDate===todayStr();
+
+  if(state.managerDateLoadError && !isToday){
+    var errNav = '<div class="date-nav">'+
+      '<button class="date-nav-btn" id="dateNavPrev" title="前の日">&#8592;</button>'+
+      '<input type="date" id="dateNavInput" value="'+viewDate+'" class="date-nav-input">'+
+      '<button class="date-nav-btn" id="dateNavNext" title="次の日">&#8594;</button>'+
+      '<button class="date-nav-today-btn" id="dateNavToday">本日に戻る</button>'+
+    '</div>';
+    return '<div class="mgr-wrap">'+errNav+
+      '<div class="warn-banner warn-banner-danger">'+
+        '⚠️ '+esc(dateLabelFromStr(viewDate))+'のデータの読み込みに失敗しました。通信が不安定な可能性があります。<br>'+
+        '安全のため、この画面は空のデータで上書きしないよう表示を止めています。'+
+        '<button type="button" class="warn-fix-btn" id="retryManagerDateBtn">もう一度読み込む</button>'+
+      '</div>'+
+    '</div>';
+  }
+
   var roster = activeRoster();
   var present = presentStaffForDay(day);
   var tasks = tasksForDate(viewDate).slice().sort(byTaskColor(function(t){ return t.color; }));
@@ -2001,6 +2047,21 @@ function renderTaskForm(){
   '</div>';
 }
 function bindManager(){
+  var retryBtn = document.getElementById('retryManagerDateBtn');
+  if(retryBtn){
+    retryBtn.addEventListener('click', function(){
+      switchManagerDate(state.managerDate);
+    });
+    var errPrevBtn = document.getElementById('dateNavPrev');
+    if(errPrevBtn) errPrevBtn.addEventListener('click', function(){ switchManagerDate(shiftDateStr(managerActiveDate(), -1)); });
+    var errNextBtn = document.getElementById('dateNavNext');
+    if(errNextBtn) errNextBtn.addEventListener('click', function(){ switchManagerDate(shiftDateStr(managerActiveDate(), 1)); });
+    var errTodayBtn = document.getElementById('dateNavToday');
+    if(errTodayBtn) errTodayBtn.addEventListener('click', function(){ switchManagerDate(todayStr()); });
+    var errDateInput = document.getElementById('dateNavInput');
+    if(errDateInput) errDateInput.addEventListener('change', function(){ switchManagerDate(errDateInput.value); });
+    return;
+  }
   document.querySelectorAll('[data-toggle-att]').forEach(function(el){
     el.addEventListener('click', async function(){
       var id = el.getAttribute('data-toggle-att');

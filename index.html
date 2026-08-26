@@ -722,6 +722,12 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-23', items:[
+    '安全対策を追加: 今まさに計測中(作業中)の作業が、何らかの理由で作業一覧の保存データから失われそうになった場合、自動的にその作業データを保護して保存するように変更。原因を問わず、進行中の作業が「削除済み」になることを防ぐ最終防波堤として機能します'
+  ]},
+  { date:'2026-08-23', items:[
+    '不整合な割り当ての修復ボタンを強化。壊れた割り当てを外すだけでなく、対象のスタッフを本日の有効な作業へ自動で割り当て直すように変更(1クリックで、パートさんの実績入力画面が再び使える状態に復旧できるように)'
+  ]},
+  { date:'2026-08-23', items:[
     'モニター画面を、画面の高さぴったりに収まるレイアウトに変更(基本的にスクロールが発生しないように)。ヘッダー・下部の実績表示は固定、中央のスタッフ一覧・作業別サマリーだけが必要に応じて内部スクロールする作りに調整'
   ]},
   { date:'2026-08-23', items:[
@@ -1187,6 +1193,25 @@ async function loadBacklog(){
   try{ return await fetchBacklogRaw(); }catch(e){ return []; }
 }
 async function saveBacklog(list){
+  if(state.day && state.day.date===todayStr()){
+    var openTaskIds = {};
+    (state.day.logs||[]).forEach(function(l){
+      if(l.end===null && l.taskId && l.taskId!=='BREAK') openTaskIds[l.taskId] = true;
+    });
+    var listIds = {};
+    list.forEach(function(t){ listIds[t.id] = true; });
+    var missing = Object.keys(openTaskIds).filter(function(tid){ return !listIds[tid]; });
+    if(missing.length){
+      missing.forEach(function(tid){
+        var existing = (state.backlog||[]).find(function(t){ return t.id===tid; });
+        if(existing && !listIds[tid]){
+          list.push(existing);
+          listIds[tid] = true;
+        }
+      });
+      showToast('⚠️ 計測中の作業がデータから失われそうになったため、自動的に保護しました。');
+    }
+  }
   state.backlog = list;
   pendingSaves++;
   try{ await window.storage.set('task-backlog', JSON.stringify(list), true); }catch(e){}
@@ -1925,7 +1950,7 @@ function renderManager(){
   var brokenBanner = brokenAssignStaff.length ? (
     '<div class="warn-banner warn-banner-danger">🛑 データの不整合があります。以下のスタッフの割り当てが、存在しない作業を指しています(データ消失の影響の可能性):<br>'+
     brokenAssignStaff.map(function(x){ return esc(x.staff.name)+'('+x.count+'件)'; }).join('、')+
-    '<br>「+ 作業を追加」で作業を作り直し、下の割り当てからこのスタッフを一度外して再度割り当ててください。<button type="button" class="warn-fix-btn" id="clearBrokenAssignBtn">この不整合な割り当てだけを一括で外す</button>'+
+    '<br>この状態だと、該当のスタッフは作業実績入力画面でその作業がタップできません。下のボタンで、壊れた割り当てを外したうえで、本日の有効な作業に自動で割り当て直せます。<button type="button" class="warn-fix-btn" id="clearBrokenAssignBtn">壊れた割り当てを修復する(本日の作業に再割り当て)</button>'+
     '</div>'
   ) : '';
 
@@ -2193,13 +2218,24 @@ function bindManager(){
   if(clearBrokenBtn){
     clearBrokenBtn.addEventListener('click', async function(){
       var day = managerActiveDay();
+      var validTaskIds = tasksForDate(managerActiveDate()).map(function(t){ return t.id; });
+      var affectedStaffIds = [];
       Object.keys(day.assignments||{}).forEach(function(sid){
-        day.assignments[sid] = (day.assignments[sid]||[]).filter(function(tid){
+        var before = day.assignments[sid]||[];
+        var hadBroken = before.some(function(tid){ return tid!=='BREAK' && !state.backlog.some(function(t){ return t.id===tid; }); });
+        var cleaned = before.filter(function(tid){
           return tid==='BREAK' || state.backlog.some(function(t){ return t.id===tid; });
         });
+        if(hadBroken){
+          affectedStaffIds.push(sid);
+          validTaskIds.forEach(function(tid){
+            if(cleaned.indexOf(tid)===-1) cleaned.push(tid);
+          });
+        }
+        day.assignments[sid] = cleaned;
       });
       await saveDay(day);
-      showToast('存在しない作業への割り当てを外しました。作業を作り直して再度割り当ててください。');
+      showToast('壊れた割り当てを修復し、対象のスタッフを本日の有効な作業('+validTaskIds.length+'件)に割り当て直しました。');
       render();
     });
   }

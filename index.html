@@ -585,61 +585,61 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .qty-break-total b{font-family:var(--font-mono);font-size:20px;color:var(--rust-600);}
 
 /* ---------- MONITOR VIEW ---------- */
-.monitor{min-height:100vh;background:var(--ink-950);color:#EDEFF3;padding:0;}
-.mon-inner{max-width:1760px;margin:0 auto;}
+.monitor{height:100vh;height:100dvh;background:var(--ink-950);color:#EDEFF3;padding:0;overflow:hidden;display:flex;flex-direction:column;}
+.mon-inner{max-width:1760px;margin:0 auto;width:100%;flex:1;min-height:0;display:flex;flex-direction:column;}
 .mon-header{
-  display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:2px solid var(--ink-700);
+  flex:none;display:flex;align-items:center;justify-content:space-between;padding:14px 28px;border-bottom:2px solid var(--ink-700);
 }
 .mon-title-block{display:flex;align-items:baseline;gap:14px;}
-.mon-title{font-family:var(--font-display);font-weight:700;font-size:22px;letter-spacing:.02em;color:#fff;}
-.mon-date{font-family:var(--font-mono);font-size:13px;color:var(--slate-300);}
-.mon-clock{font-family:var(--font-mono);font-size:30px;font-weight:700;color:var(--amber-500);}
+.mon-title{font-family:var(--font-display);font-weight:700;font-size:20px;letter-spacing:.02em;color:#fff;}
+.mon-date{font-family:var(--font-mono);font-size:12px;color:var(--slate-300);}
+.mon-clock{font-family:var(--font-mono);font-size:26px;font-weight:700;color:var(--amber-500);}
 .mon-exit{border:1px solid var(--ink-600);background:transparent;color:var(--slate-300);border-radius:16px;padding:5px 12px;font-size:11px;}
 
-.mon-body{display:grid;grid-template-columns:1fr 360px;gap:0;min-height:calc(100vh - 68px);}
+.mon-body{flex:1;min-height:0;display:grid;grid-template-columns:1fr 360px;gap:0;}
 @media (max-width:1000px){.mon-body{grid-template-columns:1fr;}}
 
-.mon-staff-list{padding:20px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;align-content:start;}
+.mon-staff-list{padding:14px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));grid-auto-rows:min-content;gap:10px;align-content:start;overflow-y:auto;}
 .mon-row{
-  display:flex;flex-direction:column;gap:10px;
-  background:var(--ink-900);border:1px solid var(--ink-700);border-radius:14px;padding:16px 18px;
+  display:flex;flex-direction:column;gap:6px;
+  background:var(--ink-900);border:1px solid var(--ink-700);border-radius:12px;padding:12px 16px;
 }
 .mon-row-top{display:flex;align-items:center;justify-content:space-between;gap:10px;}
-.mon-name{font-family:var(--font-display);font-weight:700;font-size:18px;color:#fff;}
+.mon-name{font-family:var(--font-display);font-weight:700;font-size:16px;color:#fff;}
 .mon-status{display:flex;align-items:center;gap:8px;}
-.mon-status-dot{width:10px;height:10px;border-radius:50%;flex:none;}
-.mon-status-text{font-size:15px;font-weight:600;}
+.mon-status-dot{width:9px;height:9px;border-radius:50%;flex:none;}
+.mon-status-text{font-size:13px;font-weight:600;}
 .mon-status-text.idle{color:var(--slate-300);}
-.mon-timer{font-family:var(--font-mono);font-size:23px;font-weight:700;color:var(--amber-500);}
-.mon-timer.idle{color:var(--slate-500);font-size:19px;}
-.mon-bar-wrap{display:flex;flex-direction:column;gap:4px;}
-.mon-bar{height:8px;border-radius:4px;background:var(--ink-700);overflow:hidden;display:flex;}
+.mon-timer{font-family:var(--font-mono);font-size:20px;font-weight:700;color:var(--amber-500);}
+.mon-timer.idle{color:var(--slate-500);font-size:16px;}
+.mon-bar-wrap{display:flex;flex-direction:column;gap:3px;}
+.mon-bar{height:7px;border-radius:4px;background:var(--ink-700);overflow:hidden;display:flex;}
 .mon-bar-seg{height:100%;}
-.mon-bar-total{font-family:var(--font-mono);font-size:12px;color:var(--slate-300);text-align:right;}
+.mon-bar-total{font-family:var(--font-mono);font-size:11px;color:var(--slate-300);text-align:right;}
 .mon-empty{color:var(--slate-500);text-align:center;padding:60px 0;font-size:14px;grid-column:1/-1;}
 
-.mon-side{border-left:2px solid var(--ink-700);padding:20px 22px;display:flex;flex-direction:column;gap:12px;}
+.mon-side{border-left:2px solid var(--ink-700);padding:14px 20px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;}
 .mon-side-title{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--slate-300);margin-bottom:2px;}
-.mon-task-card{background:var(--ink-900);border:1px solid var(--ink-700);border-radius:12px;padding:14px 16px;border-left:4px solid var(--slate-300);}
-.mon-task-name{font-family:var(--font-display);font-weight:600;font-size:15px;color:#fff;margin-bottom:8px;}
-.mon-task-stats{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:12px;color:var(--slate-300);}
-.mon-task-stats b{color:var(--amber-500);font-size:14px;}
+.mon-task-card{background:var(--ink-900);border:1px solid var(--ink-700);border-radius:10px;padding:10px 14px;border-left:4px solid var(--slate-300);}
+.mon-task-name{font-family:var(--font-display);font-weight:600;font-size:14px;color:#fff;margin-bottom:5px;}
+.mon-task-stats{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11px;color:var(--slate-300);}
+.mon-task-stats b{color:var(--amber-500);font-size:13px;}
 
-.mon-footer{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:2px solid var(--ink-700);}
+.mon-footer{flex:none;display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:2px solid var(--ink-700);}
 @media (max-width:900px){.mon-footer{grid-template-columns:1fr;}}
-.mon-footer-col{padding:22px 26px;}
+.mon-footer-col{padding:12px 26px;}
 .mon-footer-col:first-child{border-right:2px solid var(--ink-700);}
 @media (max-width:900px){.mon-footer-col:first-child{border-right:none;border-bottom:2px solid var(--ink-700);}}
-.mon-footer-title{font-family:var(--font-display);font-weight:700;font-size:15px;color:#fff;margin-bottom:14px;}
-.mon-footer-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:14px;}
-.mon-footer-stats div{display:flex;flex-direction:column;gap:4px;}
-.mon-footer-stats span{font-size:11px;color:var(--slate-300);}
-.mon-footer-stats b{font-family:var(--font-mono);font-size:22px;color:var(--amber-500);}
-.mon-challenge-nums{font-family:var(--font-mono);font-weight:700;font-size:26px;color:#fff;margin-bottom:10px;}
-.mon-challenge-nums span{font-size:15px;color:var(--slate-300);font-weight:400;}
-.mon-challenge-bar{height:14px;border-radius:7px;background:var(--ink-700);overflow:hidden;margin-bottom:8px;}
-.mon-challenge-fill{height:100%;background:linear-gradient(90deg,var(--amber-500),#FFD782);border-radius:7px;transition:width .4s;}
-.mon-challenge-sub{font-size:13px;font-weight:600;color:var(--amber-500);}
+.mon-footer-title{font-family:var(--font-display);font-weight:700;font-size:13px;color:#fff;margin-bottom:8px;}
+.mon-footer-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;}
+.mon-footer-stats div{display:flex;flex-direction:column;gap:2px;}
+.mon-footer-stats span{font-size:10px;color:var(--slate-300);}
+.mon-footer-stats b{font-family:var(--font-mono);font-size:18px;color:var(--amber-500);}
+.mon-challenge-nums{font-family:var(--font-mono);font-weight:700;font-size:20px;color:#fff;margin-bottom:6px;}
+.mon-challenge-nums span{font-size:13px;color:var(--slate-300);font-weight:400;}
+.mon-challenge-bar{height:11px;border-radius:6px;background:var(--ink-700);overflow:hidden;margin-bottom:6px;}
+.mon-challenge-fill{height:100%;background:linear-gradient(90deg,var(--amber-500),#FFD782);border-radius:6px;transition:width .4s;}
+.mon-challenge-sub{font-size:12px;font-weight:600;color:var(--amber-500);}
 </style>
 </head>
 <body>
@@ -721,6 +721,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-23', items:[
+    'モニター画面を、画面の高さぴったりに収まるレイアウトに変更(基本的にスクロールが発生しないように)。ヘッダー・下部の実績表示は固定、中央のスタッフ一覧・作業別サマリーだけが必要に応じて内部スクロールする作りに調整'
+  ]},
   { date:'2026-08-23', items:[
     'モニター画面の下部に「本日の実績(出荷/入庫の件数・個数)」と「今月のチームチャレンジ」を追加。空いていたスペースを活用し、常時表示のモニターでもチームの実績が確認できるように'
   ]},

@@ -141,8 +141,14 @@ input,select{font-family:inherit;}
 
 .warn-banner{
   background:#FFF3DE;border:1px solid var(--amber-500);color:#7A4A00;border-radius:10px;
-  padding:12px 16px;font-size:13px;font-weight:600;margin-bottom:16px;
+  padding:12px 16px;font-size:13px;font-weight:600;margin-bottom:16px;line-height:1.6;
 }
+.warn-banner-danger{background:#FDEEF2;border-color:#D6577E;color:#8A2E4C;}
+.warn-fix-btn{
+  display:inline-block;margin-top:8px;background:#B33C63;color:#fff;border:none;border-radius:8px;
+  padding:8px 14px;font-size:12px;font-weight:700;
+}
+.warn-fix-btn:hover{background:#94304F;}
 .chip-warn{border:1px solid var(--amber-500);background:#FFF7E8;}
 .chip-warn-label{font-size:10px;font-weight:700;color:var(--amber-600);}
 .break-toggle-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--ink-900);margin-bottom:12px;cursor:pointer;}
@@ -699,6 +705,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-23', items:[
+    '管理者画面に、存在しない作業を指したままになっているスタッフの割り当て(以前のデータ消失の影響などで発生)を検知して警告表示する機能を追加。「この不整合な割り当てだけを一括で外す」ボタンで、壊れた割り当てだけをまとめて解除できるように'
+  ]},
   { date:'2026-08-23', items:[
     '不具合修正: 繰り返し作業の登録などで入力欄にフォーカスしている間、これまでは4秒ごとの自動更新の「画面の再描画」だけを止めていましたが、更新処理そのものが裏で動き続けていたため、タイミングによっては入力中の内容に影響することがありました。入力中は自動更新処理自体を完全に一時停止するように変更し、より確実に入力中の内容を保護するように改善'
   ]},
@@ -1837,6 +1846,21 @@ function renderManager(){
     '</div>'
   ) : '';
 
+  var brokenAssignStaff = [];
+  present.forEach(function(s){
+    var assigned = day.assignments[s.id]||[];
+    var missingTaskIds = assigned.filter(function(tid){
+      return tid!=='BREAK' && !state.backlog.some(function(t){ return t.id===tid; });
+    });
+    if(missingTaskIds.length) brokenAssignStaff.push({staff:s, count:missingTaskIds.length, ids:missingTaskIds});
+  });
+  var brokenBanner = brokenAssignStaff.length ? (
+    '<div class="warn-banner warn-banner-danger">🛑 データの不整合があります。以下のスタッフの割り当てが、存在しない作業を指しています(データ消失の影響の可能性):<br>'+
+    brokenAssignStaff.map(function(x){ return esc(x.staff.name)+'('+x.count+'件)'; }).join('、')+
+    '<br>「+ 作業を追加」で作業を作り直し、下の割り当てからこのスタッフを一度外して再度割り当ててください。<button type="button" class="warn-fix-btn" id="clearBrokenAssignBtn">この不整合な割り当てだけを一括で外す</button>'+
+    '</div>'
+  ) : '';
+
   var colsHtml = tasks.map(function(t, idx){
     var assignedNames = roster.filter(function(s){
       return (day.assignments[s.id]||[]).indexOf(t.id) !== -1;
@@ -1923,6 +1947,7 @@ function renderManager(){
   '<div class="mgr-wrap">'+
     dateNav+
     unassignedBanner+
+    brokenBanner+
     '<div class="mgr-grid">'+
       '<div class="panel">'+
         '<div class="panel-title">出勤スタッフ <span class="count-badge">'+present.length+' / '+roster.length+'</span></div>'+
@@ -2081,6 +2106,20 @@ function bindManager(){
       render();
     });
   });
+  var clearBrokenBtn = document.getElementById('clearBrokenAssignBtn');
+  if(clearBrokenBtn){
+    clearBrokenBtn.addEventListener('click', async function(){
+      var day = managerActiveDay();
+      Object.keys(day.assignments||{}).forEach(function(sid){
+        day.assignments[sid] = (day.assignments[sid]||[]).filter(function(tid){
+          return tid==='BREAK' || state.backlog.some(function(t){ return t.id===tid; });
+        });
+      });
+      await saveDay(day);
+      showToast('存在しない作業への割り当てを外しました。作業を作り直して再度割り当ててください。');
+      render();
+    });
+  }
   document.querySelectorAll('[data-assign-all]').forEach(function(el){
     el.addEventListener('click', async function(){
       var tid = el.getAttribute('data-assign-all');

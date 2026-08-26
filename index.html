@@ -614,6 +614,14 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .mon-status-text.idle{color:var(--slate-300);}
 .mon-timer{font-family:var(--font-mono);font-size:20px;font-weight:700;color:var(--amber-500);}
 .mon-timer.idle{color:var(--slate-500);font-size:16px;}
+.mon-assign-list{display:flex;flex-wrap:wrap;gap:5px;}
+.mon-assign-chip{
+  display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--slate-300);
+  background:var(--ink-700);border-radius:10px;padding:3px 8px;
+}
+.mon-assign-chip.active{background:var(--ink-800,#1B2340);color:#fff;font-weight:700;box-shadow:0 0 0 1px var(--amber-500) inset;}
+.mon-assign-dot{width:7px;height:7px;border-radius:50%;flex:none;}
+.mon-assign-empty{font-size:11px;color:var(--slate-500);}
 .mon-bar-wrap{display:flex;flex-direction:column;gap:3px;}
 .mon-bar{height:7px;border-radius:4px;background:var(--ink-700);overflow:hidden;display:flex;}
 .mon-bar-seg{height:100%;}
@@ -723,6 +731,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-24', items:[
+    'モニター画面の各スタッフのカードに、本日割り当てられている作業の一覧(チップ表示)を追加。今やっている作業だけでなく、担当している作業全体が一目で確認できるように(現在作業中のものはハイライト表示)'
+  ]},
   { date:'2026-08-24', items:[
     '管理者画面の作業ボードに「編集」ボタン(✎)を追加。これまで削除(×)しかできませんでしたが、作業登録画面に移動しなくても、その場で作業名・単位・区分・内訳を編集できるように'
   ]},
@@ -4458,12 +4469,20 @@ function renderMonitor(){
       statusText = '<span class="mon-status-dot" style="background:#667085"></span><span class="mon-status-text idle">待機中</span>';
       timerHtml = '<div class="mon-timer idle">-</div>';
     }
+    var assignedIds = (state.day.assignments[s.id] || []).slice().sort(byTaskColor(function(tid){ return taskById(tid).color; }));
+    var assignedChips = assignedIds.map(function(tid){
+      var at = taskById(tid);
+      var isActive = log && log.taskId===tid;
+      return '<span class="mon-assign-chip'+(isActive?' active':'')+'"><span class="mon-assign-dot" style="background:'+at.color+'"></span>'+esc(at.name)+'</span>';
+    }).join('');
+    var assignedHtml = assignedChips ? '<div class="mon-assign-list">'+assignedChips+'</div>' : '<div class="mon-assign-list mon-assign-empty">本日の割り当てなし</div>';
     return '<div class="mon-row">'+
       '<div class="mon-row-top">'+
         '<div class="mon-name">'+esc(s.name)+'</div>'+
         timerHtml+
       '</div>'+
       '<div class="mon-status">'+statusText+'</div>'+
+      assignedHtml+
       '<div class="mon-bar-wrap"><div class="mon-bar">'+(barSegs||'')+'</div><div class="mon-bar-total">本日計 '+fmtHM(totalMs)+'</div></div>'+
     '</div>';
   }).join('') || '<div class="mon-empty">本日出勤中のスタッフはいません</div>';

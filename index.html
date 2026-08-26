@@ -245,6 +245,8 @@ input,select{font-family:inherit;}
 .task-col-unit{font-size:11px;color:var(--slate-500);}
 .assign-all-btn{width:100%;margin-top:8px;padding:7px;border-radius:8px;border:1px dashed var(--slate-300);background:#fff;font-size:11px;font-weight:600;color:var(--slate-500);}
 .assign-all-btn:hover{border-color:var(--teal-500);color:var(--teal-500);border-style:solid;}
+.task-col-edit{border:none;background:transparent;color:var(--slate-300);font-size:13px;padding:0 4px;}
+.task-col-edit:hover{color:var(--indigo-500);}
 .task-col-del{border:none;background:transparent;color:var(--slate-300);font-size:13px;}
 .task-col-del:hover{color:var(--rust-600);}
 .task-col-body{display:flex;flex-wrap:wrap;gap:6px;min-height:50px;}
@@ -721,6 +723,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-24', items:[
+    '管理者画面の作業ボードに「編集」ボタン(✎)を追加。これまで削除(×)しかできませんでしたが、作業登録画面に移動しなくても、その場で作業名・単位・区分・内訳を編集できるように'
+  ]},
   { date:'2026-08-23', items:[
     '不具合修正(前回の安全対策の副作用): 本日より先の、まだ一度も触っていない日付を管理者画面で開くと、データが存在しないだけなのに「読み込みに失敗しました」というエラー画面が表示されてしまっていた問題を修正。「データが元から存在しない」場合と「本当の通信エラー」を区別するように変更し、未来日の閲覧は通常通りすぐに開けるように'
   ]},
@@ -1973,6 +1978,7 @@ function renderManager(){
       '<div class="task-col-head">'+
         '<span class="task-color-dot" style="background:'+t.color+'"></span>'+
         '<span class="task-col-name">'+esc(t.name)+'</span>'+
+        '<button class="task-col-edit" data-edit-task-col="'+t.id+'" title="編集">✎</button>'+
         '<button class="task-col-del" data-del-task="'+t.id+'" title="削除">&times;</button>'+
       '</div>'+
       '<div class="task-col-unit">単位: '+esc(t.unit)+'</div>'+
@@ -2158,6 +2164,13 @@ function bindManager(){
       render();
     });
   }
+  document.querySelectorAll('[data-edit-task-col]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var id = el.getAttribute('data-edit-task-col');
+      var t = state.backlog.find(function(t){ return t.id===id; });
+      if(t) openEditTaskModal(t);
+    });
+  });
   document.querySelectorAll('[data-del-task]').forEach(function(el){
     el.addEventListener('click', async function(){
       var id = el.getAttribute('data-del-task');

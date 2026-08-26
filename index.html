@@ -700,6 +700,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-23', items:[
+    '不具合修正: 繰り返し作業の登録などで入力欄にフォーカスしている間、これまでは4秒ごとの自動更新の「画面の再描画」だけを止めていましたが、更新処理そのものが裏で動き続けていたため、タイミングによっては入力中の内容に影響することがありました。入力中は自動更新処理自体を完全に一時停止するように変更し、より確実に入力中の内容を保護するように改善'
+  ]},
+  { date:'2026-08-23', items:[
     '重要な不具合修正: 通信の一時的な失敗(自動更新のタイミングで発生することがある)が起きた際、作業一覧やスタッフ一覧、本日の記録が一時的に空の状態として扱われ、その直後に何か保存すると実際のデータが消えてしまう可能性があった問題を修正。通信エラー時は直前の内容を保持し、空のデータで上書きしないように変更。すでに「(削除済み)」と表示されてしまっている記録は、恐れ入りますが元のデータが失われている可能性があるため、この修正では復元されません'
   ]},
   { date:'2026-08-23', items:[
@@ -2520,6 +2523,7 @@ function bindRegister(){
       state.templates.push({id:uid(), name:name, unit:unit, color:state.newTemplateColor, pattern:state.newTemplatePattern, archived:false, subcategories:subcats, category:state.tmplDraftCategory});
       state.newTemplatePattern = defaultPattern();
       state.tmplDraftName = '';
+      state.tmplDraftUnit = '件';
       state.tmplDraftSubcats = [];
       state.tmplSubcatDraft = {name:'', unit:''};
       state.suppressRender = false;
@@ -4448,6 +4452,7 @@ function startPolling(){
   pollHandle = setInterval(async function(){
     if(!state.role) return;
     if(pendingSaves>0) return;
+    if(state.suppressRender) return;
     var oldRoster = state.roster;
     var oldBacklog = state.backlog;
     var oldDay = state.day;

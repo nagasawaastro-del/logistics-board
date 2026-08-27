@@ -342,6 +342,10 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .ach-stat-value{font-family:var(--font-mono);font-weight:700;font-size:24px;color:var(--ink-900);}
 .ach-stat-unit{font-size:13px;color:var(--slate-500);margin-left:2px;}
 .ach-today-sub{text-align:center;font-size:12px;color:var(--slate-500);margin-top:10px;}
+.ach-detail-toggle{margin-left:8px;background:var(--paper-100);border:1px solid var(--paper-line);border-radius:12px;padding:3px 10px;font-size:11px;font-weight:600;color:var(--ink-900);}
+.ach-detail-toggle:hover{border-color:var(--amber-500);color:var(--amber-600);}
+.ach-detail-panel{margin-top:14px;}
+.ach-detail-note{font-size:12px;color:var(--slate-500);margin-bottom:8px;line-height:1.6;}
 
 .ach-cta{text-align:center;padding:20px 10px;}
 .ach-cta .empty-note{padding-bottom:16px;}
@@ -745,6 +749,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-24', items:[
+    '実績画面の「今日の実績」に「作業ごとの内訳を見る」を追加。出荷/入庫の件数・個数がどの作業からどれだけ計上されているか(区分・個数・件数・セッション回数・人数)を確認できるようになり、数字が想定と違う場合の原因調査がしやすくなりました'
+  ]},
+  { date:'2026-08-24', items:[
     'パートさんの実績入力画面に「+ 他の作業を追加」を追加。現場の状況に応じて、管理者が割り当てていない本日の作業もその場で選んで開始できるように(選んだ作業は自動的に本人の割り当てにも追加されるため、管理者が後から個別に割り当て直す必要がなくなります)'
   ]},
   { date:'2026-08-24', items:[
@@ -946,6 +953,7 @@ var state = {
   shiftSettings: { enabled:false, start:'09:00', end:'18:00' },
   achievementSettings: { monthlyTargetPieces: 25000 },
   achievementsResult: null,
+  showTodayDetail: false,
   achievementsLoading: false,
   achievementsError: null,
   calendarMonth: null,
@@ -3033,6 +3041,30 @@ function todaysBuckets(){
   if(state.day) classifyDayIntoBuckets(state.day, b);
   return b;
 }
+function todaysTaskDetail(){
+  var details = {};
+  if(!state.day) return details;
+  state.day.logs.forEach(function(l){
+    if(l.taskId==='BREAK') return;
+    var task = taskById(l.taskId);
+    var cat = taskCategory(task);
+    if(!details[l.taskId]) details[l.taskId] = { name: task.name, category: cat, pieces:0, count:0, other:{}, sessions:0, staffIds:{} };
+    var d = details[l.taskId];
+    d.sessions++;
+    d.staffIds[l.staffId] = true;
+    if(l.breakdown){
+      var unitMap = subcatUnitMap(task);
+      Object.keys(l.breakdown).forEach(function(k){
+        var v = l.breakdown[k]||0;
+        if(v<=0) return;
+        addQtyToBucket(d, unitMap[k]||task.unit, v);
+      });
+    }else if(l.quantity){
+      addQtyToBucket(d, task.unit, l.quantity);
+    }
+  });
+  return details;
+}
 function achievementMessage(rate, isNewRecord){
   if(isNewRecord) return '🏆 NEW RECORD!';
   if(rate>=1) return '🎉 目標達成！';
@@ -3050,6 +3082,27 @@ function renderAchievements(){
   var inboundToday = todayB['入庫'] || freshCategoryBucket();
   var totalLogsToday = Object.keys(todayB).reduce(function(a,k){ return a+todayB[k].logCount; }, 0);
 
+  var detailHtml = '';
+  if(state.showTodayDetail){
+    var detail = todaysTaskDetail();
+    var tids = Object.keys(detail).sort(function(a,b){ return (detail[b].pieces+detail[b].count) - (detail[a].pieces+detail[a].count); });
+    var detailRows = tids.map(function(tid){
+      var d = detail[tid];
+      return '<tr>'+
+        '<td>'+esc(d.name)+'</td>'+
+        '<td class="num">'+esc(d.category)+'</td>'+
+        '<td class="num">'+d.pieces+'</td>'+
+        '<td class="num">'+d.count+'</td>'+
+        '<td class="num">'+d.sessions+'回</td>'+
+        '<td class="num">'+Object.keys(d.staffIds).length+'人</td>'+
+      '</tr>';
+    }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">本日の記録はまだありません</td></tr>';
+    detailHtml = '<div class="ach-detail-panel">'+
+      '<div class="ach-detail-note">作業ごとの内訳(区分・個数・件数・セッション回数・人数)。同じ作業を1日に複数回行った場合はセッションごとに合算されます。「区分」が意図と違う場合は、作業登録・管理者画面の「編集」から区分を直せます。</div>'+
+      '<table class="report-table"><thead><tr><th>作業</th><th>区分</th><th>個数</th><th>件数</th><th>セッション</th><th>人数</th></tr></thead><tbody>'+detailRows+'</tbody></table>'+
+    '</div>';
+  }
+
   var todaySection =
     '<div class="ach-section-title">📅 今日の実績</div>'+
     '<div class="ach-stat-grid">'+
@@ -3058,7 +3111,10 @@ function renderAchievements(){
       renderAchStatCard('📥','入庫件数', formatNum(inboundToday.count), '件')+
       renderAchStatCard('📥','入庫個数', formatNum(inboundToday.pieces), '個')+
     '</div>'+
-    '<div class="ach-today-sub">本日の作業件数(全体): '+totalLogsToday+'件</div>';
+    '<div class="ach-today-sub">本日の作業件数(全体): '+totalLogsToday+'件 '+
+      '<button type="button" class="ach-detail-toggle" id="toggleTodayDetailBtn">'+(state.showTodayDetail?'内訳を閉じる':'作業ごとの内訳を見る')+'</button>'+
+    '</div>'+
+    detailHtml;
 
   var result = state.achievementsResult;
   var bodyRest;
@@ -3154,6 +3210,11 @@ function renderAchievements(){
 function bindAchievements(){
   var btn = document.getElementById('achRefreshBtn');
   if(btn) btn.addEventListener('click', function(){ runAchievementsReport(); });
+  var toggleBtn = document.getElementById('toggleTodayDetailBtn');
+  if(toggleBtn) toggleBtn.addEventListener('click', function(){
+    state.showTodayDetail = !state.showTodayDetail;
+    render();
+  });
 }
 function aggregateLifetime(days){
   var perStaff = {};

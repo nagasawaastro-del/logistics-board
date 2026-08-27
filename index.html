@@ -522,6 +522,19 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 }
 .end-day-btn:active{background:var(--rust-600);transform:scale(.98);}
 .no-task-note{text-align:center;color:var(--slate-500);font-size:15px;padding:44px 22px;line-height:1.8;}
+.other-tasks-toggle{
+  display:block;width:100%;margin-top:16px;padding:14px;border-radius:14px;border:2px dashed var(--slate-300);
+  background:#fff;color:var(--slate-500);font-size:14px;font-weight:600;
+}
+.other-tasks-toggle:hover{border-color:var(--amber-500);color:var(--amber-600);}
+.other-tasks-panel{margin-top:16px;padding:16px;border-radius:14px;background:var(--paper-100);border:1px solid var(--paper-line);}
+.other-tasks-title{font-size:12px;color:var(--slate-500);margin-bottom:10px;line-height:1.5;}
+.other-tasks-grid{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;}
+.other-task-chip{
+  padding:10px 16px;border-radius:10px;background:#fff;border:1px solid var(--paper-line);
+  font-size:14px;font-weight:600;color:var(--ink-900);
+}
+.other-task-chip:hover{border-color:var(--amber-500);background:#FFF9EE;}
 .break-banner{
   background:linear-gradient(135deg,#EEF0FB,#F5F0FF);border:2px solid var(--indigo-500);border-radius:18px;
   padding:26px 22px;text-align:center;margin-bottom:20px;
@@ -732,6 +745,12 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-24', items:[
+    'パートさんの実績入力画面に「+ 他の作業を追加」を追加。現場の状況に応じて、管理者が割り当てていない本日の作業もその場で選んで開始できるように(選んだ作業は自動的に本人の割り当てにも追加されるため、管理者が後から個別に割り当て直す必要がなくなります)'
+  ]},
+  { date:'2026-08-24', items:[
+    '実績の編集画面に「スタッフ」の選択欄を追加。誤って別の人の名前で実績を入力してしまった場合に、削除して入力し直さなくても、その場で正しいスタッフに変更できるように'
+  ]},
+  { date:'2026-08-24', items:[
     'モニター画面の各スタッフのカードに、本日割り当てられている作業の一覧(チップ表示)を追加。今やっている作業だけでなく、担当している作業全体が一目で確認できるように(現在作業中のものはハイライト表示)'
   ]},
   { date:'2026-08-24', items:[
@@ -935,6 +954,7 @@ var state = {
   jpHolidays: { fetchedAt:0, data:{} },
   day: null,
   activeStaffId: null,
+  showOtherTasks: false,
   newTaskColIndex: -1,
   newTaskColor: TASK_COLORS[0].hex,
   newTaskDraftCategory: 'その他',
@@ -3500,7 +3520,7 @@ function renderInput(){
   }
   var body;
   if(!assignedIds.length){
-    body = '<div class="no-task-note">本日の作業がまだ割り当てられていません。<br>管理者に確認してください。</div>';
+    body = '<div class="no-task-note">本日の作業がまだ割り当てられていません。下の「他の作業を追加」から選んで始められます。</div>';
   }else{
     var tiles = assignedIds.map(function(tid){
       var t = taskById(tid);
@@ -3549,12 +3569,29 @@ function renderInput(){
     body = '<div class="task-tile-grid">'+tiles+'</div>';
   }
 
+  var otherTasks = tasksForToday().filter(function(t){ return assignedIds.indexOf(t.id)===-1; }).sort(byTaskColor(function(t){ return t.color; }));
+  var otherTasksHtml = '';
+  if(otherTasks.length){
+    if(state.showOtherTasks){
+      var otherChips = otherTasks.map(function(t){
+        return '<button type="button" class="other-task-chip" data-add-other-task="'+t.id+'" style="border-left:4px solid '+t.color+'">'+esc(t.name)+'</button>';
+      }).join('');
+      otherTasksHtml = '<div class="other-tasks-panel">'+
+        '<div class="other-tasks-title">他の作業(現在の担当外)をタップすると、割り当てに追加して開始します</div>'+
+        '<div class="other-tasks-grid">'+otherChips+'</div>'+
+        '<button type="button" class="other-tasks-toggle" id="hideOtherTasksBtn">閉じる</button>'+
+      '</div>';
+    }else{
+      otherTasksHtml = '<button type="button" class="other-tasks-toggle" id="showOtherTasksBtn">+ 他の作業を追加(担当外の作業も選べます)</button>';
+    }
+  }
+
   return '<div class="input-wrap">'+
     '<div class="staff-header">'+
       '<div><div class="staff-header-name">'+esc(staff.name)+'</div><div class="staff-header-sub">作業をタップすると開始/切替します</div></div>'+
       '<button class="back-link" id="backToNames">戻る</button>'+
     '</div>'+
-    '<div class="task-tile-wrap">'+breakBanner+body+'</div>'+
+    '<div class="task-tile-wrap">'+breakBanner+body+otherTasksHtml+'</div>'+
     '<div class="end-day-bar"><button class="end-day-btn" id="endDayBtn">本日の作業を終了する</button></div>'+
   '</div>';
 }
@@ -3589,6 +3626,7 @@ function bindInput(){
   document.querySelectorAll('[data-pick-staff]').forEach(function(el){
     el.addEventListener('click', function(){
       state.activeStaffId = el.getAttribute('data-pick-staff');
+      state.showOtherTasks = false;
       render();
       startTicker();
     });
@@ -3596,6 +3634,7 @@ function bindInput(){
   var backBtn = document.getElementById('backToNames');
   if(backBtn) backBtn.addEventListener('click', function(){
     state.activeStaffId = null;
+    state.showOtherTasks = false;
     render();
   });
   var summaryBack = document.getElementById('summaryBack');
@@ -3609,6 +3648,35 @@ function bindInput(){
       var tid = el.getAttribute('data-tap-task');
       var log = currentLog(state.activeStaffId);
       if(log && log.taskId===tid) return;
+      if(log && log.taskId==='BREAK'){
+        endBreakAndStart(tid);
+        return;
+      }
+      openQuantityModal(tid, false);
+    });
+  });
+  var showOtherBtn = document.getElementById('showOtherTasksBtn');
+  if(showOtherBtn) showOtherBtn.addEventListener('click', function(){
+    state.showOtherTasks = true;
+    render();
+  });
+  var hideOtherBtn = document.getElementById('hideOtherTasksBtn');
+  if(hideOtherBtn) hideOtherBtn.addEventListener('click', function(){
+    state.showOtherTasks = false;
+    render();
+  });
+  document.querySelectorAll('[data-add-other-task]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var tid = el.getAttribute('data-add-other-task');
+      var arr = state.day.assignments[state.activeStaffId] || [];
+      if(arr.indexOf(tid)===-1){
+        arr = arr.concat([tid]);
+        state.day.assignments[state.activeStaffId] = arr;
+        await saveDay(state.day);
+      }
+      state.showOtherTasks = false;
+      var log = currentLog(state.activeStaffId);
+      if(log && log.taskId===tid) { render(); return; }
       if(log && log.taskId==='BREAK'){
         endBreakAndStart(tid);
         return;
@@ -3955,7 +4023,9 @@ async function saveEditLog(){
     log.quantity = null;
     delete log.breakdown;
   }
+  var staffSelect = document.getElementById('editStaffSelect');
   log.taskId = taskSelect.value;
+  log.staffId = staffSelect ? staffSelect.value : log.staffId;
   log.start = newStart;
   state.modal = null;
   state.suppressRender = false;
@@ -4241,7 +4311,9 @@ function renderQtyBreakdownModal(m){
   '</div>';
 }
 function renderEditLogModal(m){
-  var s = staffById(m.staffId);
+  var staffOptions = activeRoster().map(function(rs){
+    return '<option value="'+rs.id+'" '+(rs.id===m.staffId?'selected':'')+'>'+esc(rs.name)+'</option>';
+  }).join('');
   var options = taskOptionsForEdit(managerActiveDate(), m.taskId).map(function(t){
     return '<option value="'+t.id+'" '+(t.id===m.taskId?'selected':'')+'>'+esc(t.name)+'</option>';
   }).join('');
@@ -4260,7 +4332,9 @@ function renderEditLogModal(m){
   }
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" style="max-width:400px;text-align:left;">'+
-      '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">実績を編集('+esc(s.name)+'さん)</div>'+
+      '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">実績を編集</div>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">スタッフ(間違えた場合はここで正しい人に変更できます)</label>'+
+      '<select id="editStaffSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+staffOptions+'</select>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業</label>'+
       '<select id="editTaskSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+options+'</select>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">開始時刻</label>'+

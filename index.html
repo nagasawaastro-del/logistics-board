@@ -749,6 +749,10 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-24', items:[
+    '実績・モニター画面などの表記を「個」から「ピース」に統一(出荷個数→出荷ピース数、など)',
+    '不具合修正: 内訳がある作業で、内訳ごとの計測(▶計測開始)を一度も押さないまま作業を終えると、時間の記録が内訳に振り分けられない(省略される)ことがあった問題に対処。作業を開始した時点で、最初の内訳の計測が自動的に開始されるように変更し、常にどれかの内訳に時間が記録されるように。全体の作業タイマー表示は内訳ごとの計測と重複するため非表示にしました'
+  ]},
+  { date:'2026-08-24', items:[
     '実績画面の「今日の実績」に「作業ごとの内訳を見る」を追加。出荷/入庫の件数・個数がどの作業からどれだけ計上されているか(区分・個数・件数・セッション回数・人数)を確認できるようになり、数字が想定と違う場合の原因調査がしやすくなりました'
   ]},
   { date:'2026-08-24', items:[
@@ -2084,8 +2088,8 @@ function renderManager(){
 
   var achievementPanel = '<div class="panel" style="margin-top:14px;">'+
     '<div class="panel-title">🏆 実績画面の目標設定</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">「実績」画面のチームチャレンジで使う、今月の出荷個数の目標値です。</div>'+
-    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">月間目標(出荷個数)</label>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">「実績」画面のチームチャレンジで使う、今月の出荷ピース数の目標値です。</div>'+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">月間目標(出荷ピース数)</label>'+
     '<input type="number" id="achievementTargetInput" min="0" step="100" value="'+((state.achievementSettings&&state.achievementSettings.monthlyTargetPieces)||25000)+'" style="width:200px;border:1px solid var(--paper-line);border-radius:8px;padding:8px 10px;font-size:14px;font-family:var(--font-mono);">'+
   '</div>';
 
@@ -3107,9 +3111,9 @@ function renderAchievements(){
     '<div class="ach-section-title">📅 今日の実績</div>'+
     '<div class="ach-stat-grid">'+
       renderAchStatCard('🚚','出荷件数', formatNum(shipToday.count), '件')+
-      renderAchStatCard('📦','出荷個数', formatNum(shipToday.pieces), '個')+
+      renderAchStatCard('📦','出荷ピース数', formatNum(shipToday.pieces), 'ピース')+
       renderAchStatCard('📥','入庫件数', formatNum(inboundToday.count), '件')+
-      renderAchStatCard('📥','入庫個数', formatNum(inboundToday.pieces), '個')+
+      renderAchStatCard('📥','入庫ピース数', formatNum(inboundToday.pieces), 'ピース')+
     '</div>'+
     '<div class="ach-today-sub">本日の作業件数(全体): '+totalLogsToday+'件 '+
       '<button type="button" class="ach-detail-toggle" id="toggleTodayDetailBtn">'+(state.showTodayDetail?'内訳を閉じる':'作業ごとの内訳を見る')+'</button>'+
@@ -3138,24 +3142,24 @@ function renderAchievements(){
     var challengeSection =
       '<div class="ach-section-title">🚚 今月のチームチャレンジ</div>'+
       '<div class="ach-challenge-card">'+
-        '<div class="ach-challenge-nums"><b>'+formatNum(curPieces)+'</b> / '+formatNum(target)+'個</div>'+
+        '<div class="ach-challenge-nums"><b>'+formatNum(curPieces)+'</b> / '+formatNum(target)+'ピース</div>'+
         '<div class="ach-progress-bar"><div class="ach-progress-fill" style="width:'+Math.min(100,rate*100).toFixed(1)+'%"></div></div>'+
-        '<div class="ach-challenge-sub">達成率 '+(rate*100).toFixed(1)+'%'+(remaining>0 ? ' ・ 残り '+formatNum(remaining)+'個' : '')+'</div>'+
+        '<div class="ach-challenge-sub">達成率 '+(rate*100).toFixed(1)+'%'+(remaining>0 ? ' ・ 残り '+formatNum(remaining)+'ピース' : '')+'</div>'+
       '</div>';
 
     var recordSection;
     if(isNewRecord){
       recordSection = '<div class="ach-record-banner ach-new-record">'+
         '<div class="ach-new-record-title">🎉 NEW RECORD!</div>'+
-        '<div class="ach-new-record-sub">月間出荷個数 <b>'+formatNum(curPieces)+'個</b></div>'+
-        '<div class="ach-new-record-note">過去最高記録'+(result.bestMonthKey ? '('+monthLabel(result.bestMonthKey)+' '+formatNum(result.bestPieces)+'個)' : '')+'を更新しました！</div>'+
+        '<div class="ach-new-record-sub">月間出荷ピース数 <b>'+formatNum(curPieces)+'ピース</b></div>'+
+        '<div class="ach-new-record-note">過去最高記録'+(result.bestMonthKey ? '('+monthLabel(result.bestMonthKey)+' '+formatNum(result.bestPieces)+'ピース)' : '')+'を更新しました！</div>'+
       '</div>';
     }else if(result.bestMonthKey){
       recordSection = '<div class="ach-section-title">🏆 過去最高記録</div>'+
         '<div class="ach-record-card">'+
-          '<div class="ach-record-value">'+formatNum(result.bestPieces)+'個</div>'+
+          '<div class="ach-record-value">'+formatNum(result.bestPieces)+'ピース</div>'+
           '<div class="ach-record-month">'+monthLabel(result.bestMonthKey)+'</div>'+
-          (toRecord>0 ? '<div class="ach-record-remaining">🔥 過去最高まであと '+formatNum(toRecord)+'個！</div>' : '<div class="ach-record-remaining">🔥 記録が見えてきました！</div>')+
+          (toRecord>0 ? '<div class="ach-record-remaining">🔥 過去最高まであと '+formatNum(toRecord)+'ピース！</div>' : '<div class="ach-record-remaining">🔥 記録が見えてきました！</div>')+
         '</div>';
     }else{
       recordSection = '<div class="ach-section-title">🏆 過去最高記録</div>'+
@@ -3168,8 +3172,8 @@ function renderAchievements(){
       var diffPct = lastYearPieces>0 ? ((curPieces-lastYearPieces)/lastYearPieces*100) : null;
       yoySection = '<div class="ach-section-title">📈 前年同月比較</div>'+
         '<div class="ach-yoy-card">'+
-          '<div class="ach-yoy-row"><span>'+result.lastYearKey.split('-')[0]+'年</span><b>'+formatNum(lastYearPieces)+'個</b></div>'+
-          '<div class="ach-yoy-row"><span>'+result.curMonthKey.split('-')[0]+'年</span><b>'+formatNum(curPieces)+'個</b></div>'+
+          '<div class="ach-yoy-row"><span>'+result.lastYearKey.split('-')[0]+'年</span><b>'+formatNum(lastYearPieces)+'ピース</b></div>'+
+          '<div class="ach-yoy-row"><span>'+result.curMonthKey.split('-')[0]+'年</span><b>'+formatNum(curPieces)+'ピース</b></div>'+
           (diffPct!==null ? '<div class="ach-yoy-pct '+(diffPct>=0?'up':'down')+'">前年比 '+(diffPct>=0?'+':'')+diffPct.toFixed(1)+'%'+(diffPct>=0?' 前年よりアップ！':'')+'</div>' : '')+
         '</div>';
     }else{
@@ -3183,11 +3187,11 @@ function renderAchievements(){
       var v = result.dailyPieces[d];
       var h = Math.max(2, Math.round(v/maxDay*60));
       var dayNum = parseInt(d.split('-')[2],10);
-      return '<div class="ach-bar-col" title="'+dayNum+'日: '+formatNum(v)+'個"><div class="ach-bar" style="height:'+h+'px;"></div><div class="ach-bar-label">'+dayNum+'</div></div>';
+      return '<div class="ach-bar-col" title="'+dayNum+'日: '+formatNum(v)+'ピース"><div class="ach-bar" style="height:'+h+'px;"></div><div class="ach-bar-label">'+dayNum+'</div></div>';
     }).join('');
-    var dailySection = '<div class="ach-section-title">📊 今月の日別実績(出荷個数)</div>'+
+    var dailySection = '<div class="ach-section-title">📊 今月の日別実績(出荷ピース数)</div>'+
       '<div class="ach-daily-chart">'+(bars||'<div class="empty-note">まだ記録がありません</div>')+'</div>'+
-      (result.bestDay ? '<div class="ach-bestday">🔥 今月最高日: <b>'+dateLabelShort(result.bestDay)+'</b> '+formatNum(result.bestDayPieces)+'個</div>' : '');
+      (result.bestDay ? '<div class="ach-bestday">🔥 今月最高日: <b>'+dateLabelShort(result.bestDay)+'</b> '+formatNum(result.bestDayPieces)+'ピース</div>' : '');
 
     var msg = achievementMessage(rate, isNewRecord);
     var msgSection = '<div class="ach-message">'+esc(msg)+'</div>';
@@ -3615,13 +3619,13 @@ function renderInput(){
             '</div>'+
           '</div>';
         }).join('');
-        liveCountersHtml = '<div class="task-tile-live-counters"><div class="task-tile-live-title">作業中に件数・時間を記録</div>'+liveRows+'</div>';
+        liveCountersHtml = '<div class="task-tile-live-counters"><div class="task-tile-live-title">内訳ごとに件数・時間を記録(切り替える内訳の▶を押してください)</div>'+liveRows+'</div>';
       }
       return '<div class="task-tile '+(isActive?'active-task':'')+'" data-tap-task="'+tid+'" style="border-left:6px solid '+t.color+'">'+
         '<div><div class="task-tile-name">'+esc(t.name)+'</div><div class="task-tile-unit">単位: '+esc(t.unit)+'</div></div>'+
         '<div>'+
           '<div class="task-tile-status"><span class="status-dot '+(isActive?'working':'idle')+'"></span>'+(isActive?'作業中':'タップして開始')+'</div>'+
-          (isActive ? '<div class="task-tile-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsed)+'</div>' : '')+
+          (isActive && !(t.subcategories && t.subcategories.length) ? '<div class="task-tile-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsed)+'</div>' : '')+
         '</div>'+
         liveCountersHtml+
         coworkerHtml+
@@ -3839,6 +3843,13 @@ function openQuantityModal(nextTaskId, isEndDay){
 }
 async function startTask(taskId){
   var entry = {id:uid(), staffId:state.activeStaffId, taskId:taskId, start:new Date().toISOString(), end:null, quantity:null};
+  var task = taskById(taskId);
+  if(task.subcategories && task.subcategories.length){
+    var firstName = subcatName(task.subcategories[0]);
+    entry.activeSubcat = firstName;
+    entry.activeSubcatStart = entry.start;
+    entry.subTimes = {};
+  }
   state.day.logs.push(entry);
   await saveDay(state.day);
   state.suppressRender = false;
@@ -4644,7 +4655,7 @@ function renderMonitor(){
     var curPieces = shipmentPieces(state.achievementsResult.curBuckets);
     var target = (state.achievementSettings && state.achievementSettings.monthlyTargetPieces) || 25000;
     var rate = target>0 ? curPieces/target : 0;
-    challengeHtml = '<div class="mon-challenge-nums">'+formatNum(curPieces)+' <span>/ '+formatNum(target)+'個</span></div>'+
+    challengeHtml = '<div class="mon-challenge-nums">'+formatNum(curPieces)+' <span>/ '+formatNum(target)+'ピース</span></div>'+
       '<div class="mon-challenge-bar"><div class="mon-challenge-fill" style="width:'+Math.min(100,rate*100).toFixed(1)+'%"></div></div>'+
       '<div class="mon-challenge-sub">達成率 '+(rate*100).toFixed(1)+'%</div>';
   }else{
@@ -4668,9 +4679,9 @@ function renderMonitor(){
         '<div class="mon-footer-title">📅 本日の実績</div>'+
         '<div class="mon-footer-stats">'+
           '<div><span>出荷件数</span><b>'+formatNum(shipToday.count)+'件</b></div>'+
-          '<div><span>出荷個数</span><b>'+formatNum(shipToday.pieces)+'個</b></div>'+
+          '<div><span>出荷ピース数</span><b>'+formatNum(shipToday.pieces)+'ピース</b></div>'+
           '<div><span>入庫件数</span><b>'+formatNum(inboundToday.count)+'件</b></div>'+
-          '<div><span>入庫個数</span><b>'+formatNum(inboundToday.pieces)+'個</b></div>'+
+          '<div><span>入庫ピース数</span><b>'+formatNum(inboundToday.pieces)+'ピース</b></div>'+
         '</div>'+
       '</div>'+
       '<div class="mon-footer-col">'+

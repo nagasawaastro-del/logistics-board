@@ -159,6 +159,10 @@ input,select{font-family:inherit;}
 .log-edit-btn{background:var(--paper-100);border:1px solid var(--paper-line);border-radius:14px;padding:5px 14px;font-size:12px;font-weight:600;color:var(--ink-900);}
 .log-stop-btn{background:#FDEEF2;border:1px solid #D6577E;border-radius:14px;padding:5px 12px;font-size:12px;font-weight:700;color:#B33C63;margin-right:6px;}
 .breakdown-detail-list{margin-top:6px;text-align:left;display:block;}
+.missing-subtime-warning{
+  margin-top:6px;font-size:10px;font-weight:700;color:#B33C63;background:#FDEEF2;
+  border-radius:8px;padding:3px 8px;display:inline-block;
+}
 .breakdown-detail-row{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--slate-500);padding:2px 0;}
 .breakdown-detail-name{font-weight:600;color:var(--ink-900);min-width:64px;}
 .breakdown-detail-qty{font-family:var(--font-mono);min-width:48px;text-align:right;}
@@ -748,6 +752,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-24', items:[
+    '管理者画面の作業実績一覧に「⚠️ 内訳の時間未計測」表示を追加。内訳の件数はあるのに計測時間が記録されていない記録(手動追加・修正前のデータなど)を見分けやすくしました'
+  ]},
   { date:'2026-08-24', items:[
     '実績・モニター画面などの表記を「個」から「ピース」に統一(出荷個数→出荷ピース数、など)',
     '不具合修正: 内訳がある作業で、内訳ごとの計測(▶計測開始)を一度も押さないまま作業を終えると、時間の記録が内訳に振り分けられない(省略される)ことがあった問題に対処。作業を開始した時点で、最初の内訳の計測が自動的に開始されるように変更し、常にどれかの内訳に時間が記録されるように。全体の作業タイマー表示は内訳ごとの計測と重複するため非表示にしました'
@@ -2055,13 +2062,16 @@ function renderManager(){
       qtyLabel = '-';
     }
     var detailHtml = breakdownDetailRows(l, t);
+    var hasBreakdownQty = l.breakdown && Object.keys(l.breakdown).some(function(k){ return l.breakdown[k]>0; });
+    var hasSubTimes = l.subTimes && Object.keys(l.subTimes).some(function(k){ return l.subTimes[k]>0; });
+    var missingTimeWarning = (l.end && hasBreakdownQty && !hasSubTimes) ? '<div class="missing-subtime-warning" title="内訳の計測時間が記録されていません(手動追加・編集・修正前のデータの可能性)">⚠️ 内訳の時間未計測</div>' : '';
     var stopBtn = l.end ? '' : '<button class="log-stop-btn" data-stop-log="'+l.id+'">■ ストップ</button>';
     return '<tr>'+
       '<td>'+esc(s.name)+'</td>'+
       '<td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td>'+
       '<td class="num">'+fmtClock(l.start)+'</td>'+
       '<td class="num">'+endLabel+'</td>'+
-      '<td class="num">'+qtyLabel+detailHtml+'</td>'+
+      '<td class="num">'+qtyLabel+detailHtml+missingTimeWarning+'</td>'+
       '<td class="num">'+stopBtn+'<button class="log-edit-btn" data-edit-log="'+l.id+'">編集</button></td>'+
     '</tr>';
   }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この日の記録はまだありません</td></tr>';

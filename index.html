@@ -753,6 +753,12 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-24', items:[
+    '内訳の合計表示をさらに改善。単位が異なる場合に合計を非表示にするのではなく、「単位ごとにグループ分けして、それぞれの単位内で合計」して表示するように変更(例: ピッキング80ピース+検品20ピース→100ピース、梱包40件→40件、を並べて表示)。対象: 管理者の作業実績一覧、集計画面の作業別テーブル、CSVダウンロード'
+  ]},
+  { date:'2026-08-24', items:[
+    '内訳の合計表示のルールを見直し。これまでは内訳がある作業は常に合計を非表示にしていましたが、正しくは「内訳の単位がすべて同じ場合だけ合計を表示し、単位が異なる場合だけ非表示にする」ように変更。対象: 管理者の作業実績一覧、集計画面の作業別テーブル、CSVダウンロード'
+  ]},
+  { date:'2026-08-24', items:[
     '管理者画面の作業実績一覧に「⚠️ 内訳の時間未計測」表示を追加。内訳の件数はあるのに計測時間が記録されていない記録(手動追加・修正前のデータなど)を見分けやすくしました'
   ]},
   { date:'2026-08-24', items:[
@@ -1057,6 +1063,23 @@ function breakdownLabel(breakdown, task){
   if(!keys.length) return '';
   var unitMap = subcatUnitMap(task);
   return '('+keys.map(function(k){ return esc(k)+' '+breakdown[k]+esc(unitMap[k]||task.unit); }).join(' / ')+')';
+}
+function unitGroupedTotals(breakdown, task){
+  if(!breakdown) return [];
+  var keys = Object.keys(breakdown).filter(function(k){ return breakdown[k]>0; });
+  if(!keys.length) return [];
+  var unitMap = subcatUnitMap(task);
+  var totals = {};
+  var order = [];
+  keys.forEach(function(k){
+    var u = unitMap[k]||task.unit;
+    if(!(u in totals)){ totals[u] = 0; order.push(u); }
+    totals[u] += breakdown[k]||0;
+  });
+  return order.map(function(u){ return { unit: u, qty: totals[u] }; });
+}
+function formatUnitGroupedTotals(groups, escapeHtml){
+  return groups.map(function(g){ return g.qty+(escapeHtml?esc(g.unit):g.unit); }).join(' / ');
 }
 function breakdownDetailRows(l, t){
   if(!l.breakdown && !l.activeSubcat) return '';
@@ -2053,7 +2076,13 @@ function renderManager(){
     if(l.taskId==='BREAK'){
       qtyLabel = '-';
     }else if(hasSubcats){
-      qtyLabel = l.end ? '' : '<span style="color:var(--rust-600);font-size:12px;font-weight:700;">進行中</span>';
+      var unitGroups = unitGroupedTotals(l.breakdown, t);
+      var totalStr = formatUnitGroupedTotals(unitGroups, true);
+      if(l.end){
+        qtyLabel = totalStr;
+      }else{
+        qtyLabel = '<span style="color:var(--rust-600);font-size:12px;font-weight:700;">進行中'+(totalStr?' '+totalStr:'')+'</span>';
+      }
     }else if(l.end){
       qtyLabel = (l.quantity||0)+esc(t.unit);
     }else if(l.quantity){
@@ -2927,7 +2956,10 @@ function exportAggCSV(agg, label){
     var unitMap = subcatUnitMap(t);
     var bdKeys = Object.keys(info.breakdown||{}).filter(function(k){ return info.breakdown[k]>0; });
     var bdStr = bdKeys.map(function(k){ return k+':'+info.breakdown[k]+(unitMap[k]||t.unit); }).join(' / ');
-    rows.push([t.name, Math.round(info.ms/60000), info.qty, Object.keys(info.staff).length, bdStr]);
+    var hasSubcats = t.subcategories && t.subcategories.length;
+    var unitGroups = hasSubcats ? unitGroupedTotals(info.breakdown, t) : [];
+    var qtyForCsv = hasSubcats ? formatUnitGroupedTotals(unitGroups, false) : info.qty;
+    rows.push([t.name, Math.round(info.ms/60000), qtyForCsv, Object.keys(info.staff).length, bdStr]);
   });
   downloadCSV('集計_'+label+'.csv', rows);
 }
@@ -3439,7 +3471,8 @@ function renderReportSingleBody(){
     var info = agg.perTask[tid];
     var hasSubcats = t.subcategories && t.subcategories.length;
     var bdRows = taskBreakdownRows(info, t);
-    var qtyCell = hasSubcats ? '' : (info.qty+esc(t.unit));
+    var unitGroups = hasSubcats ? unitGroupedTotals(info.breakdown, t) : [];
+    var qtyCell = hasSubcats ? formatUnitGroupedTotals(unitGroups, true) : (info.qty+esc(t.unit));
     return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+qtyCell+bdRows+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
@@ -3474,7 +3507,8 @@ function renderReportRangeBody(){
     var info = agg.perTask[tid];
     var hasSubcats = t.subcategories && t.subcategories.length;
     var bdRows = taskBreakdownRows(info, t);
-    var qtyCell = hasSubcats ? '' : (info.qty+esc(t.unit));
+    var unitGroups = hasSubcats ? unitGroupedTotals(info.breakdown, t) : [];
+    var qtyCell = hasSubcats ? formatUnitGroupedTotals(unitGroups, true) : (info.qty+esc(t.unit));
     return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+qtyCell+bdRows+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 

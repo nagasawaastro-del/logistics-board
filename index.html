@@ -153,6 +153,7 @@ input,select{font-family:inherit;}
 .vc-manage-details{margin-top:14px;border-top:1px solid var(--paper-line);padding-top:10px;}
 .vc-manage-details summary{font-size:13px;font-weight:700;color:var(--ink-900);cursor:pointer;}
 .vc-manage-toggle-btn{background:var(--paper-100);border:1px solid var(--paper-line);border-radius:12px;padding:5px 12px;font-size:11px;font-weight:600;color:var(--ink-900);margin-right:6px;}
+.vc-relink-row{display:flex;align-items:center;gap:8px;margin:10px 0;padding:10px;background:var(--paper-100);border-radius:10px;}
 .vc-manage-toggle-btn:hover{border-color:var(--teal-500);color:var(--teal-500);}
 .vc-queue{margin-top:12px;padding-top:12px;border-top:1px dashed var(--amber-500);}
 .vc-queue-title{font-size:11px;font-weight:700;color:var(--rust-600);margin-bottom:8px;text-transform:uppercase;letter-spacing:.03em;}
@@ -797,6 +798,10 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-25', items:[
+    '不具合修正: 「紐づける作業」のドロップダウンで作業を選んでからファイルを選ぶまでの間に自動更新が入ると、選択が別の作業にリセットされてしまうことがあった問題を修正。選択内容をきちんと覚えておくように変更',
+    '管理者画面の「取り込んだ伝票を管理する」に「紐づけ先を変更」欄を追加。すでに取り込んだ伝票のセットを、あとから別の作業に紐づけ直せるように(伝票データ自体はそのまま引き継がれます)'
+  ]},
+  { date:'2026-08-25', items:[
     '不具合修正: 管理者画面の「取り込んだ伝票を管理する」を開いた状態で何か操作すると、開閉状態が保存されておらず、勝手に閉じてしまっていた問題を修正',
     'ロジザード伝票の表示を「荷主出荷NO」を基本の識別子として表示するように変更(パートさんの伝票選択画面・管理者の伝票管理一覧の両方)。出荷伝票NOは補足情報として表示'
   ]},
@@ -1043,6 +1048,7 @@ var state = {
   vcImporting: false,
   vcSelectedSlipIds: [],
   vcManageOpen: false,
+  vcImportTaskId: null,
   day: null,
   activeStaffId: null,
   showOtherTasks: false,
@@ -2389,16 +2395,30 @@ function renderManager(){
 
   var vcImportPanel = '';
   if(isToday){
-    var vcTaskOptions = tasksForDate(viewDate).map(function(t){
-      return '<option value="'+t.id+'" '+(state.vcSlips && state.vcSlips.taskId===t.id ? 'selected':'')+'>'+esc(t.name)+'</option>';
+    var vcDateTasks = tasksForDate(viewDate);
+    if(state.vcImportTaskId===null){
+      state.vcImportTaskId = (state.vcSlips && state.vcSlips.taskId) || (vcDateTasks[0] ? vcDateTasks[0].id : '');
+    }
+    var vcTaskOptions = vcDateTasks.map(function(t){
+      return '<option value="'+t.id+'" '+(state.vcImportTaskId===t.id ? 'selected':'')+'>'+esc(t.name)+'</option>';
     }).join('') || '<option value="">本日の作業がありません</option>';
     var vcStatusHtml = '';
     var vcManageHtml = '';
+    var vcRelinkHtml = '';
     if(state.vcSlips && state.vcSlips.slips && state.vcSlips.slips.length){
       var vcTask = taskById(state.vcSlips.taskId);
       var doneCount = state.vcSlips.slips.filter(function(s){ return s.status==='done'; }).length;
       var totalQtyAll = state.vcSlips.slips.reduce(function(a,s){ return a+s.totalQty; }, 0);
       vcStatusHtml = '<div class="vc-import-status">「'+esc(vcTask.name)+'」に'+state.vcSlips.slips.length+'件の伝票(合計'+formatNum(totalQtyAll)+'ピース)を取り込み済み・'+doneCount+'/'+state.vcSlips.slips.length+'件完了</div>';
+
+      var vcRelinkOptions = vcDateTasks.map(function(t){
+        return '<option value="'+t.id+'" '+(state.vcSlips.taskId===t.id ? 'selected':'')+'>'+esc(t.name)+'</option>';
+      }).join('');
+      vcRelinkHtml = '<div class="vc-relink-row">'+
+        '<label style="font-size:11px;color:var(--slate-500);">紐づけ先を変更</label>'+
+        '<select id="vcRelinkSelect" style="flex:1;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;font-size:13px;">'+vcRelinkOptions+'</select>'+
+        '<button type="button" class="vc-manage-toggle-btn" id="vcRelinkBtn">変更する</button>'+
+      '</div>';
 
       var vcRows = state.vcSlips.slips.slice().sort(function(a,b){
         if(a.status!==b.status) return a.status==='done' ? 1 : -1;
@@ -2416,6 +2436,7 @@ function renderManager(){
       }).join('');
       vcManageHtml = '<details class="vc-manage-details" id="vcManageDetails" '+(state.vcManageOpen?'open':'')+'>'+
         '<summary>取り込んだ伝票を管理する('+state.vcSlips.slips.length+'件)</summary>'+
+        vcRelinkHtml+
         '<table class="report-table" style="margin-top:10px;"><thead><tr><th>荷主出荷NO</th><th>明細</th><th>ピース</th><th>計測時間</th><th>状態</th><th></th></tr></thead><tbody>'+vcRows+'</tbody></table>'+
       '</details>';
     }
@@ -2831,13 +2852,28 @@ function bindManager(){
       render();
     });
   });
+  var vcTaskSelect = document.getElementById('vcTaskSelect');
+  if(vcTaskSelect) vcTaskSelect.addEventListener('change', function(){
+    state.vcImportTaskId = vcTaskSelect.value;
+  });
+  var vcRelinkBtn = document.getElementById('vcRelinkBtn');
+  if(vcRelinkBtn){
+    vcRelinkBtn.addEventListener('click', async function(){
+      var relinkSelect = document.getElementById('vcRelinkSelect');
+      var newTaskId = relinkSelect ? relinkSelect.value : '';
+      if(!newTaskId || !state.vcSlips || newTaskId===state.vcSlips.taskId) return;
+      state.vcSlips.taskId = newTaskId;
+      await saveVcSlips(todayStr(), state.vcSlips);
+      showToast('紐づけ先を「'+esc(taskById(newTaskId).name)+'」に変更しました');
+      render();
+    });
+  }
   var vcCsvInput = document.getElementById('vcCsvInput');
   if(vcCsvInput){
     vcCsvInput.addEventListener('change', function(){
       var file = vcCsvInput.files[0];
       if(!file) return;
-      var taskSelect = document.getElementById('vcTaskSelect');
-      var taskId = taskSelect ? taskSelect.value : '';
+      var taskId = state.vcImportTaskId || (document.getElementById('vcTaskSelect') ? document.getElementById('vcTaskSelect').value : '');
       if(!taskId){ showToast('紐づける作業を選択してください'); return; }
       state.vcImporting = true;
       render();

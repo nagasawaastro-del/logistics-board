@@ -150,6 +150,10 @@ input,select{font-family:inherit;}
 }
 .warn-fix-btn:hover{background:#94304F;}
 .vc-import-status{background:#EEF7F1;border:1px solid var(--teal-500);color:#1F6B4A;border-radius:10px;padding:10px 14px;font-size:13px;font-weight:600;margin-bottom:12px;}
+.vc-manage-details{margin-top:14px;border-top:1px solid var(--paper-line);padding-top:10px;}
+.vc-manage-details summary{font-size:13px;font-weight:700;color:var(--ink-900);cursor:pointer;}
+.vc-manage-toggle-btn{background:var(--paper-100);border:1px solid var(--paper-line);border-radius:12px;padding:5px 12px;font-size:11px;font-weight:600;color:var(--ink-900);margin-right:6px;}
+.vc-manage-toggle-btn:hover{border-color:var(--teal-500);color:var(--teal-500);}
 .vc-queue{margin-top:12px;padding-top:12px;border-top:1px dashed var(--amber-500);}
 .vc-queue-title{font-size:11px;font-weight:700;color:var(--rust-600);margin-bottom:8px;text-transform:uppercase;letter-spacing:.03em;}
 .vc-queue-hint{font-size:12px;color:var(--slate-500);margin-bottom:8px;}
@@ -792,6 +796,10 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-25', items:[
+    'ロジザードCSVを1日に複数回アップロードできるように変更。「荷主出荷NO」を目印に、すでに取り込み済みの伝票はそのままにし、新しく増えた伝票だけを追加するように(進捗が上書きされる心配がなくなりました)',
+    '管理者画面に「取り込んだ伝票を管理する」を追加。伝票ごとの明細数・ピース数・計測時間を一覧で確認し、手動で完了/未完了を切り替えたり、不要な伝票を削除したりできるように'
+  ]},
   { date:'2026-08-25', items:[
     '重要な不具合修正: 画面を再描画するたびに、スクロール位置が先頭に戻ってしまう問題を修正。特にロジザード伝票のチェックボックス選択で、1つチェックするたびに一覧が先頭に戻ってしまい、選び直しになっていた不具合の原因でした。あわせて、伝票を選択している最中は4秒ごとの自動更新も一時停止するように変更'
   ]},
@@ -1489,7 +1497,13 @@ function parseVcCsvFile(file, callback, errCallback){
         var slipNo = (r['出荷伝票NO']||'').trim();
         if(!slipNo) return;
         if(!groups[slipNo]){
-          groups[slipNo] = { slipNo: slipNo, destination: (r['出荷先名']||'').trim(), client: (r['取引先名']||'').trim(), lineCount:0, totalQty:0 };
+          groups[slipNo] = {
+            slipNo: slipNo,
+            shipperNo: (r['荷主出荷NO']||'').trim(),
+            destination: (r['出荷先名']||'').trim(),
+            client: (r['取引先名']||'').trim(),
+            lineCount:0, totalQty:0
+          };
           order.push(slipNo);
         }
         groups[slipNo].lineCount++;
@@ -1499,7 +1513,7 @@ function parseVcCsvFile(file, callback, errCallback){
       var slips = order.map(function(sn){
         var g = groups[sn];
         return {
-          id: uid(), slipNo: g.slipNo, destination: g.destination, client: g.client,
+          id: uid(), slipNo: g.slipNo, shipperNo: g.shipperNo, destination: g.destination, client: g.client,
           lineCount: g.lineCount, totalQty: g.totalQty,
           status: 'pending', pickingMs: 0, packingMs: 0,
           activePhase: null, activePhaseStart: null, activeStaffId: null,
@@ -1514,6 +1528,32 @@ function parseVcCsvFile(file, callback, errCallback){
   };
   reader.onerror = function(){ errCallback('ファイルの読み込みに失敗しました。'); };
   reader.readAsArrayBuffer(file);
+}
+function mergeVcSlips(existingData, newSlips, taskId){
+  var sameBatch = existingData && existingData.taskId===taskId;
+  var existingSlips = sameBatch ? existingData.slips.slice() : [];
+  var existingShipperNos = {};
+  existingSlips.forEach(function(s){ if(s.shipperNo) existingShipperNos[s.shipperNo] = true; });
+  var addedCount = 0, skippedCount = 0;
+  newSlips.forEach(function(s){
+    if(s.shipperNo && existingShipperNos[s.shipperNo]){
+      skippedCount++;
+      return;
+    }
+    existingSlips.push(s);
+    if(s.shipperNo) existingShipperNos[s.shipperNo] = true;
+    addedCount++;
+  });
+  return {
+    data: {
+      taskId: taskId,
+      importedAt: new Date().toISOString(),
+      activeSessions: sameBatch ? (existingData.activeSessions||[]) : [],
+      slips: existingSlips
+    },
+    addedCount: addedCount,
+    skippedCount: skippedCount
+  };
 }
 function myVcSession(){
   if(!state.vcSlips || !state.vcSlips.activeSessions) return null;
@@ -2348,20 +2388,41 @@ function renderManager(){
       return '<option value="'+t.id+'" '+(state.vcSlips && state.vcSlips.taskId===t.id ? 'selected':'')+'>'+esc(t.name)+'</option>';
     }).join('') || '<option value="">本日の作業がありません</option>';
     var vcStatusHtml = '';
+    var vcManageHtml = '';
     if(state.vcSlips && state.vcSlips.slips && state.vcSlips.slips.length){
       var vcTask = taskById(state.vcSlips.taskId);
       var doneCount = state.vcSlips.slips.filter(function(s){ return s.status==='done'; }).length;
       var totalQtyAll = state.vcSlips.slips.reduce(function(a,s){ return a+s.totalQty; }, 0);
       vcStatusHtml = '<div class="vc-import-status">「'+esc(vcTask.name)+'」に'+state.vcSlips.slips.length+'件の伝票(合計'+formatNum(totalQtyAll)+'ピース)を取り込み済み・'+doneCount+'/'+state.vcSlips.slips.length+'件完了</div>';
+
+      var vcRows = state.vcSlips.slips.slice().sort(function(a,b){
+        if(a.status!==b.status) return a.status==='done' ? 1 : -1;
+        return 0;
+      }).map(function(s){
+        var statusLabel = s.status==='done' ? '<span style="color:var(--teal-500);font-weight:700;">完了</span>' : '<span style="color:var(--slate-500);">未完了</span>';
+        return '<tr>'+
+          '<td>'+esc(s.slipNo)+(s.shipperNo?'<div style="font-size:11px;color:var(--slate-500);">荷主NO: '+esc(s.shipperNo)+'</div>':'')+'</td>'+
+          '<td class="num">'+s.lineCount+'件</td>'+
+          '<td class="num">'+formatNum(s.totalQty)+'ピース</td>'+
+          '<td class="num">ピ'+fmtHM(s.pickingMs||0)+' / 梱'+fmtHM(s.packingMs||0)+'</td>'+
+          '<td class="num">'+statusLabel+'</td>'+
+          '<td class="num"><button type="button" class="vc-manage-toggle-btn" data-vc-toggle-done="'+s.id+'">'+(s.status==='done'?'未完了に戻す':'完了にする')+'</button> <button type="button" class="log-stop-btn" data-vc-delete="'+s.id+'">削除</button></td>'+
+        '</tr>';
+      }).join('');
+      vcManageHtml = '<details class="vc-manage-details">'+
+        '<summary>取り込んだ伝票を管理する('+state.vcSlips.slips.length+'件)</summary>'+
+        '<table class="report-table" style="margin-top:10px;"><thead><tr><th>伝票</th><th>明細</th><th>ピース</th><th>計測時間</th><th>状態</th><th></th></tr></thead><tbody>'+vcRows+'</tbody></table>'+
+      '</details>';
     }
     vcImportPanel = '<div class="panel" style="margin-top:14px;">'+
       '<div class="panel-title">📋 ロジザード明細インポート</div>'+
-      '<div class="pool-hint" style="margin-bottom:10px;">出荷指示CSVを取り込むと、出荷伝票(出荷伝票NO)ごとに明細数・ピース数が自動集計され、パートさんの画面でピッキング・梱包の時間を伝票ごとに計測できるようになります。1日1回、まとめてアップロードしてください(再度アップロードすると本日分は上書きされます)。</div>'+
+      '<div class="pool-hint" style="margin-bottom:10px;">出荷指示CSVを取り込むと、出荷伝票(出荷伝票NO)ごとに明細数・ピース数が自動集計され、パートさんの画面でピッキング・梱包の時間を伝票ごとに計測できるようになります。「荷主出荷NO」を目印に重複を防ぐので、1日に何度アップロードしても大丈夫です(新しく増えた伝票だけが追加され、すでにある伝票の進捗はそのまま残ります)。</div>'+
       vcStatusHtml+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">紐づける作業</label>'+
       '<select id="vcTaskSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:10px;">'+vcTaskOptions+'</select>'+
       '<input type="file" id="vcCsvInput" accept=".csv" style="display:block;margin-bottom:6px;">'+
       (state.vcImporting ? '<div class="empty-note">取り込み中...</div>' : '')+
+      vcManageHtml+
     '</div>';
   }
 
@@ -2724,6 +2785,41 @@ function bindManager(){
   var openAddLogBtn = document.getElementById('openAddLogBtn');
   if(openAddLogBtn) openAddLogBtn.addEventListener('click', openAddLogModal);
 
+  document.querySelectorAll('[data-vc-toggle-done]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var slipId = el.getAttribute('data-vc-toggle-done');
+      var slip = state.vcSlips && state.vcSlips.slips.find(function(s){ return s.id===slipId; });
+      if(!slip) return;
+      if(slip.status==='done'){
+        slip.status = 'pending';
+        slip.doneBy = null;
+        slip.doneAt = null;
+      }else{
+        slip.status = 'done';
+        slip.doneBy = null;
+        slip.doneAt = new Date().toISOString();
+      }
+      await saveVcSlips(todayStr(), state.vcSlips);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-vc-delete]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var slipId = el.getAttribute('data-vc-delete');
+      if(!confirm('この伝票を削除しますか?(記録した計測時間も失われます)')) return;
+      var idx = state.vcSlips.slips.findIndex(function(s){ return s.id===slipId; });
+      if(idx===-1) return;
+      state.vcSlips.slips.splice(idx,1);
+      if(state.vcSlips.activeSessions){
+        state.vcSlips.activeSessions.forEach(function(sess){
+          var i = sess.slipIds.indexOf(slipId);
+          if(i!==-1) sess.slipIds.splice(i,1);
+        });
+      }
+      await saveVcSlips(todayStr(), state.vcSlips);
+      render();
+    });
+  });
   var vcCsvInput = document.getElementById('vcCsvInput');
   if(vcCsvInput){
     vcCsvInput.addEventListener('change', function(){
@@ -2734,13 +2830,16 @@ function bindManager(){
       if(!taskId){ showToast('紐づける作業を選択してください'); return; }
       state.vcImporting = true;
       render();
-      parseVcCsvFile(file, async function(slips){
-        var data = { taskId: taskId, importedAt: new Date().toISOString(), slips: slips };
-        await saveVcSlips(todayStr(), data);
-        state.vcSlips = data;
+      parseVcCsvFile(file, async function(newSlips){
+        var merged = mergeVcSlips(state.vcSlips, newSlips, taskId);
+        await saveVcSlips(todayStr(), merged.data);
+        state.vcSlips = merged.data;
         state.vcImporting = false;
-        var totalQty = slips.reduce(function(a,s){ return a+s.totalQty; }, 0);
-        showToast('伝票'+slips.length+'件(合計'+formatNum(totalQty)+'ピース)を取り込みました');
+        var totalQty = newSlips.reduce(function(a,s){ return a+s.totalQty; }, 0);
+        var msg = '新規'+merged.addedCount+'件を追加しました(合計'+formatNum(totalQty)+'ピース分のCSVを読み込み)';
+        if(merged.skippedCount) msg += '。'+merged.skippedCount+'件はすでに取り込み済みのため、そのままにしました';
+        showToast(msg);
+        vcCsvInput.value = '';
         render();
       }, function(errMsg){
         state.vcImporting = false;

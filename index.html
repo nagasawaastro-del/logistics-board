@@ -797,6 +797,10 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-25', items:[
+    '不具合修正: 管理者画面の「取り込んだ伝票を管理する」を開いた状態で何か操作すると、開閉状態が保存されておらず、勝手に閉じてしまっていた問題を修正',
+    'ロジザード伝票の表示を「荷主出荷NO」を基本の識別子として表示するように変更(パートさんの伝票選択画面・管理者の伝票管理一覧の両方)。出荷伝票NOは補足情報として表示'
+  ]},
+  { date:'2026-08-25', items:[
     'ロジザードCSVを1日に複数回アップロードできるように変更。「荷主出荷NO」を目印に、すでに取り込み済みの伝票はそのままにし、新しく増えた伝票だけを追加するように(進捗が上書きされる心配がなくなりました)',
     '管理者画面に「取り込んだ伝票を管理する」を追加。伝票ごとの明細数・ピース数・計測時間を一覧で確認し、手動で完了/未完了を切り替えたり、不要な伝票を削除したりできるように'
   ]},
@@ -1038,6 +1042,7 @@ var state = {
   vcSlips: null,
   vcImporting: false,
   vcSelectedSlipIds: [],
+  vcManageOpen: false,
   day: null,
   activeStaffId: null,
   showOtherTasks: false,
@@ -1941,7 +1946,7 @@ function renderVcSlipQueue(taskId){
     var timerText = fmtElapsed(Date.now()-new Date(mySession.start).getTime());
     html += '<div class="vc-active-slip">'+
       '<div class="vc-active-slip-head">'+phaseLabel+'計測中('+slipsInSession.length+'件まとめて)</div>'+
-      '<div class="vc-active-slip-meta">'+slipsInSession.map(function(s){ return esc(s.slipNo)+'('+s.lineCount+'明細/'+formatNum(s.totalQty)+'ピース)'; }).join('、')+'</div>'+
+      '<div class="vc-active-slip-meta">'+slipsInSession.map(function(s){ return esc(s.shipperNo||s.slipNo)+'('+s.lineCount+'明細/'+formatNum(s.totalQty)+'ピース)'; }).join('、')+'</div>'+
       '<div class="sub-timer-row" style="margin:10px 0;">'+
         '<button type="button" class="sub-timer-btn active" data-vc-stop-session="1">■ 計測終了</button>'+
         '<span class="sub-timer-display active"'+timerAttrs+'>'+timerText+'</span>'+
@@ -1957,7 +1962,7 @@ function renderVcSlipQueue(taskId){
       var timesNote = (s.pickingMs||s.packingMs) ? '<span class="vc-slip-times">済: ピ'+fmtHM(s.pickingMs||0)+' / 梱'+fmtHM(s.packingMs||0)+'</span>' : '';
       return '<label class="vc-slip-row'+(checked?' vc-slip-row-checked':'')+'">'+
         '<input type="checkbox" data-vc-checkbox="'+s.id+'" '+(checked?'checked':'')+'>'+
-        '<span class="vc-slip-main"><span class="vc-slip-no">'+esc(s.slipNo)+'</span>'+
+        '<span class="vc-slip-main"><span class="vc-slip-no">'+esc(s.shipperNo||s.slipNo)+'</span>'+
         '<span class="vc-slip-meta">明細'+s.lineCount+'件 ・ '+formatNum(s.totalQty)+'ピース</span>'+
         othersNote+timesNote+'</span>'+
       '</label>';
@@ -2401,7 +2406,7 @@ function renderManager(){
       }).map(function(s){
         var statusLabel = s.status==='done' ? '<span style="color:var(--teal-500);font-weight:700;">完了</span>' : '<span style="color:var(--slate-500);">未完了</span>';
         return '<tr>'+
-          '<td>'+esc(s.slipNo)+(s.shipperNo?'<div style="font-size:11px;color:var(--slate-500);">荷主NO: '+esc(s.shipperNo)+'</div>':'')+'</td>'+
+          '<td>'+esc(s.shipperNo||s.slipNo)+'<div style="font-size:11px;color:var(--slate-500);">伝票NO: '+esc(s.slipNo)+'</div></td>'+
           '<td class="num">'+s.lineCount+'件</td>'+
           '<td class="num">'+formatNum(s.totalQty)+'ピース</td>'+
           '<td class="num">ピ'+fmtHM(s.pickingMs||0)+' / 梱'+fmtHM(s.packingMs||0)+'</td>'+
@@ -2409,9 +2414,9 @@ function renderManager(){
           '<td class="num"><button type="button" class="vc-manage-toggle-btn" data-vc-toggle-done="'+s.id+'">'+(s.status==='done'?'未完了に戻す':'完了にする')+'</button> <button type="button" class="log-stop-btn" data-vc-delete="'+s.id+'">削除</button></td>'+
         '</tr>';
       }).join('');
-      vcManageHtml = '<details class="vc-manage-details">'+
+      vcManageHtml = '<details class="vc-manage-details" id="vcManageDetails" '+(state.vcManageOpen?'open':'')+'>'+
         '<summary>取り込んだ伝票を管理する('+state.vcSlips.slips.length+'件)</summary>'+
-        '<table class="report-table" style="margin-top:10px;"><thead><tr><th>伝票</th><th>明細</th><th>ピース</th><th>計測時間</th><th>状態</th><th></th></tr></thead><tbody>'+vcRows+'</tbody></table>'+
+        '<table class="report-table" style="margin-top:10px;"><thead><tr><th>荷主出荷NO</th><th>明細</th><th>ピース</th><th>計測時間</th><th>状態</th><th></th></tr></thead><tbody>'+vcRows+'</tbody></table>'+
       '</details>';
     }
     vcImportPanel = '<div class="panel" style="margin-top:14px;">'+
@@ -2785,6 +2790,12 @@ function bindManager(){
   var openAddLogBtn = document.getElementById('openAddLogBtn');
   if(openAddLogBtn) openAddLogBtn.addEventListener('click', openAddLogModal);
 
+  var vcManageDetails = document.getElementById('vcManageDetails');
+  if(vcManageDetails){
+    vcManageDetails.addEventListener('toggle', function(){
+      state.vcManageOpen = vcManageDetails.open;
+    });
+  }
   document.querySelectorAll('[data-vc-toggle-done]').forEach(function(el){
     el.addEventListener('click', async function(){
       var slipId = el.getAttribute('data-vc-toggle-done');

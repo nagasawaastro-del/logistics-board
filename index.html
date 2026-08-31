@@ -149,6 +149,46 @@ input,select{font-family:inherit;}
   padding:8px 14px;font-size:12px;font-weight:700;
 }
 .warn-fix-btn:hover{background:#94304F;}
+.vc-import-status{background:#EEF7F1;border:1px solid var(--teal-500);color:#1F6B4A;border-radius:10px;padding:10px 14px;font-size:13px;font-weight:600;margin-bottom:12px;}
+.vc-queue{margin-top:12px;padding-top:12px;border-top:1px dashed var(--amber-500);}
+.vc-queue-title{font-size:11px;font-weight:700;color:var(--rust-600);margin-bottom:8px;text-transform:uppercase;letter-spacing:.03em;}
+.vc-queue-hint{font-size:12px;color:var(--slate-500);margin-bottom:8px;}
+.vc-select-shortcuts{display:flex;gap:8px;margin-bottom:8px;}
+.vc-select-shortcut-btn{
+  background:#fff;border:1px solid var(--paper-line);color:var(--ink-900);border-radius:10px;
+  padding:7px 14px;font-size:12px;font-weight:600;
+}
+.vc-select-shortcut-btn:hover{border-color:var(--amber-500);color:var(--amber-600);}
+.vc-slip-list{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;}
+.vc-slip-row{
+  display:flex;align-items:flex-start;gap:10px;cursor:pointer;
+  border:1px solid var(--paper-line);background:#fff;border-radius:10px;padding:10px 14px;
+  font-size:13px;text-align:left;width:100%;
+}
+.vc-slip-row input[type="checkbox"]{margin-top:3px;width:18px;height:18px;flex:none;}
+.vc-slip-row:hover{border-color:var(--amber-500);background:#FFF9EE;}
+.vc-slip-row-checked{border-color:var(--amber-500);background:#FFF3DE;}
+.vc-slip-main{display:flex;flex-direction:column;gap:2px;flex:1;}
+.vc-slip-no{font-family:var(--font-mono);font-weight:700;color:var(--ink-900);}
+.vc-slip-meta{font-size:12px;color:var(--slate-500);}
+.vc-slip-others{font-size:11px;color:var(--indigo-500);font-weight:600;}
+.vc-slip-times{font-size:11px;color:var(--teal-500);font-weight:600;}
+.vc-batch-actions{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
+.vc-batch-btn{
+  width:100%;background:#fff;border:2px solid var(--amber-500);color:var(--amber-600);border-radius:10px;
+  padding:11px;font-size:13px;font-weight:700;
+}
+.vc-batch-btn:disabled{border-color:var(--paper-line);color:var(--slate-300);}
+.vc-batch-btn:hover:not(:disabled){background:#FFF9EE;}
+.vc-active-slip{background:#FFF9EE;border:1px solid var(--amber-500);border-radius:12px;padding:14px 16px;}
+.vc-active-slip-head{font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--ink-900);margin-bottom:4px;}
+.vc-active-slip-meta{font-size:12px;color:var(--slate-500);margin-bottom:4px;}
+.vc-complete-btn{
+  width:100%;background:var(--teal-500);color:#fff;border:none;border-radius:10px;
+  padding:11px;font-size:13px;font-weight:700;
+}
+.vc-complete-btn:disabled{background:var(--paper-100);color:var(--slate-300);}
+.vc-complete-btn:hover:not(:disabled){background:#1F8A6E;}
 .chip-warn{border:1px solid var(--amber-500);background:#FFF7E8;}
 .chip-warn-label{font-size:10px;font-weight:700;color:var(--amber-600);}
 .break-toggle-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--ink-900);margin-bottom:12px;cursor:pointer;}
@@ -675,7 +715,7 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 </head>
 <body>
 <div id="app"></div>
-
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
@@ -752,6 +792,13 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-25', items:[
+    'ロジザード伝票の選択画面に「全て選択」「選択解除」ボタンを追加。何十件もの伝票を1件ずつチェックする手間を減らし、まとめて選んでから不要な分だけ外す、という使い方ができるように'
+  ]},
+  { date:'2026-08-25', items:[
+    'ロジザードZEROの出荷指示CSVを取り込む機能を追加。管理者画面から1日1回CSVをアップロードすると、出荷伝票(出荷伝票NO)ごとに明細数・合計ピース数が自動集計されます',
+    'VCなど、CSVと紐づけた作業をパートさんがタップすると、対応可能な伝票の一覧(チェックボックス形式)が表示されます。複数の伝票をまとめて選んで1回のピッキング/梱包として計測でき、経過時間は選んだ伝票の件数で自動的に按分されます。また、同じ伝票に複数人が別々に取り組むこともでき、それぞれの作業時間が積み上がって記録されます。途中で他の作業に切り替えても、計測中の時間は保持されたまま再開できます'
+  ]},
   { date:'2026-08-24', items:[
     '内訳の合計表示をさらに改善。単位が異なる場合に合計を非表示にするのではなく、「単位ごとにグループ分けして、それぞれの単位内で合計」して表示するように変更(例: ピッキング80ピース+検品20ピース→100ピース、梱包40件→40件、を並べて表示)。対象: 管理者の作業実績一覧、集計画面の作業別テーブル、CSVダウンロード'
   ]},
@@ -977,6 +1024,9 @@ var state = {
   calendarData: null,
   calendarLoading: false,
   jpHolidays: { fetchedAt:0, data:{} },
+  vcSlips: null,
+  vcImporting: false,
+  vcSelectedSlipIds: [],
   day: null,
   activeStaffId: null,
   showOtherTasks: false,
@@ -1406,6 +1456,113 @@ async function loadJpHolidays(){
 function holidayName(dateStr){
   return (state.jpHolidays && state.jpHolidays.data && state.jpHolidays.data[dateStr]) || null;
 }
+async function loadVcSlips(dateStr){
+  try{
+    var r = await window.storage.get('vc-slips:'+dateStr, true);
+    return r && r.value ? JSON.parse(r.value) : null;
+  }catch(e){ return null; }
+}
+async function saveVcSlips(dateStr, data){
+  pendingSaves++;
+  try{ await window.storage.set('vc-slips:'+dateStr, JSON.stringify(data), true); }catch(e){}
+  finally{ pendingSaves--; }
+}
+function parseVcCsvFile(file, callback, errCallback){
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var buffer = e.target.result;
+    var text;
+    try{
+      text = new TextDecoder('shift-jis').decode(buffer);
+    }catch(err){
+      text = new TextDecoder('utf-8').decode(buffer);
+    }
+    try{
+      var parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+      var rows = parsed.data;
+      var groups = {};
+      var order = [];
+      rows.forEach(function(r){
+        var slipNo = (r['出荷伝票NO']||'').trim();
+        if(!slipNo) return;
+        if(!groups[slipNo]){
+          groups[slipNo] = { slipNo: slipNo, destination: (r['出荷先名']||'').trim(), client: (r['取引先名']||'').trim(), lineCount:0, totalQty:0 };
+          order.push(slipNo);
+        }
+        groups[slipNo].lineCount++;
+        var qty = parseInt(r['出荷指示数'],10);
+        if(!isNaN(qty)) groups[slipNo].totalQty += qty;
+      });
+      var slips = order.map(function(sn){
+        var g = groups[sn];
+        return {
+          id: uid(), slipNo: g.slipNo, destination: g.destination, client: g.client,
+          lineCount: g.lineCount, totalQty: g.totalQty,
+          status: 'pending', pickingMs: 0, packingMs: 0,
+          activePhase: null, activePhaseStart: null, activeStaffId: null,
+          doneBy: null, doneAt: null
+        };
+      });
+      if(!slips.length){ errCallback('伝票データが見つかりませんでした。CSVの形式(出荷伝票NO列など)をご確認ください。'); return; }
+      callback(slips);
+    }catch(err){
+      errCallback('CSVの読み込みに失敗しました: '+(err.message||err));
+    }
+  };
+  reader.onerror = function(){ errCallback('ファイルの読み込みに失敗しました。'); };
+  reader.readAsArrayBuffer(file);
+}
+function myVcSession(){
+  if(!state.vcSlips || !state.vcSlips.activeSessions) return null;
+  return state.vcSlips.activeSessions.find(function(s){ return s.staffId===state.activeStaffId; }) || null;
+}
+function whosOnSlip(slipId, excludeStaffId){
+  if(!state.vcSlips || !state.vcSlips.activeSessions) return [];
+  return state.vcSlips.activeSessions.filter(function(s){
+    return s.slipIds.indexOf(slipId)!==-1 && s.staffId!==excludeStaffId;
+  }).map(function(s){ return { name: staffById(s.staffId).name, phase: s.phase }; });
+}
+async function startVcBatchSession(slipIds, phase){
+  if(!state.vcSlips || !slipIds.length) return;
+  await stopMyVcSession();
+  if(!state.vcSlips.activeSessions) state.vcSlips.activeSessions = [];
+  state.vcSlips.activeSessions.push({ staffId: state.activeStaffId, phase: phase, slipIds: slipIds.slice(), start: new Date().toISOString() });
+  state.vcSelectedSlipIds = [];
+  await saveVcSlips(todayStr(), state.vcSlips);
+  render();
+}
+async function stopMyVcSession(){
+  if(!state.vcSlips || !state.vcSlips.activeSessions) return;
+  var idx = state.vcSlips.activeSessions.findIndex(function(s){ return s.staffId===state.activeStaffId; });
+  if(idx===-1) return;
+  var session = state.vcSlips.activeSessions[idx];
+  var elapsed = Math.max(0, Date.now()-new Date(session.start).getTime());
+  var perSlip = session.slipIds.length ? elapsed/session.slipIds.length : 0;
+  session.slipIds.forEach(function(sid){
+    var slip = state.vcSlips.slips.find(function(s){ return s.id===sid; });
+    if(!slip) return;
+    var field = session.phase==='picking' ? 'pickingMs' : 'packingMs';
+    var contribField = session.phase==='picking' ? 'pickingContributors' : 'packingContributors';
+    slip[field] = (slip[field]||0) + perSlip;
+    if(!slip[contribField]) slip[contribField] = {};
+    slip[contribField][session.staffId] = (slip[contribField][session.staffId]||0) + perSlip;
+  });
+  state.vcSlips.activeSessions.splice(idx,1);
+  await saveVcSlips(todayStr(), state.vcSlips);
+}
+async function completeVcSlips(slipIds){
+  if(!state.vcSlips) return;
+  slipIds.forEach(function(sid){
+    var slip = state.vcSlips.slips.find(function(s){ return s.id===sid; });
+    if(!slip) return;
+    slip.status = 'done';
+    slip.doneBy = state.activeStaffId;
+    slip.doneAt = new Date().toISOString();
+  });
+  state.vcSelectedSlipIds = [];
+  await saveVcSlips(todayStr(), state.vcSlips);
+  render();
+}
 function freshDay(dateStr){
   var attendance = {};
   var weekday = new Date(dateStr+'T00:00:00').getDay();
@@ -1726,6 +1883,61 @@ function coworkersForTask(taskId, excludeStaffId){
     var order = {working:0, other:1, brk:2, idle:3};
     return order[a.statusClass]-order[b.statusClass];
   });
+}
+function renderVcSlipQueue(taskId){
+  var data = state.vcSlips;
+  if(!data) return '';
+  var mySession = myVcSession();
+  var doneCount = data.slips.filter(function(s){ return s.status==='done'; }).length;
+  var html = '<div class="vc-queue"><div class="vc-queue-title">📋 ロジザード伝票('+doneCount+'/'+data.slips.length+'件完了)</div>';
+  if(mySession){
+    var elapsedBase = 0;
+    var slipsInSession = mySession.slipIds.map(function(sid){ return data.slips.find(function(s){ return s.id===sid; }); }).filter(Boolean);
+    var phaseLabel = mySession.phase==='picking' ? 'ピッキング' : '梱包';
+    var timerAttrs = ' data-live-subtimer-start="'+mySession.start+'" data-live-subtimer-base="0"';
+    var timerText = fmtElapsed(Date.now()-new Date(mySession.start).getTime());
+    html += '<div class="vc-active-slip">'+
+      '<div class="vc-active-slip-head">'+phaseLabel+'計測中('+slipsInSession.length+'件まとめて)</div>'+
+      '<div class="vc-active-slip-meta">'+slipsInSession.map(function(s){ return esc(s.slipNo)+'('+s.lineCount+'明細/'+formatNum(s.totalQty)+'ピース)'; }).join('、')+'</div>'+
+      '<div class="sub-timer-row" style="margin:10px 0;">'+
+        '<button type="button" class="sub-timer-btn active" data-vc-stop-session="1">■ 計測終了</button>'+
+        '<span class="sub-timer-display active"'+timerAttrs+'>'+timerText+'</span>'+
+      '</div>'+
+    '</div>';
+  }else{
+    var open = data.slips.filter(function(s){ return s.status!=='done'; });
+    var selected = state.vcSelectedSlipIds||[];
+    var rows = open.map(function(s){
+      var checked = selected.indexOf(s.id)!==-1;
+      var others = whosOnSlip(s.id, state.activeStaffId);
+      var othersNote = others.length ? '<span class="vc-slip-others">'+others.map(function(o){ return esc(o.name)+'('+(o.phase==='picking'?'ピ':'梱')+')'; }).join('・')+'も対応中</span>' : '';
+      var timesNote = (s.pickingMs||s.packingMs) ? '<span class="vc-slip-times">済: ピ'+fmtHM(s.pickingMs||0)+' / 梱'+fmtHM(s.packingMs||0)+'</span>' : '';
+      return '<label class="vc-slip-row'+(checked?' vc-slip-row-checked':'')+'">'+
+        '<input type="checkbox" data-vc-checkbox="'+s.id+'" '+(checked?'checked':'')+'>'+
+        '<span class="vc-slip-main"><span class="vc-slip-no">'+esc(s.slipNo)+'</span>'+
+        '<span class="vc-slip-meta">明細'+s.lineCount+'件 ・ '+formatNum(s.totalQty)+'ピース</span>'+
+        othersNote+timesNote+'</span>'+
+      '</label>';
+    }).join('');
+    html += '<div class="vc-queue-hint">複数の伝票をまとめて選んでから、ピッキング/梱包を開始できます</div>';
+    if(open.length){
+      html += '<div class="vc-select-shortcuts">'+
+        '<button type="button" class="vc-select-shortcut-btn" data-vc-select-all="1">全て選択('+open.length+')</button>'+
+        '<button type="button" class="vc-select-shortcut-btn" data-vc-select-clear="1">選択解除</button>'+
+      '</div>';
+    }
+    html += '<div class="vc-slip-list">'+(rows || '<div class="empty-note" style="padding:16px 0;">対応可能な伝票がありません</div>')+'</div>';
+    if(open.length){
+      var disabledAttr = selected.length ? '' : 'disabled';
+      html += '<div class="vc-batch-actions">'+
+        '<button type="button" class="vc-batch-btn" data-vc-start-phase="picking" '+disabledAttr+'>▶ 選択した伝票のピッキング開始('+selected.length+')</button>'+
+        '<button type="button" class="vc-batch-btn" data-vc-start-phase="packing" '+disabledAttr+'>▶ 選択した伝票の梱包開始('+selected.length+')</button>'+
+        '<button type="button" class="vc-complete-btn" data-vc-complete-selected="1" '+disabledAttr+'>✓ 選択した伝票を完了にする</button>'+
+      '</div>';
+    }
+  }
+  html += '</div>';
+  return html;
 }
 function totalsByTaskForDay(day, staffId){
   var map = {};
@@ -2115,6 +2327,29 @@ function renderManager(){
     '</div>'+
   '</div>';
 
+  var vcImportPanel = '';
+  if(isToday){
+    var vcTaskOptions = tasksForDate(viewDate).map(function(t){
+      return '<option value="'+t.id+'" '+(state.vcSlips && state.vcSlips.taskId===t.id ? 'selected':'')+'>'+esc(t.name)+'</option>';
+    }).join('') || '<option value="">本日の作業がありません</option>';
+    var vcStatusHtml = '';
+    if(state.vcSlips && state.vcSlips.slips && state.vcSlips.slips.length){
+      var vcTask = taskById(state.vcSlips.taskId);
+      var doneCount = state.vcSlips.slips.filter(function(s){ return s.status==='done'; }).length;
+      var totalQtyAll = state.vcSlips.slips.reduce(function(a,s){ return a+s.totalQty; }, 0);
+      vcStatusHtml = '<div class="vc-import-status">「'+esc(vcTask.name)+'」に'+state.vcSlips.slips.length+'件の伝票(合計'+formatNum(totalQtyAll)+'ピース)を取り込み済み・'+doneCount+'/'+state.vcSlips.slips.length+'件完了</div>';
+    }
+    vcImportPanel = '<div class="panel" style="margin-top:14px;">'+
+      '<div class="panel-title">📋 ロジザード明細インポート</div>'+
+      '<div class="pool-hint" style="margin-bottom:10px;">出荷指示CSVを取り込むと、出荷伝票(出荷伝票NO)ごとに明細数・ピース数が自動集計され、パートさんの画面でピッキング・梱包の時間を伝票ごとに計測できるようになります。1日1回、まとめてアップロードしてください(再度アップロードすると本日分は上書きされます)。</div>'+
+      vcStatusHtml+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">紐づける作業</label>'+
+      '<select id="vcTaskSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:10px;">'+vcTaskOptions+'</select>'+
+      '<input type="file" id="vcCsvInput" accept=".csv" style="display:block;margin-bottom:6px;">'+
+      (state.vcImporting ? '<div class="empty-note">取り込み中...</div>' : '')+
+    '</div>';
+  }
+
   var breakPanel = '<div class="panel" style="margin-top:14px;">'+
     '<div class="panel-title">休憩の自動設定</div>'+
     '<div class="pool-hint" style="margin-bottom:10px;">設定した時間になると、出勤中スタッフの作業タイマーが自動的に止まり「休憩」として記録されます。</div>'+
@@ -2158,6 +2393,7 @@ function renderManager(){
       '</div>'+
     '</div>'+
     shiftPanel+
+    vcImportPanel+
     breakPanel+
     achievementPanel+
     '<div class="panel" style="margin-top:20px;">'+
@@ -2472,6 +2708,32 @@ function bindManager(){
   });
   var openAddLogBtn = document.getElementById('openAddLogBtn');
   if(openAddLogBtn) openAddLogBtn.addEventListener('click', openAddLogModal);
+
+  var vcCsvInput = document.getElementById('vcCsvInput');
+  if(vcCsvInput){
+    vcCsvInput.addEventListener('change', function(){
+      var file = vcCsvInput.files[0];
+      if(!file) return;
+      var taskSelect = document.getElementById('vcTaskSelect');
+      var taskId = taskSelect ? taskSelect.value : '';
+      if(!taskId){ showToast('紐づける作業を選択してください'); return; }
+      state.vcImporting = true;
+      render();
+      parseVcCsvFile(file, async function(slips){
+        var data = { taskId: taskId, importedAt: new Date().toISOString(), slips: slips };
+        await saveVcSlips(todayStr(), data);
+        state.vcSlips = data;
+        state.vcImporting = false;
+        var totalQty = slips.reduce(function(a,s){ return a+s.totalQty; }, 0);
+        showToast('伝票'+slips.length+'件(合計'+formatNum(totalQty)+'ピース)を取り込みました');
+        render();
+      }, function(errMsg){
+        state.vcImporting = false;
+        showToast(errMsg);
+        render();
+      });
+    });
+  }
 
   var shiftEnabledInput = document.getElementById('shiftEnabledInput');
   var shiftStartInput = document.getElementById('shiftStartInput');
@@ -3642,7 +3904,10 @@ function renderInput(){
         }).join('')+
       '</div>' : '';
       var liveCountersHtml = '';
-      if(isActive && t.subcategories && t.subcategories.length){
+      var isVcLinked = state.vcSlips && state.vcSlips.taskId===tid;
+      if(isActive && isVcLinked){
+        liveCountersHtml = renderVcSlipQueue(tid);
+      }else if(isActive && t.subcategories && t.subcategories.length){
         var subcatObjs = t.subcategories.map(function(sc){ return { name: subcatName(sc), unit: subcatUnit(sc, t.unit) }; });
         var liveRows = subcatObjs.map(function(sc){
           var v = (log.breakdown && log.breakdown[sc.name]) || 0;
@@ -3669,7 +3934,7 @@ function renderInput(){
         '<div><div class="task-tile-name">'+esc(t.name)+'</div><div class="task-tile-unit">単位: '+esc(t.unit)+'</div></div>'+
         '<div>'+
           '<div class="task-tile-status"><span class="status-dot '+(isActive?'working':'idle')+'"></span>'+(isActive?'作業中':'タップして開始')+'</div>'+
-          (isActive && !(t.subcategories && t.subcategories.length) ? '<div class="task-tile-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsed)+'</div>' : '')+
+          (isActive && !(t.subcategories && t.subcategories.length) && !isVcLinked ? '<div class="task-tile-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsed)+'</div>' : '')+
         '</div>'+
         liveCountersHtml+
         coworkerHtml+
@@ -3736,6 +4001,7 @@ function bindInput(){
     el.addEventListener('click', function(){
       state.activeStaffId = el.getAttribute('data-pick-staff');
       state.showOtherTasks = false;
+      state.vcSelectedSlipIds = [];
       render();
       startTicker();
     });
@@ -3744,6 +4010,7 @@ function bindInput(){
   if(backBtn) backBtn.addEventListener('click', function(){
     state.activeStaffId = null;
     state.showOtherTasks = false;
+    state.vcSelectedSlipIds = [];
     render();
   });
   var summaryBack = document.getElementById('summaryBack');
@@ -3807,6 +4074,54 @@ function bindInput(){
       var parts = el.getAttribute('data-sub-timer').split('|');
       var tid = parts[0], scName = parts[1];
       toggleSubTimer(tid, scName);
+    });
+  });
+  document.querySelectorAll('[data-vc-checkbox]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      var slipId = el.getAttribute('data-vc-checkbox');
+      if(!state.vcSelectedSlipIds) state.vcSelectedSlipIds = [];
+      var idx = state.vcSelectedSlipIds.indexOf(slipId);
+      if(idx===-1) state.vcSelectedSlipIds.push(slipId);
+      else state.vcSelectedSlipIds.splice(idx,1);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-vc-select-all]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      state.vcSelectedSlipIds = state.vcSlips ? state.vcSlips.slips.filter(function(s){ return s.status!=='done'; }).map(function(s){ return s.id; }) : [];
+      render();
+    });
+  });
+  document.querySelectorAll('[data-vc-select-clear]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      state.vcSelectedSlipIds = [];
+      render();
+    });
+  });
+  document.querySelectorAll('[data-vc-start-phase]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      var phase = el.getAttribute('data-vc-start-phase');
+      var ids = (state.vcSelectedSlipIds||[]).slice();
+      if(!ids.length) return;
+      startVcBatchSession(ids, phase);
+    });
+  });
+  document.querySelectorAll('[data-vc-stop-session]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      stopMyVcSession().then(render);
+    });
+  });
+  document.querySelectorAll('[data-vc-complete-selected]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      var ids = (state.vcSelectedSlipIds||[]).slice();
+      if(!ids.length) return;
+      completeVcSlips(ids);
     });
   });
   var endDayBtn = document.getElementById('endDayBtn');
@@ -3977,6 +4292,9 @@ async function checkAutoShift(){
     await saveDay(day);
   }
 }
+async function pauseMyActiveVcPhase(){
+  await stopMyVcSession();
+}
 async function closeLogAndProceed(qty, breakdown){
   var m = state.modal;
   var log = state.day.logs.find(function(l){ return l.staffId===state.activeStaffId && l.taskId===m.closingTaskId && l.end===null; });
@@ -3986,6 +4304,7 @@ async function closeLogAndProceed(qty, breakdown){
     log.quantity = qty;
     if(breakdown){ log.breakdown = breakdown; } else { delete log.breakdown; }
   }
+  await pauseMyActiveVcPhase();
   await saveDay(state.day);
   state.modal = null;
   if(m.isEndDay){
@@ -4906,6 +5225,8 @@ function startPolling(){
     }
     if(pendingSaves>0) return;
     state.day = day;
+    var freshVcSlips = await loadVcSlips(todayStr());
+    if(freshVcSlips) state.vcSlips = freshVcSlips;
     notifyChanges(oldRoster, oldBacklog, oldDay, state.roster, state.backlog, state.day);
     await checkAutoBreak();
     await checkAutoShift();
@@ -4946,6 +5267,7 @@ async function init(){
   state.jpHolidays = await loadJpHolidays();
   await ensureTemplateTasksForToday();
   state.day = await loadDay();
+  state.vcSlips = await loadVcSlips(todayStr());
   await checkAutoBreak();
   await checkAutoShift();
   render();

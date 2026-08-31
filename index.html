@@ -793,6 +793,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-25', items:[
+    '重要な不具合修正: 画面を再描画するたびに、スクロール位置が先頭に戻ってしまう問題を修正。特にロジザード伝票のチェックボックス選択で、1つチェックするたびに一覧が先頭に戻ってしまい、選び直しになっていた不具合の原因でした。あわせて、伝票を選択している最中は4秒ごとの自動更新も一時停止するように変更'
+  ]},
+  { date:'2026-08-25', items:[
     'ロジザード伝票の選択画面に「全て選択」「選択解除」ボタンを追加。何十件もの伝票を1件ずつチェックする手間を減らし、まとめて選んでから不要な分だけ外す、という使い方ができるように'
   ]},
   { date:'2026-08-25', items:[
@@ -2015,12 +2018,23 @@ function aggregateDays(days){
 /* ---------- render root ---------- */
 function render(){
   var root = document.getElementById('app');
+  var savedScrollY = window.scrollY;
+  var vcListElBefore = document.querySelector('.vc-slip-list');
+  var savedVcScrollTop = vcListElBefore ? vcListElBefore.scrollTop : null;
+  function restoreScroll(){
+    window.scrollTo(0, savedScrollY);
+    if(savedVcScrollTop !== null){
+      var el = document.querySelector('.vc-slip-list');
+      if(el) el.scrollTop = savedVcScrollTop;
+    }
+  }
   if(!state.role){
     var gateHtml = renderGate();
     if(state.showChangelog) gateHtml += renderChangelogModal();
     root.innerHTML = gateHtml;
     bindGate();
     if(state.showChangelog) bindChangelogModal();
+    restoreScroll();
     return;
   }
   var html = '';
@@ -2045,6 +2059,7 @@ function render(){
   if(state.role==='achievements') bindAchievements();
   if(state.role==='calendar') bindCalendar();
   if(state.modal) bindModal();
+  restoreScroll();
 }
 
 /* ---------- GATE ---------- */
@@ -5195,6 +5210,7 @@ function startPolling(){
     if(!state.role) return;
     if(pendingSaves>0) return;
     if(state.suppressRender) return;
+    if(state.vcSelectedSlipIds && state.vcSelectedSlipIds.length>0) return;
     var oldRoster = state.roster;
     var oldBacklog = state.backlog;
     var oldDay = state.day;

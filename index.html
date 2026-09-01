@@ -812,6 +812,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-27', items:[
+    '重要な不具合修正: 操作中(入力・選択・モーダル表示・ドラッグ・スクロール中)に自動更新で画面が再構築され、状態が失われることがあった問題に、より包括的に対応。document全体でのフォーカス検知に変更(個別の入力欄への配線漏れを解消)、ドラッグ中の保護を追加、データに変化がない場合はそもそも再描画しないように変更'
+  ]},
   { date:'2026-08-26', items:[
     '管理者PINロックを追加。管理者画面・作業登録・操作履歴は、初回にPINを設定し、以降はPIN入力しないと開けないように(トップバーから手動でロックし直すことも可能)',
     '操作履歴画面を追加(管理者専用)。作業・出勤状態・割り当て・実績の変更/削除を、日時・操作した人・変更前後の内容とともに記録し、日付で絞り込んで確認できます',
@@ -1058,6 +1061,9 @@ var state = {
   pinModal: null,
   pendingCalendarDate: null,
   auditLogDate: null,
+  focusBusy: false,
+  isDragging: false,
+  lastSnapshotStr: null,
   auditLogEntries: null,
   roster: [],
   backlog: [],
@@ -2203,6 +2209,20 @@ function aggregateDays(days){
 }
 
 /* ---------- render root ---------- */
+function isUserBusy(){
+  if(state.suppressRender) return true;
+  if(state.focusBusy) return true;
+  if(state.isDragging) return true;
+  if(state.modal) return true;
+  if(state.pinModal) return true;
+  if(state.vcImporting) return true;
+  if(state.vcSelectedSlipIds && state.vcSelectedSlipIds.length>0) return true;
+  if(state.showOtherTasks) return true;
+  if(state.role==='input' && state.activeStaffId && typeof myVcSession==='function'){
+    try{ if(myVcSession()) return true; }catch(e){}
+  }
+  return false;
+}
 function render(){
   var root = document.getElementById('app');
   var savedScrollY = window.scrollY;
@@ -3067,7 +3087,12 @@ function bindManager(){
   document.querySelectorAll('[data-staff-chip]').forEach(function(el){
     el.addEventListener('dragstart', function(e){
       state.dragStaffId = el.getAttribute('data-staff-chip');
+      state.isDragging = true;
       e.dataTransfer.effectAllowed = 'copy';
+    });
+    el.addEventListener('dragend', function(){
+      state.isDragging = false;
+      maybeRefreshNow();
     });
   });
   document.querySelectorAll('[data-task-col]').forEach(function(el){
@@ -3078,6 +3103,7 @@ function bindManager(){
       el.classList.remove('dragover');
       var taskId = el.getAttribute('data-task-col');
       var staffId = state.dragStaffId;
+      state.isDragging = false;
       if(!staffId) return;
       var day = managerActiveDay();
       var arr = day.assignments[staffId] || [];
@@ -5707,13 +5733,23 @@ function notifyChanges(oldRoster, oldBacklog, oldDay, newRoster, newBacklog, new
 }
 
 var pollHandle = null;
-function startPolling(){
-  if(pollHandle) return;
-  pollHandle = setInterval(async function(){
-    if(!state.role) return;
-    if(pendingSaves>0) return;
-    if(state.suppressRender) return;
-    if(state.vcSelectedSlipIds && state.vcSelectedSlipIds.length>0) return;
+var pollTickRunning = false;
+function safeSnapshotForChangeDetection(){
+  try{
+    return JSON.stringify({
+      roster: state.roster, backlog: state.backlog, templates: state.templates,
+      day: state.day, vcSlips: state.vcSlips,
+      breakSettings: state.breakSettings, shiftSettings: state.shiftSettings, achievementSettings: state.achievementSettings
+    });
+  }catch(e){ return 'x'+Math.random(); }
+}
+async function pollTick(){
+  if(pollTickRunning) return;
+  if(!state.role) return;
+  if(pendingSaves>0) return;
+  if(isUserBusy()) return;
+  pollTickRunning = true;
+  try{
     var oldRoster = state.roster;
     var oldBacklog = state.backlog;
     var oldDay = state.day;
@@ -5749,8 +5785,39 @@ function startPolling(){
     notifyChanges(oldRoster, oldBacklog, oldDay, state.roster, state.backlog, state.day);
     await checkAutoBreak();
     await checkAutoShift();
-    if(!state.suppressRender) render();
-  }, 4000);
+    var newSnapshot = safeSnapshotForChangeDetection();
+    var dataChanged = newSnapshot !== state.lastSnapshotStr;
+    state.lastSnapshotStr = newSnapshot;
+    if(!isUserBusy() && dataChanged) render();
+  } finally {
+    pollTickRunning = false;
+  }
+}
+function maybeRefreshNow(){
+  if(state.role && !isUserBusy()) pollTick();
+}
+function startPolling(){
+  if(pollHandle) return;
+  pollHandle = setInterval(pollTick, 4000);
+}
+function setupGlobalFocusTracking(){
+  var FIELD_TAGS = {INPUT:1, SELECT:1, TEXTAREA:1};
+  document.addEventListener('focusin', function(e){
+    var t = e.target;
+    if(t && FIELD_TAGS[t.tagName]) state.focusBusy = true;
+  }, true);
+  document.addEventListener('focusout', function(e){
+    var t = e.target;
+    if(t && FIELD_TAGS[t.tagName]){
+      setTimeout(function(){
+        var active = document.activeElement;
+        if(!active || !FIELD_TAGS[active.tagName]){
+          state.focusBusy = false;
+          maybeRefreshNow();
+        }
+      }, 150);
+    }
+  }, true);
 }
 
 /* ---------- init ---------- */
@@ -5792,6 +5859,7 @@ async function init(){
   render();
   startTicker();
 }
+setupGlobalFocusTracking();
 init();
 
 })();

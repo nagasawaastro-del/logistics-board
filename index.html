@@ -64,11 +64,12 @@ input,select{font-family:inherit;}
 .gate-sub{font-size:15px;color:var(--slate-500);margin:0 0 40px;max-width:440px;}
 .gate-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;width:100%;max-width:920px;}
 .gate-card{
-  background:#fff;border:1px solid var(--paper-line);border-radius:14px;padding:28px 20px;
+  position:relative;background:#fff;border:1px solid var(--paper-line);border-radius:14px;padding:28px 20px;
   display:flex;flex-direction:column;align-items:center;gap:10px;transition:transform .15s,border-color .15s;
 }
 .gate-card:hover{transform:translateY(-2px);border-color:var(--amber-500);}
 .gate-card:active{transform:translateY(0) scale(.98);}
+.gate-lock-badge{position:absolute;top:10px;right:12px;font-size:14px;opacity:.55;}
 .gate-icon{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;}
 .gate-card-title{font-family:var(--font-display);font-weight:600;font-size:18px;color:var(--ink-900);}
 .gate-card-desc{font-size:13px;color:var(--slate-500);line-height:1.5;}
@@ -98,6 +99,17 @@ input,select{font-family:inherit;}
   padding:6px 14px;font-size:12px;font-weight:500;
 }
 .pill-btn:hover{border-color:var(--amber-500);color:#fff;}
+@media (max-width:640px){
+  .topbar{flex-wrap:wrap;gap:8px;padding:10px 14px;}
+  .topbar-left{flex-wrap:wrap;gap:6px;}
+  .topbar-title{font-size:14px;}
+  .mgr-wrap{padding:12px;}
+  .mgr-settings-summary{font-size:13px;}
+  .vc-relink-row{flex-wrap:wrap;}
+  .vc-batch-actions{gap:6px;}
+  .report-table{font-size:12px;}
+  .date-nav{flex-wrap:wrap;}
+}
 
 /* ---------- MANAGER VIEW ---------- */
 .mgr-wrap{padding:20px;max-width:1400px;margin:0 auto;}
@@ -151,6 +163,9 @@ input,select{font-family:inherit;}
 .warn-fix-btn:hover{background:#94304F;}
 .vc-import-status{background:#EEF7F1;border:1px solid var(--teal-500);color:#1F6B4A;border-radius:10px;padding:10px 14px;font-size:13px;font-weight:600;margin-bottom:12px;}
 .vc-manage-details{margin-top:14px;border-top:1px solid var(--paper-line);padding-top:10px;}
+.mgr-settings-details{background:var(--paper-100);border:1px solid var(--paper-line);border-radius:14px;padding:16px 18px;}
+.mgr-settings-summary{font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--ink-900);cursor:pointer;list-style:revert;}
+.mgr-settings-summary:hover{color:var(--amber-600);}
 .vc-manage-details summary{font-size:13px;font-weight:700;color:var(--ink-900);cursor:pointer;}
 .vc-manage-toggle-btn{background:var(--paper-100);border:1px solid var(--paper-line);border-radius:12px;padding:5px 12px;font-size:11px;font-weight:600;color:var(--ink-900);margin-right:6px;}
 .vc-relink-row{display:flex;align-items:center;gap:8px;margin:10px 0;padding:10px;background:var(--paper-100);border-radius:10px;}
@@ -797,6 +812,14 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-26', items:[
+    '管理者PINロックを追加。管理者画面・作業登録・操作履歴は、初回にPINを設定し、以降はPIN入力しないと開けないように(トップバーから手動でロックし直すことも可能)',
+    '操作履歴画面を追加(管理者専用)。作業・出勤状態・割り当て・実績の変更/削除を、日時・操作した人・変更前後の内容とともに記録し、日付で絞り込んで確認できます',
+    '実績の削除を論理削除化。削除しても「元に戻す」トーストからすぐに復元できるように',
+    '誤操作防止を強化。削除・割り当て解除ボタンの確認文言に対象名を明記し、割り当て解除・スタッフ削除・作業削除に「元に戻す」を追加。アイコンのみのボタンにツールチップ/aria-labelを追加',
+    '管理者画面を整理。出勤者・本日の作業・割り当て・作業実績を上部に、自動出退勤・休憩設定・CSV取込・実績目標・PIN変更を折りたたみ「設定」セクションにまとめました',
+    'スマホ幅での表示を一部調整(トップバー・管理画面・設定セクション)'
+  ]},
   { date:'2026-08-25', items:[
     '不具合修正: 「紐づける作業」のドロップダウンで作業を選んでからファイルを選ぶまでの間に自動更新が入ると、選択が別の作業にリセットされてしまうことがあった問題を修正。選択内容をきちんと覚えておくように変更',
     '管理者画面の「取り込んだ伝票を管理する」に「紐づけ先を変更」欄を追加。すでに取り込んだ伝票のセットを、あとから別の作業に紐づけ直せるように(伝票データ自体はそのまま引き継がれます)'
@@ -1030,6 +1053,12 @@ var CHANGELOG = [
 var state = {
   role: null,
   showChangelog: false,
+  isAdminUnlocked: false,
+  adminPinHash: null,
+  pinModal: null,
+  pendingCalendarDate: null,
+  auditLogDate: null,
+  auditLogEntries: null,
   roster: [],
   backlog: [],
   templates: [],
@@ -1048,6 +1077,7 @@ var state = {
   vcImporting: false,
   vcSelectedSlipIds: [],
   vcManageOpen: false,
+  mgrSettingsOpen: false,
   vcImportTaskId: null,
   day: null,
   activeStaffId: null,
@@ -1190,7 +1220,7 @@ function subcatDraftRef(context){
 }
 function renderSubcatTagInput(list, context, textId, defaultUnit){
   var chips = (list||[]).map(function(sc,i){
-    return '<span class="subcat-chip">'+esc(subcatName(sc))+' <span class="subcat-chip-unit">('+esc(subcatUnit(sc, defaultUnit))+')</span><button type="button" data-subcat-remove="'+context+'|'+i+'">&times;</button></span>';
+    return '<span class="subcat-chip">'+esc(subcatName(sc))+' <span class="subcat-chip-unit">('+esc(subcatUnit(sc, defaultUnit))+')</span><button type="button" data-subcat-remove="'+context+'|'+i+'" title="内訳「'+esc(subcatName(sc))+'」を削除" aria-label="内訳「'+esc(subcatName(sc))+'」を削除">&times;</button></span>';
   }).join('') || '<span class="pool-hint" style="margin:0;">まだ内訳がありません</span>';
   var draftRef = subcatDraftRef(context);
   var draft = (draftRef && draftRef.get()) || {};
@@ -1418,6 +1448,43 @@ async function saveAchievementSettings(settings){
   pendingSaves++;
   try{ await window.storage.set('achievement-settings', JSON.stringify(settings), true); }catch(e){}
   finally{ pendingSaves--; }
+}
+/* ---------- admin PIN lock ---------- */
+async function hashPin(pin){
+  var enc = new TextEncoder().encode('wdb-pin-salt-v1:'+pin);
+  var buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+}
+async function loadAdminPinHash(){
+  try{
+    var r = await window.storage.get('admin-pin-hash', true);
+    return r ? r.value : null;
+  }catch(e){ return null; }
+}
+async function saveAdminPinHash(hash){
+  try{ await window.storage.set('admin-pin-hash', hash, true); }catch(e){}
+}
+function ADMIN_GATED_ROLES(){ return ['manager','register','history']; }
+/* ---------- audit log ---------- */
+async function loadAuditLog(dateStr){
+  try{
+    var r = await window.storage.get('audit-log:'+dateStr, true);
+    return r && r.value ? JSON.parse(r.value) : [];
+  }catch(e){ return []; }
+}
+async function appendAuditLog(entry){
+  var dateStr = todayStr();
+  var list = await loadAuditLog(dateStr);
+  list.push({
+    id: uid(),
+    at: new Date().toISOString(),
+    actor: state.activeStaffId ? (staffById(state.activeStaffId).name) : '管理者',
+    action: entry.action,
+    target: entry.target,
+    before: entry.before===undefined ? null : entry.before,
+    after: entry.after===undefined ? null : entry.after
+  });
+  try{ await window.storage.set('audit-log:'+dateStr, JSON.stringify(list), true); }catch(e){}
 }
 function ensureTemplateTasksForDateSync(dateStr){
   var wd = new Date(dateStr+'T00:00:00').getDay();
@@ -1866,9 +1933,78 @@ function bindCalendar(){
   document.querySelectorAll('[data-cal-date]').forEach(function(el){
     el.addEventListener('click', function(){
       var dateStr = el.getAttribute('data-cal-date');
+      if(!state.isAdminUnlocked){
+        state.pendingCalendarDate = dateStr;
+        openPinGate('manager');
+        return;
+      }
       state.role = 'manager';
       switchManagerDate(dateStr);
     });
+  });
+}
+function renderHistory(){
+  var dateStr = state.auditLogDate || todayStr();
+  if(state.auditLogEntries===null){
+    var loadDate = dateStr;
+    loadAuditLog(loadDate).then(function(entries){
+      if((state.auditLogDate||todayStr())===loadDate){
+        state.auditLogEntries = entries;
+        render();
+      }
+    });
+  }
+  var navHtml = '<div class="date-nav">'+
+    '<button class="date-nav-btn" id="histNavPrev" title="前の日">&#8592;</button>'+
+    '<input type="date" id="histNavInput" value="'+dateStr+'" class="date-nav-input">'+
+    '<button class="date-nav-btn" id="histNavNext" title="次の日">&#8594;</button>'+
+    '<button class="date-nav-today-btn" id="histNavToday">本日に戻る</button>'+
+  '</div>';
+  var entries = state.auditLogEntries || [];
+  var rows = entries.slice().reverse().map(function(e){
+    var beforeStr = e.before===null||e.before===undefined ? '-' : (typeof e.before==='object' ? esc(JSON.stringify(e.before)) : esc(String(e.before)));
+    var afterStr = e.after===null||e.after===undefined ? '-' : (typeof e.after==='object' ? esc(JSON.stringify(e.after)) : esc(String(e.after)));
+    return '<tr>'+
+      '<td class="num">'+fmtClock(e.at)+'</td>'+
+      '<td>'+esc(e.actor)+'</td>'+
+      '<td>'+esc(e.action)+'</td>'+
+      '<td>'+esc(e.target)+'</td>'+
+      '<td style="max-width:220px;overflow-wrap:break-word;font-size:11px;color:var(--slate-500);">'+beforeStr+'</td>'+
+      '<td style="max-width:220px;overflow-wrap:break-word;font-size:11px;color:var(--slate-500);">'+afterStr+'</td>'+
+    '</tr>';
+  }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この日の履歴はありません</td></tr>';
+  return '<div class="mgr-wrap">'+navHtml+
+    '<div class="panel" style="margin-top:16px;">'+
+      '<div class="panel-title">操作履歴 <span class="count-badge">'+entries.length+'件</span></div>'+
+      '<div class="pool-hint" style="margin-bottom:10px;">作業・出勤状態・割り当て・実績の変更や削除を、日時・操作した人・変更前後の内容とともに記録しています。</div>'+
+      '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>時刻</th><th>操作した人</th><th>操作</th><th>対象</th><th>変更前</th><th>変更後</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '</div>'+
+  '</div>';
+}
+function bindHistory(){
+  var prevBtn = document.getElementById('histNavPrev');
+  if(prevBtn) prevBtn.addEventListener('click', function(){
+    state.auditLogDate = shiftDateStr(state.auditLogDate||todayStr(), -1);
+    state.auditLogEntries = null;
+    render();
+  });
+  var nextBtn = document.getElementById('histNavNext');
+  if(nextBtn) nextBtn.addEventListener('click', function(){
+    state.auditLogDate = shiftDateStr(state.auditLogDate||todayStr(), 1);
+    state.auditLogEntries = null;
+    render();
+  });
+  var todayBtn = document.getElementById('histNavToday');
+  if(todayBtn) todayBtn.addEventListener('click', function(){
+    state.auditLogDate = todayStr();
+    state.auditLogEntries = null;
+    render();
+  });
+  var dateInput = document.getElementById('histNavInput');
+  if(dateInput) dateInput.addEventListener('change', function(){
+    state.auditLogDate = dateInput.value;
+    state.auditLogEntries = null;
+    render();
   });
 }
 function shiftDateStr(dateStr, deltaDays){
@@ -2082,9 +2218,11 @@ function render(){
   if(!state.role){
     var gateHtml = renderGate();
     if(state.showChangelog) gateHtml += renderChangelogModal();
+    if(state.pinModal) gateHtml += renderPinModal();
     root.innerHTML = gateHtml;
     bindGate();
     if(state.showChangelog) bindChangelogModal();
+    if(state.pinModal) bindPinModal();
     restoreScroll();
     return;
   }
@@ -2099,7 +2237,9 @@ function render(){
   else if(state.role==='monitor') html += renderMonitor();
   else if(state.role==='achievements') html += renderAchievements();
   else if(state.role==='calendar') html += renderCalendar();
+  else if(state.role==='history') html += renderHistory();
   if(state.modal) html += renderModal();
+  if(state.pinModal) html += renderPinModal();
   root.innerHTML = html;
   bindCommon();
   if(state.role==='manager') bindManager();
@@ -2109,7 +2249,9 @@ function render(){
   if(state.role==='monitor') bindMonitor();
   if(state.role==='achievements') bindAchievements();
   if(state.role==='calendar') bindCalendar();
+  if(state.role==='history') bindHistory();
   if(state.modal) bindModal();
+  if(state.pinModal) bindPinModal();
   restoreScroll();
 }
 
@@ -2122,11 +2264,13 @@ function renderGate(){
     '<p class="gate-sub">このアプリのデータは全員で共有されます。使う画面の役割を選んでください。</p>'+
     '<div class="gate-grid">'+
       '<button class="gate-card" data-role="manager">'+
+        (state.isAdminUnlocked?'':'<div class="gate-lock-badge" title="管理者専用">&#128274;</div>')+
         '<div class="gate-icon" style="background:#EFEBE2;color:#1B2333;">&#128203;</div>'+
         '<div class="gate-card-title">管理者</div>'+
         '<div class="gate-card-desc">当日分の作業に出勤者を割り当て</div>'+
       '</button>'+
       '<button class="gate-card" data-role="register">'+
+        (state.isAdminUnlocked?'':'<div class="gate-lock-badge" title="管理者専用">&#128274;</div>')+
         '<div class="gate-icon" style="background:#E9F2F0;color:#0F6E56;">&#128221;</div>'+
         '<div class="gate-card-title">作業登録</div>'+
         '<div class="gate-card-desc">日付指定の単発作業や、毎日/曜日で繰り返す作業を登録</div>'+
@@ -2156,6 +2300,12 @@ function renderGate(){
         '<div class="gate-card-title">カレンダー</div>'+
         '<div class="gate-card-desc">登録済みの作業・出勤予定を月ごとに確認して編集</div>'+
       '</button>'+
+      '<button class="gate-card" data-role="history">'+
+        (state.isAdminUnlocked?'':'<div class="gate-lock-badge" title="管理者専用">&#128274;</div>')+
+        '<div class="gate-icon" style="background:#EEF0FB;color:#4C5FD5;">&#128220;</div>'+
+        '<div class="gate-card-title">操作履歴</div>'+
+        '<div class="gate-card-desc">作業・出勤・割り当て・実績の変更/削除履歴(管理者専用)</div>'+
+      '</button>'+
     '</div>'+
     '<button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
   '</div>';
@@ -2179,7 +2329,12 @@ function renderChangelogModal(){
 function bindGate(){
   document.querySelectorAll('.gate-card').forEach(function(btn){
     btn.addEventListener('click', function(){
-      state.role = btn.getAttribute('data-role');
+      var role = btn.getAttribute('data-role');
+      if(ADMIN_GATED_ROLES().indexOf(role)!==-1 && !state.isAdminUnlocked){
+        openPinGate(role);
+        return;
+      }
+      state.role = role;
       render();
       startPolling();
     });
@@ -2202,9 +2357,124 @@ function bindChangelogModal(){
   });
 }
 
+/* ---------- ADMIN PIN MODAL ---------- */
+async function openPinGate(pendingRole){
+  if(state.adminPinHash===null){
+    state.adminPinHash = await loadAdminPinHash();
+  }
+  if(!state.adminPinHash){
+    state.pinModal = { mode:'setup', pendingRole: pendingRole, error:'' };
+  }else{
+    state.pinModal = { mode:'enter', pendingRole: pendingRole, error:'' };
+  }
+  render();
+}
+function renderPinModal(){
+  var m = state.pinModal;
+  var errHtml = m.error ? '<div style="color:var(--rust-600);font-size:12px;margin-bottom:10px;">'+esc(m.error)+'</div>' : '';
+  var inputStyle = 'width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:16px;margin-bottom:10px;letter-spacing:.3em;text-align:center;';
+  if(m.mode==='setup' || m.mode==='change'){
+    return '<div class="modal-overlay" id="pinModalOverlay">'+
+      '<div class="modal-card" style="max-width:360px;">'+
+        '<div class="modal-task-name" style="text-align:center;margin-bottom:10px;">管理者PINを'+(m.mode==='change'?'変更':'設定')+'</div>'+
+        (m.mode==='setup' ? '<div class="pool-hint" style="margin-bottom:14px;">まだ管理者PINが設定されていません。今後、管理者専用の画面に入るときに必要になります。4桁以上の数字を設定してください。</div>' : '<div class="pool-hint" style="margin-bottom:14px;">新しいPINを入力してください。</div>')+
+        '<input type="password" inputmode="numeric" id="pinInput1" placeholder="新しいPIN" style="'+inputStyle+'">'+
+        '<input type="password" inputmode="numeric" id="pinInput2" placeholder="もう一度入力" style="'+inputStyle+'">'+
+        errHtml+
+        '<div class="modal-actions">'+
+          '<button class="modal-cancel" id="pinCancelBtn">キャンセル</button>'+
+          '<button class="modal-confirm" id="pinSetupBtn">'+(m.mode==='change'?'変更する':'設定する')+'</button>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  }
+  return '<div class="modal-overlay" id="pinModalOverlay">'+
+    '<div class="modal-card" style="max-width:340px;">'+
+      '<div class="modal-task-name" style="text-align:center;margin-bottom:10px;">管理者PIN</div>'+
+      '<div class="pool-hint" style="margin-bottom:14px;">この画面は管理者専用です。PINを入力してください。</div>'+
+      '<input type="password" inputmode="numeric" id="pinInputEnter" placeholder="PIN" style="'+inputStyle+'">'+
+      errHtml+
+      '<div class="modal-actions">'+
+        '<button class="modal-cancel" id="pinCancelBtn">キャンセル</button>'+
+        '<button class="modal-confirm" id="pinEnterBtn">解除する</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+function bindPinModal(){
+  var m = state.pinModal;
+  var cancelBtn = document.getElementById('pinCancelBtn');
+  if(cancelBtn) cancelBtn.addEventListener('click', function(){
+    state.pinModal = null;
+    state.pendingCalendarDate = null;
+    render();
+  });
+  if(m.mode==='setup' || m.mode==='change'){
+    var setupBtn = document.getElementById('pinSetupBtn');
+    var doSetup = async function(){
+      var p1El = document.getElementById('pinInput1');
+      var p2El = document.getElementById('pinInput2');
+      var p1 = p1El.value, p2 = p2El.value;
+      if(p1.length<4){ m.error='4桁以上で入力してください'; render(); return; }
+      if(p1!==p2){ m.error='2つの入力が一致しません'; render(); return; }
+      var hash = await hashPin(p1);
+      await saveAdminPinHash(hash);
+      state.adminPinHash = hash;
+      state.isAdminUnlocked = true;
+      var pendingRole = m.pendingRole;
+      var pendingDate = state.pendingCalendarDate;
+      var wasSetup = m.mode==='setup';
+      state.pinModal = null;
+      state.pendingCalendarDate = null;
+      if(wasSetup && pendingRole){
+        state.role = pendingRole;
+        render();
+        startPolling();
+        if(pendingDate) switchManagerDate(pendingDate);
+      }else{
+        showToast('管理者PINを変更しました');
+        render();
+      }
+    };
+    if(setupBtn) setupBtn.addEventListener('click', doSetup);
+    [document.getElementById('pinInput1'), document.getElementById('pinInput2')].forEach(function(el){
+      if(el) el.addEventListener('keydown', function(e){ if(e.key==='Enter') doSetup(); });
+    });
+  }else{
+    var enterBtn = document.getElementById('pinEnterBtn');
+    var doEnter = async function(){
+      var input = document.getElementById('pinInputEnter');
+      var hash = await hashPin(input.value);
+      if(hash===state.adminPinHash){
+        state.isAdminUnlocked = true;
+        var pendingRole = m.pendingRole;
+        var pendingDate = state.pendingCalendarDate;
+        state.pinModal = null;
+        state.pendingCalendarDate = null;
+        state.role = pendingRole;
+        render();
+        startPolling();
+        if(pendingDate) switchManagerDate(pendingDate);
+      }else{
+        m.error = 'PINが違います';
+        render();
+        var freshInput = document.getElementById('pinInputEnter');
+        if(freshInput) freshInput.focus();
+      }
+    };
+    if(enterBtn) enterBtn.addEventListener('click', doEnter);
+    var enterInput = document.getElementById('pinInputEnter');
+    if(enterInput){
+      enterInput.focus();
+      enterInput.addEventListener('keydown', function(e){ if(e.key==='Enter') doEnter(); });
+    }
+  }
+}
+
 /* ---------- TOPBAR ---------- */
 function renderTopbar(){
-  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業実績入力', monitor:'モニター', achievements:'実績', calendar:'カレンダー'}[state.role];
+  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業実績入力', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴'}[state.role];
+  var lockBtn = (state.isAdminUnlocked && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="管理者ロックをかけ直す">🔒 ロックする</button>' : '';
   return ''+
   '<div class="topbar">'+
     '<div class="topbar-left">'+
@@ -2212,6 +2482,7 @@ function renderTopbar(){
       '<span class="topbar-date">'+todayLabel()+' / '+roleLabel+'</span>'+
     '</div>'+
     '<div class="topbar-right">'+
+      lockBtn+
       '<button class="pill-btn" id="switchRoleBtn">役割を変更</button>'+
     '</div>'+
   '</div>';
@@ -2221,6 +2492,13 @@ function bindCommon(){
   if(b) b.addEventListener('click', function(){
     state.role = null; state.activeStaffId = null; state.modal = null;
     render();
+  });
+  var lockBtn = document.getElementById('adminLockBtn');
+  if(lockBtn) lockBtn.addEventListener('click', function(){
+    state.isAdminUnlocked = false;
+    state.role = null; state.activeStaffId = null; state.modal = null;
+    render();
+    showToast('管理者ロックをかけ直しました');
   });
 }
 
@@ -2281,7 +2559,7 @@ function renderManager(){
         '<span class="roster-name">'+esc(s.name)+'</span>'+
         '<div class="roster-controls">'+
           '<button class="toggle-att '+(on?'on':'off')+'" data-toggle-att="'+s.id+'">'+(on?'出勤中':'欠勤')+'</button>'+
-          '<button class="icon-x" data-del-staff="'+s.id+'" title="削除">&times;</button>'+
+          '<button class="icon-x" data-del-staff="'+s.id+'" title="'+esc(s.name)+'を削除" aria-label="'+esc(s.name)+'を削除">&times;</button>'+
         '</div>'+
       '</div>'+
       '<div class="pattern-row">'+dayToggles+'</div>'+
@@ -2323,14 +2601,14 @@ function renderManager(){
       return (day.assignments[s.id]||[]).indexOf(t.id) !== -1;
     });
     var chips = assignedNames.map(function(s){
-      return '<div class="task-chip">'+esc(s.name)+'<button data-unassign="'+s.id+'|'+t.id+'">&times;</button></div>';
+      return '<div class="task-chip">'+esc(s.name)+'<button data-unassign="'+s.id+'|'+t.id+'" title="'+esc(s.name)+'を「'+esc(t.name)+'」から外す" aria-label="'+esc(s.name)+'を「'+esc(t.name)+'」から外す">&times;</button></div>';
     }).join('') || '<span class="pool-hint" style="margin:0;">ここにスタッフをドラッグ</span>';
     return '<div class="task-col" data-task-col="'+t.id+'">'+
       '<div class="task-col-head">'+
         '<span class="task-color-dot" style="background:'+t.color+'"></span>'+
         '<span class="task-col-name">'+esc(t.name)+'</span>'+
         '<button class="task-col-edit" data-edit-task-col="'+t.id+'" title="編集">✎</button>'+
-        '<button class="task-col-del" data-del-task="'+t.id+'" title="削除">&times;</button>'+
+        '<button class="task-col-del" data-del-task="'+t.id+'" title="'+esc(t.name)+'を削除" aria-label="'+esc(t.name)+'を削除">&times;</button>'+
       '</div>'+
       '<div class="task-col-unit">単位: '+esc(t.unit)+'</div>'+
       '<button class="assign-all-btn" data-assign-all="'+t.id+'">出勤者'+present.length+'人を全員割り当て</button>'+
@@ -2469,6 +2747,12 @@ function renderManager(){
     '<input type="number" id="achievementTargetInput" min="0" step="100" value="'+((state.achievementSettings&&state.achievementSettings.monthlyTargetPieces)||25000)+'" style="width:200px;border:1px solid var(--paper-line);border-radius:8px;padding:8px 10px;font-size:14px;font-family:var(--font-mono);">'+
   '</div>';
 
+  var pinChangeHtml = '<div class="panel" style="margin-top:14px;">'+
+    '<div class="panel-title">🔒 管理者PIN</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">管理者画面・作業登録・操作履歴に入るためのPINです。忘れた場合は、Supabaseの管理画面から「admin-pin-hash」のキーを削除すると、次回アクセス時に再設定できます。</div>'+
+    '<button type="button" class="add-btn" id="changePinBtn">PINを変更する</button>'+
+  '</div>';
+
   return ''+
   '<div class="mgr-wrap">'+
     dateNav+
@@ -2494,16 +2778,22 @@ function renderManager(){
         '</div>'+
       '</div>'+
     '</div>'+
-    shiftPanel+
-    vcImportPanel+
-    breakPanel+
-    achievementPanel+
     '<div class="panel" style="margin-top:20px;">'+
       '<div class="panel-title">作業実績(この日の記録) <span class="count-badge">'+logsSorted.length+'件</span></div>'+
       '<div class="pool-hint" style="margin-bottom:10px;">パートさんが入力した内容に誤りがあれば「編集」から修正できます。パートさんが入力し忘れた実績は「+ 実績を手動で追加」から入力できます。</div>'+
       '<button class="add-btn" id="openAddLogBtn" style="margin-bottom:12px;">+ 実績を手動で追加</button>'+
-      '<table class="report-table"><thead><tr><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>件数</th><th></th></tr></thead><tbody>'+logRows+'</tbody></table>'+
+      '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>件数</th><th></th></tr></thead><tbody>'+logRows+'</tbody></table></div>'+
     '</div>'+
+    '<details class="mgr-settings-details" id="mgrSettingsDetails" '+(state.mgrSettingsOpen?'open':'')+' style="margin-top:20px;">'+
+      '<summary class="mgr-settings-summary">⚙️ 設定(自動出退勤・休憩・CSV取込・実績目標・管理者PIN)</summary>'+
+      '<div style="margin-top:14px;">'+
+        shiftPanel+
+        vcImportPanel+
+        breakPanel+
+        achievementPanel+
+        pinChangeHtml+
+      '</div>'+
+    '</details>'+
   '</div>';
 }
 function renderTaskForm(){
@@ -2547,19 +2837,32 @@ function bindManager(){
     el.addEventListener('click', async function(){
       var id = el.getAttribute('data-toggle-att');
       var day = managerActiveDay();
+      var before = !!day.attendance[id];
       day.attendance[id] = !day.attendance[id];
       await saveDay(day);
+      await appendAuditLog({ action:'出勤状態変更', target: staffById(id).name, before: (before?'出勤中':'欠勤'), after: (day.attendance[id]?'出勤中':'欠勤') });
       render();
     });
   });
   document.querySelectorAll('[data-del-staff]').forEach(function(el){
     el.addEventListener('click', async function(){
       var id = el.getAttribute('data-del-staff');
-      if(!confirm('このスタッフを削除しますか?(過去の記録は残ります)')) return;
       var s = state.roster.find(function(s){ return s.id===id; });
-      if(s) s.archived = true;
+      if(!s) return;
+      if(!confirm('スタッフ「'+s.name+'」を削除しますか?(名簿から非表示になります。過去の記録は残ります)')) return;
+      s.archived = true;
       await saveRoster(state.roster);
+      await appendAuditLog({ action:'スタッフ削除', target: s.name, before:'在籍', after:'削除(名簿非表示)' });
       render();
+      showToast('「'+s.name+'」を削除しました', '元に戻す', async function(){
+        var cur = state.roster.find(function(x){ return x.id===id; });
+        if(cur){
+          cur.archived = false;
+          await saveRoster(state.roster);
+          await appendAuditLog({ action:'スタッフ削除の取り消し', target: cur.name, before:'削除(名簿非表示)', after:'在籍' });
+          render();
+        }
+      });
     });
   });
   var newStaffInput = document.getElementById('newStaffInput');
@@ -2597,14 +2900,17 @@ function bindManager(){
       var t = state.backlog.find(function(t){ return t.id===id; });
       if(!t) return;
       var taskName = t.name;
+      if(!confirm('作業「'+taskName+'」を削除しますか?(本日の割り当てから消え、過去の記録は残ります)')) return;
       t.archived = true;
       await saveBacklog(state.backlog);
+      await appendAuditLog({ action:'作業削除', target: taskName, before:'有効', after:'削除' });
       render();
       showToast('「'+taskName+'」を削除しました', '元に戻す', async function(){
         var cur = state.backlog.find(function(x){ return x.id===id; });
         if(cur){
           cur.archived = false;
           await saveBacklog(state.backlog);
+          await appendAuditLog({ action:'作業削除の取り消し', target: taskName, before:'削除', after:'有効' });
           render();
         }
       });
@@ -2652,7 +2958,19 @@ function bindManager(){
       var arr = day.assignments[sid]||[];
       day.assignments[sid] = arr.filter(function(x){ return x!==tid; });
       await saveDay(day);
+      var sName = staffById(sid).name, tName = taskById(tid).name;
+      await appendAuditLog({ action:'割り当て解除', target: sName+' / '+tName, before:'割り当て済み', after:'解除' });
       render();
+      showToast(sName+'さんを「'+tName+'」の割り当てから外しました', '元に戻す', async function(){
+        var freshDayObj = managerActiveDay();
+        var freshArr = freshDayObj.assignments[sid]||[];
+        if(freshArr.indexOf(tid)===-1){
+          freshDayObj.assignments[sid] = freshArr.concat([tid]);
+          await saveDay(freshDayObj);
+          await appendAuditLog({ action:'割り当て解除の取り消し', target: sName+' / '+tName, before:'解除', after:'割り当て済み' });
+          render();
+        }
+      });
     });
   });
   var clearBrokenBtn = document.getElementById('clearBrokenAssignBtn');
@@ -2815,6 +3133,19 @@ function bindManager(){
   if(vcManageDetails){
     vcManageDetails.addEventListener('toggle', function(){
       state.vcManageOpen = vcManageDetails.open;
+    });
+  }
+  var mgrSettingsDetails = document.getElementById('mgrSettingsDetails');
+  if(mgrSettingsDetails){
+    mgrSettingsDetails.addEventListener('toggle', function(){
+      state.mgrSettingsOpen = mgrSettingsDetails.open;
+    });
+  }
+  var changePinBtn = document.getElementById('changePinBtn');
+  if(changePinBtn){
+    changePinBtn.addEventListener('click', function(){
+      state.pinModal = { mode:'change', error:'' };
+      render();
     });
   }
   document.querySelectorAll('[data-vc-toggle-done]').forEach(function(el){
@@ -3019,7 +3350,7 @@ function renderRegister(){
         badge+
         '<span class="reg-row-unit">'+esc(t.unit)+'</span>'+
         '<button class="log-edit-btn" data-edit-backlog="'+t.id+'">編集</button>'+
-        '<button class="icon-x" data-del-backlog="'+t.id+'" title="削除">&times;</button>'+
+        '<button class="icon-x" data-del-backlog="'+t.id+'" title="'+esc(t.name)+'を削除" aria-label="'+esc(t.name)+'を削除">&times;</button>'+
       '</div>';
     }).join('');
     var isOpen = state.regExpandedDates && Object.prototype.hasOwnProperty.call(state.regExpandedDates, dateStr)
@@ -3049,7 +3380,7 @@ function renderRegister(){
         '<span class="roster-name"><span class="task-color-dot" style="background:'+tmpl.color+';display:inline-block;margin-right:6px;"></span>'+esc(tmpl.name)+' <span style="font-size:11px;color:var(--slate-500);font-weight:400;">('+esc(tmpl.unit)+')</span></span>'+
         '<div class="roster-controls">'+
           '<button class="log-edit-btn" data-edit-template="'+tmpl.id+'">編集</button>'+
-          '<button class="icon-x" data-del-template="'+tmpl.id+'" title="削除">&times;</button>'+
+          '<button class="icon-x" data-del-template="'+tmpl.id+'" title="繰り返し作業「'+esc(tmpl.name)+'」を削除" aria-label="繰り返し作業「'+esc(tmpl.name)+'」を削除">&times;</button>'+
         '</div>'+
       '</div>'+
       '<div class="pattern-row">'+toggles+'</div>'+
@@ -3154,14 +3485,17 @@ function bindRegister(){
       var t = state.backlog.find(function(t){ return t.id===id; });
       if(!t) return;
       var taskName = t.name;
+      if(!confirm('作業「'+taskName+'」を削除しますか?(過去の記録は残ります)')) return;
       t.archived = true;
       await saveBacklog(state.backlog);
+      await appendAuditLog({ action:'作業削除', target: taskName, before:'有効', after:'削除' });
       render();
       showToast('「'+taskName+'」を削除しました', '元に戻す', async function(){
         var cur = state.backlog.find(function(x){ return x.id===id; });
         if(cur){
           cur.archived = false;
           await saveBacklog(state.backlog);
+          await appendAuditLog({ action:'作業削除の取り消し', target: taskName, before:'削除', after:'有効' });
           render();
         }
       });
@@ -3236,6 +3570,7 @@ function bindRegister(){
       var t = state.templates.find(function(t){ return t.id===id; });
       if(!t) return;
       var tmplName = t.name;
+      if(!confirm('繰り返し作業「'+tmplName+'」を削除しますか?(本日以降に生成済みの作業も一緒に削除されます。過去の記録は残ります)')) return;
       t.archived = true;
       await saveTemplates(state.templates);
       var today = todayStr();
@@ -3247,6 +3582,7 @@ function bindRegister(){
         }
       });
       if(cascadedIds.length) await saveBacklog(state.backlog);
+      await appendAuditLog({ action:'繰り返し作業削除', target: tmplName, before:'有効', after:'削除('+cascadedIds.length+'件の生成済み作業も削除)' });
       render();
       showToast('繰り返し作業「'+tmplName+'」を削除しました', '元に戻す', async function(){
         var curTmpl = state.templates.find(function(x){ return x.id===id; });
@@ -3257,6 +3593,7 @@ function bindRegister(){
           if(task) task.archived = false;
         });
         if(cascadedIds.length) await saveBacklog(state.backlog);
+        await appendAuditLog({ action:'繰り返し作業削除の取り消し', target: tmplName, before:'削除', after:'有効' });
         render();
       });
     });
@@ -4489,6 +4826,7 @@ async function stopLogAsManager(logId){
   var log = (day.logs||[]).find(function(l){ return l.id===logId; });
   if(!log || log.end) return;
   var t = taskById(log.taskId);
+  var before = Object.assign({}, log);
   finalizeActiveSubTimer(log);
   log.end = new Date().toISOString();
   if(log.taskId==='BREAK'){
@@ -4497,6 +4835,7 @@ async function stopLogAsManager(logId){
     log.quantity = 0;
   }
   await saveDay(day);
+  await appendAuditLog({ action:'実績ストップ(管理者操作)', target: staffById(log.staffId).name+' / '+t.name, before: before, after: Object.assign({}, log) });
   render();
   showToast('「'+t.name+'」('+staffById(log.staffId).name+')を停止しました。件数の修正は「編集」から行えます。');
 }
@@ -4558,6 +4897,7 @@ async function saveAddLog(){
   state.modal = null;
   state.suppressRender = false;
   await saveDay(day);
+  await appendAuditLog({ action:'実績を手動追加', target: staffById(staffId).name+' / '+taskById(taskId).name, before: null, after: Object.assign({}, entry) });
   render();
 }
 function openEditLogModal(log){
@@ -4583,6 +4923,7 @@ async function saveEditLog(){
   var day = managerActiveDay();
   var log = (day.logs||[]).find(function(l){ return l.id===m.logId; });
   if(!log){ state.modal=null; state.suppressRender=false; render(); return; }
+  var before = Object.assign({}, log);
   var taskSelect = document.getElementById('editTaskSelect');
   var startInput = document.getElementById('editStartTime');
   var endInput = document.getElementById('editEndTime');
@@ -4626,17 +4967,33 @@ async function saveEditLog(){
   state.modal = null;
   state.suppressRender = false;
   await saveDay(day);
+  await appendAuditLog({ action:'実績編集', target: staffById(log.staffId).name+' / '+taskById(log.taskId).name, before: before, after: Object.assign({}, log) });
   render();
 }
 async function deleteEditLog(){
   var m = state.modal;
-  if(!confirm('この記録を削除しますか?この操作は元に戻せません。')) return;
   var day = managerActiveDay();
+  var log = (day.logs||[]).find(function(l){ return l.id===m.logId; });
+  if(!log) return;
+  var t = taskById(log.taskId);
+  var s = staffById(log.staffId);
+  var label = s.name+'さんの「'+t.name+'」('+fmtClock(log.start)+'開始)の実績記録';
+  if(!confirm(label+'を削除します。よろしいですか?')) return;
+  var snapshot = Object.assign({}, log);
   day.logs = (day.logs||[]).filter(function(l){ return l.id!==m.logId; });
   state.modal = null;
   state.suppressRender = false;
   await saveDay(day);
+  await appendAuditLog({ action:'実績削除', target: s.name+' / '+t.name, before: snapshot, after: null });
   render();
+  showToast(label+'を削除しました', '元に戻す', async function(){
+    var freshDayObj = managerActiveDay();
+    freshDayObj.logs = freshDayObj.logs || [];
+    freshDayObj.logs.push(snapshot);
+    await saveDay(freshDayObj);
+    await appendAuditLog({ action:'実績削除の取り消し', target: s.name+' / '+t.name, before: null, after: snapshot });
+    render();
+  });
 }
 function bindEditLogModal(m){
   var cancelBtn = document.getElementById('editCancelBtn');

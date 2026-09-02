@@ -820,6 +820,10 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-08-30', items:[
+    'トップ画面に「⚙️ 設定」を独立したメニューとして追加。自動出退勤・休憩・CSV取込バッチ管理・実績目標・管理者PINは、管理者画面の中の折りたたみではなく、トップ画面から直接開けるようになりました(管理者PINでのロックは維持)',
+    '管理者画面は、出勤者・本日の作業・割り当て・作業実績の日常操作に絞られ、下部に設定画面への案内を表示するように変更'
+  ]},
   { date:'2026-08-29', items:[
     'CSV取込バッチ管理を追加。管理者画面の「📋 ロジザード明細インポート・バッチ管理」に、取込・設定/バッチ管理/伝票管理/取込履歴/削除済みの5タブを用意しました',
     'CSV取込後は即確定せず、作成されるバッチのプレビュー(バッチ名の編集・除外)を確認してから確定するように変更',
@@ -1492,7 +1496,7 @@ async function loadAdminPinHash(){
 async function saveAdminPinHash(hash){
   try{ await window.storage.set('admin-pin-hash', hash, true); }catch(e){}
 }
-function ADMIN_GATED_ROLES(){ return ['manager','register','history']; }
+function ADMIN_GATED_ROLES(){ return ['manager','register','history','settings']; }
 /* ---------- audit log ---------- */
 async function loadAuditLog(dateStr){
   try{
@@ -2664,6 +2668,7 @@ function render(){
   else if(state.role==='achievements') html += renderAchievements();
   else if(state.role==='calendar') html += renderCalendar();
   else if(state.role==='history') html += renderHistory();
+  else if(state.role==='settings') html += renderSettings();
   if(state.modal) html += renderModal();
   if(state.pinModal) html += renderPinModal();
   root.innerHTML = html;
@@ -2676,6 +2681,7 @@ function render(){
   if(state.role==='achievements') bindAchievements();
   if(state.role==='calendar') bindCalendar();
   if(state.role==='history') bindHistory();
+  if(state.role==='settings') bindSettings();
   if(state.modal) bindModal();
   if(state.pinModal) bindPinModal();
   restoreScroll();
@@ -2731,6 +2737,12 @@ function renderGate(){
         '<div class="gate-icon" style="background:#EEF0FB;color:#4C5FD5;">&#128220;</div>'+
         '<div class="gate-card-title">操作履歴</div>'+
         '<div class="gate-card-desc">作業・出勤・割り当て・実績の変更/削除履歴(管理者専用)</div>'+
+      '</button>'+
+      '<button class="gate-card" data-role="settings">'+
+        (state.isAdminUnlocked?'':'<div class="gate-lock-badge" title="管理者専用">&#128274;</div>')+
+        '<div class="gate-icon" style="background:#F4EEE4;color:#8A6A3B;">&#9881;</div>'+
+        '<div class="gate-card-title">設定</div>'+
+        '<div class="gate-card-desc">自動出退勤・休憩・CSV取込バッチ管理・実績目標・管理者PIN(管理者専用)</div>'+
       '</button>'+
     '</div>'+
     '<button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
@@ -2899,7 +2911,7 @@ function bindPinModal(){
 
 /* ---------- TOPBAR ---------- */
 function renderTopbar(){
-  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業実績入力', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴'}[state.role];
+  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業実績入力', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定'}[state.role];
   var lockBtn = (state.isAdminUnlocked && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="管理者ロックをかけ直す">🔒 ロックする</button>' : '';
   return ''+
   '<div class="topbar">'+
@@ -3087,6 +3099,7 @@ function renderManager(){
     '</tr>';
   }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この日の記録はまだありません</td></tr>';
 
+function renderSettingsPanels(){
   var shiftPanel = '<div class="panel" style="margin-top:14px;">'+
     '<div class="panel-title">出退勤の自動設定</div>'+
     '<div class="pool-hint" style="margin-bottom:10px;">曜日パターンで出勤予定になっているスタッフを、設定した始業時間に自動で「出勤中」に、終業時間に自動で「欠勤(退勤済み)」にします。一度手動で切り替えた後は、その日はその状態を優先し、自動処理は再度上書きしません。</div>'+
@@ -3097,79 +3110,78 @@ function renderManager(){
     '</div>'+
   '</div>';
 
+  var viewDate = todayStr();
   var vcImportPanel = '';
-  if(isToday){
-    if(!state.vcData) state.vcData = emptyVcData();
-    var vd = state.vcData;
-    var vcDateTasks = tasksForDate(viewDate);
-    if(state.vcImportTaskId===null){
-      state.vcImportTaskId = vcDateTasks[0] ? vcDateTasks[0].id : '';
-    }
-    var curTaskId = state.vcImportTaskId;
-    var curTask = taskById(curTaskId);
-    var vcTaskOptions = vcDateTasks.map(function(t){
-      return '<option value="'+t.id+'" '+(curTaskId===t.id ? 'selected':'')+'>'+esc(t.name)+'</option>';
-    }).join('') || '<option value="">本日の作業がありません</option>';
-    var cfg = vd.batchConfig[curTaskId] || { enabled:false, criteria:'none', nameTemplate:'{作業名} / {引当ロケーション} / {送り状区分}', evenSplitMaxSlips:15, columnMap:{pickLocation:'',invoiceType:''} };
-
-    var taskSelectHtml = '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">対象作業</label>'+
-      '<select id="vcTaskSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:10px;">'+vcTaskOptions+'</select>';
-
-    var tabsHtml = '<div class="vc-tabs">'+
-      ['import:取込・設定','batches:バッチ管理','slips:伝票管理','imports:取込履歴','deleted:削除済み'].map(function(t){
-        var parts = t.split(':'); var key=parts[0], label=parts[1];
-        return '<button type="button" class="vc-tab-btn'+(state.vcAdminTab===key?' active':'')+'" data-vc-admin-tab="'+key+'">'+label+'</button>';
-      }).join('')+
-    '</div>';
-
-    var tabBody = '';
-    if(state.vcAdminTab==='batches'){
-      tabBody = renderVcBatchesTab(vd, curTaskId);
-    }else if(state.vcAdminTab==='slips'){
-      tabBody = renderVcSlipsTab(vd, curTaskId);
-    }else if(state.vcAdminTab==='imports'){
-      tabBody = renderVcImportsTab(vd, curTaskId);
-    }else if(state.vcAdminTab==='deleted'){
-      tabBody = renderVcDeletedTab(vd, curTaskId);
-    }else{
-      var taskSlips = vcActiveSlips(vd).filter(function(s){ return s.taskId===curTaskId; });
-      var taskBatches = vcActiveBatches(vd).filter(function(b){ return b.taskId===curTaskId; });
-      var vcStatusHtml = '';
-      if(taskSlips.length){
-        var totalQtyAll = taskSlips.reduce(function(a,s){ return a+s.totalQty; }, 0);
-        vcStatusHtml = '<div class="vc-import-status">「'+esc(curTask.name)+'」に伝票'+taskSlips.length+'件(合計'+formatNum(totalQtyAll)+'ピース)'+(cfg.enabled?'・バッチ'+taskBatches.length+'件':'')+'を取り込み済み</div>';
-      }
-      var batchConfigHtml = '<details class="vc-manage-details" id="vcBatchConfigDetails" '+(state.vcBatchConfigOpen?'open':'')+'>'+
-        '<summary>バッチ設定(この作業: '+esc(curTask.name)+')</summary>'+
-        '<div style="margin-top:10px;">'+
-          '<label class="break-toggle-row"><input type="checkbox" id="vcBatchEnabledInput" '+(cfg.enabled?'checked':'')+'> この作業でバッチ管理を使う</label>'+
-          '<div class="pool-hint" style="margin:8px 0;">バッチ化の基準</div>'+
-          ['none:バッチ化しない(伝票単位)','location:引当ロケーションごと','invoice:送り状区分ごと','location_invoice:引当ロケーション×送り状区分','even_split:件数で均等分割'].map(function(opt){
-            var parts = opt.split(':'); var val=parts[0], label=parts[1];
-            return '<label style="display:block;font-size:13px;margin:4px 0;"><input type="radio" name="vcCriteria" value="'+val+'" '+(cfg.criteria===val?'checked':'')+'> '+label+'</label>';
-          }).join('')+
-          '<div style="margin:8px 0;"><label style="font-size:11px;color:var(--slate-500);">1バッチあたり最大伝票数(均等分割の場合)</label><input type="number" id="vcEvenSplitMax" min="1" value="'+(cfg.evenSplitMaxSlips||15)+'" style="width:100px;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
-          '<div style="margin:8px 0;"><label style="font-size:11px;color:var(--slate-500);display:block;">バッチ名のルール(使える置き換え: {引当ロケーション} {送り状区分} {作業名} {連番})</label><input type="text" id="vcNameTemplate" value="'+esc(cfg.nameTemplate||'')+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
-          '<div style="display:flex;gap:10px;margin:8px 0;">'+
-            '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;">「引当ロケーション」のCSV列名</label><input type="text" id="vcColLocation" value="'+esc((cfg.columnMap&&cfg.columnMap.pickLocation)||'')+'" placeholder="例: ロケーション" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
-            '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;">「送り状区分」のCSV列名</label><input type="text" id="vcColInvoice" value="'+esc((cfg.columnMap&&cfg.columnMap.invoiceType)||'')+'" placeholder="例: 業務区分" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
-          '</div>'+
-          '<button type="button" class="add-btn" id="vcSaveBatchConfigBtn">この作業の設定を保存</button>'+
-        '</div>'+
-      '</details>';
-      tabBody = vcStatusHtml+batchConfigHtml+
-        '<div style="margin-top:12px;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="vcCsvInput" accept=".csv" style="display:block;margin-bottom:6px;"></div>'+
-        (state.vcImporting ? '<div class="empty-note">取り込み中...</div>' : '');
-    }
-
-    vcImportPanel = '<div class="panel" style="margin-top:14px;">'+
-      '<div class="panel-title">📋 ロジザード明細インポート・バッチ管理</div>'+
-      '<div class="pool-hint" style="margin-bottom:10px;">出荷指示CSVを取り込むと、出荷伝票ごとに明細数・ピース数が自動集計されます。「荷主出荷NO」を目印に重複を防ぐので、1日に何度アップロードしても大丈夫です。</div>'+
-      taskSelectHtml+
-      tabsHtml+
-      '<div class="vc-tab-body">'+tabBody+'</div>'+
-    '</div>';
+  if(!state.vcData) state.vcData = emptyVcData();
+  var vd = state.vcData;
+  var vcDateTasks = tasksForDate(viewDate);
+  if(state.vcImportTaskId===null){
+    state.vcImportTaskId = vcDateTasks[0] ? vcDateTasks[0].id : '';
   }
+  var curTaskId = state.vcImportTaskId;
+  var curTask = taskById(curTaskId);
+  var vcTaskOptions = vcDateTasks.map(function(t){
+    return '<option value="'+t.id+'" '+(curTaskId===t.id ? 'selected':'')+'>'+esc(t.name)+'</option>';
+  }).join('') || '<option value="">本日の作業がありません</option>';
+  var cfg = vd.batchConfig[curTaskId] || { enabled:false, criteria:'none', nameTemplate:'{作業名} / {引当ロケーション} / {送り状区分}', evenSplitMaxSlips:15, columnMap:{pickLocation:'',invoiceType:''} };
+
+  var taskSelectHtml = '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">対象作業</label>'+
+    '<select id="vcTaskSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:10px;">'+vcTaskOptions+'</select>';
+
+  var tabsHtml = '<div class="vc-tabs">'+
+    ['import:取込・設定','batches:バッチ管理','slips:伝票管理','imports:取込履歴','deleted:削除済み'].map(function(t){
+      var parts = t.split(':'); var key=parts[0], label=parts[1];
+      return '<button type="button" class="vc-tab-btn'+(state.vcAdminTab===key?' active':'')+'" data-vc-admin-tab="'+key+'">'+label+'</button>';
+    }).join('')+
+  '</div>';
+
+  var tabBody = '';
+  if(state.vcAdminTab==='batches'){
+    tabBody = renderVcBatchesTab(vd, curTaskId);
+  }else if(state.vcAdminTab==='slips'){
+    tabBody = renderVcSlipsTab(vd, curTaskId);
+  }else if(state.vcAdminTab==='imports'){
+    tabBody = renderVcImportsTab(vd, curTaskId);
+  }else if(state.vcAdminTab==='deleted'){
+    tabBody = renderVcDeletedTab(vd, curTaskId);
+  }else{
+    var taskSlips = vcActiveSlips(vd).filter(function(s){ return s.taskId===curTaskId; });
+    var taskBatches = vcActiveBatches(vd).filter(function(b){ return b.taskId===curTaskId; });
+    var vcStatusHtml = '';
+    if(taskSlips.length){
+      var totalQtyAll = taskSlips.reduce(function(a,s){ return a+s.totalQty; }, 0);
+      vcStatusHtml = '<div class="vc-import-status">「'+esc(curTask.name)+'」に伝票'+taskSlips.length+'件(合計'+formatNum(totalQtyAll)+'ピース)'+(cfg.enabled?'・バッチ'+taskBatches.length+'件':'')+'を取り込み済み</div>';
+    }
+    var batchConfigHtml = '<details class="vc-manage-details" id="vcBatchConfigDetails" '+(state.vcBatchConfigOpen?'open':'')+'>'+
+      '<summary>バッチ設定(この作業: '+esc(curTask.name)+')</summary>'+
+      '<div style="margin-top:10px;">'+
+        '<label class="break-toggle-row"><input type="checkbox" id="vcBatchEnabledInput" '+(cfg.enabled?'checked':'')+'> この作業でバッチ管理を使う</label>'+
+        '<div class="pool-hint" style="margin:8px 0;">バッチ化の基準</div>'+
+        ['none:バッチ化しない(伝票単位)','location:引当ロケーションごと','invoice:送り状区分ごと','location_invoice:引当ロケーション×送り状区分','even_split:件数で均等分割'].map(function(opt){
+          var parts = opt.split(':'); var val=parts[0], label=parts[1];
+          return '<label style="display:block;font-size:13px;margin:4px 0;"><input type="radio" name="vcCriteria" value="'+val+'" '+(cfg.criteria===val?'checked':'')+'> '+label+'</label>';
+        }).join('')+
+        '<div style="margin:8px 0;"><label style="font-size:11px;color:var(--slate-500);">1バッチあたり最大伝票数(均等分割の場合)</label><input type="number" id="vcEvenSplitMax" min="1" value="'+(cfg.evenSplitMaxSlips||15)+'" style="width:100px;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
+        '<div style="margin:8px 0;"><label style="font-size:11px;color:var(--slate-500);display:block;">バッチ名のルール(使える置き換え: {引当ロケーション} {送り状区分} {作業名} {連番})</label><input type="text" id="vcNameTemplate" value="'+esc(cfg.nameTemplate||'')+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
+        '<div style="display:flex;gap:10px;margin:8px 0;">'+
+          '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;">「引当ロケーション」のCSV列名</label><input type="text" id="vcColLocation" value="'+esc((cfg.columnMap&&cfg.columnMap.pickLocation)||'')+'" placeholder="例: ロケーション" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
+          '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;">「送り状区分」のCSV列名</label><input type="text" id="vcColInvoice" value="'+esc((cfg.columnMap&&cfg.columnMap.invoiceType)||'')+'" placeholder="例: 業務区分" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
+        '</div>'+
+        '<button type="button" class="add-btn" id="vcSaveBatchConfigBtn">この作業の設定を保存</button>'+
+      '</div>'+
+    '</details>';
+    tabBody = vcStatusHtml+batchConfigHtml+
+      '<div style="margin-top:12px;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="vcCsvInput" accept=".csv" style="display:block;margin-bottom:6px;"></div>'+
+      (state.vcImporting ? '<div class="empty-note">取り込み中...</div>' : '');
+  }
+
+  vcImportPanel = '<div class="panel" style="margin-top:14px;">'+
+    '<div class="panel-title">📋 ロジザード明細インポート・バッチ管理</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">出荷指示CSVを取り込むと、出荷伝票ごとに明細数・ピース数が自動集計されます。「荷主出荷NO」を目印に重複を防ぐので、1日に何度アップロードしても大丈夫です。</div>'+
+    taskSelectHtml+
+    tabsHtml+
+    '<div class="vc-tab-body">'+tabBody+'</div>'+
+  '</div>';
 
   var breakPanel = '<div class="panel" style="margin-top:14px;">'+
     '<div class="panel-title">休憩の自動設定</div>'+
@@ -3193,6 +3205,15 @@ function renderManager(){
     '<div class="pool-hint" style="margin-bottom:10px;">管理者画面・作業登録・操作履歴に入るためのPINです。忘れた場合は、Supabaseの管理画面から「admin-pin-hash」のキーを削除すると、次回アクセス時に再設定できます。</div>'+
     '<button type="button" class="add-btn" id="changePinBtn">PINを変更する</button>'+
   '</div>';
+
+  return shiftPanel + vcImportPanel + breakPanel + achievementPanel + pinChangeHtml;
+}
+function renderSettings(){
+  return '<div class="mgr-wrap"><div class="panel-title" style="font-size:20px;margin-bottom:4px;">⚙️ 設定</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">自動出退勤・休憩・CSV取込バッチ管理・実績目標・管理者PINをここでまとめて設定できます。</div>'+
+    renderSettingsPanels()+
+  '</div>';
+}
 
   return ''+
   '<div class="mgr-wrap">'+
@@ -3225,16 +3246,7 @@ function renderManager(){
       '<button class="add-btn" id="openAddLogBtn" style="margin-bottom:12px;">+ 実績を手動で追加</button>'+
       '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>件数</th><th></th></tr></thead><tbody>'+logRows+'</tbody></table></div>'+
     '</div>'+
-    '<details class="mgr-settings-details" id="mgrSettingsDetails" '+(state.mgrSettingsOpen?'open':'')+' style="margin-top:20px;">'+
-      '<summary class="mgr-settings-summary">⚙️ 設定(自動出退勤・休憩・CSV取込・実績目標・管理者PIN)</summary>'+
-      '<div style="margin-top:14px;">'+
-        shiftPanel+
-        vcImportPanel+
-        breakPanel+
-        achievementPanel+
-        pinChangeHtml+
-      '</div>'+
-    '</details>'+
+    '<div class="pool-hint" style="margin-top:16px;text-align:center;">自動出退勤・休憩・CSV取込バッチ管理・実績目標・管理者PINは、トップ画面の「⚙️ 設定」から変更できます。</div>'+
   '</div>';
 }
 function renderTaskForm(){
@@ -3576,6 +3588,12 @@ function bindManager(){
   var openAddLogBtn = document.getElementById('openAddLogBtn');
   if(openAddLogBtn) openAddLogBtn.addEventListener('click', openAddLogModal);
 
+
+  bindCategoryToggle();
+  bindSubcatTagControls();
+}
+
+function bindSettings(){
   var mgrSettingsDetails = document.getElementById('mgrSettingsDetails');
   if(mgrSettingsDetails){
     mgrSettingsDetails.addEventListener('toggle', function(){

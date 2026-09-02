@@ -821,6 +821,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-08-30', items:[
+    '重要な不具合修正: 前回追加した「⚙️ 設定」画面で、PIN入力後に画面がフリーズし、ボタンが反応しなくなる不具合を修正。関数の定義位置が誤って別の関数の内側に入り込んでいたことが原因でした(実際に画面遷移を再現するテストで動作確認済み)'
+  ]},
+  { date:'2026-08-30', items:[
     'トップ画面に「⚙️ 設定」を独立したメニューとして追加。自動出退勤・休憩・CSV取込バッチ管理・実績目標・管理者PINは、管理者画面の中の折りたたみではなく、トップ画面から直接開けるようになりました(管理者PINでのロックは維持)',
     '管理者画面は、出勤者・本日の作業・割り当て・作業実績の日常操作に絞られ、下部に設定画面への案内を表示するように変更'
   ]},
@@ -3099,6 +3102,42 @@ function renderManager(){
     '</tr>';
   }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この日の記録はまだありません</td></tr>';
 
+
+  return ''+
+  '<div class="mgr-wrap">'+
+    dateNav+
+    unassignedBanner+
+    brokenBanner+
+    '<div class="mgr-grid">'+
+      '<div class="panel">'+
+        '<div class="panel-title">出勤スタッフ <span class="count-badge">'+present.length+' / '+roster.length+'</span></div>'+
+        '<div class="pool-hint" style="margin-bottom:8px;">曜日ボタンで通常の出勤パターンを設定。この日の出退勤はボタンで個別に切替。</div>'+
+        '<div class="roster-list">'+rosterHtml+'</div>'+
+        '<div class="add-row">'+
+          '<input type="text" id="newStaffInput" placeholder="名前を入力" value="'+esc(state.newStaffDraftName)+'">'+
+          '<button class="add-btn" id="addStaffBtn">追加</button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="panel">'+
+        '<div class="panel-title">'+esc(dateLabelFromStr(viewDate))+'の作業 <span class="count-badge">'+tasks.length+'件</span></div>'+
+        '<div class="pool-hint" style="margin-bottom:8px;">作業登録画面でこの日付の作業として登録されたものが並びます。急ぎの作業はここから直接追加できます。</div>'+
+        '<div class="task-board">'+colsHtml+newTaskForm+'</div>'+
+        '<div class="staff-pool">'+
+          '<div class="pool-hint">出勤中スタッフ(ドラッグして作業に割り当て)</div>'+
+          poolHtml+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="panel" style="margin-top:20px;">'+
+      '<div class="panel-title">作業実績(この日の記録) <span class="count-badge">'+logsSorted.length+'件</span></div>'+
+      '<div class="pool-hint" style="margin-bottom:10px;">パートさんが入力した内容に誤りがあれば「編集」から修正できます。パートさんが入力し忘れた実績は「+ 実績を手動で追加」から入力できます。</div>'+
+      '<button class="add-btn" id="openAddLogBtn" style="margin-bottom:12px;">+ 実績を手動で追加</button>'+
+      '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>件数</th><th></th></tr></thead><tbody>'+logRows+'</tbody></table></div>'+
+    '</div>'+
+    '<div class="pool-hint" style="margin-top:16px;text-align:center;">自動出退勤・休憩・CSV取込バッチ管理・実績目標・管理者PINは、トップ画面の「⚙️ 設定」から変更できます。</div>'+
+  '</div>';
+}
+
 function renderSettingsPanels(){
   var shiftPanel = '<div class="panel" style="margin-top:14px;">'+
     '<div class="panel-title">出退勤の自動設定</div>'+
@@ -3215,40 +3254,6 @@ function renderSettings(){
   '</div>';
 }
 
-  return ''+
-  '<div class="mgr-wrap">'+
-    dateNav+
-    unassignedBanner+
-    brokenBanner+
-    '<div class="mgr-grid">'+
-      '<div class="panel">'+
-        '<div class="panel-title">出勤スタッフ <span class="count-badge">'+present.length+' / '+roster.length+'</span></div>'+
-        '<div class="pool-hint" style="margin-bottom:8px;">曜日ボタンで通常の出勤パターンを設定。この日の出退勤はボタンで個別に切替。</div>'+
-        '<div class="roster-list">'+rosterHtml+'</div>'+
-        '<div class="add-row">'+
-          '<input type="text" id="newStaffInput" placeholder="名前を入力" value="'+esc(state.newStaffDraftName)+'">'+
-          '<button class="add-btn" id="addStaffBtn">追加</button>'+
-        '</div>'+
-      '</div>'+
-      '<div class="panel">'+
-        '<div class="panel-title">'+esc(dateLabelFromStr(viewDate))+'の作業 <span class="count-badge">'+tasks.length+'件</span></div>'+
-        '<div class="pool-hint" style="margin-bottom:8px;">作業登録画面でこの日付の作業として登録されたものが並びます。急ぎの作業はここから直接追加できます。</div>'+
-        '<div class="task-board">'+colsHtml+newTaskForm+'</div>'+
-        '<div class="staff-pool">'+
-          '<div class="pool-hint">出勤中スタッフ(ドラッグして作業に割り当て)</div>'+
-          poolHtml+
-        '</div>'+
-      '</div>'+
-    '</div>'+
-    '<div class="panel" style="margin-top:20px;">'+
-      '<div class="panel-title">作業実績(この日の記録) <span class="count-badge">'+logsSorted.length+'件</span></div>'+
-      '<div class="pool-hint" style="margin-bottom:10px;">パートさんが入力した内容に誤りがあれば「編集」から修正できます。パートさんが入力し忘れた実績は「+ 実績を手動で追加」から入力できます。</div>'+
-      '<button class="add-btn" id="openAddLogBtn" style="margin-bottom:12px;">+ 実績を手動で追加</button>'+
-      '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>件数</th><th></th></tr></thead><tbody>'+logRows+'</tbody></table></div>'+
-    '</div>'+
-    '<div class="pool-hint" style="margin-top:16px;text-align:center;">自動出退勤・休憩・CSV取込バッチ管理・実績目標・管理者PINは、トップ画面の「⚙️ 設定」から変更できます。</div>'+
-  '</div>';
-}
 function renderTaskForm(){
   var swatches = TASK_COLORS.map(function(c){
     return '<div class="swatch '+(state.newTaskColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-color-swatch="'+c.hex+'"></div>';

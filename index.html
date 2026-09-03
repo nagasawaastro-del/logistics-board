@@ -185,6 +185,17 @@ input,select{font-family:inherit;}
 .vc-tab-body{margin-top:10px;}
 .vc-preview-row{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--paper-line);border-radius:10px;margin-bottom:6px;}
 .vc-preview-row.vc-preview-excluded{opacity:.45;}
+.vc-warning-box{background:#FFF3DE;border:1px solid var(--amber-500);color:#7A5A1E;border-radius:10px;padding:10px 12px;font-size:12px;margin-bottom:8px;line-height:1.5;}
+.checklist-panel{border:2px solid #C1521F;background:#FFF6F0;}
+.checklist-panel .panel-title{color:#C1521F;}
+.checklist-item{padding:10px 0;border-bottom:1px solid #F0DACB;}
+.checklist-item:last-child{border-bottom:none;}
+.checklist-item-title{font-size:13px;font-weight:700;color:var(--ink-900);}
+.checklist-item-action{font-size:12px;color:var(--slate-500);margin:3px 0 6px;}
+.checklist-item-actions{display:flex;gap:8px;flex-wrap:wrap;}
+.csv-link-badge{display:inline-block;font-size:10px;font-weight:700;border-radius:10px;padding:2px 8px;margin-left:4px;vertical-align:middle;}
+.csv-link-badge-on{background:#E9F2F0;color:#0F6E56;}
+.csv-link-badge-off{background:var(--paper-100);color:var(--slate-500);}
 .vc-preview-name-input{flex:1;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;font-size:13px;}
 .vc-preview-meta{font-size:11px;color:var(--slate-500);white-space:nowrap;}
 .vc-slip-list{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;}
@@ -844,6 +855,14 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-05', items:[
+    '【日次締めチェック・CSV取込安全性】管理者画面に「⚠️ 本日の確認事項」を追加。作業中のまま終了していないスタッフ、CSV連携なのに取込がない作業、取込済みなのに実績0時間、VC作業なのにケース数未入力、取込の失敗/確認未完了、削除済み取込データ、をまとめて表示。各項目に「確認済みにする」「管理者が作業を終了する」を用意し、操作履歴に記録します',
+    'CSV取込のプレビューに安全チェックを追加。同一ファイル(内容・サイズ・ファイル名が一致)の二重取込は完全にブロックします(上書き・強制取込はできません。やり直す場合は取込履歴を削除してから正しいファイルを取り込んでください)。前回の同一作業・同一日付の取込と比べて件数/明細/ピースが±50%以上変化している場合、必須列が見つからない場合、前回までの取込と重複する荷主出荷NOがある場合は警告表示します(警告のみで、確認のうえ確定は可能です)',
+    '管理者の作業ボード・現場画面の作業タイルに「📋 CSV連携」「✍️ 通常入力」のバッジを追加し、数量入力が必要かどうかを一目で分かるようにしました',
+    'CSV取込に「対象日付」を追加(初期値は本日)。過去日付・未来日付を選んで取込・確定でき、既存の時間実績の有無に関わらず追加できます。取込履歴から日付の変更・削除ができ、集計画面はその日付のCSV作業量と時間実績を組み合わせて表示します',
+    '管理者専用のバックアップ出力を追加(「⚙️ 設定」)。指定日付の作業時間実績・CSV取込履歴と作業量・VCケース数履歴を、JSON(復旧用)とCSV3種(確認用)でダウンロードできます(復元機能ではなく出力のみ)',
+    '既存の時間計測・CSV連携・内訳計測のロジックは変更していません。実際にコードを実行するテストで、二重取込のブロック・異常値の検知・重複候補の検知・取込日付の変更・締めチェック項目の検出を確認済みです'
+  ]},
   { date:'2026-09-04', items:[
     '【CSV作業量・内訳生産性対応 段階3】現場入力の手間を削減する変更を実装',
     '内訳が2つ以上ある作業を開始する際、先頭の内訳を自動開始するのをやめ、「ピッキング」「梱包」などの大きな選択ボタンから最初の内訳を1回選ぶ方式に変更。梱包だけの途中参加者が、ピッキングを経由せず直接梱包を開始できます',
@@ -1150,10 +1169,14 @@ var state = {
   workVolume: null,
   workVolumeConfig: null,
   wvImportTaskId: null,
+  wvTargetDate: null,
+  wvViewData: null,
   wvImporting: false,
   wvConfigOpen: false,
   wvHistoryOpen: false,
   vcCaseLedger: null,
+  dailyChecklistAck: null,
+  vcImportAttemptsToday: null,
   vcPreview: null,
   mgrSettingsOpen: false,
   day: null,
@@ -1663,12 +1686,99 @@ async function loadWorkVolume(dateStr){
 }
 async function saveWorkVolume(dateStr, data){
   pendingSaves++;
-  try{ await window.storage.set('work-volume:'+dateStr, JSON.stringify(data), true); }catch(e){}
+  var ok = true;
+  try{ await window.storage.set('work-volume:'+dateStr, JSON.stringify(data), true); }
+  catch(e){ ok = false; }
   finally{ pendingSaves--; }
+  return ok;
 }
 function emptyWorkVolume(){ return { imports:[], batches:[] }; }
 function wvActiveImports(data){ return (data.imports||[]).filter(function(i){ return !i.deletedAt; }); }
 function wvActiveBatches(data){ return (data.batches||[]).filter(function(b){ return !b.deletedAt; }); }
+
+/* ---------- CSV重複ファイル検知(全日付・全作業を対象にした軽量インデックス) ---------- */
+async function computeFileFingerprint(file){
+  var buffer = await file.arrayBuffer();
+  var hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+  return Array.from(new Uint8Array(hashBuffer)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+}
+async function loadCsvFingerprintIndex(){
+  try{
+    var r = await window.storage.get('csv-import-fingerprints', true);
+    return r && r.value ? JSON.parse(r.value) : { entries: [] };
+  }catch(e){ return { entries: [] }; }
+}
+async function saveCsvFingerprintIndex(idx){
+  try{ await window.storage.set('csv-import-fingerprints', JSON.stringify(idx), true); }catch(e){}
+}
+function findDuplicateFingerprint(idx, fingerprint, fileSize, fileName){
+  return (idx.entries||[]).find(function(e){
+    return e.fingerprint===fingerprint && e.fileSize===fileSize && e.fileName===fileName;
+  }) || null;
+}
+async function registerFileFingerprint(fingerprint, fileSize, fileName, dateStr, taskId, importId){
+  var idx = await loadCsvFingerprintIndex();
+  idx.entries.push({ fingerprint: fingerprint, fileSize: fileSize, fileName: fileName, date: dateStr, taskId: taskId, importId: importId, at: new Date().toISOString() });
+  await saveCsvFingerprintIndex(idx);
+}
+
+/* ---------- 取込の試行状況(確認未完了・失敗の検知用) ---------- */
+async function loadVcImportAttempts(dateStr){
+  try{
+    var r = await window.storage.get('vc-import-attempts:'+dateStr, true);
+    return r && r.value ? JSON.parse(r.value) : { attempts: [] };
+  }catch(e){ return { attempts: [] }; }
+}
+async function saveVcImportAttempts(dateStr, data){
+  try{ await window.storage.set('vc-import-attempts:'+dateStr, JSON.stringify(data), true); }catch(e){}
+}
+async function markImportAttemptStatus(dateStr, attemptId, status){
+  var data = await loadVcImportAttempts(dateStr);
+  var att = data.attempts.find(function(a){ return a.id===attemptId; });
+  if(att) att.status = status;
+  await saveVcImportAttempts(dateStr, data);
+  return data;
+}
+
+/* ---------- 日次締めチェックの確認済み状態 ---------- */
+async function loadChecklistAck(dateStr){
+  try{
+    var r = await window.storage.get('daily-checklist-ack:'+dateStr, true);
+    return r && r.value ? JSON.parse(r.value) : { ack: {} };
+  }catch(e){ return { ack: {} }; }
+}
+async function saveChecklistAck(dateStr, data){
+  try{ await window.storage.set('daily-checklist-ack:'+dateStr, JSON.stringify(data), true); }catch(e){}
+}
+
+function findPreviousImportForTaskDate(workVolume, taskId, excludeImportId){
+  var imports = wvActiveImports(workVolume).filter(function(i){ return i.taskId===taskId && i.id!==excludeImportId; });
+  if(!imports.length) return null;
+  imports.sort(function(a,b){ return new Date(b.importedAt) - new Date(a.importedAt); });
+  return imports[0];
+}
+function computeAnomalyWarning(newTotals, prevImport){
+  if(!prevImport) return null;
+  var SMALL_SAMPLE_THRESHOLD = 10;
+  function pctDiff(newVal, oldVal){
+    if(oldVal===0) return newVal===0 ? 0 : 100;
+    return ((newVal-oldVal)/oldVal)*100;
+  }
+  var diffs = {
+    primaryCount: pctDiff(newTotals.primaryCount, prevImport.primaryCount),
+    lineCount: pctDiff(newTotals.lineCount, prevImport.lineCount),
+    totalQty: pctDiff(newTotals.totalQty, prevImport.totalQty)
+  };
+  var flagged = Object.keys(diffs).filter(function(k){ return Math.abs(diffs[k])>=50; });
+  if(!flagged.length) return null;
+  return { flagged: flagged, diffs: diffs, prevImport: prevImport, isSmallSample: prevImport.primaryCount < SMALL_SAMPLE_THRESHOLD };
+}
+function findShipperNoOverlap(newShipperNos, workVolume, taskId, excludeImportId){
+  var prevImports = wvActiveImports(workVolume).filter(function(i){ return i.taskId===taskId && i.id!==excludeImportId && i.shipperNos; });
+  var seen = {};
+  prevImports.forEach(function(i){ i.shipperNos.forEach(function(sn){ seen[sn]=true; }); });
+  return newShipperNos.filter(function(sn){ return seen[sn]; });
+}
 function wvTotalsForTask(data, taskId){
   var imports = wvActiveImports(data).filter(function(i){ return i.taskId===taskId; });
   return {
@@ -1714,7 +1824,12 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
       var primaryCount = shipperGroups.length;
       var lineCount = shipperGroups.reduce(function(a,g){ return a+g.lineCount; }, 0);
       var totalQty = shipperGroups.reduce(function(a,g){ return a+g.totalQty; }, 0);
-      callback({ primaryCount: primaryCount, lineCount: lineCount, totalQty: totalQty, shipperGroups: shipperGroups, rowCount: rows.length, headers: headers });
+      var missingColumns = [];
+      if(headers.indexOf('荷主出荷NO')===-1) missingColumns.push('荷主出荷NO');
+      if(headers.indexOf('出荷指示数')===-1) missingColumns.push('出荷指示数');
+      if(locCol && headers.indexOf(locCol)===-1) missingColumns.push(locCol+'(引当ロケーション列)');
+      if(invCol && headers.indexOf(invCol)===-1) missingColumns.push(invCol+'(送り状区分列)');
+      callback({ primaryCount: primaryCount, lineCount: lineCount, totalQty: totalQty, shipperGroups: shipperGroups, rowCount: rows.length, headers: headers, missingColumns: missingColumns });
     }catch(err){
       errCallback('CSVの読み込みに失敗しました: '+(err.message||err));
     }
@@ -1768,8 +1883,13 @@ function generateWorkVolumeBatches(shipperGroups, config, taskId, taskName, impo
     };
   });
 }
+async function getWorkVolumeForDate(dateStr){
+  if(dateStr===todayStr()) return state.workVolume;
+  var data = await loadWorkVolume(dateStr);
+  return data || emptyWorkVolume();
+}
 async function deleteWvImport(dateStr, importId, reason){
-  var data = state.workVolume;
+  var data = await getWorkVolumeForDate(dateStr);
   var imp = data.imports.find(function(i){ return i.id===importId; });
   if(!imp) return;
   imp.deletedAt = new Date().toISOString();
@@ -1781,9 +1901,11 @@ async function deleteWvImport(dateStr, importId, reason){
     }
   });
   await saveWorkVolume(dateStr, data);
+  if(dateStr===todayStr()) state.workVolume = data;
+  if(state.wvTargetDate===dateStr || (!state.wvTargetDate && dateStr===todayStr())) state.wvViewData = data;
 }
 async function restoreWvImport(dateStr, importId){
-  var data = state.workVolume;
+  var data = await getWorkVolumeForDate(dateStr);
   var imp = data.imports.find(function(i){ return i.id===importId; });
   if(!imp) return;
   imp.deletedAt = null; imp.deletedBy = null; imp.deleteReason = null;
@@ -1793,6 +1915,29 @@ async function restoreWvImport(dateStr, importId){
     }
   });
   await saveWorkVolume(dateStr, data);
+  if(dateStr===todayStr()) state.workVolume = data;
+  if(state.wvTargetDate===dateStr || (!state.wvTargetDate && dateStr===todayStr())) state.wvViewData = data;
+}
+async function moveWvImportDate(fromDateStr, toDateStr, importId){
+  if(fromDateStr===toDateStr) return { ok:false, msg:'同じ日付です' };
+  var fromData = await getWorkVolumeForDate(fromDateStr);
+  var imp = fromData.imports.find(function(i){ return i.id===importId; });
+  if(!imp) return { ok:false, msg:'取込が見つかりません' };
+  var movedBatches = fromData.batches.filter(function(b){ return b.importId===importId; });
+  fromData.imports = fromData.imports.filter(function(i){ return i.id!==importId; });
+  fromData.batches = fromData.batches.filter(function(b){ return b.importId!==importId; });
+  await saveWorkVolume(fromDateStr, fromData);
+  if(fromDateStr===todayStr()) state.workVolume = fromData;
+
+  var toData = await getWorkVolumeForDate(toDateStr);
+  toData.imports.push(imp);
+  toData.batches = toData.batches.concat(movedBatches);
+  await saveWorkVolume(toDateStr, toData);
+  if(toDateStr===todayStr()) state.workVolume = toData;
+
+  if(state.wvTargetDate===fromDateStr) state.wvViewData = fromData;
+  else if(state.wvTargetDate===toDateStr) state.wvViewData = toData;
+  return { ok:true, imp: imp };
 }
 
 /* ---------- VCケース数台帳(日付×作業枠、加算/取消の履歴) ---------- */
@@ -2624,6 +2769,98 @@ function bindCommon(){
 }
 
 /* ---------- MANAGER ---------- */
+function computeDailyChecklist(){
+  var items = [];
+  var day = state.day;
+  var today = todayStr();
+  if(!day || day.date!==today) return items;
+
+  (day.logs||[]).forEach(function(l){
+    if(l.end===null && l.taskId!=='BREAK'){
+      var s = staffById(l.staffId);
+      var t = taskById(l.taskId);
+      items.push({
+        id: 'open_log_'+l.id, title: s.name+'さんが「'+t.name+'」を作業中のまま終了していません',
+        target: s.name+' / '+t.name, action: '現場で終了操作をしてもらうか、管理者が終了してください',
+        canForceEnd: true, logId: l.id, staffId: l.staffId, taskId: l.taskId
+      });
+    }
+  });
+
+  var todayTasks = tasksForDate(today);
+  var wv = state.workVolume || emptyWorkVolume();
+  var wvCfgAll = state.workVolumeConfig || {};
+  var agg = aggregateDays([day]);
+
+  todayTasks.forEach(function(t){
+    var cfg = wvCfgAll[t.id];
+    if(cfg && cfg.enabled){
+      var hasImport = wvActiveImports(wv).some(function(i){ return i.taskId===t.id; });
+      if(!hasImport){
+        items.push({
+          id: 'no_import_'+t.id, title: '「'+t.name+'」はCSV連携が有効ですが、本日の有効な取込がありません',
+          target: t.name, action: 'CSVを取り込むか、連携設定を確認してください'
+        });
+      }else{
+        var info = agg.perTask[t.id];
+        var ms = info ? info.ms : 0;
+        if(ms===0){
+          items.push({
+            id: 'zero_hours_'+t.id, title: '「'+t.name+'」はCSV取込済みですが、作業実績が0時間です',
+            target: t.name, action: '現場で作業が開始されているか確認してください'
+          });
+        }
+      }
+    }
+    if(isVcKindTask(t.id)){
+      var ledger = (state.vcCaseLedger && state.vcCaseLedger[t.id]) || {entries:[]};
+      if(vcCaseCurrentValue(ledger.entries)===0){
+        items.push({
+          id: 'no_case_'+t.id, title: '「'+t.name+'」はVC作業ですが、ケース数が未入力です',
+          target: t.name, action: '現場でケース数を入力してください'
+        });
+      }
+    }
+  });
+
+  var attempts = (state.vcImportAttemptsToday && state.vcImportAttemptsToday.attempts) || [];
+  attempts.filter(function(a){ return a.status==='pending' || a.status==='failed'; }).forEach(function(a){
+    items.push({
+      id: 'attempt_'+a.id,
+      title: '「'+taskById(a.taskId).name+'」の取込(「'+a.fileName+'」)が'+(a.status==='failed'?'失敗しました':'確認未完了のままです'),
+      target: taskById(a.taskId).name, action: '取込をやり直すか、内容を確認してください'
+    });
+  });
+
+  (wv.imports||[]).filter(function(i){ return i.deletedAt; }).forEach(function(imp){
+    items.push({
+      id: 'deleted_import_'+imp.id,
+      title: '「'+taskById(imp.taskId).name+'」に削除済みの取込データがあります(「'+imp.fileName+'」)',
+      target: taskById(imp.taskId).name, action: '誤って削除していないか確認してください(削除済みタブから復元できます)'
+    });
+  });
+
+  var ack = (state.dailyChecklistAck && state.dailyChecklistAck.ack) || {};
+  return items.filter(function(item){ return !ack[item.id]; });
+}
+function renderDailyChecklist(){
+  var items = computeDailyChecklist();
+  if(!items.length) return '';
+  var rows = items.map(function(item){
+    var forceEndBtn = item.canForceEnd ? '<button type="button" class="vc-manage-toggle-btn" data-checklist-force-end="'+item.logId+'|'+item.staffId+'|'+item.taskId+'">管理者が作業を終了する</button>' : '';
+    return '<div class="checklist-item">'+
+      '<div class="checklist-item-title">'+esc(item.title)+'</div>'+
+      '<div class="checklist-item-action">'+esc(item.action)+'</div>'+
+      '<div class="checklist-item-actions">'+forceEndBtn+
+        '<button type="button" class="vc-manage-toggle-btn" data-checklist-ack="'+item.id+'">確認済みにする</button>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+  return '<div class="panel checklist-panel" style="margin-bottom:16px;">'+
+    '<div class="panel-title">⚠️ 本日の確認事項 <span class="count-badge">'+items.length+'件</span></div>'+
+    rows+
+  '</div>';
+}
 function renderManager(){
   var viewDate = managerActiveDate();
   var day = managerActiveDay();
@@ -2728,6 +2965,7 @@ function renderManager(){
       '<div class="task-col-head">'+
         '<span class="task-color-dot" style="background:'+t.color+'"></span>'+
         '<span class="task-col-name">'+esc(t.name)+'</span>'+
+        csvLinkBadge(t.id)+
         '<button class="task-col-edit" data-edit-task-col="'+t.id+'" title="編集">✎</button>'+
         '<button class="task-col-del" data-del-task="'+t.id+'" title="'+esc(t.name)+'を削除" aria-label="'+esc(t.name)+'を削除">&times;</button>'+
       '</div>'+
@@ -2785,6 +3023,7 @@ function renderManager(){
 
   return ''+
   '<div class="mgr-wrap">'+
+    (isToday ? renderDailyChecklist() : '')+
     dateNav+
     unassignedBanner+
     brokenBanner+
@@ -2829,11 +3068,12 @@ function renderSettingsPanels(){
     '</div>'+
   '</div>';
 
-  var viewDate = todayStr();
+  var wvTargetDate = state.wvTargetDate || todayStr();
   var workVolumePanel = '';
   if(!state.workVolume) state.workVolume = emptyWorkVolume();
   if(!state.workVolumeConfig) state.workVolumeConfig = {};
-  var wvDateTasks = tasksForDate(viewDate);
+  var wvViewData = state.wvViewData || (wvTargetDate===todayStr() ? state.workVolume : emptyWorkVolume());
+  var wvDateTasks = tasksForDate(wvTargetDate);
   if(state.wvImportTaskId===null){
     state.wvImportTaskId = wvDateTasks[0] ? wvDateTasks[0].id : '';
   }
@@ -2841,19 +3081,19 @@ function renderSettingsPanels(){
   var wvTask = taskById(wvTaskId);
   var wvTaskOptions = wvDateTasks.map(function(t){
     return '<option value="'+t.id+'" '+(wvTaskId===t.id ? 'selected':'')+'>'+esc(t.name)+'</option>';
-  }).join('') || '<option value="">本日の作業がありません</option>';
+  }).join('') || '<option value="">この日付の作業がありません</option>';
   var wvCfg = state.workVolumeConfig[wvTaskId] || { enabled:false, taskKind:'normal', criteria:'none', nameTemplate:'{作業名} / {引当ロケーション} / {送り状区分}', evenSplitMaxSlips:15, columnMap:{pickLocation:'',invoiceType:''} };
   var wvPrimaryLabel = wvCfg.taskKind==='vc' ? 'PO数' : '件数';
-  var wvTotals = wvTotalsForTask(state.workVolume, wvTaskId);
+  var wvTotals = wvTotalsForTask(wvViewData, wvTaskId);
 
   var wvStatusHtml = '';
   if(wvTotals.importCount){
-    wvStatusHtml = '<div class="vc-import-status">「'+esc(wvTask.name)+'」の本日の作業量(取込'+wvTotals.importCount+'回の合計): '+wvPrimaryLabel+' '+formatNum(wvTotals.primaryCount)+' / 明細 '+formatNum(wvTotals.lineCount)+' / ピース '+formatNum(wvTotals.totalQty)+'</div>';
+    wvStatusHtml = '<div class="vc-import-status">「'+esc(wvTask.name)+'」の'+esc(dateLabelFromStr(wvTargetDate))+'の作業量(取込'+wvTotals.importCount+'回の合計): '+wvPrimaryLabel+' '+formatNum(wvTotals.primaryCount)+' / 明細 '+formatNum(wvTotals.lineCount)+' / ピース '+formatNum(wvTotals.totalQty)+'</div>';
   }
 
-  var wvImportRows = wvActiveImports(state.workVolume).filter(function(i){ return i.taskId===wvTaskId; }).map(function(imp){
+  var wvImportRows = wvActiveImports(wvViewData).filter(function(i){ return i.taskId===wvTaskId; }).map(function(imp){
     var lbl = imp.taskKind==='vc' ? 'PO数' : '件数';
-    var batchCount = wvActiveBatches(state.workVolume).filter(function(b){ return b.importId===imp.id; }).length;
+    var batchCount = wvActiveBatches(wvViewData).filter(function(b){ return b.importId===imp.id; }).length;
     return '<tr>'+
       '<td>'+fmtClock(imp.importedAt)+'</td>'+
       '<td>'+esc(imp.fileName)+'</td>'+
@@ -2861,10 +3101,10 @@ function renderSettingsPanels(){
       '<td class="num">明細'+formatNum(imp.lineCount)+'</td>'+
       '<td class="num">ピース'+formatNum(imp.totalQty)+'</td>'+
       '<td class="num">'+batchCount+'バッチ</td>'+
-      '<td class="num"><button type="button" class="log-stop-btn" data-wv-import-delete="'+imp.id+'">削除</button></td>'+
+      '<td class="num"><button type="button" class="vc-manage-toggle-btn" data-wv-import-move="'+imp.id+'">日付変更</button> <button type="button" class="log-stop-btn" data-wv-import-delete="'+imp.id+'">削除</button></td>'+
     '</tr>';
   }).join('') || '<tr><td colspan="7" style="color:var(--slate-500);">この作業の取込履歴はまだありません</td></tr>';
-  var wvDeletedImports = (state.workVolume.imports||[]).filter(function(i){ return i.deletedAt && i.taskId===wvTaskId; });
+  var wvDeletedImports = (wvViewData.imports||[]).filter(function(i){ return i.deletedAt && i.taskId===wvTaskId; });
   var wvDeletedHtml = wvDeletedImports.map(function(imp){
     return '<div class="vc-slip-row">'+esc(imp.fileName)+'(削除: '+fmtClock(imp.deletedAt)+') <button type="button" class="vc-manage-toggle-btn" data-wv-import-restore="'+imp.id+'">復元</button></div>';
   }).join('') || '<div class="empty-note">削除済みの取込はありません</div>';
@@ -2904,7 +3144,10 @@ function renderSettingsPanels(){
     '<select id="wvTaskSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:10px;">'+wvTaskOptions+'</select>'+
     wvStatusHtml+
     wvConfigHtml+
-    '<div style="margin-top:12px;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="wvCsvInput" accept=".csv" style="display:block;margin-bottom:6px;"></div>'+
+    '<div style="margin-top:12px;display:flex;gap:10px;">'+
+      '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">対象日付</label><input type="date" id="wvTargetDate" value="'+(state.wvTargetDate||todayStr())+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
+      '<div style="flex:2;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="wvCsvInput" accept=".csv" style="display:block;"></div>'+
+    '</div>'+
     (state.wvImporting ? '<div class="empty-note">取り込み中...</div>' : '')+
     wvHistoryHtml+
   '</div>';
@@ -2932,7 +3175,15 @@ function renderSettingsPanels(){
     '<button type="button" class="add-btn" id="changePinBtn">PINを変更する</button>'+
   '</div>';
 
-  return shiftPanel + workVolumePanel + breakPanel + achievementPanel + pinChangeHtml;
+  var backupPanel = '<div class="panel" style="margin-top:14px;">'+
+    '<div class="panel-title">💾 データ保全(バックアップ出力)</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">指定した日付の作業実績・CSV取込履歴と作業量・VCケース数履歴を出力します。復元機能ではなく、確認・保管用のバックアップです。JSON(復旧用)とCSV3種(確認用)がまとめてダウンロードされます。</div>'+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">対象日付</label>'+
+    '<input type="date" id="backupDateInput" value="'+todayStr()+'" style="border:1px solid var(--paper-line);border-radius:8px;padding:8px;margin-bottom:10px;">'+
+    '<button type="button" class="add-btn" id="backupDownloadBtn">この日のバックアップをダウンロード</button>'+
+  '</div>';
+
+  return shiftPanel + workVolumePanel + breakPanel + achievementPanel + pinChangeHtml + backupPanel;
 }
 function renderSettings(){
   return '<div class="mgr-wrap"><div class="panel-title" style="font-size:20px;margin-bottom:4px;">⚙️ 設定</div>'+
@@ -2963,6 +3214,35 @@ function renderTaskForm(){
   '</div>';
 }
 function bindManager(){
+  document.querySelectorAll('[data-checklist-ack]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var itemId = el.getAttribute('data-checklist-ack');
+      if(!state.dailyChecklistAck) state.dailyChecklistAck = { ack: {} };
+      state.dailyChecklistAck.ack[itemId] = { at: new Date().toISOString(), by: state.activeStaffId || '管理者' };
+      await saveChecklistAck(todayStr(), state.dailyChecklistAck);
+      await appendAuditLog({ action:'締めチェック確認済み', target: itemId, before:null, after:'確認済み' });
+      render();
+    });
+  });
+  document.querySelectorAll('[data-checklist-force-end]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var parts = el.getAttribute('data-checklist-force-end').split('|');
+      var logId = parts[0], staffId = parts[1], taskId = parts[2];
+      var sName = staffById(staffId).name, tName = taskById(taskId).name;
+      if(!confirm(sName+'さんの「'+tName+'」を、今の時刻で終了しますか?(件数は入力されません)')) return;
+      var day = state.day;
+      var log = (day.logs||[]).find(function(l){ return l.id===logId; });
+      if(log){
+        finalizeActiveSubTimer(log);
+        log.end = new Date().toISOString();
+        log.quantity = null;
+        await saveDay(day);
+        await appendAuditLog({ action:'管理者による作業終了', target: sName+' / '+tName, before:'作業中', after:'終了('+fmtClock(log.end)+')' });
+        showToast(sName+'さんの「'+tName+'」を終了しました');
+        render();
+      }
+    });
+  });
   var retryBtn = document.getElementById('retryManagerDateBtn');
   if(retryBtn){
     retryBtn.addEventListener('click', function(){
@@ -3299,6 +3579,24 @@ function bindSettings(){
       render();
     });
   }
+  var backupDownloadBtn = document.getElementById('backupDownloadBtn');
+  if(backupDownloadBtn){
+    backupDownloadBtn.addEventListener('click', async function(){
+      var dateInput = document.getElementById('backupDateInput');
+      var dateStr = (dateInput && dateInput.value) || todayStr();
+      backupDownloadBtn.disabled = true;
+      backupDownloadBtn.textContent = '出力中...';
+      try{
+        await downloadBackupForDate(dateStr);
+        await appendAuditLog({ action:'バックアップ出力', target: dateStr, before:null, after:'JSON+CSV3種を出力' });
+        showToast(dateStr+'のバックアップをダウンロードしました');
+      }catch(e){
+        showToast('バックアップの出力に失敗しました');
+      }
+      backupDownloadBtn.disabled = false;
+      backupDownloadBtn.textContent = 'この日のバックアップをダウンロード';
+    });
+  }
   var wvConfigDetails = document.getElementById('wvConfigDetails');
   if(wvConfigDetails){
     wvConfigDetails.addEventListener('toggle', function(){
@@ -3340,30 +3638,76 @@ function bindSettings(){
       render();
     });
   }
+  var wvTargetDateInput = document.getElementById('wvTargetDate');
+  if(wvTargetDateInput){
+    wvTargetDateInput.addEventListener('change', async function(){
+      var newDate = wvTargetDateInput.value || todayStr();
+      state.wvTargetDate = newDate;
+      state.wvViewData = await getWorkVolumeForDate(newDate);
+      render();
+    });
+  }
   var wvCsvInput = document.getElementById('wvCsvInput');
   if(wvCsvInput){
-    wvCsvInput.addEventListener('change', function(){
+    wvCsvInput.addEventListener('change', async function(){
       var file = wvCsvInput.files[0];
       if(!file) return;
       var taskId = state.wvImportTaskId || (document.getElementById('wvTaskSelect') ? document.getElementById('wvTaskSelect').value : '');
-      if(!taskId){ showToast('対象作業を選択してください'); return; }
+      if(!taskId){ showToast('対象作業を選択してください'); wvCsvInput.value=''; return; }
+      var targetDate = state.wvTargetDate || todayStr();
       if(!state.workVolumeConfig) state.workVolumeConfig = {};
       var cfg = state.workVolumeConfig[taskId] || { enabled:false, taskKind:'normal', criteria:'none', nameTemplate:'', evenSplitMaxSlips:15, columnMap:{} };
       state.wvImporting = true;
       render();
-      parseCsvForWorkVolume(file, cfg.columnMap, function(result){
+
+      var fingerprint, fileSize = file.size, fileName = file.name;
+      try{
+        fingerprint = await computeFileFingerprint(file);
+      }catch(e){
+        state.wvImporting = false;
+        showToast('ファイルの読み取りに失敗しました');
+        wvCsvInput.value = '';
+        render();
+        return;
+      }
+      var fpIndex = await loadCsvFingerprintIndex();
+      var dup = findDuplicateFingerprint(fpIndex, fingerprint, fileSize, fileName);
+      if(dup){
+        state.wvImporting = false;
+        wvCsvInput.value = '';
+        alert('このファイル(「'+fileName+'」)は '+dup.date+' に既に取り込み済みです。同じファイルの二重取込はできません。\n\n誤って取り込んだ場合は、その取込履歴を削除してから、正しいファイルを取り込み直してください。');
+        render();
+        return;
+      }
+
+      var targetData = await getWorkVolumeForDate(targetDate);
+      var attemptId = uid();
+      var attemptsData = await loadVcImportAttempts(targetDate);
+      attemptsData.attempts.push({ id: attemptId, taskId: taskId, startedAt: new Date().toISOString(), status:'pending', fileName: fileName });
+      await saveVcImportAttempts(targetDate, attemptsData);
+      if(targetDate===todayStr()) state.vcImportAttemptsToday = attemptsData;
+
+      parseCsvForWorkVolume(file, cfg.columnMap, async function(result){
         var importId = uid();
         var newBatches = (cfg.enabled && cfg.criteria!=='none') ? generateWorkVolumeBatches(result.shipperGroups, cfg, taskId, taskById(taskId).name, importId) : [];
+        var shipperNos = result.shipperGroups.map(function(g){ return g.shipperNo; });
+        var prevImport = findPreviousImportForTaskDate(targetData, taskId, importId);
+        var anomaly = computeAnomalyWarning({primaryCount:result.primaryCount, lineCount:result.lineCount, totalQty:result.totalQty}, prevImport);
+        var overlap = findShipperNoOverlap(shipperNos, targetData, taskId, importId);
         state.vcPreview = {
-          taskId: taskId, importId: importId, fileName: file.name, cfg: cfg,
+          taskId: taskId, importId: importId, fileName: fileName, cfg: cfg, targetDate: targetDate,
+          attemptId: attemptId,
           primaryCount: result.primaryCount, lineCount: result.lineCount, totalQty: result.totalQty,
-          batches: newBatches
+          batches: newBatches, shipperNos: shipperNos,
+          fingerprint: fingerprint, fileSize: fileSize,
+          missingColumns: result.missingColumns||[], anomaly: anomaly, overlap: overlap
         };
         state.wvImporting = false;
         wvCsvInput.value = '';
         state.modal = { kind:'vcPreview' };
         render();
-      }, function(errMsg){
+      }, async function(errMsg){
+        await markImportAttemptStatus(targetDate, attemptId, 'failed');
         state.wvImporting = false;
         showToast(errMsg);
         render();
@@ -3373,11 +3717,13 @@ function bindSettings(){
   document.querySelectorAll('[data-wv-import-delete]').forEach(function(el){
     el.addEventListener('click', async function(){
       var importId = el.getAttribute('data-wv-import-delete');
-      var imp = state.workVolume.imports.find(function(i){ return i.id===importId; });
+      var viewDate = state.wvTargetDate || todayStr();
+      var data = state.wvViewData || (viewDate===todayStr() ? state.workVolume : null);
+      var imp = data && data.imports.find(function(i){ return i.id===importId; });
       if(!imp) return;
       if(!confirm('この取込(「'+imp.fileName+'」)を削除しますか?(論理削除。あとで復元できます)')) return;
       var reason = prompt('削除理由を入力してください(任意)', '') || '';
-      await deleteWvImport(todayStr(), importId, reason);
+      await deleteWvImport(viewDate, importId, reason);
       await appendAuditLog({ action:'作業量取込削除', target: taskById(imp.taskId).name+' / '+imp.fileName, before:'有効', after:'削除(理由: '+reason+')' });
       showToast('取込を削除しました');
       render();
@@ -3386,11 +3732,26 @@ function bindSettings(){
   document.querySelectorAll('[data-wv-import-restore]').forEach(function(el){
     el.addEventListener('click', async function(){
       var importId = el.getAttribute('data-wv-import-restore');
-      var imp = state.workVolume.imports.find(function(i){ return i.id===importId; });
+      var viewDate = state.wvTargetDate || todayStr();
+      var data = state.wvViewData || (viewDate===todayStr() ? state.workVolume : null);
+      var imp = data && data.imports.find(function(i){ return i.id===importId; });
       if(!imp) return;
-      await restoreWvImport(todayStr(), importId);
+      await restoreWvImport(viewDate, importId);
       await appendAuditLog({ action:'作業量取込復元', target: taskById(imp.taskId).name+' / '+imp.fileName, before:'削除', after:'復元' });
       showToast('取込を復元しました');
+      render();
+    });
+  });
+  document.querySelectorAll('[data-wv-import-move]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var importId = el.getAttribute('data-wv-import-move');
+      var viewDate = state.wvTargetDate || todayStr();
+      var newDate = prompt('移動先の日付を入力してください(例: 2026-09-10)', viewDate);
+      if(!newDate) return;
+      var result = await moveWvImportDate(viewDate, newDate, importId);
+      if(!result.ok){ showToast(result.msg); return; }
+      await appendAuditLog({ action:'作業量取込の日付変更', target: taskById(result.imp.taskId).name+' / '+result.imp.fileName, before: viewDate, after: newDate });
+      showToast('取込の対象日付を'+newDate+'に変更しました');
       render();
     });
   });
@@ -3890,6 +4251,45 @@ function csvEscape(v){
   var s = String(v==null?'':v);
   if(/[",\n]/.test(s)) s = '"'+s.replace(/"/g,'""')+'"';
   return s;
+}
+function downloadJSON(filename, obj){
+  var json = JSON.stringify(obj, null, 2);
+  var blob = new Blob([json], {type:'application/json;charset=utf-8;'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ if(a.parentNode) a.parentNode.removeChild(a); URL.revokeObjectURL(url); }, 200);
+}
+async function downloadBackupForDate(dateStr){
+  var day = await loadDayByDate(dateStr);
+  var wv = await getWorkVolumeForDate(dateStr);
+  var caseLedger = await loadVcCaseLedger(dateStr);
+  var bundle = { date: dateStr, exportedAt: new Date().toISOString(), day: day, workVolume: wv, vcCaseLedger: caseLedger };
+  downloadJSON(dateStr+'_backup.json', bundle);
+
+  var logRows = [['スタッフ','作業','内訳(終了時点)','開始時刻','終了時刻','件数']];
+  (day.logs||[]).forEach(function(l){
+    logRows.push([staffById(l.staffId).name, taskById(l.taskId).name, l.activeSubcat||'', l.start, l.end||'(作業中)', l.quantity!=null?l.quantity:'']);
+  });
+  downloadCSV(dateStr+'_作業時間実績.csv', logRows);
+
+  var wvRows = [['取込日時','ファイル名','作業','件数またはPO数','明細数','ピース数','状態']];
+  (wv.imports||[]).forEach(function(imp){
+    wvRows.push([imp.importedAt, imp.fileName, taskById(imp.taskId).name, imp.primaryCount, imp.lineCount, imp.totalQty, imp.deletedAt?'削除済み':'有効']);
+  });
+  downloadCSV(dateStr+'_CSV取込履歴と作業量.csv', wvRows);
+
+  var caseRows = [['作業','日時','加算数','担当者','状態','取消理由']];
+  Object.keys(caseLedger).forEach(function(taskId){
+    (caseLedger[taskId].entries||[]).forEach(function(e){
+      var actorName = staffById(e.actor) ? staffById(e.actor).name : '';
+      caseRows.push([taskById(taskId).name, e.at, e.delta, actorName, e.reversedAt?'取消済み':'有効', e.reverseReason||'']);
+    });
+  });
+  downloadCSV(dateStr+'_VCケース数履歴.csv', caseRows);
 }
 function downloadCSV(filename, rows){
   var csv = '\uFEFF'+rows.map(function(r){ return r.map(csvEscape).join(','); }).join('\r\n');
@@ -4641,7 +5041,7 @@ function renderInput(){
         liveCountersHtml += renderVcCaseCountWidget(tid);
       }
       return '<div class="task-tile '+(isActive?'active-task':'')+'" data-tap-task="'+tid+'" style="border-left:6px solid '+t.color+'">'+
-        '<div><div class="task-tile-name">'+esc(t.name)+'</div><div class="task-tile-unit">単位: '+esc(t.unit)+'</div></div>'+
+        '<div><div class="task-tile-name">'+esc(t.name)+' '+csvLinkBadge(tid)+'</div><div class="task-tile-unit">単位: '+esc(t.unit)+'</div></div>'+
         '<div>'+
           '<div class="task-tile-status"><span class="status-dot '+(isActive?'working':'idle')+'"></span>'+(isActive?'作業中':'タップして開始')+'</div>'+
           (isActive && !(t.subcategories && t.subcategories.length) ? '<div class="task-tile-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsed)+'</div>' : '')+
@@ -4874,6 +5274,12 @@ async function toggleSubTimer(taskId, subcatName){
   }
   await saveDay(state.day);
   render();
+}
+function csvLinkBadge(taskId){
+  if(isCsvLinkedTask(taskId)){
+    return '<span class="csv-link-badge csv-link-badge-on" title="数量はCSVから自動取得。現場での数量入力は不要です">📋 CSV連携</span>';
+  }
+  return '<span class="csv-link-badge csv-link-badge-off" title="現場で数量入力が必要です">✍️ 通常入力</span>';
 }
 function isCsvLinkedTask(taskId){
   return !!(state.workVolumeConfig && state.workVolumeConfig[taskId] && state.workVolumeConfig[taskId].enabled);
@@ -5673,6 +6079,22 @@ function renderVcPreviewModal(m){
   if(!vp) return '';
   var taskName = taskById(vp.taskId).name;
   var primaryLabel = vp.cfg.taskKind==='vc' ? 'PO数' : '件数';
+  var warningsHtml = '';
+  if(vp.missingColumns && vp.missingColumns.length){
+    warningsHtml += '<div class="vc-warning-box">⚠️ 必須列が見つかりません: '+vp.missingColumns.map(esc).join('、')+'。列名の設定をご確認ください。</div>';
+  }
+  if(vp.anomaly){
+    var a = vp.anomaly;
+    var labelMap = { primaryCount: primaryLabel, lineCount:'明細数', totalQty:'ピース数' };
+    var lines = a.flagged.map(function(k){
+      var sign = a.diffs[k]>=0 ? '+' : '';
+      return labelMap[k]+'が前回取込('+esc(a.prevImport.fileName)+')から'+sign+a.diffs[k].toFixed(0)+'%';
+    }).join('、');
+    warningsHtml += '<div class="vc-warning-box">⚠️ 前回取込との差が大きいです: '+lines+'。'+(a.isSmallSample?'(前回の件数が少ないため参考値です)':'')+'</div>';
+  }
+  if(vp.overlap && vp.overlap.length){
+    warningsHtml += '<div class="vc-warning-box">⚠️ 前回までの取込と重複する可能性がある荷主出荷NOが'+vp.overlap.length+'件あります('+vp.overlap.slice(0,5).map(esc).join('、')+(vp.overlap.length>5?' 他':'')+')。二重計上でないかご確認ください。</div>';
+  }
   var body;
   if(vp.cfg.enabled && vp.batches.length){
     var rows = vp.batches.map(function(b){
@@ -5691,7 +6113,9 @@ function renderVcPreviewModal(m){
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" style="max-width:520px;text-align:left;">'+
       '<div class="modal-task-name" style="text-align:center;margin-bottom:6px;">プレビュー: '+esc(taskName)+' の取込結果</div>'+
+      '<div class="pool-hint" style="text-align:center;margin-bottom:6px;">対象日付: '+esc(dateLabelFromStr(vp.targetDate))+'</div>'+
       '<div class="pool-hint" style="text-align:center;margin-bottom:14px;">'+vp.primaryCount+primaryLabel+' / '+vp.lineCount+'明細 / 合計'+formatNum(vp.totalQty)+'ピース</div>'+
+      warningsHtml+
       body+
       '<div class="modal-actions" style="margin-top:14px;">'+
         '<button class="modal-cancel" id="vcPreviewCancelBtn">キャンセル</button>'+
@@ -5702,7 +6126,9 @@ function renderVcPreviewModal(m){
 }
 function bindVcPreviewModal(m){
   var cancelBtn = document.getElementById('vcPreviewCancelBtn');
-  if(cancelBtn) cancelBtn.addEventListener('click', function(){
+  if(cancelBtn) cancelBtn.addEventListener('click', async function(){
+    var vp = state.vcPreview;
+    if(vp && vp.attemptId) await markImportAttemptStatus(vp.targetDate, vp.attemptId, 'cancelled');
     state.vcPreview = null;
     state.modal = null;
     render();
@@ -5730,18 +6156,25 @@ function bindVcPreviewModal(m){
       var vp = state.vcPreview;
       var finalBatches = vp.batches.filter(function(b){ return !b._excluded; });
       finalBatches.forEach(function(b){ delete b._excluded; });
-      if(!state.workVolume) state.workVolume = emptyWorkVolume();
-      state.workVolume.imports.push({
+      var targetData = await getWorkVolumeForDate(vp.targetDate);
+      targetData.imports.push({
         id: vp.importId, importedAt: new Date().toISOString(), fileName: vp.fileName, taskId: vp.taskId,
         taskKind: vp.cfg.taskKind||'normal',
         primaryCount: vp.primaryCount, lineCount: vp.lineCount, totalQty: vp.totalQty,
+        fileFingerprint: vp.fingerprint, fileSize: vp.fileSize, shipperNos: vp.shipperNos,
         deletedAt: null, deletedBy: null, deleteReason: null
       });
-      state.workVolume.batches = state.workVolume.batches.concat(finalBatches);
-      await saveWorkVolume(todayStr(), state.workVolume);
+      targetData.batches = targetData.batches.concat(finalBatches);
+      var saveOk = await saveWorkVolume(vp.targetDate, targetData);
+      if(vp.targetDate===todayStr()) state.workVolume = targetData;
+      if(state.wvTargetDate===vp.targetDate) state.wvViewData = targetData;
+      await markImportAttemptStatus(vp.targetDate, vp.attemptId, saveOk ? 'done' : 'failed');
+      if(saveOk) await registerFileFingerprint(vp.fingerprint, vp.fileSize, vp.fileName, vp.targetDate, vp.taskId, vp.importId);
       var primaryLabel = (vp.cfg.taskKind==='vc') ? 'PO数' : '件数';
-      await appendAuditLog({ action:'CSV作業量取込確定', target: taskById(vp.taskId).name+' / '+vp.fileName, before:null, after: vp.primaryCount+primaryLabel+'、'+finalBatches.length+'件のバッチ' });
-      var msg = '取込を確定しました('+vp.primaryCount+primaryLabel+' / '+vp.lineCount+'明細 / '+formatNum(vp.totalQty)+'ピース)'+(finalBatches.length?'。'+finalBatches.length+'件のバッチを作成しました':'');
+      await appendAuditLog({ action:'CSV作業量取込確定', target: taskById(vp.taskId).name+' / '+vp.fileName, before:null, after: vp.primaryCount+primaryLabel+'、'+finalBatches.length+'件のバッチ('+vp.targetDate+')' });
+      var msg = saveOk
+        ? '取込を確定しました('+vp.primaryCount+primaryLabel+' / '+vp.lineCount+'明細 / '+formatNum(vp.totalQty)+'ピース)'+(finalBatches.length?'。'+finalBatches.length+'件のバッチを作成しました':'')
+        : '保存に失敗した可能性があります。本日の確認事項をご確認ください。';
       state.vcPreview = null;
       state.modal = null;
       showToast(msg);
@@ -6135,6 +6568,10 @@ async function pollTick(){
     if(freshWvConfig) state.workVolumeConfig = freshWvConfig;
     var freshCaseLedger = await loadVcCaseLedger(todayStr());
     if(freshCaseLedger) state.vcCaseLedger = freshCaseLedger;
+    var freshAck = await loadChecklistAck(todayStr());
+    if(freshAck) state.dailyChecklistAck = freshAck;
+    var freshAttempts = await loadVcImportAttempts(todayStr());
+    if(freshAttempts) state.vcImportAttemptsToday = freshAttempts;
     notifyChanges(oldRoster, oldBacklog, oldDay, state.roster, state.backlog, state.day);
     await checkAutoBreak();
     await checkAutoShift();
@@ -6210,6 +6647,8 @@ async function init(){
   if(!state.workVolume) state.workVolume = emptyWorkVolume();
   state.workVolumeConfig = await loadWorkVolumeConfig();
   state.vcCaseLedger = await loadVcCaseLedger(todayStr());
+  state.dailyChecklistAck = await loadChecklistAck(todayStr());
+  state.vcImportAttemptsToday = await loadVcImportAttempts(todayStr());
   await checkAutoBreak();
   await checkAutoShift();
   render();

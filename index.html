@@ -855,6 +855,11 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-06', items:[
+    '重要な不具合修正: 「作業量設定」で連携を有効にし忘れていても、実際にその日CSVを取り込んでいれば自動的にCSV連携作業として扱うように変更。これまでは設定の有効/無効だけを見ていたため、CSVを取り込んだのに現場で数量入力画面が出てしまう(設定漏れによる事故)ことがありました。今後は「設定が有効」または「その日の有効な取込データが1件以上ある」のどちらかを満たせば自動的にCSV連携として判定します(削除済みの取込のみの場合は対象外)',
+    '管理者の作業ボードのCSV連携バッジも、閲覧中の日付の実際の取込状況と一致するように修正(過去日付を表示中でもズレません)',
+    '実際にコードを実行するテストで、「設定は無効のままCSVだけ取り込んだ作業」を開始→切替した際に数量入力が出ないこと、削除済みの取込しかない作業は通常入力として扱われることを確認済みです'
+  ]},
   { date:'2026-09-05', items:[
     '【日次締めチェック・CSV取込安全性】管理者画面に「⚠️ 本日の確認事項」を追加。作業中のまま終了していないスタッフ、CSV連携なのに取込がない作業、取込済みなのに実績0時間、VC作業なのにケース数未入力、取込の失敗/確認未完了、削除済み取込データ、をまとめて表示。各項目に「確認済みにする」「管理者が作業を終了する」を用意し、操作履歴に記録します',
     'CSV取込のプレビューに安全チェックを追加。同一ファイル(内容・サイズ・ファイル名が一致)の二重取込は完全にブロックします(上書き・強制取込はできません。やり直す場合は取込履歴を削除してから正しいファイルを取り込んでください)。前回の同一作業・同一日付の取込と比べて件数/明細/ピースが±50%以上変化している場合、必須列が見つからない場合、前回までの取込と重複する荷主出荷NOがある場合は警告表示します(警告のみで、確認のうえ確定は可能です)',
@@ -1219,6 +1224,7 @@ var state = {
   reportError: null,
   managerDate: null,
   managerDay: null,
+  managerWorkVolume: null,
   managerDateLoadError: false,
   modal: null,
   suppressRender: false,
@@ -2052,6 +2058,9 @@ function managerActiveDate(){
 function managerActiveDay(){
   return managerActiveDate()===todayStr() ? state.day : state.managerDay;
 }
+function managerActiveWorkVolume(){
+  return managerActiveDate()===todayStr() ? state.workVolume : state.managerWorkVolume;
+}
 async function loadDayByDateWithRetry(dateStr, retries){
   for(var i=0;i<=retries;i++){
     try{
@@ -2067,6 +2076,7 @@ async function switchManagerDate(dateStr){
   state.managerDateLoadError = false;
   if(dateStr===todayStr()){
     state.managerDay = null;
+    state.managerWorkVolume = null;
     render();
     return;
   }
@@ -2081,6 +2091,7 @@ async function switchManagerDate(dateStr){
   }
   if(!day) day = freshDay(dateStr);
   state.managerDay = day;
+  state.managerWorkVolume = await loadWorkVolume(dateStr) || emptyWorkVolume();
   render();
   await ensureTemplateTasksForDate(dateStr);
   var refreshed = await loadDayByDate(dateStr);
@@ -2965,7 +2976,7 @@ function renderManager(){
       '<div class="task-col-head">'+
         '<span class="task-color-dot" style="background:'+t.color+'"></span>'+
         '<span class="task-col-name">'+esc(t.name)+'</span>'+
-        csvLinkBadge(t.id)+
+        csvLinkBadge(t.id, managerActiveWorkVolume())+
         '<button class="task-col-edit" data-edit-task-col="'+t.id+'" title="編集">✎</button>'+
         '<button class="task-col-del" data-del-task="'+t.id+'" title="'+esc(t.name)+'を削除" aria-label="'+esc(t.name)+'を削除">&times;</button>'+
       '</div>'+
@@ -5275,18 +5286,25 @@ async function toggleSubTimer(taskId, subcatName){
   await saveDay(state.day);
   render();
 }
-function csvLinkBadge(taskId){
-  if(isCsvLinkedTask(taskId)){
+function csvLinkBadge(taskId, wvDataOverride){
+  if(isCsvLinkedTask(taskId, wvDataOverride)){
     return '<span class="csv-link-badge csv-link-badge-on" title="数量はCSVから自動取得。現場での数量入力は不要です">📋 CSV連携</span>';
   }
   return '<span class="csv-link-badge csv-link-badge-off" title="現場で数量入力が必要です">✍️ 通常入力</span>';
 }
-function isCsvLinkedTask(taskId){
-  return !!(state.workVolumeConfig && state.workVolumeConfig[taskId] && state.workVolumeConfig[taskId].enabled);
-}
-function isVcKindTask(taskId){
+function isCsvLinkedTask(taskId, wvDataOverride){
   var cfg = state.workVolumeConfig && state.workVolumeConfig[taskId];
-  return !!(cfg && cfg.enabled && cfg.taskKind==='vc');
+  if(cfg && cfg.enabled) return true;
+  var wv = wvDataOverride || state.workVolume;
+  if(wv && wvActiveImports(wv).some(function(i){ return i.taskId===taskId; })) return true;
+  return false;
+}
+function isVcKindTask(taskId, wvDataOverride){
+  var cfg = state.workVolumeConfig && state.workVolumeConfig[taskId];
+  if(cfg && cfg.enabled) return cfg.taskKind==='vc';
+  var wv = wvDataOverride || state.workVolume;
+  var imp = wv && wvActiveImports(wv).find(function(i){ return i.taskId===taskId; });
+  return !!(imp && imp.taskKind==='vc');
 }
 function renderVcCaseCountWidget(taskId){
   var ledger = (state.vcCaseLedger && state.vcCaseLedger[taskId]) || { entries: [] };

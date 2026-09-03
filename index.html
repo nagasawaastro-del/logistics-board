@@ -651,6 +651,27 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .qty-manual{width:100%;border:2px solid var(--paper-line);border-radius:12px;padding:14px;font-size:17px;text-align:center;margin-bottom:20px;outline:none;font-family:var(--font-mono);}
 .qty-manual:focus{border-color:var(--amber-500);}
 .modal-actions{display:flex;gap:12px;}
+.pick-subcat-list{display:flex;flex-direction:column;gap:10px;margin:16px 0;}
+.pick-subcat-btn{
+  background:var(--amber-500);color:#1B2333;border:none;border-radius:14px;padding:18px;
+  font-size:17px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;
+}
+.pick-subcat-btn:hover{background:#E0982F;}
+.pick-subcat-btn:active{transform:scale(.98);}
+.pick-subcat-unit{font-size:12px;font-weight:400;opacity:.75;}
+.vc-case-widget{margin-top:12px;padding:14px;background:#FFF9EE;border:1px solid var(--amber-500);border-radius:12px;}
+.vc-case-widget-title{font-size:11px;font-weight:700;color:var(--rust-600);margin-bottom:8px;}
+.vc-case-current{font-family:var(--font-mono);font-size:32px;font-weight:700;color:var(--ink-900);margin-bottom:10px;}
+.vc-case-current-unit{font-size:14px;font-weight:400;color:var(--slate-500);margin-left:6px;}
+.vc-case-btn-row{display:flex;gap:8px;margin-bottom:10px;}
+.vc-case-btn{flex:1;background:var(--amber-500);color:#1B2333;border:none;border-radius:12px;padding:16px 0;font-size:18px;font-weight:700;}
+.vc-case-btn:hover{background:#E0982F;}
+.vc-case-btn:active{transform:scale(.97);}
+.vc-case-manual-row{display:flex;gap:8px;margin-bottom:10px;}
+.vc-case-manual-row input{flex:1;border:1px solid var(--paper-line);border-radius:10px;padding:10px;font-size:15px;font-family:var(--font-mono);}
+.vc-case-manual-btn{background:#fff;border:1px solid var(--paper-line);border-radius:10px;padding:10px 16px;font-size:13px;font-weight:600;}
+.vc-case-history-details summary{font-size:12px;color:var(--slate-500);cursor:pointer;}
+.vc-case-history-row{display:flex;align-items:center;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px solid var(--paper-line);}
 .modal-actions button{flex:1;padding:18px;border-radius:14px;border:none;font-weight:700;font-size:16px;min-height:56px;-webkit-user-select:none;user-select:none;}
 .modal-cancel{background:var(--paper-200);color:var(--slate-500);}
 .modal-cancel:active{transform:scale(.97);}
@@ -823,6 +844,14 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-04', items:[
+    '【CSV作業量・内訳生産性対応 段階3】現場入力の手間を削減する変更を実装',
+    '内訳が2つ以上ある作業を開始する際、先頭の内訳を自動開始するのをやめ、「ピッキング」「梱包」などの大きな選択ボタンから最初の内訳を1回選ぶ方式に変更。梱包だけの途中参加者が、ピッキングを経由せず直接梱包を開始できます',
+    'CSV作業量が紐づいた作業(個配・VCなど)では、次の作業への切替時・終業時に件数・明細数・ピースの入力モーダルを一切表示しないように変更。内訳の時間だけを確定します。作業中の件数+1/-1ボタンも同様に非表示になります',
+    'VC専用のケース数入力UIを追加。+1/+5/+10ボタンと数値入力欄で、日付×VC作業枠全体で共有する値として加算できます。誰が・いつ加算したかの履歴を保持し、個別に取消可能。スタッフ個人や内訳の実績数量には一切保存されません',
+    '内訳(ピッキング・梱包)ごとの人時を、スタッフ×作業枠×内訳で集計できるように。集計(単日)画面に「内訳別 人時・生産性」を追加し、CSV作業量と組み合わせて「明細/時」「ピース/時」「件数(PO)/時」を表示します',
+    '既存の時間計測(次作業開始時の自動終了・内訳切替)ロジックは変更していません。実際にコードを実行するテストで、パッキングのみでの開始・CSV連携作業での数量入力スキップ・ケース数の加算取消・内訳別人時の集計、すべてを確認済みです'
+  ]},
   { date:'2026-09-03', items:[
     '内訳(ピッキング・梱包など)の設定は、以前からすべての作業に対して汎用的に使える仕組みでした(個配・VCに限りません)。作業登録・作業追加・編集のどの画面でも設定できます',
     '内訳の入力欄に「+ ピッキング」「+ 梱包」「+ 検品」「+ 仕分け」「+ 補充」のよく使う候補ボタンを追加し、毎回手入力しなくてもワンタップで内訳を追加できるように'
@@ -1158,6 +1187,7 @@ var state = {
   reportStart: null,
   reportEnd: null,
   reportSingleDay: undefined,
+  reportWorkVolume: null,
   reportRangeResult: null,
   reportRpgResult: null,
   reportRpgLoading: false,
@@ -2242,11 +2272,11 @@ function aggregateDays(days){
       perStaff[l.staffId].ms += dur;
       perStaff[l.staffId].qty += qty;
       if(l.taskId==='BREAK') perStaff[l.staffId].breakMs += dur;
-      if(!perStaff[l.staffId].byTask[l.taskId]) perStaff[l.staffId].byTask[l.taskId] = { ms:0, qty:0, breakdown:{} };
+      if(!perStaff[l.staffId].byTask[l.taskId]) perStaff[l.staffId].byTask[l.taskId] = { ms:0, qty:0, breakdown:{}, subMs:{} };
       perStaff[l.staffId].byTask[l.taskId].ms += dur;
       perStaff[l.staffId].byTask[l.taskId].qty += qty;
 
-      if(!perTask[l.taskId]) perTask[l.taskId] = { ms:0, qty:0, staff:{}, breakdown:{} };
+      if(!perTask[l.taskId]) perTask[l.taskId] = { ms:0, qty:0, staff:{}, breakdown:{}, subMs:{} };
       perTask[l.taskId].ms += dur;
       perTask[l.taskId].qty += qty;
       perTask[l.taskId].staff[l.staffId] = true;
@@ -2255,6 +2285,20 @@ function aggregateDays(days){
           perTask[l.taskId].breakdown[k] = (perTask[l.taskId].breakdown[k]||0) + (l.breakdown[k]||0);
           perStaff[l.staffId].byTask[l.taskId].breakdown[k] = (perStaff[l.staffId].byTask[l.taskId].breakdown[k]||0) + (l.breakdown[k]||0);
         });
+      }
+      // 内訳ごとの人時(確定分)
+      if(l.subTimes){
+        Object.keys(l.subTimes).forEach(function(scName){
+          var ms = l.subTimes[scName]||0;
+          perTask[l.taskId].subMs[scName] = (perTask[l.taskId].subMs[scName]||0) + ms;
+          perStaff[l.staffId].byTask[l.taskId].subMs[scName] = (perStaff[l.staffId].byTask[l.taskId].subMs[scName]||0) + ms;
+        });
+      }
+      // 現在計測中の内訳の経過分も加算(未確定分)
+      if(l.activeSubcat && l.activeSubcatStart){
+        var liveMs = Math.max(0, Date.now() - new Date(l.activeSubcatStart).getTime());
+        perTask[l.taskId].subMs[l.activeSubcat] = (perTask[l.taskId].subMs[l.activeSubcat]||0) + liveMs;
+        perStaff[l.staffId].byTask[l.taskId].subMs[l.activeSubcat] = (perStaff[l.staffId].byTask[l.taskId].subMs[l.activeSubcat]||0) + liveMs;
       }
     });
   });
@@ -3780,6 +3824,45 @@ function renderReport(){
     '<div class="panel">'+body+'</div>'+
   '</div></div>';
 }
+function taskSubMsRows(info, task){
+  var subMs = info.subMs || {};
+  var keys = Object.keys(subMs).filter(function(k){ return subMs[k]>0; });
+  if(!keys.length) return '';
+  var rows = keys.map(function(k){
+    return '<div class="breakdown-detail-row"><span class="breakdown-detail-name">'+esc(k)+'人時</span><span class="breakdown-detail-qty">'+fmtHM(subMs[k])+'</span></div>';
+  }).join('');
+  return '<div class="breakdown-detail-list">'+rows+'</div>';
+}
+function renderSubcatProductivity(agg, workVolume){
+  var taskIds = Object.keys(agg.perTask).filter(function(tid){
+    var info = agg.perTask[tid];
+    return info.subMs && Object.keys(info.subMs).some(function(k){ return info.subMs[k]>0; });
+  });
+  if(!taskIds.length) return '';
+  var rows = [];
+  taskIds.forEach(function(tid){
+    var t = taskById(tid);
+    var info = agg.perTask[tid];
+    var wvTotals = workVolume ? wvTotalsForTask(workVolume, tid) : null;
+    var cfg = state.workVolumeConfig && state.workVolumeConfig[tid];
+    var primaryLabel = (cfg && cfg.taskKind==='vc') ? 'PO' : '件数';
+    Object.keys(info.subMs).filter(function(k){ return info.subMs[k]>0; }).forEach(function(scName){
+      var hours = info.subMs[scName]/3600000;
+      var ratioCells = '';
+      if(wvTotals && hours>0){
+        ratioCells = '<td class="num">'+(wvTotals.lineCount/hours).toFixed(1)+' 明細/時</td>'+
+          '<td class="num">'+(wvTotals.totalQty/hours).toFixed(1)+' ピース/時</td>'+
+          '<td class="num">'+(wvTotals.primaryCount/hours).toFixed(1)+' '+primaryLabel+'/時</td>';
+      }else{
+        ratioCells = '<td class="num" colspan="3" style="color:var(--slate-500);">CSV作業量が未取込のため計算できません</td>';
+      }
+      rows.push('<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td>'+esc(scName)+'</td><td class="num">'+fmtHM(info.subMs[scName])+'</td>'+ratioCells+'</tr>');
+    });
+  });
+  return '<div class="report-section-title">内訳別 人時・生産性</div>'+
+    '<div class="report-range-note">内訳(ピッキング・梱包など)ごとの人時と、CSVで取り込んだ作業量(明細・ピース・件数/PO)を組み合わせた生産性です。同じ作業量を各内訳の工程が処理したものとして計算しています。</div>'+
+    '<table class="report-table"><thead><tr><th>作業</th><th>内訳</th><th>人時</th><th colspan="3">1時間あたり</th></tr></thead><tbody>'+rows.join('')+'</tbody></table>';
+}
 function renderProductivityRanking(agg){
   var staffIds = Object.keys(agg.perStaff).filter(function(sid){
     var info = agg.perStaff[sid];
@@ -4356,7 +4439,7 @@ function renderReportSingleBody(){
     var bdRows = taskBreakdownRows(info, t);
     var unitGroups = hasSubcats ? unitGroupedTotals(info.breakdown, t) : [];
     var qtyCell = hasSubcats ? formatUnitGroupedTotals(unitGroups, true) : (info.qty+esc(t.unit));
-    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+qtyCell+bdRows+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
+    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+qtyCell+bdRows+taskSubMsRows(info, t)+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
   return '<div class="panel-title">'+esc(dateLabelFromStr(state.reportDate))+' の集計 <button class="csv-export-btn" id="csvExportSingle">CSVダウンロード</button></div>'+
@@ -4364,6 +4447,7 @@ function renderReportSingleBody(){
     '<table class="report-table"><thead><tr><th>名前</th><th>合計時間</th><th>作業内訳</th></tr></thead><tbody>'+staffRows+'</tbody></table>'+
     '<div class="report-section-title">作業別</div>'+
     '<table class="report-table"><thead><tr><th>作業</th><th>合計時間</th><th>合計件数</th><th>稼働人数</th></tr></thead><tbody>'+taskRows+'</tbody></table>'+
+    renderSubcatProductivity(agg, state.reportWorkVolume)+
     renderProductivityRanking(agg);
 }
 function renderReportRangeBody(){
@@ -4410,6 +4494,7 @@ async function runSingleReport(dateStr){
   render();
   var day = await loadDayByDate(dateStr);
   state.reportSingleDay = day;
+  state.reportWorkVolume = await loadWorkVolume(dateStr);
   state.reportLoading = false;
   render();
 }
@@ -4525,6 +4610,7 @@ function renderInput(){
         }).join('')+
       '</div>' : '';
       var liveCountersHtml = '';
+      var csvLinked = isCsvLinkedTask(tid);
       if(isActive && t.subcategories && t.subcategories.length){
         var subcatObjs = t.subcategories.map(function(sc){ return { name: subcatName(sc), unit: subcatUnit(sc, t.unit) }; });
         var liveRows = subcatObjs.map(function(sc){
@@ -4533,20 +4619,26 @@ function renderInput(){
           var subActive = log.activeSubcat === sc.name;
           var timerAttrs = subActive ? ' data-live-subtimer-start="'+log.activeSubcatStart+'" data-live-subtimer-base="'+subAccum+'"' : '';
           var timerText = subActive ? fmtElapsed(subAccum + (Date.now()-new Date(log.activeSubcatStart).getTime())) : fmtElapsed(subAccum);
+          var countControlsHtml = csvLinked ? '' :
+            '<div class="qty-break-controls">'+
+              '<button type="button" class="qty-btn qty-btn-sm" data-live-count="'+esc(tid)+'|'+esc(sc.name)+'|-1">-1</button>'+
+              '<div class="qty-break-value" data-live-count-val="'+esc(tid)+'|'+esc(sc.name)+'">'+v+'</div>'+
+              '<button type="button" class="qty-btn qty-btn-sm" data-live-count="'+esc(tid)+'|'+esc(sc.name)+'|1">+1</button>'+
+            '</div>';
           return '<div class="qty-break-row live-count-row">'+
             '<div class="qty-break-label">'+esc(sc.name)+' <span style="font-weight:400;color:var(--slate-500);">('+esc(sc.unit)+')</span></div>'+
             '<div class="sub-timer-row">'+
               '<button type="button" class="sub-timer-btn '+(subActive?'active':'')+'" data-sub-timer="'+esc(tid)+'|'+esc(sc.name)+'">'+(subActive?'■ 計測終了':'▶ 計測開始')+'</button>'+
               '<span class="sub-timer-display'+(subActive?' active':'')+'"'+timerAttrs+'>'+timerText+'</span>'+
             '</div>'+
-            '<div class="qty-break-controls">'+
-              '<button type="button" class="qty-btn qty-btn-sm" data-live-count="'+esc(tid)+'|'+esc(sc.name)+'|-1">-1</button>'+
-              '<div class="qty-break-value" data-live-count-val="'+esc(tid)+'|'+esc(sc.name)+'">'+v+'</div>'+
-              '<button type="button" class="qty-btn qty-btn-sm" data-live-count="'+esc(tid)+'|'+esc(sc.name)+'|1">+1</button>'+
-            '</div>'+
+            countControlsHtml+
           '</div>';
         }).join('');
-        liveCountersHtml = '<div class="task-tile-live-counters"><div class="task-tile-live-title">内訳ごとに件数・時間を記録(切り替える内訳の▶を押してください)</div>'+liveRows+'</div>';
+        var liveTitle = csvLinked ? '内訳ごとに時間を記録(切り替える内訳の▶を押してください)' : '内訳ごとに件数・時間を記録(切り替える内訳の▶を押してください)';
+        liveCountersHtml = '<div class="task-tile-live-counters"><div class="task-tile-live-title">'+liveTitle+'</div>'+liveRows+'</div>';
+      }
+      if(isActive && isVcKindTask(tid)){
+        liveCountersHtml += renderVcCaseCountWidget(tid);
       }
       return '<div class="task-tile '+(isActive?'active-task':'')+'" data-tap-task="'+tid+'" style="border-left:6px solid '+t.color+'">'+
         '<div><div class="task-tile-name">'+esc(t.name)+'</div><div class="task-tile-unit">単位: '+esc(t.unit)+'</div></div>'+
@@ -4692,6 +4784,40 @@ function bindInput(){
       toggleSubTimer(tid, scName);
     });
   });
+  document.querySelectorAll('[data-vc-case-add]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      var curLog = currentLog(state.activeStaffId);
+      var tid = curLog ? curLog.taskId : null;
+      if(!tid) return;
+      var delta = parseInt(el.getAttribute('data-vc-case-add'),10);
+      addVcCaseEntry(todayStr(), tid, delta, '').then(render);
+    });
+  });
+  document.querySelectorAll('[data-vc-case-manual]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      var tid = el.getAttribute('data-vc-case-manual');
+      var input = document.getElementById('vcCaseManualInput_'+tid);
+      if(!input) return;
+      var val = parseInt(input.value,10);
+      if(isNaN(val) || val===0) return;
+      addVcCaseEntry(todayStr(), tid, val, '手動入力').then(function(){
+        render();
+      });
+    });
+  });
+  document.querySelectorAll('[data-vc-case-reverse]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      var entryId = el.getAttribute('data-vc-case-reverse');
+      var curLog = currentLog(state.activeStaffId);
+      var tid = curLog ? curLog.taskId : null;
+      if(!tid) return;
+      var reason = prompt('取消理由を入力してください(任意)', '') || '';
+      reverseVcCaseEntry(todayStr(), tid, entryId, reason).then(render);
+    });
+  });
   var endDayBtn = document.getElementById('endDayBtn');
   if(endDayBtn) endDayBtn.addEventListener('click', function(){
     var log = currentLog(state.activeStaffId);
@@ -4717,7 +4843,7 @@ async function endBreakAndStart(taskId){
     log.quantity = null;
   }
   await saveDay(state.day);
-  await startTask(taskId);
+  startTaskWithSubcatCheck(taskId);
 }
 async function liveCountAdjust(taskId, subcatName, delta){
   var log = currentLog(state.activeStaffId);
@@ -4749,10 +4875,44 @@ async function toggleSubTimer(taskId, subcatName){
   await saveDay(state.day);
   render();
 }
+function isCsvLinkedTask(taskId){
+  return !!(state.workVolumeConfig && state.workVolumeConfig[taskId] && state.workVolumeConfig[taskId].enabled);
+}
+function isVcKindTask(taskId){
+  var cfg = state.workVolumeConfig && state.workVolumeConfig[taskId];
+  return !!(cfg && cfg.enabled && cfg.taskKind==='vc');
+}
+function renderVcCaseCountWidget(taskId){
+  var ledger = (state.vcCaseLedger && state.vcCaseLedger[taskId]) || { entries: [] };
+  var current = vcCaseCurrentValue(ledger.entries);
+  var recentEntries = (ledger.entries||[]).filter(function(e){ return !e.reversedAt; }).slice(-5).reverse();
+  var historyRows = recentEntries.map(function(e){
+    var actorName = staffById(e.actor) ? staffById(e.actor).name : '不明';
+    return '<div class="vc-case-history-row"><span>'+(e.delta>=0?'+':'')+e.delta+'('+esc(actorName)+' '+fmtClock(e.at)+')</span><button type="button" class="vc-manage-toggle-btn" data-vc-case-reverse="'+e.id+'">取消</button></div>';
+  }).join('') || '<div class="empty-note">まだ記録がありません</div>';
+  return '<div class="vc-case-widget">'+
+    '<div class="vc-case-widget-title">📦 ケース数(VC全体で共有・個人には保存されません)</div>'+
+    '<div class="vc-case-current">'+formatNum(current)+'<span class="vc-case-current-unit">ケース</span></div>'+
+    '<div class="vc-case-btn-row">'+
+      '<button type="button" class="vc-case-btn" data-vc-case-add="1">+1</button>'+
+      '<button type="button" class="vc-case-btn" data-vc-case-add="5">+5</button>'+
+      '<button type="button" class="vc-case-btn" data-vc-case-add="10">+10</button>'+
+    '</div>'+
+    '<div class="vc-case-manual-row">'+
+      '<input type="number" id="vcCaseManualInput_'+esc(taskId)+'" placeholder="任意の数(マイナスも可)">'+
+      '<button type="button" class="vc-case-manual-btn" data-vc-case-manual="'+esc(taskId)+'">追加</button>'+
+    '</div>'+
+    '<details class="vc-case-history-details"><summary>最近の記録・取消</summary>'+historyRows+'</details>'+
+  '</div>';
+}
 function openQuantityModal(nextTaskId, isEndDay){
   var log = currentLog(state.activeStaffId);
   state.suppressRender = true;
   if(log){
+    if(isCsvLinkedTask(log.taskId)){
+      finishCsvLinkedLog(log, nextTaskId, isEndDay);
+      return;
+    }
     var t = taskById(log.taskId);
     if(t.subcategories && t.subcategories.length){
       var subcatObjs = t.subcategories.map(function(sc){ return { name: subcatName(sc), unit: subcatUnit(sc, t.unit) }; });
@@ -4763,17 +4923,46 @@ function openQuantityModal(nextTaskId, isEndDay){
       state.modal = {kind:'qty', closingTaskId: log.taskId, closingTaskName: t.name, closingUnit: t.unit, value:0, nextTaskId: nextTaskId, isEndDay: isEndDay};
     }
   }else{
-    startTask(nextTaskId);
+    state.suppressRender = false;
+    startTaskWithSubcatCheck(nextTaskId);
     return;
   }
   render();
 }
-async function startTask(taskId){
+async function finishCsvLinkedLog(log, nextTaskId, isEndDay){
+  finalizeActiveSubTimer(log);
+  log.end = new Date().toISOString();
+  log.quantity = null;
+  delete log.breakdown;
+  await saveDay(state.day);
+  state.suppressRender = false;
+  if(isEndDay){
+    state.day.summaryFor = state.activeStaffId;
+    render();
+  }else if(nextTaskId){
+    startTaskWithSubcatCheck(nextTaskId);
+  }else{
+    render();
+  }
+}
+function startTaskWithSubcatCheck(taskId){
+  var task = taskById(taskId);
+  if(task.subcategories && task.subcategories.length>1){
+    state.modal = {
+      kind:'pickSubcat', taskId: taskId, taskName: task.name,
+      subcategories: task.subcategories.map(function(sc){ return { name: subcatName(sc), unit: subcatUnit(sc, task.unit) }; })
+    };
+    render();
+    return;
+  }
+  var firstSubcat = (task.subcategories && task.subcategories.length===1) ? subcatName(task.subcategories[0]) : null;
+  startTask(taskId, firstSubcat);
+}
+async function startTask(taskId, chosenSubcat){
   var entry = {id:uid(), staffId:state.activeStaffId, taskId:taskId, start:new Date().toISOString(), end:null, quantity:null};
   var task = taskById(taskId);
   if(task.subcategories && task.subcategories.length){
-    var firstName = subcatName(task.subcategories[0]);
-    entry.activeSubcat = firstName;
+    entry.activeSubcat = chosenSubcat || subcatName(task.subcategories[0]);
     entry.activeSubcatStart = entry.start;
     entry.subTimes = {};
   }
@@ -4877,7 +5066,8 @@ async function closeLogAndProceed(qty, breakdown){
     await saveDay(state.day);
     render();
   }else if(m.nextTaskId){
-    await startTask(m.nextTaskId);
+    state.suppressRender = false;
+    startTaskWithSubcatCheck(m.nextTaskId);
   }else{
     state.suppressRender = false;
     render();
@@ -5280,6 +5470,7 @@ function renderModal(){
   if(m.kind==='qtyBreakdown') return renderQtyBreakdownModal(m);
   if(m.kind==='addLog') return renderAddLogModal(m);
   if(m.kind==='vcPreview') return renderVcPreviewModal(m);
+  if(m.kind==='pickSubcat') return renderPickSubcatModal(m);
   if(m.kind!=='qty') return '';
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card">'+
@@ -5446,6 +5637,37 @@ function bindAddLogModal(m){
 function criteriaLabel(c){
   return { none:'バッチ化しない', location:'引当ロケーションごと', invoice:'送り状区分ごと', location_invoice:'引当ロケーション×送り状区分', even_split:'件数で均等分割' }[c] || c;
 }
+function renderPickSubcatModal(m){
+  var buttons = m.subcategories.map(function(sc){
+    return '<button type="button" class="pick-subcat-btn" data-pick-subcat="'+esc(sc.name)+'">'+esc(sc.name)+'<span class="pick-subcat-unit">('+esc(sc.unit)+')</span></button>';
+  }).join('');
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card" style="max-width:380px;">'+
+      '<div class="modal-task-name">'+esc(m.taskName)+'を開始</div>'+
+      '<div class="modal-q">最初に行う内訳を選んでください</div>'+
+      '<div class="pick-subcat-list">'+buttons+'</div>'+
+      '<div class="modal-actions" style="margin-top:14px;">'+
+        '<button class="modal-cancel" id="pickSubcatCancelBtn">キャンセル</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+function bindPickSubcatModal(m){
+  document.querySelectorAll('[data-pick-subcat]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var chosen = el.getAttribute('data-pick-subcat');
+      var taskId = m.taskId;
+      state.modal = null;
+      startTask(taskId, chosen);
+    });
+  });
+  var cancelBtn = document.getElementById('pickSubcatCancelBtn');
+  if(cancelBtn) cancelBtn.addEventListener('click', function(){
+    state.modal = null;
+    state.suppressRender = false;
+    render();
+  });
+}
 function renderVcPreviewModal(m){
   var vp = state.vcPreview;
   if(!vp) return '';
@@ -5597,6 +5819,7 @@ function bindModal(){
   if(m.kind==='qtyBreakdown'){ bindQtyBreakdownModal(m); return; }
   if(m.kind==='addLog'){ bindAddLogModal(m); return; }
   if(m.kind==='vcPreview'){ bindVcPreviewModal(m); return; }
+  if(m.kind==='pickSubcat'){ bindPickSubcatModal(m); return; }
   document.querySelectorAll('[data-qty-delta]').forEach(function(el){
     el.addEventListener('click', function(){
       var d = parseInt(el.getAttribute('data-qty-delta'),10);

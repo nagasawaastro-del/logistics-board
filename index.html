@@ -367,6 +367,9 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .subcat-chip button:hover{color:var(--rust-600);}
 .subcat-chip-unit{color:var(--slate-500);font-weight:400;}
 .subcat-add-row{display:flex;gap:6px;}
+.subcat-preset-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;}
+.subcat-preset-btn{background:var(--paper-100);border:1px dashed var(--paper-line);border-radius:14px;padding:4px 10px;font-size:11px;font-weight:600;color:var(--slate-500);}
+.subcat-preset-btn:hover{border-color:var(--amber-500);color:var(--amber-600);border-style:solid;}
 .subcat-add-row input{
   border:1px solid var(--paper-line);border-radius:8px;padding:8px 10px;font-size:13px;outline:none;
 }
@@ -821,6 +824,10 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-09-03', items:[
+    '内訳(ピッキング・梱包など)の設定は、以前からすべての作業に対して汎用的に使える仕組みでした(個配・VCに限りません)。作業登録・作業追加・編集のどの画面でも設定できます',
+    '内訳の入力欄に「+ ピッキング」「+ 梱包」「+ 検品」「+ 仕分け」「+ 補充」のよく使う候補ボタンを追加し、毎回手入力しなくてもワンタップで内訳を追加できるように'
+  ]},
+  { date:'2026-09-03', items:[
     '【CSV作業量・内訳生産性対応 段階2】CSV作業量の保存機能を実装。件数(VCはPO数)・明細数・ピース数を、日付・作業枠・取込履歴に紐づけて保存し、複数回取り込んでも過去の取込を上書きしません',
     'バッチはCSV作業量を分類する集計単位に変更。担当者の割り当てや個別の開始/完了/保留は行わず、人員配置・時間計測は常に作業枠(個配・VCなど)単位のまま維持しています',
     'CSV取込は内容を確認してから確定するプレビュー画面付き。取込履歴は「⚙️ 設定」から確認・削除・復元できます',
@@ -1267,8 +1274,14 @@ function renderSubcatTagInput(list, context, textId, defaultUnit){
   var draft = (draftRef && draftRef.get()) || {};
   var nameVal = draft.name || '';
   var unitVal = draft.unit!==undefined && draft.unit!==null && draft.unit!=='' ? draft.unit : (defaultUnit||'件');
+  var existingNames = (list||[]).map(function(sc){ return subcatName(sc); });
+  var presets = ['ピッキング','梱包','検品','仕分け','補充'].filter(function(p){ return existingNames.indexOf(p)===-1; });
+  var presetHtml = presets.length ? '<div class="subcat-preset-row">'+
+    presets.map(function(p){ return '<button type="button" class="subcat-preset-btn" data-subcat-preset="'+context+'|'+textId+'|'+p+'">+ '+p+'</button>'; }).join('')+
+  '</div>' : '';
   return '<div class="subcat-tag-wrap">'+
     '<div class="subcat-chips">'+chips+'</div>'+
+    presetHtml+
     '<div class="subcat-add-row">'+
       '<input type="text" id="'+textId+'" class="subcat-name-input" placeholder="内訳名(例: ピッキング)" value="'+esc(nameVal)+'">'+
       '<input type="text" id="'+textId+'-unit" class="subcat-unit-input" placeholder="単位" value="'+esc(unitVal)+'">'+
@@ -1305,6 +1318,21 @@ function bindCategoryToggle(){
 }
 function bindSubcatTagControls(){
   var inModal = !!state.modal;
+  document.querySelectorAll('[data-subcat-preset]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var parts = el.getAttribute('data-subcat-preset').split('|');
+      var ctx = parts[0], textId = parts[1], presetName = parts[2];
+      var ref = subcatListRef(ctx);
+      if(!ref) return;
+      var list = (ref.get()||[]).slice();
+      if(!list.some(function(sc){ return subcatName(sc)===presetName; })){
+        list.push({name:presetName, unit:'件'});
+      }
+      ref.set(list);
+      if(!inModal) state.suppressRender = false;
+      render();
+    });
+  });
   document.querySelectorAll('[data-subcat-add]').forEach(function(el){
     el.addEventListener('click', function(){
       var parts = el.getAttribute('data-subcat-add').split('|');

@@ -820,6 +820,14 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-03', items:[
+    '【CSV作業量・内訳生産性対応 段階2】CSV作業量の保存機能を実装。件数(VCはPO数)・明細数・ピース数を、日付・作業枠・取込履歴に紐づけて保存し、複数回取り込んでも過去の取込を上書きしません',
+    'バッチはCSV作業量を分類する集計単位に変更。担当者の割り当てや個別の開始/完了/保留は行わず、人員配置・時間計測は常に作業枠(個配・VCなど)単位のまま維持しています',
+    'CSV取込は内容を確認してから確定するプレビュー画面付き。取込履歴は「⚙️ 設定」から確認・削除・復元できます',
+    'VCのケース数台帳(加算・取消の履歴を残す仕組み)のデータ層を追加(入力画面は次の段階で実装します)',
+    '既存の時間計測(内訳の開始・切替・自動終了)は一切変更していません。動作確認用のテストで、CSV取込・バッチ生成・内訳時間計測がいずれも正しく動くことを確認済みです',
+    '※前バージョンに存在した、伝票を個別に選んで開始/完了/保留する機能は、今回の設計変更に伴い終了しました'
+  ]},
   { date:'2026-08-30', items:[
     '重要な不具合修正: 前回追加した「⚙️ 設定」画面で、PIN入力後に画面がフリーズし、ボタンが反応しなくなる不具合を修正。関数の定義位置が誤って別の関数の内側に入り込んでいたことが原因でした(実際に画面遷移を再現するテストで動作確認済み)'
   ]},
@@ -1103,16 +1111,14 @@ var state = {
   calendarData: null,
   calendarLoading: false,
   jpHolidays: { fetchedAt:0, data:{} },
-  vcData: null,
-  vcSelectedSlipIds: [],
-  vcImportTaskId: null,
-  vcManageOpen: false,
-  vcBatchConfigOpen: false,
-  vcAdminTab: 'import',
+  workVolume: null,
+  workVolumeConfig: null,
+  wvImportTaskId: null,
+  wvImporting: false,
+  wvConfigOpen: false,
+  wvHistoryOpen: false,
+  vcCaseLedger: null,
   vcPreview: null,
-  vcDeleteSelectedBatchIds: [],
-  vcDeleteSelectedSlipIds: [],
-  vcImporting: false,
   mgrSettingsOpen: false,
   day: null,
   activeStaffId: null,
@@ -1580,51 +1586,41 @@ async function loadJpHolidays(){
 function holidayName(dateStr){
   return (state.jpHolidays && state.jpHolidays.data && state.jpHolidays.data[dateStr]) || null;
 }
-async function loadVcData(dateStr){
+/* ---------- 作業量(CSV取込)・ケース数台帳 ---------- */
+async function loadWorkVolumeConfig(){
   try{
-    var r = await window.storage.get('vc-data:'+dateStr, true);
+    var r = await window.storage.get('work-volume-config', true);
+    return r && r.value ? JSON.parse(r.value) : {};
+  }catch(e){ return {}; }
+}
+async function saveWorkVolumeConfig(cfg){
+  try{ await window.storage.set('work-volume-config', JSON.stringify(cfg), true); }catch(e){}
+}
+async function loadWorkVolume(dateStr){
+  try{
+    var r = await window.storage.get('work-volume:'+dateStr, true);
     if(r && r.value) return JSON.parse(r.value);
-  }catch(e){}
-  try{
-    var legacy = await window.storage.get('vc-slips:'+dateStr, true);
-    if(legacy && legacy.value){
-      var old = JSON.parse(legacy.value);
-      if(old && old.slips && old.slips.length){
-        var importId = uid();
-        return {
-          batchConfig: {},
-          imports: [{ id: importId, importedAt: old.importedAt||new Date().toISOString(), fileName:'(旧データ)', taskId: old.taskId, rowCount:null, slipCount: old.slips.length, batchCount:0, deletedAt:null, deletedBy:null, deleteReason:null }],
-          slips: old.slips.map(function(s){
-            return Object.assign({}, s, { importId: importId, taskId: old.taskId, batchId:null, originalBatchId:null, pickLocation:null, invoiceType:null, deletedAt:null, deletedBy:null, deleteReason:null });
-          }),
-          batches: [],
-          activeSessions: old.activeSessions || []
-        };
-      }
-    }
   }catch(e){}
   return null;
 }
-async function saveVcData(dateStr, data){
+async function saveWorkVolume(dateStr, data){
   pendingSaves++;
-  try{ await window.storage.set('vc-data:'+dateStr, JSON.stringify(data), true); }catch(e){}
+  try{ await window.storage.set('work-volume:'+dateStr, JSON.stringify(data), true); }catch(e){}
   finally{ pendingSaves--; }
 }
-function emptyVcData(){
-  return { batchConfig:{}, imports:[], slips:[], batches:[], activeSessions:[] };
+function emptyWorkVolume(){ return { imports:[], batches:[] }; }
+function wvActiveImports(data){ return (data.imports||[]).filter(function(i){ return !i.deletedAt; }); }
+function wvActiveBatches(data){ return (data.batches||[]).filter(function(b){ return !b.deletedAt; }); }
+function wvTotalsForTask(data, taskId){
+  var imports = wvActiveImports(data).filter(function(i){ return i.taskId===taskId; });
+  return {
+    primaryCount: imports.reduce(function(a,i){ return a+(i.primaryCount||0); }, 0),
+    lineCount: imports.reduce(function(a,i){ return a+(i.lineCount||0); }, 0),
+    totalQty: imports.reduce(function(a,i){ return a+(i.totalQty||0); }, 0),
+    importCount: imports.length
+  };
 }
-function vcActiveSlips(data){ return (data.slips||[]).filter(function(s){ return !s.deletedAt; }); }
-function vcActiveBatches(data){ return (data.batches||[]).filter(function(b){ return !b.deletedAt; }); }
-function vcActiveImports(data){ return (data.imports||[]).filter(function(i){ return !i.deletedAt; }); }
-function slipsForBatch(data, batchId){ return vcActiveSlips(data).filter(function(s){ return s.batchId===batchId; }); }
-function recalcBatchAggregate(data, batch){
-  var slips = slipsForBatch(data, batch.id);
-  batch.lineCount = slips.reduce(function(a,s){ return a+(s.lineCount||0); }, 0);
-  batch.totalQty = slips.reduce(function(a,s){ return a+(s.totalQty||0); }, 0);
-  batch.slipCount = slips.length;
-  return batch;
-}
-function parseVcCsvFile(file, columnMap, callback, errCallback){
+function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
   var reader = new FileReader();
   reader.onload = function(e){
     var buffer = e.target.result;
@@ -1640,39 +1636,27 @@ function parseVcCsvFile(file, columnMap, callback, errCallback){
       var groups = {};
       var order = [];
       rows.forEach(function(r){
-        var slipNo = (r['出荷伝票NO']||'').trim();
-        if(!slipNo) return;
-        if(!groups[slipNo]){
-          groups[slipNo] = {
-            slipNo: slipNo,
-            shipperNo: (r['荷主出荷NO']||'').trim(),
-            destination: (r['出荷先名']||'').trim(),
-            client: (r['取引先名']||'').trim(),
+        var shipperNo = (r['荷主出荷NO']||'').trim();
+        if(!shipperNo) return;
+        if(!groups[shipperNo]){
+          groups[shipperNo] = {
+            shipperNo: shipperNo,
             pickLocation: locCol ? (r[locCol]||'').trim() : '',
             invoiceType: invCol ? (r[invCol]||'').trim() : '',
             lineCount:0, totalQty:0
           };
-          order.push(slipNo);
+          order.push(shipperNo);
         }
-        groups[slipNo].lineCount++;
+        groups[shipperNo].lineCount++;
         var qty = parseInt(r['出荷指示数'],10);
-        if(!isNaN(qty)) groups[slipNo].totalQty += qty;
+        if(!isNaN(qty)) groups[shipperNo].totalQty += qty;
       });
-      var slips = order.map(function(sn){
-        var g = groups[sn];
-        return {
-          id: uid(), slipNo: g.slipNo, shipperNo: g.shipperNo, destination: g.destination, client: g.client,
-          pickLocation: g.pickLocation, invoiceType: g.invoiceType,
-          lineCount: g.lineCount, totalQty: g.totalQty,
-          batchId: null, originalBatchId: null,
-          status: 'pending', pickingMs: 0, packingMs: 0,
-          activePhase: null, activePhaseStart: null, activeStaffId: null,
-          doneBy: null, doneAt: null,
-          deletedAt: null, deletedBy: null, deleteReason: null
-        };
-      });
-      if(!slips.length){ errCallback('伝票データが見つかりませんでした。CSVの形式(出荷伝票NO列など)をご確認ください。'); return; }
-      callback(slips, rows.length, headers);
+      var shipperGroups = order.map(function(sn){ return groups[sn]; });
+      if(!shipperGroups.length){ errCallback('データが見つかりませんでした。CSVの形式(荷主出荷NO列など)をご確認ください。'); return; }
+      var primaryCount = shipperGroups.length;
+      var lineCount = shipperGroups.reduce(function(a,g){ return a+g.lineCount; }, 0);
+      var totalQty = shipperGroups.reduce(function(a,g){ return a+g.totalQty; }, 0);
+      callback({ primaryCount: primaryCount, lineCount: lineCount, totalQty: totalQty, shipperGroups: shipperGroups, rowCount: rows.length, headers: headers });
     }catch(err){
       errCallback('CSVの読み込みに失敗しました: '+(err.message||err));
     }
@@ -1680,299 +1664,111 @@ function parseVcCsvFile(file, columnMap, callback, errCallback){
   reader.onerror = function(){ errCallback('ファイルの読み込みに失敗しました。'); };
   reader.readAsArrayBuffer(file);
 }
-function buildBatchName(template, criteria, taskName, seq){
+function buildWvBatchName(template, criteria, taskName, seq){
   return (template||'{作業名} バッチ{連番}')
     .replace(/\{引当ロケーション\}/g, criteria.pickLocation || '(未指定)')
     .replace(/\{送り状区分\}/g, criteria.invoiceType || '(未指定)')
     .replace(/\{作業名\}/g, taskName || '')
     .replace(/\{連番\}/g, String(seq));
 }
-function generateBatchesForImport(newSlips, config, taskId, taskName, importId){
+function generateWorkVolumeBatches(shipperGroups, config, taskId, taskName, importId){
   var mode = config.criteria || 'none';
   if(mode==='none') return [];
   var groups = {};
   var order = [];
   if(mode==='even_split'){
     var max = Math.max(1, config.evenSplitMaxSlips||15);
-    for(var i=0;i<newSlips.length;i+=max){
-      var chunk = newSlips.slice(i, i+max);
+    for(var i=0;i<shipperGroups.length;i+=max){
+      var chunk = shipperGroups.slice(i, i+max);
       var seq = Math.floor(i/max)+1;
       var key = 'chunk-'+seq;
-      groups[key] = { slips: chunk, criteria: {} };
+      groups[key] = { items: chunk, criteria: {} };
       order.push(key);
     }
   }else{
-    newSlips.forEach(function(s){
-      var loc = mode!=='invoice' ? (s.pickLocation||'') : '';
-      var inv = mode!=='location' ? (s.invoiceType||'') : '';
+    shipperGroups.forEach(function(g){
+      var loc = mode!=='invoice' ? (g.pickLocation||'') : '';
+      var inv = mode!=='location' ? (g.invoiceType||'') : '';
       var key = loc+'|||'+inv;
-      if(!groups[key]){ groups[key] = { slips:[], criteria:{ pickLocation: (mode!=='invoice'?loc:undefined), invoiceType: (mode!=='location'?inv:undefined) } }; order.push(key); }
-      groups[key].slips.push(s);
+      if(!groups[key]){ groups[key] = { items:[], criteria:{ pickLocation:(mode!=='invoice'?loc:undefined), invoiceType:(mode!=='location'?inv:undefined) } }; order.push(key); }
+      groups[key].items.push(g);
     });
   }
   var seqCounter = 0;
   return order.map(function(key){
     seqCounter++;
     var g = groups[key];
-    var batch = {
+    return {
       id: uid(), taskId: taskId, importId: importId,
-      name: buildBatchName(config.nameTemplate, g.criteria, taskName, seqCounter),
+      name: buildWvBatchName(config.nameTemplate, g.criteria, taskName, seqCounter),
       criteria: g.criteria,
-      status: 'pending', assignedStaffId: null, startAt: null, endAt: null,
-      actualQty: null, holdReason: null, linkedLogIds: [],
-      deletedAt: null, deletedBy: null, deleteReason: null,
-      createdAt: new Date().toISOString(),
-      lineCount:0, totalQty:0, slipCount:0
+      primaryCount: g.items.length,
+      lineCount: g.items.reduce(function(a,x){ return a+x.lineCount; }, 0),
+      totalQty: g.items.reduce(function(a,x){ return a+x.totalQty; }, 0),
+      deletedAt:null, deletedBy:null, deleteReason:null,
+      createdAt: new Date().toISOString()
     };
-    g.slips.forEach(function(s){ s.batchId = batch.id; });
-    return batch;
   });
 }
-
-/* ---------- まとめて削除・復元 ---------- */
-function vcCountsForSlipIds(data, slipIds){
-  var slips = data.slips.filter(function(s){ return slipIds.indexOf(s.id)!==-1 && !s.deletedAt; });
-  var batchIdsAffected = {};
-  slips.forEach(function(s){ if(s.batchId) batchIdsAffected[s.batchId] = true; });
-  var activeOrDoneBatches = Object.keys(batchIdsAffected).filter(function(bid){
-    var b = batchById(data, bid);
-    return b && (b.status==='active' || b.status==='done');
-  });
-  return {
-    slipCount: slips.length,
-    totalQty: slips.reduce(function(a,s){ return a+(s.totalQty||0); }, 0),
-    batchCount: Object.keys(batchIdsAffected).length,
-    activeOrDoneBatchCount: activeOrDoneBatches.length
-  };
-}
-async function deleteVcSlips(slipIds, reason){
-  var data = state.vcData;
-  var affectedBatchIds = {};
-  slipIds.forEach(function(sid){
-    var slip = data.slips.find(function(s){ return s.id===sid; });
-    if(!slip || slip.deletedAt) return;
-    slip.deletedAt = new Date().toISOString();
-    slip.deletedBy = state.activeStaffId;
-    slip.deleteReason = reason || '';
-    slip.originalBatchId = slip.batchId;
-    if(slip.batchId) affectedBatchIds[slip.batchId] = true;
-    slip.batchId = null;
-  });
-  Object.keys(affectedBatchIds).forEach(function(bid){
-    var b = batchById(data, bid);
-    if(!b) return;
-    recalcBatchAggregate(data, b);
-    if(b.slipCount===0 && !b.deletedAt){
-      b.deletedAt = new Date().toISOString();
-      b.deletedBy = state.activeStaffId;
-      b.deleteReason = '所属する伝票がすべて削除されたため自動的に削除されました';
+async function deleteWvImport(dateStr, importId, reason){
+  var data = state.workVolume;
+  var imp = data.imports.find(function(i){ return i.id===importId; });
+  if(!imp) return;
+  imp.deletedAt = new Date().toISOString();
+  imp.deletedBy = state.activeStaffId;
+  imp.deleteReason = reason || '';
+  data.batches.forEach(function(b){
+    if(b.importId===importId && !b.deletedAt){
+      b.deletedAt = imp.deletedAt; b.deletedBy = imp.deletedBy; b.deleteReason = '取込削除に伴う自動削除';
     }
   });
-  await saveVcData(todayStr(), data);
+  await saveWorkVolume(dateStr, data);
 }
-async function restoreVcSlips(slipIds){
-  var data = state.vcData;
-  slipIds.forEach(function(sid){
-    var slip = data.slips.find(function(s){ return s.id===sid; });
-    if(!slip || !slip.deletedAt) return;
-    slip.deletedAt = null;
-    slip.deletedBy = null;
-    slip.deleteReason = null;
-    var origBatch = slip.originalBatchId ? batchById(data, slip.originalBatchId) : null;
-    slip.batchId = (origBatch && !origBatch.deletedAt) ? origBatch.id : null;
-    slip.originalBatchId = null;
-  });
-  var touched = {};
-  slipIds.forEach(function(sid){
-    var slip = data.slips.find(function(s){ return s.id===sid; });
-    if(slip && slip.batchId) touched[slip.batchId] = true;
-  });
-  Object.keys(touched).forEach(function(bid){
-    var b = batchById(data, bid);
-    if(b) recalcBatchAggregate(data, b);
-  });
-  await saveVcData(todayStr(), data);
-}
-async function deleteVcBatches(batchIds, reason){
-  var data = state.vcData;
-  batchIds.forEach(function(bid){
-    var b = batchById(data, bid);
-    if(!b || b.deletedAt) return;
-    b.deletedAt = new Date().toISOString();
-    b.deletedBy = state.activeStaffId;
-    b.deleteReason = reason || '';
-    slipsForBatch(data, bid).forEach(function(s){ s.batchId = null; });
-  });
-  await saveVcData(todayStr(), data);
-}
-async function restoreVcBatches(batchIds){
-  var data = state.vcData;
-  batchIds.forEach(function(bid){
-    var b = batchById(data, bid);
-    if(!b || !b.deletedAt) return;
-    b.deletedAt = null;
-    b.deletedBy = null;
-    b.deleteReason = null;
-  });
-  await saveVcData(todayStr(), data);
-}
-async function deleteVcImport(importId, reason){
-  var data = state.vcData;
+async function restoreWvImport(dateStr, importId){
+  var data = state.workVolume;
   var imp = data.imports.find(function(i){ return i.id===importId; });
-  if(imp) { imp.deletedAt = new Date().toISOString(); imp.deletedBy = state.activeStaffId; imp.deleteReason = reason || ''; }
-  var slipIds = data.slips.filter(function(s){ return s.importId===importId && !s.deletedAt; }).map(function(s){ return s.id; });
-  await deleteVcSlips(slipIds, reason || '取込履歴ごと削除');
+  if(!imp) return;
+  imp.deletedAt = null; imp.deletedBy = null; imp.deleteReason = null;
+  data.batches.forEach(function(b){
+    if(b.importId===importId && b.deleteReason==='取込削除に伴う自動削除'){
+      b.deletedAt = null; b.deletedBy = null; b.deleteReason = null;
+    }
+  });
+  await saveWorkVolume(dateStr, data);
 }
 
-function myVcSession(){
-  if(!state.vcData || !state.vcData.activeSessions) return null;
-  return state.vcData.activeSessions.find(function(s){ return s.staffId===state.activeStaffId; }) || null;
+/* ---------- VCケース数台帳(日付×作業枠、加算/取消の履歴) ---------- */
+async function loadVcCaseLedger(dateStr){
+  try{
+    var r = await window.storage.get('vc-case-ledger:'+dateStr, true);
+    return r && r.value ? JSON.parse(r.value) : {};
+  }catch(e){ return {}; }
 }
-function whosOnSlip(slipId, excludeStaffId){
-  if(!state.vcData || !state.vcData.activeSessions) return [];
-  return state.vcData.activeSessions.filter(function(s){
-    return s.slipIds && s.slipIds.indexOf(slipId)!==-1 && s.staffId!==excludeStaffId;
-  }).map(function(s){ return { name: staffById(s.staffId).name, phase: s.phase }; });
+async function saveVcCaseLedger(dateStr, data){
+  pendingSaves++;
+  try{ await window.storage.set('vc-case-ledger:'+dateStr, JSON.stringify(data), true); }catch(e){}
+  finally{ pendingSaves--; }
 }
-async function startVcBatchSession(slipIds, phase){
-  if(!state.vcData || !slipIds.length) return;
-  await stopMyVcSession();
-  if(!state.vcData.activeSessions) state.vcData.activeSessions = [];
-  state.vcData.activeSessions.push({ staffId: state.activeStaffId, phase: phase, slipIds: slipIds.slice(), start: new Date().toISOString() });
-  state.vcSelectedSlipIds = [];
-  await saveVcData(todayStr(), state.vcData);
-  render();
+function vcCaseCurrentValue(entries){
+  return (entries||[]).filter(function(e){ return !e.reversedAt; }).reduce(function(a,e){ return a+(e.delta||0); }, 0);
 }
-async function stopMyVcSession(){
-  if(!state.vcData || !state.vcData.activeSessions) return;
-  var idx = state.vcData.activeSessions.findIndex(function(s){ return s.staffId===state.activeStaffId; });
-  if(idx===-1) return;
-  var session = state.vcData.activeSessions[idx];
-  var elapsed = Math.max(0, Date.now()-new Date(session.start).getTime());
-  var perSlip = session.slipIds.length ? elapsed/session.slipIds.length : 0;
-  session.slipIds.forEach(function(sid){
-    var slip = state.vcData.slips.find(function(s){ return s.id===sid; });
-    if(!slip) return;
-    var field = session.phase==='picking' ? 'pickingMs' : 'packingMs';
-    var contribField = session.phase==='picking' ? 'pickingContributors' : 'packingContributors';
-    slip[field] = (slip[field]||0) + perSlip;
-    if(!slip[contribField]) slip[contribField] = {};
-    slip[contribField][session.staffId] = (slip[contribField][session.staffId]||0) + perSlip;
-  });
-  state.vcData.activeSessions.splice(idx,1);
-  await saveVcData(todayStr(), state.vcData);
+async function addVcCaseEntry(dateStr, taskId, delta, note){
+  var data = state.vcCaseLedger || {};
+  if(!data[taskId]) data[taskId] = { entries: [] };
+  data[taskId].entries.push({ id: uid(), delta: delta, actor: state.activeStaffId, at: new Date().toISOString(), note: note||'', reversedAt: null, reversedBy: null });
+  state.vcCaseLedger = data;
+  await saveVcCaseLedger(dateStr, data);
+  await appendAuditLog({ action:'ケース数追加', target: taskById(taskId).name, before: null, after: (delta>=0?'+':'')+delta+'(理由: '+(note||'なし')+')' });
 }
-async function completeVcSlips(slipIds){
-  if(!state.vcData) return;
-  slipIds.forEach(function(sid){
-    var slip = state.vcData.slips.find(function(s){ return s.id===sid; });
-    if(!slip) return;
-    slip.status = 'done';
-    slip.doneBy = state.activeStaffId;
-    slip.doneAt = new Date().toISOString();
-  });
-  state.vcSelectedSlipIds = [];
-  await saveVcData(todayStr(), state.vcData);
-  render();
-}
-
-/* ---------- バッチのライフサイクル ---------- */
-function batchById(data, batchId){
-  return (data.batches||[]).find(function(b){ return b.id===batchId; }) || null;
-}
-async function startVcBatch(batchId){
-  var fresh = await loadVcData(todayStr());
-  if(!fresh){ showToast('データの取得に失敗しました。再読み込みしてください。'); return; }
-  var batch = batchById(fresh, batchId);
-  if(!batch || batch.deletedAt){ showToast('このバッチは見つかりません(削除された可能性があります)'); state.vcData = fresh; render(); return; }
-  if(batch.status !== 'pending'){
-    var who = batch.assignedStaffId ? (staffById(batch.assignedStaffId).name+'さんが') : '他の人が';
-    showToast(who+(batch.status==='done'?'すでに完了しています':batch.status==='hold'?'保留中です':'作業中です'));
-    state.vcData = fresh; render(); return;
-  }
-  var day = state.day;
-  var logEntry = { id: uid(), staffId: state.activeStaffId, taskId: batch.taskId, start: new Date().toISOString(), end: null, quantity: null, batchId: batch.id };
-  day.logs.push(logEntry);
-  batch.status = 'active';
-  batch.assignedStaffId = state.activeStaffId;
-  batch.startAt = logEntry.start;
-  if(!batch.linkedLogIds) batch.linkedLogIds = [];
-  batch.linkedLogIds.push(logEntry.id);
-  fresh.batches = fresh.batches.map(function(b){ return b.id===batch.id ? batch : b; });
-  state.vcData = fresh;
-  await saveDay(day);
-  await saveVcData(todayStr(), fresh);
-  await appendAuditLog({ action:'バッチ開始', target: batch.name, before:'未着手', after:'作業中('+staffById(state.activeStaffId).name+')' });
-  render();
-}
-function vcOpenLogForBatch(batch){
-  if(!batch.linkedLogIds || !batch.linkedLogIds.length) return null;
-  var lastId = batch.linkedLogIds[batch.linkedLogIds.length-1];
-  return (state.day.logs||[]).find(function(l){ return l.id===lastId && l.end===null; }) || null;
-}
-async function completeVcBatch(batchId, actualQty){
-  var fresh = await loadVcData(todayStr());
-  if(!fresh){ showToast('データの取得に失敗しました。再読み込みしてください。'); return; }
-  var batch = batchById(fresh, batchId);
-  if(!batch || batch.deletedAt){ showToast('このバッチは見つかりません'); state.vcData = fresh; render(); return; }
-  if(batch.status !== 'active'){ showToast('このバッチは作業中ではありません'); state.vcData = fresh; render(); return; }
-  if(batch.assignedStaffId !== state.activeStaffId && !state.isAdminUnlocked){
-    showToast('このバッチは'+staffById(batch.assignedStaffId).name+'さんが対応中のため、本人か管理者のみ完了にできます');
-    state.vcData = fresh; render(); return;
-  }
-  var log = vcOpenLogForBatch(batch);
-  if(log){ log.end = new Date().toISOString(); log.quantity = actualQty; }
-  batch.status = 'done';
-  batch.endAt = new Date().toISOString();
-  batch.actualQty = actualQty;
-  fresh.batches = fresh.batches.map(function(b){ return b.id===batch.id ? batch : b; });
-  state.vcData = fresh;
-  await saveDay(state.day);
-  await saveVcData(todayStr(), fresh);
-  await appendAuditLog({ action:'バッチ完了', target: batch.name, before:'作業中', after:'完了(実績'+actualQty+')' });
-  render();
-}
-async function holdVcBatch(batchId, reason){
-  var fresh = await loadVcData(todayStr());
-  if(!fresh){ showToast('データの取得に失敗しました。再読み込みしてください。'); return; }
-  var batch = batchById(fresh, batchId);
-  if(!batch || batch.deletedAt){ showToast('このバッチは見つかりません'); state.vcData = fresh; render(); return; }
-  if(batch.status !== 'active'){ showToast('このバッチは作業中ではありません'); state.vcData = fresh; render(); return; }
-  if(batch.assignedStaffId !== state.activeStaffId && !state.isAdminUnlocked){
-    showToast('このバッチは'+staffById(batch.assignedStaffId).name+'さんが対応中のため、本人か管理者のみ保留にできます');
-    state.vcData = fresh; render(); return;
-  }
-  var log = vcOpenLogForBatch(batch);
-  if(log){ log.end = new Date().toISOString(); log.quantity = 0; }
-  batch.status = 'hold';
-  batch.holdReason = reason || '';
-  fresh.batches = fresh.batches.map(function(b){ return b.id===batch.id ? batch : b; });
-  state.vcData = fresh;
-  await saveDay(state.day);
-  await saveVcData(todayStr(), fresh);
-  await appendAuditLog({ action:'バッチ保留', target: batch.name, before:'作業中', after:'保留(理由: '+(reason||'なし')+')' });
-  render();
-}
-async function resumeVcBatch(batchId){
-  var fresh = await loadVcData(todayStr());
-  if(!fresh){ showToast('データの取得に失敗しました。再読み込みしてください。'); return; }
-  var batch = batchById(fresh, batchId);
-  if(!batch || batch.deletedAt){ showToast('このバッチは見つかりません'); state.vcData = fresh; render(); return; }
-  if(batch.status !== 'hold'){ showToast('このバッチは保留中ではありません'); state.vcData = fresh; render(); return; }
-  var day = state.day;
-  var logEntry = { id: uid(), staffId: state.activeStaffId, taskId: batch.taskId, start: new Date().toISOString(), end: null, quantity: null, batchId: batch.id };
-  day.logs.push(logEntry);
-  batch.status = 'active';
-  batch.assignedStaffId = state.activeStaffId;
-  if(!batch.linkedLogIds) batch.linkedLogIds = [];
-  batch.linkedLogIds.push(logEntry.id);
-  batch.holdReason = null;
-  fresh.batches = fresh.batches.map(function(b){ return b.id===batch.id ? batch : b; });
-  state.vcData = fresh;
-  await saveDay(day);
-  await saveVcData(todayStr(), fresh);
-  await appendAuditLog({ action:'バッチ再開', target: batch.name, before:'保留', after:'作業中('+staffById(state.activeStaffId).name+')' });
-  render();
+async function reverseVcCaseEntry(dateStr, taskId, entryId, reason){
+  var data = state.vcCaseLedger || {};
+  var entry = data[taskId] && data[taskId].entries.find(function(e){ return e.id===entryId; });
+  if(!entry || entry.reversedAt) return;
+  entry.reversedAt = new Date().toISOString();
+  entry.reversedBy = state.activeStaffId;
+  entry.reverseReason = reason || '';
+  await saveVcCaseLedger(dateStr, data);
+  await appendAuditLog({ action:'ケース数取消', target: taskById(taskId).name, before: (entry.delta>=0?'+':'')+entry.delta, after:'取消(理由: '+(reason||'なし')+')' });
 }
 function freshDay(dateStr){
   var attendance = {};
@@ -2364,190 +2160,6 @@ function coworkersForTask(taskId, excludeStaffId){
     return order[a.statusClass]-order[b.statusClass];
   });
 }
-function vcStatusLabel(status){
-  return { pending:'未着手', active:'作業中', done:'完了', hold:'保留' }[status] || status;
-}
-function renderVcBatchesTab(vd, taskId){
-  var batches = vcActiveBatches(vd).filter(function(b){ return b.taskId===taskId; });
-  var selected = state.vcDeleteSelectedBatchIds||[];
-  var rows = batches.map(function(b){
-    var checked = selected.indexOf(b.id)!==-1;
-    var who = b.assignedStaffId ? '('+esc(staffById(b.assignedStaffId).name)+')' : '';
-    return '<tr>'+
-      '<td><input type="checkbox" data-vc-batch-check="'+b.id+'" '+(checked?'checked':'')+'></td>'+
-      '<td>'+esc(b.name)+'</td>'+
-      '<td class="num">'+b.slipCount+'伝票</td>'+
-      '<td class="num">'+formatNum(b.totalQty)+'ピース</td>'+
-      '<td class="num">'+vcStatusLabel(b.status)+who+'</td>'+
-    '</tr>';
-  }).join('') || '<tr><td colspan="5" style="color:var(--slate-500);">バッチがありません</td></tr>';
-  var counts = vcCountsForSlipIds(vd, vd.slips.filter(function(s){ return selected.indexOf(s.batchId)!==-1; }).map(function(s){ return s.id; }));
-  return '<div class="vc-select-shortcuts">'+
-      '<button type="button" class="vc-select-shortcut-btn" data-vc-batch-select-all="1">全選択</button>'+
-      '<button type="button" class="vc-select-shortcut-btn" data-vc-batch-select-clear="1">選択解除</button>'+
-      '<button type="button" class="vc-select-shortcut-btn" data-vc-batch-select-status="pending">未着手のみ選択</button>'+
-      '<button type="button" class="vc-select-shortcut-btn" data-vc-batch-select-status="done">完了のみ選択</button>'+
-    '</div>'+
-    '<table class="report-table"><thead><tr><th></th><th>バッチ名</th><th>伝票数</th><th>ピース</th><th>状態</th></tr></thead><tbody>'+rows+'</tbody></table>'+
-    (selected.length ? '<div class="vc-import-status">選択中: '+selected.length+'バッチ</div>'+
-      '<button type="button" class="log-stop-btn" id="vcBatchBulkDeleteBtn" style="margin-top:8px;">選択したバッチを削除する</button>' : '');
-}
-function renderVcSlipsTab(vd, taskId){
-  var slips = vcActiveSlips(vd).filter(function(s){ return s.taskId===taskId; });
-  var selected = state.vcDeleteSelectedSlipIds||[];
-  var rows = slips.map(function(s){
-    var checked = selected.indexOf(s.id)!==-1;
-    var batch = s.batchId ? batchById(vd, s.batchId) : null;
-    return '<tr>'+
-      '<td><input type="checkbox" data-vc-slip-check="'+s.id+'" '+(checked?'checked':'')+'></td>'+
-      '<td>'+esc(s.shipperNo||s.slipNo)+'</td>'+
-      '<td class="num">'+s.lineCount+'件</td>'+
-      '<td class="num">'+formatNum(s.totalQty)+'ピース</td>'+
-      '<td class="num">'+(batch?esc(batch.name):'未割当')+'</td>'+
-      '<td class="num">'+vcStatusLabel(s.status)+'</td>'+
-    '</tr>';
-  }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">伝票がありません</td></tr>';
-  var counts = vcCountsForSlipIds(vd, selected);
-  return '<div class="vc-select-shortcuts">'+
-      '<button type="button" class="vc-select-shortcut-btn" data-vc-slip-select-all="1">全選択</button>'+
-      '<button type="button" class="vc-select-shortcut-btn" data-vc-slip-select-clear="1">選択解除</button>'+
-      '<button type="button" class="vc-select-shortcut-btn" data-vc-slip-select-status="pending">未着手のみ</button>'+
-      '<button type="button" class="vc-select-shortcut-btn" data-vc-slip-select-status="done">完了済みのみ</button>'+
-    '</div>'+
-    '<table class="report-table"><thead><tr><th></th><th>荷主出荷NO</th><th>明細</th><th>ピース</th><th>バッチ</th><th>状態</th></tr></thead><tbody>'+rows+'</tbody></table>'+
-    (selected.length ? '<div class="vc-import-status">選択中: '+selected.length+'伝票 / 影響するバッチ'+counts.batchCount+'件</div>'+
-      '<button type="button" class="log-stop-btn" id="vcSlipBulkDeleteBtn" style="margin-top:8px;">選択した伝票を削除する</button>' : '');
-}
-function renderVcImportsTab(vd, taskId){
-  var imports = vcActiveImports(vd).filter(function(i){ return i.taskId===taskId; });
-  var rows = imports.map(function(imp){
-    var slipCount = vcActiveSlips(vd).filter(function(s){ return s.importId===imp.id; }).length;
-    var batchCount = vcActiveBatches(vd).filter(function(b){ return b.importId===imp.id; }).length;
-    return '<tr>'+
-      '<td>'+fmtClock(imp.importedAt)+' '+esc(new Date(imp.importedAt).toLocaleDateString('ja-JP'))+'</td>'+
-      '<td>'+esc(imp.fileName)+'</td>'+
-      '<td class="num">'+(imp.rowCount||'-')+'</td>'+
-      '<td class="num">'+slipCount+'件</td>'+
-      '<td class="num">'+batchCount+'件</td>'+
-      '<td class="num"><button type="button" class="log-stop-btn" data-vc-import-delete="'+imp.id+'">この取込分を削除</button></td>'+
-    '</tr>';
-  }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">取込履歴がありません</td></tr>';
-  return '<table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>明細行数</th><th>伝票数</th><th>バッチ数</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>';
-}
-function renderVcDeletedTab(vd, taskId){
-  var deletedBatches = (vd.batches||[]).filter(function(b){ return b.deletedAt && b.taskId===taskId; });
-  var deletedSlips = (vd.slips||[]).filter(function(s){ return s.deletedAt && s.taskId===taskId; });
-  var batchRows = deletedBatches.map(function(b){
-    return '<div class="vc-slip-row">'+esc(b.name)+' (削除: '+fmtClock(b.deletedAt)+' by '+esc(b.deletedBy?staffById(b.deletedBy).name:'管理者')+') <button type="button" class="vc-manage-toggle-btn" data-vc-batch-restore="'+b.id+'">復元</button></div>';
-  }).join('') || '<div class="empty-note">削除済みバッチはありません</div>';
-  var slipRows = deletedSlips.map(function(s){
-    return '<div class="vc-slip-row">'+esc(s.shipperNo||s.slipNo)+' (削除: '+fmtClock(s.deletedAt)+') <button type="button" class="vc-manage-toggle-btn" data-vc-slip-restore="'+s.id+'">復元</button></div>';
-  }).join('') || '<div class="empty-note">削除済み伝票はありません</div>';
-  return '<div class="vc-queue-title">削除済みバッチ</div><div class="vc-slip-list" style="margin-bottom:16px;">'+batchRows+'</div>'+
-    '<div class="vc-queue-title">削除済み伝票</div><div class="vc-slip-list">'+slipRows+'</div>';
-}
-function vcModeForTask(tid){
-  if(!state.vcData) return 'none';
-  var hasSlips = (state.vcData.slips||[]).some(function(s){ return s.taskId===tid && !s.deletedAt; });
-  if(!hasSlips) return 'none';
-  var cfg = state.vcData.batchConfig && state.vcData.batchConfig[tid];
-  return (cfg && cfg.enabled) ? 'batch' : 'slip';
-}
-function renderVcBatchQueue(taskId){
-  var data = state.vcData;
-  if(!data) return '';
-  var batches = vcActiveBatches(data).filter(function(b){ return b.taskId===taskId; });
-  var doneCount = batches.filter(function(b){ return b.status==='done'; }).length;
-  var myActive = batches.find(function(b){ return b.status==='active' && b.assignedStaffId===state.activeStaffId; });
-  var myHold = batches.filter(function(b){ return b.status==='hold' && b.assignedStaffId===state.activeStaffId; });
-  var html = '<div class="vc-queue"><div class="vc-queue-title">📦 バッチ('+doneCount+'/'+batches.length+'件完了)</div>';
-  if(myActive){
-    var elapsed = myActive.startAt ? (Date.now()-new Date(myActive.startAt).getTime()) : 0;
-    html += '<div class="vc-active-slip">'+
-      '<div class="vc-active-slip-head">'+esc(myActive.name)+'</div>'+
-      '<div class="vc-active-slip-meta">'+myActive.slipCount+'伝票 ・ '+formatNum(myActive.totalQty)+'ピース</div>'+
-      '<div class="sub-timer-row" style="margin:10px 0;"><span class="sub-timer-display active" data-live-timer="'+myActive.startAt+'">'+fmtElapsed(elapsed)+'</span></div>'+
-      '<div class="vc-active-slip-actions">'+
-        '<button type="button" class="vc-release-btn" data-vc-batch-hold="'+myActive.id+'">保留にする</button>'+
-        '<button type="button" class="vc-complete-btn" data-vc-batch-complete="'+myActive.id+'">✓ 完了にする</button>'+
-      '</div>'+
-    '</div>';
-  }else{
-    var pending = batches.filter(function(b){ return b.status==='pending'; });
-    var rows = pending.map(function(b){
-      return '<button type="button" class="vc-slip-row" data-vc-batch-start="'+b.id+'" style="cursor:pointer;">'+
-        '<span class="vc-slip-main"><span class="vc-slip-no">'+esc(b.name)+'</span>'+
-        '<span class="vc-slip-meta">'+b.slipCount+'伝票 ・ '+formatNum(b.totalQty)+'ピース</span></span>'+
-      '</button>';
-    }).join('');
-    var activeOthers = batches.filter(function(b){ return b.status==='active' && b.assignedStaffId!==state.activeStaffId; }).map(function(b){
-      return '<div class="vc-slip-row vc-slip-row-taken">'+esc(b.name)+' — '+esc(staffById(b.assignedStaffId).name)+'さんが作業中</div>';
-    }).join('');
-    var holdOthers = myHold.map(function(b){
-      return '<div class="vc-slip-row">'+esc(b.name)+'(保留中: '+esc(b.holdReason||'理由なし')+') <button type="button" class="vc-manage-toggle-btn" data-vc-batch-resume="'+b.id+'">再開する</button></div>';
-    }).join('');
-    html += '<div class="vc-queue-hint">未着手のバッチをタップして開始してください</div>'+
-      '<div class="vc-slip-list">'+(rows+activeOthers+holdOthers || '<div class="empty-note" style="padding:16px 0;">対応可能なバッチがありません</div>')+'</div>';
-  }
-  html += '</div>';
-  return html;
-}
-function renderVcSlipQueue(taskId){
-  var data = state.vcData;
-  if(!data) return '';
-  var taskSlips = vcActiveSlips(data).filter(function(s){ return s.taskId===taskId; });
-  var mySession = myVcSession();
-  var doneCount = taskSlips.filter(function(s){ return s.status==='done'; }).length;
-  var html = '<div class="vc-queue"><div class="vc-queue-title">📋 ロジザード伝票('+doneCount+'/'+taskSlips.length+'件完了)</div>';
-  if(mySession){
-    var elapsedBase = 0;
-    var slipsInSession = mySession.slipIds.map(function(sid){ return taskSlips.find(function(s){ return s.id===sid; }); }).filter(Boolean);
-    var phaseLabel = mySession.phase==='picking' ? 'ピッキング' : '梱包';
-    var timerAttrs = ' data-live-subtimer-start="'+mySession.start+'" data-live-subtimer-base="0"';
-    var timerText = fmtElapsed(Date.now()-new Date(mySession.start).getTime());
-    html += '<div class="vc-active-slip">'+
-      '<div class="vc-active-slip-head">'+phaseLabel+'計測中('+slipsInSession.length+'件まとめて)</div>'+
-      '<div class="vc-active-slip-meta">'+slipsInSession.map(function(s){ return esc(s.shipperNo||s.slipNo)+'('+s.lineCount+'明細/'+formatNum(s.totalQty)+'ピース)'; }).join('、')+'</div>'+
-      '<div class="sub-timer-row" style="margin:10px 0;">'+
-        '<button type="button" class="sub-timer-btn active" data-vc-stop-session="1">■ 計測終了</button>'+
-        '<span class="sub-timer-display active"'+timerAttrs+'>'+timerText+'</span>'+
-      '</div>'+
-    '</div>';
-  }else{
-    var open = taskSlips.filter(function(s){ return s.status!=='done'; });
-    var selected = state.vcSelectedSlipIds||[];
-    var rows = open.map(function(s){
-      var checked = selected.indexOf(s.id)!==-1;
-      var others = whosOnSlip(s.id, state.activeStaffId);
-      var othersNote = others.length ? '<span class="vc-slip-others">'+others.map(function(o){ return esc(o.name)+'('+(o.phase==='picking'?'ピ':'梱')+')'; }).join('・')+'も対応中</span>' : '';
-      var timesNote = (s.pickingMs||s.packingMs) ? '<span class="vc-slip-times">済: ピ'+fmtHM(s.pickingMs||0)+' / 梱'+fmtHM(s.packingMs||0)+'</span>' : '';
-      return '<label class="vc-slip-row'+(checked?' vc-slip-row-checked':'')+'">'+
-        '<input type="checkbox" data-vc-checkbox="'+s.id+'" '+(checked?'checked':'')+'>'+
-        '<span class="vc-slip-main"><span class="vc-slip-no">'+esc(s.shipperNo||s.slipNo)+'</span>'+
-        '<span class="vc-slip-meta">明細'+s.lineCount+'件 ・ '+formatNum(s.totalQty)+'ピース</span>'+
-        othersNote+timesNote+'</span>'+
-      '</label>';
-    }).join('');
-    html += '<div class="vc-queue-hint">複数の伝票をまとめて選んでから、ピッキング/梱包を開始できます</div>';
-    if(open.length){
-      html += '<div class="vc-select-shortcuts">'+
-        '<button type="button" class="vc-select-shortcut-btn" data-vc-select-all="1">全て選択('+open.length+')</button>'+
-        '<button type="button" class="vc-select-shortcut-btn" data-vc-select-clear="1">選択解除</button>'+
-      '</div>';
-    }
-    html += '<div class="vc-slip-list">'+(rows || '<div class="empty-note" style="padding:16px 0;">対応可能な伝票がありません</div>')+'</div>';
-    if(open.length){
-      var disabledAttr = selected.length ? '' : 'disabled';
-      html += '<div class="vc-batch-actions">'+
-        '<button type="button" class="vc-batch-btn" data-vc-start-phase="picking" '+disabledAttr+'>▶ 選択した伝票のピッキング開始('+selected.length+')</button>'+
-        '<button type="button" class="vc-batch-btn" data-vc-start-phase="packing" '+disabledAttr+'>▶ 選択した伝票の梱包開始('+selected.length+')</button>'+
-        '<button type="button" class="vc-complete-btn" data-vc-complete-selected="1" '+disabledAttr+'>✓ 選択した伝票を完了にする</button>'+
-      '</div>';
-    }
-  }
-  html += '</div>';
-  return html;
-}
 function totalsByTaskForDay(day, staffId){
   var map = {};
   day.logs.filter(function(l){ return l.staffId===staffId; }).forEach(function(l){
@@ -2628,12 +2240,8 @@ function isUserBusy(){
   if(state.isDragging) return true;
   if(state.modal) return true;
   if(state.pinModal) return true;
-  if(state.vcImporting) return true;
-  if(state.vcSelectedSlipIds && state.vcSelectedSlipIds.length>0) return true;
+  if(state.wvImporting) return true;
   if(state.showOtherTasks) return true;
-  if(state.role==='input' && state.activeStaffId && typeof myVcSession==='function'){
-    try{ if(myVcSession()) return true; }catch(e){}
-  }
   return false;
 }
 function render(){
@@ -3150,76 +2758,83 @@ function renderSettingsPanels(){
   '</div>';
 
   var viewDate = todayStr();
-  var vcImportPanel = '';
-  if(!state.vcData) state.vcData = emptyVcData();
-  var vd = state.vcData;
-  var vcDateTasks = tasksForDate(viewDate);
-  if(state.vcImportTaskId===null){
-    state.vcImportTaskId = vcDateTasks[0] ? vcDateTasks[0].id : '';
+  var workVolumePanel = '';
+  if(!state.workVolume) state.workVolume = emptyWorkVolume();
+  if(!state.workVolumeConfig) state.workVolumeConfig = {};
+  var wvDateTasks = tasksForDate(viewDate);
+  if(state.wvImportTaskId===null){
+    state.wvImportTaskId = wvDateTasks[0] ? wvDateTasks[0].id : '';
   }
-  var curTaskId = state.vcImportTaskId;
-  var curTask = taskById(curTaskId);
-  var vcTaskOptions = vcDateTasks.map(function(t){
-    return '<option value="'+t.id+'" '+(curTaskId===t.id ? 'selected':'')+'>'+esc(t.name)+'</option>';
+  var wvTaskId = state.wvImportTaskId;
+  var wvTask = taskById(wvTaskId);
+  var wvTaskOptions = wvDateTasks.map(function(t){
+    return '<option value="'+t.id+'" '+(wvTaskId===t.id ? 'selected':'')+'>'+esc(t.name)+'</option>';
   }).join('') || '<option value="">本日の作業がありません</option>';
-  var cfg = vd.batchConfig[curTaskId] || { enabled:false, criteria:'none', nameTemplate:'{作業名} / {引当ロケーション} / {送り状区分}', evenSplitMaxSlips:15, columnMap:{pickLocation:'',invoiceType:''} };
+  var wvCfg = state.workVolumeConfig[wvTaskId] || { enabled:false, taskKind:'normal', criteria:'none', nameTemplate:'{作業名} / {引当ロケーション} / {送り状区分}', evenSplitMaxSlips:15, columnMap:{pickLocation:'',invoiceType:''} };
+  var wvPrimaryLabel = wvCfg.taskKind==='vc' ? 'PO数' : '件数';
+  var wvTotals = wvTotalsForTask(state.workVolume, wvTaskId);
 
-  var taskSelectHtml = '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">対象作業</label>'+
-    '<select id="vcTaskSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:10px;">'+vcTaskOptions+'</select>';
-
-  var tabsHtml = '<div class="vc-tabs">'+
-    ['import:取込・設定','batches:バッチ管理','slips:伝票管理','imports:取込履歴','deleted:削除済み'].map(function(t){
-      var parts = t.split(':'); var key=parts[0], label=parts[1];
-      return '<button type="button" class="vc-tab-btn'+(state.vcAdminTab===key?' active':'')+'" data-vc-admin-tab="'+key+'">'+label+'</button>';
-    }).join('')+
-  '</div>';
-
-  var tabBody = '';
-  if(state.vcAdminTab==='batches'){
-    tabBody = renderVcBatchesTab(vd, curTaskId);
-  }else if(state.vcAdminTab==='slips'){
-    tabBody = renderVcSlipsTab(vd, curTaskId);
-  }else if(state.vcAdminTab==='imports'){
-    tabBody = renderVcImportsTab(vd, curTaskId);
-  }else if(state.vcAdminTab==='deleted'){
-    tabBody = renderVcDeletedTab(vd, curTaskId);
-  }else{
-    var taskSlips = vcActiveSlips(vd).filter(function(s){ return s.taskId===curTaskId; });
-    var taskBatches = vcActiveBatches(vd).filter(function(b){ return b.taskId===curTaskId; });
-    var vcStatusHtml = '';
-    if(taskSlips.length){
-      var totalQtyAll = taskSlips.reduce(function(a,s){ return a+s.totalQty; }, 0);
-      vcStatusHtml = '<div class="vc-import-status">「'+esc(curTask.name)+'」に伝票'+taskSlips.length+'件(合計'+formatNum(totalQtyAll)+'ピース)'+(cfg.enabled?'・バッチ'+taskBatches.length+'件':'')+'を取り込み済み</div>';
-    }
-    var batchConfigHtml = '<details class="vc-manage-details" id="vcBatchConfigDetails" '+(state.vcBatchConfigOpen?'open':'')+'>'+
-      '<summary>バッチ設定(この作業: '+esc(curTask.name)+')</summary>'+
-      '<div style="margin-top:10px;">'+
-        '<label class="break-toggle-row"><input type="checkbox" id="vcBatchEnabledInput" '+(cfg.enabled?'checked':'')+'> この作業でバッチ管理を使う</label>'+
-        '<div class="pool-hint" style="margin:8px 0;">バッチ化の基準</div>'+
-        ['none:バッチ化しない(伝票単位)','location:引当ロケーションごと','invoice:送り状区分ごと','location_invoice:引当ロケーション×送り状区分','even_split:件数で均等分割'].map(function(opt){
-          var parts = opt.split(':'); var val=parts[0], label=parts[1];
-          return '<label style="display:block;font-size:13px;margin:4px 0;"><input type="radio" name="vcCriteria" value="'+val+'" '+(cfg.criteria===val?'checked':'')+'> '+label+'</label>';
-        }).join('')+
-        '<div style="margin:8px 0;"><label style="font-size:11px;color:var(--slate-500);">1バッチあたり最大伝票数(均等分割の場合)</label><input type="number" id="vcEvenSplitMax" min="1" value="'+(cfg.evenSplitMaxSlips||15)+'" style="width:100px;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
-        '<div style="margin:8px 0;"><label style="font-size:11px;color:var(--slate-500);display:block;">バッチ名のルール(使える置き換え: {引当ロケーション} {送り状区分} {作業名} {連番})</label><input type="text" id="vcNameTemplate" value="'+esc(cfg.nameTemplate||'')+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
-        '<div style="display:flex;gap:10px;margin:8px 0;">'+
-          '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;">「引当ロケーション」のCSV列名</label><input type="text" id="vcColLocation" value="'+esc((cfg.columnMap&&cfg.columnMap.pickLocation)||'')+'" placeholder="例: ロケーション" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
-          '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;">「送り状区分」のCSV列名</label><input type="text" id="vcColInvoice" value="'+esc((cfg.columnMap&&cfg.columnMap.invoiceType)||'')+'" placeholder="例: 業務区分" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
-        '</div>'+
-        '<button type="button" class="add-btn" id="vcSaveBatchConfigBtn">この作業の設定を保存</button>'+
-      '</div>'+
-    '</details>';
-    tabBody = vcStatusHtml+batchConfigHtml+
-      '<div style="margin-top:12px;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="vcCsvInput" accept=".csv" style="display:block;margin-bottom:6px;"></div>'+
-      (state.vcImporting ? '<div class="empty-note">取り込み中...</div>' : '');
+  var wvStatusHtml = '';
+  if(wvTotals.importCount){
+    wvStatusHtml = '<div class="vc-import-status">「'+esc(wvTask.name)+'」の本日の作業量(取込'+wvTotals.importCount+'回の合計): '+wvPrimaryLabel+' '+formatNum(wvTotals.primaryCount)+' / 明細 '+formatNum(wvTotals.lineCount)+' / ピース '+formatNum(wvTotals.totalQty)+'</div>';
   }
 
-  vcImportPanel = '<div class="panel" style="margin-top:14px;">'+
-    '<div class="panel-title">📋 ロジザード明細インポート・バッチ管理</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">出荷指示CSVを取り込むと、出荷伝票ごとに明細数・ピース数が自動集計されます。「荷主出荷NO」を目印に重複を防ぐので、1日に何度アップロードしても大丈夫です。</div>'+
-    taskSelectHtml+
-    tabsHtml+
-    '<div class="vc-tab-body">'+tabBody+'</div>'+
+  var wvImportRows = wvActiveImports(state.workVolume).filter(function(i){ return i.taskId===wvTaskId; }).map(function(imp){
+    var lbl = imp.taskKind==='vc' ? 'PO数' : '件数';
+    var batchCount = wvActiveBatches(state.workVolume).filter(function(b){ return b.importId===imp.id; }).length;
+    return '<tr>'+
+      '<td>'+fmtClock(imp.importedAt)+'</td>'+
+      '<td>'+esc(imp.fileName)+'</td>'+
+      '<td class="num">'+lbl+' '+formatNum(imp.primaryCount)+'</td>'+
+      '<td class="num">明細'+formatNum(imp.lineCount)+'</td>'+
+      '<td class="num">ピース'+formatNum(imp.totalQty)+'</td>'+
+      '<td class="num">'+batchCount+'バッチ</td>'+
+      '<td class="num"><button type="button" class="log-stop-btn" data-wv-import-delete="'+imp.id+'">削除</button></td>'+
+    '</tr>';
+  }).join('') || '<tr><td colspan="7" style="color:var(--slate-500);">この作業の取込履歴はまだありません</td></tr>';
+  var wvDeletedImports = (state.workVolume.imports||[]).filter(function(i){ return i.deletedAt && i.taskId===wvTaskId; });
+  var wvDeletedHtml = wvDeletedImports.map(function(imp){
+    return '<div class="vc-slip-row">'+esc(imp.fileName)+'(削除: '+fmtClock(imp.deletedAt)+') <button type="button" class="vc-manage-toggle-btn" data-wv-import-restore="'+imp.id+'">復元</button></div>';
+  }).join('') || '<div class="empty-note">削除済みの取込はありません</div>';
+
+  var wvHistoryHtml = '<details class="vc-manage-details" id="wvHistoryDetails" '+(state.wvHistoryOpen?'open':'')+'>'+
+    '<summary>取込履歴・削除済み(この作業)</summary>'+
+    '<div style="margin-top:10px;overflow-x:auto;"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>合計</th><th>明細</th><th>ピース</th><th>バッチ</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
+    '<div class="vc-queue-title" style="margin-top:12px;">削除済み</div><div class="vc-slip-list">'+wvDeletedHtml+'</div>'+
+  '</details>';
+
+  var wvConfigHtml = '<details class="vc-manage-details" id="wvConfigDetails" '+(state.wvConfigOpen?'open':'')+'>'+
+    '<summary>作業量の設定(この作業: '+esc(wvTask.name)+')</summary>'+
+    '<div style="margin-top:10px;">'+
+      '<label class="break-toggle-row"><input type="checkbox" id="wvEnabledInput" '+(wvCfg.enabled?'checked':'')+'> この作業でCSV作業量を使う</label>'+
+      '<div class="pool-hint" style="margin:8px 0;">この作業の種類</div>'+
+      '<label style="display:block;font-size:13px;margin:4px 0;"><input type="radio" name="wvKind" value="normal" '+(wvCfg.taskKind==='normal'?'checked':'')+'> 通常出荷(荷主出荷番号→件数)</label>'+
+      '<label style="display:block;font-size:13px;margin:4px 0;"><input type="radio" name="wvKind" value="vc" '+(wvCfg.taskKind==='vc'?'checked':'')+'> VC(荷主出荷番号→PO)</label>'+
+      '<div class="pool-hint" style="margin:8px 0;">バッチ分類の基準(任意。作業量をさらに細分化して集計したい場合)</div>'+
+      ['none:バッチ分類しない','location:引当ロケーションごと','invoice:送り状区分ごと','location_invoice:引当ロケーション×送り状区分','even_split:件数で均等分割'].map(function(opt){
+        var parts = opt.split(':'); var val=parts[0], label=parts[1];
+        return '<label style="display:block;font-size:13px;margin:4px 0;"><input type="radio" name="wvCriteria" value="'+val+'" '+(wvCfg.criteria===val?'checked':'')+'> '+label+'</label>';
+      }).join('')+
+      '<div style="margin:8px 0;"><label style="font-size:11px;color:var(--slate-500);">1バッチあたり最大件数(均等分割の場合)</label><input type="number" id="wvEvenSplitMax" min="1" value="'+(wvCfg.evenSplitMaxSlips||15)+'" style="width:100px;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
+      '<div style="margin:8px 0;"><label style="font-size:11px;color:var(--slate-500);display:block;">バッチ名のルール(使える置き換え: {引当ロケーション} {送り状区分} {作業名} {連番})</label><input type="text" id="wvNameTemplate" value="'+esc(wvCfg.nameTemplate||'')+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
+      '<div style="display:flex;gap:10px;margin:8px 0;">'+
+        '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;">「引当ロケーション」のCSV列名</label><input type="text" id="wvColLocation" value="'+esc((wvCfg.columnMap&&wvCfg.columnMap.pickLocation)||'')+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
+        '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;">「送り状区分」のCSV列名</label><input type="text" id="wvColInvoice" value="'+esc((wvCfg.columnMap&&wvCfg.columnMap.invoiceType)||'')+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
+      '</div>'+
+      '<button type="button" class="add-btn" id="wvSaveConfigBtn">この作業の設定を保存</button>'+
+    '</div>'+
+  '</details>';
+
+  workVolumePanel = '<div class="panel" style="margin-top:14px;">'+
+    '<div class="panel-title">📋 作業量CSV取込</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">CSVから件数(VCはPO数)・明細数・ピース数を自動集計し、作業枠に紐づけて表示します。時間の計測とは別のデータとして扱われ、パートさんへの数字入力は求めません。取込は履歴として積み上がり、既存の取込を上書きすることはありません。</div>'+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">対象作業</label>'+
+    '<select id="wvTaskSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:10px;">'+wvTaskOptions+'</select>'+
+    wvStatusHtml+
+    wvConfigHtml+
+    '<div style="margin-top:12px;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="wvCsvInput" accept=".csv" style="display:block;margin-bottom:6px;"></div>'+
+    (state.wvImporting ? '<div class="empty-note">取り込み中...</div>' : '')+
+    wvHistoryHtml+
   '</div>';
 
   var breakPanel = '<div class="panel" style="margin-top:14px;">'+
@@ -3245,7 +2860,7 @@ function renderSettingsPanels(){
     '<button type="button" class="add-btn" id="changePinBtn">PINを変更する</button>'+
   '</div>';
 
-  return shiftPanel + vcImportPanel + breakPanel + achievementPanel + pinChangeHtml;
+  return shiftPanel + workVolumePanel + breakPanel + achievementPanel + pinChangeHtml;
 }
 function renderSettings(){
   return '<div class="mgr-wrap"><div class="panel-title" style="font-size:20px;margin-bottom:4px;">⚙️ 設定</div>'+
@@ -3612,204 +3227,101 @@ function bindSettings(){
       render();
     });
   }
-  document.querySelectorAll('[data-vc-admin-tab]').forEach(function(el){
-    el.addEventListener('click', function(){
-      state.vcAdminTab = el.getAttribute('data-vc-admin-tab');
-      state.vcDeleteSelectedBatchIds = [];
-      state.vcDeleteSelectedSlipIds = [];
-      render();
-    });
-  });
-  var vcBatchConfigDetails = document.getElementById('vcBatchConfigDetails');
-  if(vcBatchConfigDetails){
-    vcBatchConfigDetails.addEventListener('toggle', function(){
-      state.vcBatchConfigOpen = vcBatchConfigDetails.open;
+  var wvConfigDetails = document.getElementById('wvConfigDetails');
+  if(wvConfigDetails){
+    wvConfigDetails.addEventListener('toggle', function(){
+      state.wvConfigOpen = wvConfigDetails.open;
     });
   }
-  var vcTaskSelect = document.getElementById('vcTaskSelect');
-  if(vcTaskSelect) vcTaskSelect.addEventListener('change', function(){
-    state.vcImportTaskId = vcTaskSelect.value;
+  var wvHistoryDetails = document.getElementById('wvHistoryDetails');
+  if(wvHistoryDetails){
+    wvHistoryDetails.addEventListener('toggle', function(){
+      state.wvHistoryOpen = wvHistoryDetails.open;
+    });
+  }
+  var wvTaskSelect = document.getElementById('wvTaskSelect');
+  if(wvTaskSelect) wvTaskSelect.addEventListener('change', function(){
+    state.wvImportTaskId = wvTaskSelect.value;
     render();
   });
-  var vcSaveBatchConfigBtn = document.getElementById('vcSaveBatchConfigBtn');
-  if(vcSaveBatchConfigBtn){
-    vcSaveBatchConfigBtn.addEventListener('click', async function(){
-      var taskId = state.vcImportTaskId;
-      var enabled = document.getElementById('vcBatchEnabledInput').checked;
-      var criteriaEl = document.querySelector('input[name="vcCriteria"]:checked');
+  var wvSaveConfigBtn = document.getElementById('wvSaveConfigBtn');
+  if(wvSaveConfigBtn){
+    wvSaveConfigBtn.addEventListener('click', async function(){
+      var taskId = state.wvImportTaskId;
+      var enabled = document.getElementById('wvEnabledInput').checked;
+      var kindEl = document.querySelector('input[name="wvKind"]:checked');
+      var taskKind = kindEl ? kindEl.value : 'normal';
+      var criteriaEl = document.querySelector('input[name="wvCriteria"]:checked');
       var criteria = criteriaEl ? criteriaEl.value : 'none';
-      var maxSlips = parseInt(document.getElementById('vcEvenSplitMax').value,10) || 15;
-      var nameTemplate = document.getElementById('vcNameTemplate').value;
-      var colLoc = document.getElementById('vcColLocation').value.trim();
-      var colInv = document.getElementById('vcColInvoice').value.trim();
-      if(!state.vcData) state.vcData = emptyVcData();
-      state.vcData.batchConfig[taskId] = {
-        enabled: enabled, criteria: criteria, nameTemplate: nameTemplate,
+      var maxSlips = parseInt(document.getElementById('wvEvenSplitMax').value,10) || 15;
+      var nameTemplate = document.getElementById('wvNameTemplate').value;
+      var colLoc = document.getElementById('wvColLocation').value.trim();
+      var colInv = document.getElementById('wvColInvoice').value.trim();
+      if(!state.workVolumeConfig) state.workVolumeConfig = {};
+      state.workVolumeConfig[taskId] = {
+        enabled: enabled, taskKind: taskKind, criteria: criteria, nameTemplate: nameTemplate,
         evenSplitMaxSlips: maxSlips, columnMap: { pickLocation: colLoc, invoiceType: colInv }
       };
-      await saveVcData(todayStr(), state.vcData);
-      showToast('「'+esc(taskById(taskId).name)+'」のバッチ設定を保存しました');
+      await saveWorkVolumeConfig(state.workVolumeConfig);
+      await appendAuditLog({ action:'作業量設定変更', target: taskById(taskId).name, before:null, after: (taskKind==='vc'?'VC(PO)':'通常(件数)')+' / '+criteriaLabel(criteria) });
+      showToast('「'+esc(taskById(taskId).name)+'」の作業量設定を保存しました');
       render();
     });
   }
-  var vcCsvInput = document.getElementById('vcCsvInput');
-  if(vcCsvInput){
-    vcCsvInput.addEventListener('change', function(){
-      var file = vcCsvInput.files[0];
+  var wvCsvInput = document.getElementById('wvCsvInput');
+  if(wvCsvInput){
+    wvCsvInput.addEventListener('change', function(){
+      var file = wvCsvInput.files[0];
       if(!file) return;
-      var taskId = state.vcImportTaskId || (document.getElementById('vcTaskSelect') ? document.getElementById('vcTaskSelect').value : '');
-      if(!taskId){ showToast('紐づける作業を選択してください'); return; }
-      if(!state.vcData) state.vcData = emptyVcData();
-      var cfg = state.vcData.batchConfig[taskId] || { enabled:false, criteria:'none', nameTemplate:'', evenSplitMaxSlips:15, columnMap:{} };
-      state.vcImporting = true;
+      var taskId = state.wvImportTaskId || (document.getElementById('wvTaskSelect') ? document.getElementById('wvTaskSelect').value : '');
+      if(!taskId){ showToast('対象作業を選択してください'); return; }
+      if(!state.workVolumeConfig) state.workVolumeConfig = {};
+      var cfg = state.workVolumeConfig[taskId] || { enabled:false, taskKind:'normal', criteria:'none', nameTemplate:'', evenSplitMaxSlips:15, columnMap:{} };
+      state.wvImporting = true;
       render();
-      parseVcCsvFile(file, cfg.columnMap, function(newSlips, rowCount, headers){
-        var existingShipperNos = {};
-        vcActiveSlips(state.vcData).filter(function(s){ return s.taskId===taskId; }).forEach(function(s){
-          if(s.shipperNo) existingShipperNos[s.shipperNo] = true;
-        });
-        var toAdd = newSlips.filter(function(s){ return !(s.shipperNo && existingShipperNos[s.shipperNo]); });
-        var skippedCount = newSlips.length - toAdd.length;
+      parseCsvForWorkVolume(file, cfg.columnMap, function(result){
         var importId = uid();
-        toAdd.forEach(function(s){ s.importId = importId; s.taskId = taskId; });
-        var newBatches = cfg.enabled ? generateBatchesForImport(toAdd, cfg, taskId, taskById(taskId).name, importId) : [];
-        newBatches.forEach(function(b){
-          var matched = toAdd.filter(function(s){ return s.batchId===b.id; });
-          b.lineCount = matched.reduce(function(a,s){ return a+(s.lineCount||0); }, 0);
-          b.totalQty = matched.reduce(function(a,s){ return a+(s.totalQty||0); }, 0);
-          b.slipCount = matched.length;
-        });
-        state.vcPreview = { taskId: taskId, importId: importId, fileName: file.name, rowCount: rowCount, cfg: cfg, newSlips: toAdd, batches: newBatches, skippedCount: skippedCount };
-        state.vcImporting = false;
-        vcCsvInput.value = '';
+        var newBatches = (cfg.enabled && cfg.criteria!=='none') ? generateWorkVolumeBatches(result.shipperGroups, cfg, taskId, taskById(taskId).name, importId) : [];
+        state.vcPreview = {
+          taskId: taskId, importId: importId, fileName: file.name, cfg: cfg,
+          primaryCount: result.primaryCount, lineCount: result.lineCount, totalQty: result.totalQty,
+          batches: newBatches
+        };
+        state.wvImporting = false;
+        wvCsvInput.value = '';
         state.modal = { kind:'vcPreview' };
         render();
       }, function(errMsg){
-        state.vcImporting = false;
+        state.wvImporting = false;
         showToast(errMsg);
         render();
       });
     });
   }
-  document.querySelectorAll('[data-vc-batch-check]').forEach(function(el){
-    el.addEventListener('click', function(){
-      var id = el.getAttribute('data-vc-batch-check');
-      var idx = state.vcDeleteSelectedBatchIds.indexOf(id);
-      if(idx===-1) state.vcDeleteSelectedBatchIds.push(id); else state.vcDeleteSelectedBatchIds.splice(idx,1);
-      render();
-    });
-  });
-  var vcBatchSelectAll = document.getElementById('vcBatchBulkDeleteBtn');
-  document.querySelectorAll('[data-vc-batch-select-all]').forEach(function(el){
-    el.addEventListener('click', function(){
-      state.vcDeleteSelectedBatchIds = vcActiveBatches(state.vcData).filter(function(b){ return b.taskId===state.vcImportTaskId; }).map(function(b){ return b.id; });
-      render();
-    });
-  });
-  document.querySelectorAll('[data-vc-batch-select-clear]').forEach(function(el){
-    el.addEventListener('click', function(){ state.vcDeleteSelectedBatchIds = []; render(); });
-  });
-  document.querySelectorAll('[data-vc-batch-select-status]').forEach(function(el){
-    el.addEventListener('click', function(){
-      var status = el.getAttribute('data-vc-batch-select-status');
-      state.vcDeleteSelectedBatchIds = vcActiveBatches(state.vcData).filter(function(b){ return b.taskId===state.vcImportTaskId && b.status===status; }).map(function(b){ return b.id; });
-      render();
-    });
-  });
-  if(vcBatchSelectAll){
-    vcBatchSelectAll.addEventListener('click', async function(){
-      var ids = state.vcDeleteSelectedBatchIds.slice();
-      var batches = ids.map(function(id){ return batchById(state.vcData, id); }).filter(Boolean);
-      var slipCount = batches.reduce(function(a,b){ return a+b.slipCount; }, 0);
-      var qty = batches.reduce(function(a,b){ return a+b.totalQty; }, 0);
-      var risky = batches.some(function(b){ return b.status==='active' || b.status==='done'; });
-      var msg = '以下を削除します:\nバッチ数: '+ids.length+'件\n伝票数: '+slipCount+'件\nピース数: '+qty+'\n\n所属していた伝票は「未割当」に戻ります(伝票自体は削除されません)。';
-      if(risky) msg = '⚠️ 選択したバッチに「作業中」または「完了」のものが含まれています。現場での計測が中断される可能性があります。\n\n'+msg;
-      if(!confirm(msg)) return;
-      var reason = prompt('削除理由を入力してください(任意)', '') || '';
-      await deleteVcBatches(ids, reason);
-      await appendAuditLog({ action:'バッチ一括削除', target: ids.length+'件のバッチ', before:null, after:'削除(伝票'+slipCount+'件、'+qty+'ピース、理由: '+reason+')' });
-      state.vcDeleteSelectedBatchIds = [];
-      showToast(ids.length+'件のバッチを削除しました');
-      render();
-    });
-  }
-  document.querySelectorAll('[data-vc-slip-check]').forEach(function(el){
-    el.addEventListener('click', function(){
-      var id = el.getAttribute('data-vc-slip-check');
-      var idx = state.vcDeleteSelectedSlipIds.indexOf(id);
-      if(idx===-1) state.vcDeleteSelectedSlipIds.push(id); else state.vcDeleteSelectedSlipIds.splice(idx,1);
-      render();
-    });
-  });
-  document.querySelectorAll('[data-vc-slip-select-all]').forEach(function(el){
-    el.addEventListener('click', function(){
-      state.vcDeleteSelectedSlipIds = vcActiveSlips(state.vcData).filter(function(s){ return s.taskId===state.vcImportTaskId; }).map(function(s){ return s.id; });
-      render();
-    });
-  });
-  document.querySelectorAll('[data-vc-slip-select-clear]').forEach(function(el){
-    el.addEventListener('click', function(){ state.vcDeleteSelectedSlipIds = []; render(); });
-  });
-  document.querySelectorAll('[data-vc-slip-select-status]').forEach(function(el){
-    el.addEventListener('click', function(){
-      var status = el.getAttribute('data-vc-slip-select-status');
-      state.vcDeleteSelectedSlipIds = vcActiveSlips(state.vcData).filter(function(s){ return s.taskId===state.vcImportTaskId && s.status===status; }).map(function(s){ return s.id; });
-      render();
-    });
-  });
-  var vcSlipBulkDeleteBtn = document.getElementById('vcSlipBulkDeleteBtn');
-  if(vcSlipBulkDeleteBtn){
-    vcSlipBulkDeleteBtn.addEventListener('click', async function(){
-      var ids = state.vcDeleteSelectedSlipIds.slice();
-      var counts = vcCountsForSlipIds(state.vcData, ids);
-      var msg = '以下を削除します:\n伝票数: '+counts.slipCount+'件\nピース数: '+counts.totalQty+'\n影響するバッチ: '+counts.batchCount+'件';
-      if(counts.activeOrDoneBatchCount>0) msg = '⚠️ 影響するバッチのうち'+counts.activeOrDoneBatchCount+'件が「作業中」または「完了」です。\n\n'+msg;
-      if(!confirm(msg)) return;
-      var reason = prompt('削除理由を入力してください(任意)', '') || '';
-      await deleteVcSlips(ids, reason);
-      await appendAuditLog({ action:'伝票一括削除', target: ids.length+'件の伝票', before:null, after:'削除('+counts.totalQty+'ピース、理由: '+reason+')' });
-      state.vcDeleteSelectedSlipIds = [];
-      showToast(ids.length+'件の伝票を削除しました');
-      render();
-    });
-  }
-  document.querySelectorAll('[data-vc-import-delete]').forEach(function(el){
+  document.querySelectorAll('[data-wv-import-delete]').forEach(function(el){
     el.addEventListener('click', async function(){
-      var importId = el.getAttribute('data-vc-import-delete');
-      var slipIds = vcActiveSlips(state.vcData).filter(function(s){ return s.importId===importId; }).map(function(s){ return s.id; });
-      var counts = vcCountsForSlipIds(state.vcData, slipIds);
-      var msg = 'この取込分をまとめて削除します:\n伝票数: '+counts.slipCount+'件\nピース数: '+counts.totalQty+'\n影響するバッチ: '+counts.batchCount+'件';
-      if(counts.activeOrDoneBatchCount>0) msg = '⚠️ 影響するバッチのうち'+counts.activeOrDoneBatchCount+'件が「作業中」または「完了」です。\n\n'+msg;
-      if(!confirm(msg)) return;
+      var importId = el.getAttribute('data-wv-import-delete');
+      var imp = state.workVolume.imports.find(function(i){ return i.id===importId; });
+      if(!imp) return;
+      if(!confirm('この取込(「'+imp.fileName+'」)を削除しますか?(論理削除。あとで復元できます)')) return;
       var reason = prompt('削除理由を入力してください(任意)', '') || '';
-      await deleteVcImport(importId, reason);
-      await appendAuditLog({ action:'取込履歴削除', target: importId, before:null, after:'削除('+counts.slipCount+'件の伝票、理由: '+reason+')' });
-      showToast('この取込分を削除しました');
+      await deleteWvImport(todayStr(), importId, reason);
+      await appendAuditLog({ action:'作業量取込削除', target: taskById(imp.taskId).name+' / '+imp.fileName, before:'有効', after:'削除(理由: '+reason+')' });
+      showToast('取込を削除しました');
       render();
     });
   });
-  document.querySelectorAll('[data-vc-batch-restore]').forEach(function(el){
+  document.querySelectorAll('[data-wv-import-restore]').forEach(function(el){
     el.addEventListener('click', async function(){
-      var id = el.getAttribute('data-vc-batch-restore');
-      var b = batchById(state.vcData, id);
-      await restoreVcBatches([id]);
-      await appendAuditLog({ action:'バッチ復元', target: b?b.name:id, before:'削除', after:'復元' });
-      showToast('バッチを復元しました');
+      var importId = el.getAttribute('data-wv-import-restore');
+      var imp = state.workVolume.imports.find(function(i){ return i.id===importId; });
+      if(!imp) return;
+      await restoreWvImport(todayStr(), importId);
+      await appendAuditLog({ action:'作業量取込復元', target: taskById(imp.taskId).name+' / '+imp.fileName, before:'削除', after:'復元' });
+      showToast('取込を復元しました');
       render();
     });
   });
-  document.querySelectorAll('[data-vc-slip-restore]').forEach(function(el){
-    el.addEventListener('click', async function(){
-      var id = el.getAttribute('data-vc-slip-restore');
-      var s = state.vcData.slips.find(function(x){ return x.id===id; });
-      await restoreVcSlips([id]);
-      await appendAuditLog({ action:'伝票復元', target: s?(s.shipperNo||s.slipNo):id, before:'削除', after:'復元' });
-      showToast('伝票を復元しました');
-      render();
-    });
-  });
-
   var shiftEnabledInput = document.getElementById('shiftEnabledInput');
   var shiftStartInput = document.getElementById('shiftStartInput');
   var shiftEndInput = document.getElementById('shiftEndInput');
@@ -4985,12 +4497,7 @@ function renderInput(){
         }).join('')+
       '</div>' : '';
       var liveCountersHtml = '';
-      var vcMode = vcModeForTask(tid);
-      if(isActive && vcMode==='batch'){
-        liveCountersHtml = renderVcBatchQueue(tid);
-      }else if(isActive && vcMode==='slip'){
-        liveCountersHtml = renderVcSlipQueue(tid);
-      }else if(isActive && t.subcategories && t.subcategories.length){
+      if(isActive && t.subcategories && t.subcategories.length){
         var subcatObjs = t.subcategories.map(function(sc){ return { name: subcatName(sc), unit: subcatUnit(sc, t.unit) }; });
         var liveRows = subcatObjs.map(function(sc){
           var v = (log.breakdown && log.breakdown[sc.name]) || 0;
@@ -5017,7 +4524,7 @@ function renderInput(){
         '<div><div class="task-tile-name">'+esc(t.name)+'</div><div class="task-tile-unit">単位: '+esc(t.unit)+'</div></div>'+
         '<div>'+
           '<div class="task-tile-status"><span class="status-dot '+(isActive?'working':'idle')+'"></span>'+(isActive?'作業中':'タップして開始')+'</div>'+
-          (isActive && !(t.subcategories && t.subcategories.length) && vcMode==='none' ? '<div class="task-tile-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsed)+'</div>' : '')+
+          (isActive && !(t.subcategories && t.subcategories.length) ? '<div class="task-tile-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsed)+'</div>' : '')+
         '</div>'+
         liveCountersHtml+
         coworkerHtml+
@@ -5084,7 +4591,6 @@ function bindInput(){
     el.addEventListener('click', function(){
       state.activeStaffId = el.getAttribute('data-pick-staff');
       state.showOtherTasks = false;
-      state.vcSelectedSlipIds = [];
       render();
       startTicker();
     });
@@ -5093,7 +4599,6 @@ function bindInput(){
   if(backBtn) backBtn.addEventListener('click', function(){
     state.activeStaffId = null;
     state.showOtherTasks = false;
-    state.vcSelectedSlipIds = [];
     render();
   });
   var summaryBack = document.getElementById('summaryBack');
@@ -5157,89 +4662,6 @@ function bindInput(){
       var parts = el.getAttribute('data-sub-timer').split('|');
       var tid = parts[0], scName = parts[1];
       toggleSubTimer(tid, scName);
-    });
-  });
-  document.querySelectorAll('[data-vc-checkbox]').forEach(function(el){
-    el.addEventListener('click', function(e){
-      e.stopPropagation();
-      var slipId = el.getAttribute('data-vc-checkbox');
-      if(!state.vcSelectedSlipIds) state.vcSelectedSlipIds = [];
-      var idx = state.vcSelectedSlipIds.indexOf(slipId);
-      if(idx===-1) state.vcSelectedSlipIds.push(slipId);
-      else state.vcSelectedSlipIds.splice(idx,1);
-      render();
-    });
-  });
-  document.querySelectorAll('[data-vc-batch-start]').forEach(function(el){
-    el.addEventListener('click', function(e){
-      e.stopPropagation();
-      startVcBatch(el.getAttribute('data-vc-batch-start'));
-    });
-  });
-  document.querySelectorAll('[data-vc-batch-complete]').forEach(function(el){
-    el.addEventListener('click', function(e){
-      e.stopPropagation();
-      var batchId = el.getAttribute('data-vc-batch-complete');
-      var batch = batchById(state.vcData, batchId);
-      var defaultQty = batch ? batch.totalQty : 0;
-      var input = prompt('完了する件数(ピース数)を確認してください。差異がなければそのままOKを押してください。', defaultQty);
-      if(input===null) return;
-      var qty = parseInt(input,10);
-      if(isNaN(qty) || qty<0) qty = defaultQty;
-      completeVcBatch(batchId, qty);
-    });
-  });
-  document.querySelectorAll('[data-vc-batch-hold]').forEach(function(el){
-    el.addEventListener('click', function(e){
-      e.stopPropagation();
-      var reason = prompt('保留の理由を入力してください(例: 欠品、他作業優先)', '');
-      if(reason===null) return;
-      holdVcBatch(el.getAttribute('data-vc-batch-hold'), reason);
-    });
-  });
-  document.querySelectorAll('[data-vc-batch-resume]').forEach(function(el){
-    el.addEventListener('click', function(e){
-      e.stopPropagation();
-      resumeVcBatch(el.getAttribute('data-vc-batch-resume'));
-    });
-  });
-  document.querySelectorAll('[data-vc-select-all]').forEach(function(el){
-    el.addEventListener('click', function(e){
-      e.stopPropagation();
-      var curLog = currentLog(state.activeStaffId);
-      var tid = curLog ? curLog.taskId : null;
-      state.vcSelectedSlipIds = (state.vcData && tid) ? vcActiveSlips(state.vcData).filter(function(s){ return s.taskId===tid && s.status!=='done'; }).map(function(s){ return s.id; }) : [];
-      render();
-    });
-  });
-  document.querySelectorAll('[data-vc-select-clear]').forEach(function(el){
-    el.addEventListener('click', function(e){
-      e.stopPropagation();
-      state.vcSelectedSlipIds = [];
-      render();
-    });
-  });
-  document.querySelectorAll('[data-vc-start-phase]').forEach(function(el){
-    el.addEventListener('click', function(e){
-      e.stopPropagation();
-      var phase = el.getAttribute('data-vc-start-phase');
-      var ids = (state.vcSelectedSlipIds||[]).slice();
-      if(!ids.length) return;
-      startVcBatchSession(ids, phase);
-    });
-  });
-  document.querySelectorAll('[data-vc-stop-session]').forEach(function(el){
-    el.addEventListener('click', function(e){
-      e.stopPropagation();
-      stopMyVcSession().then(render);
-    });
-  });
-  document.querySelectorAll('[data-vc-complete-selected]').forEach(function(el){
-    el.addEventListener('click', function(e){
-      e.stopPropagation();
-      var ids = (state.vcSelectedSlipIds||[]).slice();
-      if(!ids.length) return;
-      completeVcSlips(ids);
     });
   });
   var endDayBtn = document.getElementById('endDayBtn');
@@ -5410,9 +4832,6 @@ async function checkAutoShift(){
     await saveDay(day);
   }
 }
-async function pauseMyActiveVcPhase(){
-  await stopMyVcSession();
-}
 async function closeLogAndProceed(qty, breakdown){
   var m = state.modal;
   var log = state.day.logs.find(function(l){ return l.staffId===state.activeStaffId && l.taskId===m.closingTaskId && l.end===null; });
@@ -5422,7 +4841,6 @@ async function closeLogAndProceed(qty, breakdown){
     log.quantity = qty;
     if(breakdown){ log.breakdown = breakdown; } else { delete log.breakdown; }
   }
-  await pauseMyActiveVcPhase();
   await saveDay(state.day);
   state.modal = null;
   if(m.isEndDay){
@@ -6004,26 +5422,26 @@ function renderVcPreviewModal(m){
   var vp = state.vcPreview;
   if(!vp) return '';
   var taskName = taskById(vp.taskId).name;
-  var totalQty = vp.newSlips.reduce(function(a,s){ return a+s.totalQty; }, 0);
+  var primaryLabel = vp.cfg.taskKind==='vc' ? 'PO数' : '件数';
   var body;
   if(vp.cfg.enabled && vp.batches.length){
     var rows = vp.batches.map(function(b){
       var excluded = !!b._excluded;
       return '<div class="vc-preview-row'+(excluded?' vc-preview-excluded':'')+'">'+
         '<input type="text" class="vc-preview-name-input" data-vc-preview-name="'+b.id+'" value="'+esc(b.name)+'" '+(excluded?'disabled':'')+'>'+
-        '<span class="vc-preview-meta">'+b.slipCount+'伝票 ・ '+formatNum(b.totalQty)+'ピース'+(b.criteria.pickLocation?' ・ '+esc(b.criteria.pickLocation):'')+(b.criteria.invoiceType?' ・ '+esc(b.criteria.invoiceType):'')+'</span>'+
+        '<span class="vc-preview-meta">'+b.primaryCount+primaryLabel+' ・ '+b.lineCount+'明細 ・ '+formatNum(b.totalQty)+'ピース'+(b.criteria.pickLocation?' ・ '+esc(b.criteria.pickLocation):'')+(b.criteria.invoiceType?' ・ '+esc(b.criteria.invoiceType):'')+'</span>'+
         '<button type="button" class="vc-manage-toggle-btn" data-vc-preview-exclude="'+b.id+'">'+(excluded?'含める':'除外')+'</button>'+
       '</div>';
     }).join('');
     body = '<div class="pool-hint" style="margin-bottom:10px;">バッチ化基準: '+esc(criteriaLabel(vp.cfg.criteria))+' → '+vp.batches.length+'バッチ作成予定</div>'+
       '<div class="vc-slip-list" style="max-height:320px;">'+rows+'</div>';
   }else{
-    body = '<div class="pool-hint">この作業はバッチ管理を使わないため、伝票単位でそのまま取り込まれます。</div>';
+    body = '<div class="pool-hint">この作業はバッチ分類を使わないため、取込全体の合計値のみ保存されます。</div>';
   }
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" style="max-width:520px;text-align:left;">'+
       '<div class="modal-task-name" style="text-align:center;margin-bottom:6px;">プレビュー: '+esc(taskName)+' の取込結果</div>'+
-      '<div class="pool-hint" style="text-align:center;margin-bottom:14px;">新規伝票 '+vp.newSlips.length+'件 / 合計'+formatNum(totalQty)+'ピース'+(vp.skippedCount?'(取り込み済みのため'+vp.skippedCount+'件はスキップ)':'')+'</div>'+
+      '<div class="pool-hint" style="text-align:center;margin-bottom:14px;">'+vp.primaryCount+primaryLabel+' / '+vp.lineCount+'明細 / 合計'+formatNum(vp.totalQty)+'ピース</div>'+
       body+
       '<div class="modal-actions" style="margin-top:14px;">'+
         '<button class="modal-cancel" id="vcPreviewCancelBtn">キャンセル</button>'+
@@ -6060,28 +5478,20 @@ function bindVcPreviewModal(m){
   if(confirmBtn){
     confirmBtn.addEventListener('click', async function(){
       var vp = state.vcPreview;
-      var finalBatches = [];
-      vp.batches.forEach(function(b){
-        if(b._excluded){
-          vp.newSlips.filter(function(s){ return s.batchId===b.id; }).forEach(function(s){ s.batchId = null; });
-        }else{
-          delete b._excluded;
-          finalBatches.push(b);
-        }
-      });
-      if(!state.vcData) state.vcData = emptyVcData();
-      state.vcData.slips = state.vcData.slips.concat(vp.newSlips);
-      state.vcData.batches = state.vcData.batches.concat(finalBatches);
-      state.vcData.imports.push({
+      var finalBatches = vp.batches.filter(function(b){ return !b._excluded; });
+      finalBatches.forEach(function(b){ delete b._excluded; });
+      if(!state.workVolume) state.workVolume = emptyWorkVolume();
+      state.workVolume.imports.push({
         id: vp.importId, importedAt: new Date().toISOString(), fileName: vp.fileName, taskId: vp.taskId,
-        rowCount: vp.rowCount, slipCount: vp.newSlips.length, batchCount: finalBatches.length,
+        taskKind: vp.cfg.taskKind||'normal',
+        primaryCount: vp.primaryCount, lineCount: vp.lineCount, totalQty: vp.totalQty,
         deletedAt: null, deletedBy: null, deleteReason: null
       });
-      await saveVcData(todayStr(), state.vcData);
-      var totalQty = vp.newSlips.reduce(function(a,s){ return a+s.totalQty; }, 0);
-      await appendAuditLog({ action:'CSV取込確定', target: taskById(vp.taskId).name+' / '+vp.fileName, before:null, after: vp.newSlips.length+'件の伝票、'+finalBatches.length+'件のバッチ' });
-      var msg = '新規'+vp.newSlips.length+'件の伝票を追加しました(合計'+formatNum(totalQty)+'ピース)'+(finalBatches.length?'。'+finalBatches.length+'件のバッチを作成しました':'');
-      if(vp.skippedCount) msg += '。'+vp.skippedCount+'件はすでに取り込み済みのため、そのままにしました';
+      state.workVolume.batches = state.workVolume.batches.concat(finalBatches);
+      await saveWorkVolume(todayStr(), state.workVolume);
+      var primaryLabel = (vp.cfg.taskKind==='vc') ? 'PO数' : '件数';
+      await appendAuditLog({ action:'CSV作業量取込確定', target: taskById(vp.taskId).name+' / '+vp.fileName, before:null, after: vp.primaryCount+primaryLabel+'、'+finalBatches.length+'件のバッチ' });
+      var msg = '取込を確定しました('+vp.primaryCount+primaryLabel+' / '+vp.lineCount+'明細 / '+formatNum(vp.totalQty)+'ピース)'+(finalBatches.length?'。'+finalBatches.length+'件のバッチを作成しました':'');
       state.vcPreview = null;
       state.modal = null;
       showToast(msg);
@@ -6426,7 +5836,7 @@ function safeSnapshotForChangeDetection(){
   try{
     return JSON.stringify({
       roster: state.roster, backlog: state.backlog, templates: state.templates,
-      day: state.day, vcData: state.vcData,
+      day: state.day, workVolume: state.workVolume, vcCaseLedger: state.vcCaseLedger,
       breakSettings: state.breakSettings, shiftSettings: state.shiftSettings, achievementSettings: state.achievementSettings
     });
   }catch(e){ return 'x'+Math.random(); }
@@ -6468,8 +5878,12 @@ async function pollTick(){
     }
     if(pendingSaves>0) return;
     state.day = day;
-    var freshVcData = await loadVcData(todayStr());
-    if(freshVcData) state.vcData = freshVcData;
+    var freshWorkVolume = await loadWorkVolume(todayStr());
+    if(freshWorkVolume) state.workVolume = freshWorkVolume;
+    var freshWvConfig = await loadWorkVolumeConfig();
+    if(freshWvConfig) state.workVolumeConfig = freshWvConfig;
+    var freshCaseLedger = await loadVcCaseLedger(todayStr());
+    if(freshCaseLedger) state.vcCaseLedger = freshCaseLedger;
     notifyChanges(oldRoster, oldBacklog, oldDay, state.roster, state.backlog, state.day);
     await checkAutoBreak();
     await checkAutoShift();
@@ -6541,8 +5955,10 @@ async function init(){
   state.jpHolidays = await loadJpHolidays();
   await ensureTemplateTasksForToday();
   state.day = await loadDay();
-  state.vcData = await loadVcData(todayStr());
-  if(!state.vcData) state.vcData = emptyVcData();
+  state.workVolume = await loadWorkVolume(todayStr());
+  if(!state.workVolume) state.workVolume = emptyWorkVolume();
+  state.workVolumeConfig = await loadWorkVolumeConfig();
+  state.vcCaseLedger = await loadVcCaseLedger(todayStr());
   await checkAutoBreak();
   await checkAutoShift();
   render();

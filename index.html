@@ -196,6 +196,14 @@ input,select{font-family:inherit;}
 .csv-link-badge{display:inline-block;font-size:10px;font-weight:700;border-radius:10px;padding:2px 8px;margin-left:4px;vertical-align:middle;}
 .csv-link-badge-on{background:#E9F2F0;color:#0F6E56;}
 .csv-link-badge-off{background:var(--paper-100);color:var(--slate-500);}
+.fin-summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:10px;}
+.fin-summary-card{background:var(--paper-100);border-radius:12px;padding:14px;text-align:center;}
+.fin-summary-label{font-size:11px;color:var(--slate-500);margin-bottom:4px;}
+.fin-summary-value{font-family:var(--font-mono);font-size:20px;font-weight:700;color:var(--ink-900);}
+.fin-price-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.fin-price-taskname{flex:1;font-size:13px;font-weight:600;}
+.fin-price-input{width:90px;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;font-family:var(--font-mono);}
+.fin-price-unit{border:1px solid var(--paper-line);border-radius:8px;padding:6px 4px;font-size:12px;}
 .vc-preview-name-input{flex:1;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;font-size:13px;}
 .vc-preview-meta{font-size:11px;color:var(--slate-500);white-space:nowrap;}
 .vc-slip-list{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;}
@@ -789,6 +797,7 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
   if(cfg.url && cfg.anonKey && cfg.url.indexOf('YOUR-PROJECT')===-1){
     client = window.supabase.createClient(cfg.url, cfg.anonKey);
   }
+  window.__supabaseClient = client;
 
   window.storage = {
     get: async function(key, shared){
@@ -855,6 +864,13 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-07', items:[
+    '【収支情報の完全なアクセス分離】「💰 収支ダッシュボード」を追加。売上・原価・人件費・粗利・利益率は、管理者PINとは別に、Supabase Authでの本物のログインをしたセッションでしか取得できません。未ログイン時は、収支データを扱う関数がSupabaseへの問い合わせ自体を一切行わない設計です(画面を隠すだけの実装ではありません)',
+    '単価マスタ(作業ごとの単価)・人件費設定(時給)は、専用のテーブル(`unit_prices`/`labor_costs`)に分離。RLS(参照はmanager以上、変更はadminのみ)とGRANT(anonへの権限自体を削除)の二重で保護します。SQLは別ファイル(`financial_security_schema.sql`)としてお渡しします',
+    '作業者側(名前をタップして作業する画面)は一切変更していません。既存の作業実績・CSV連携・内訳計測・締めチェック等の機能への影響もありません',
+    '管理者PINを「ロックする」際に、収支ダッシュボードのログインも同時に解除し、共有端末での安全性を高めました',
+    '実際にコードを実行するテストで、未ログイン時は収支データの取得処理自体が一度も呼ばれないこと、保存処理も未ログイン時は実行されないこと、ログアウト後にメモリ上の収支データが消去されること、作業者向け画面のHTMLに収支関連の文言が一切含まれないことを確認済みです'
+  ]},
   { date:'2026-09-06', items:[
     '重要な不具合修正: 「作業量設定」で連携を有効にし忘れていても、実際にその日CSVを取り込んでいれば自動的にCSV連携作業として扱うように変更。これまでは設定の有効/無効だけを見ていたため、CSVを取り込んだのに現場で数量入力画面が出てしまう(設定漏れによる事故)ことがありました。今後は「設定が有効」または「その日の有効な取込データが1件以上ある」のどちらかを満たせば自動的にCSV連携として判定します(削除済みの取込のみの場合は対象外)',
     '管理者の作業ボードのCSV連携バッジも、閲覧中の日付の実際の取込状況と一致するように修正(過去日付を表示中でもズレません)',
@@ -1150,6 +1166,14 @@ var state = {
   showChangelog: false,
   isAdminUnlocked: false,
   adminPinHash: null,
+  managerSession: null,
+  managerSessionChecked: false,
+  managerLoginError: '',
+  managerLoginBusy: false,
+  financialUnitPrices: null,
+  financialLaborCost: null,
+  financialLoadError: '',
+  finPriceOpen: false,
   pinModal: null,
   pendingCalendarDate: null,
   auditLogDate: null,
@@ -1592,7 +1616,7 @@ async function loadAdminPinHash(){
 async function saveAdminPinHash(hash){
   try{ await window.storage.set('admin-pin-hash', hash, true); }catch(e){}
 }
-function ADMIN_GATED_ROLES(){ return ['manager','register','history','settings']; }
+function ADMIN_GATED_ROLES(){ return ['manager','register','history','settings','financial']; }
 /* ---------- audit log ---------- */
 async function loadAuditLog(dateStr){
   try{
@@ -2243,6 +2267,165 @@ function bindCalendar(){
     });
   });
 }
+function renderFinancial(){
+  if(!state.managerSessionChecked && window.__supabaseClient){
+    state.managerSessionChecked = true;
+    refreshManagerSession().then(function(){
+      if(hasManagerSession() && state.financialUnitPrices===null){
+        fetchFinancialData().then(render);
+      }else{
+        render();
+      }
+    });
+  }
+  if(hasManagerSession() && state.financialUnitPrices===null){
+    fetchFinancialData().then(render);
+  }
+  if(!hasManagerSession()){
+    return '<div class="mgr-wrap" style="max-width:420px;">'+
+      '<div class="panel">'+
+        '<div class="panel-title">💰 収支ダッシュボード</div>'+
+        '<div class="pool-hint" style="margin-bottom:14px;">この画面は売上・原価・人件費・粗利などの経営情報を扱います。閲覧には管理者アカウントでのログインが必要です(管理者PINとは別の、本物のログインです)。</div>'+
+        (state.managerLoginError ? '<div style="color:var(--rust-600);font-size:12px;margin-bottom:10px;">'+esc(state.managerLoginError)+'</div>' : '')+
+        '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">メールアドレス</label>'+
+        '<input type="email" id="mgrLoginEmail" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:10px;margin-bottom:10px;">'+
+        '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">パスワード</label>'+
+        '<input type="password" id="mgrLoginPassword" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:10px;margin-bottom:14px;">'+
+        '<button type="button" class="add-btn" id="mgrLoginBtn" style="width:100%;" '+(state.managerLoginBusy?'disabled':'')+'>'+(state.managerLoginBusy?'ログイン中...':'ログイン')+'</button>'+
+      '</div>'+
+    '</div>';
+  }
+  var dateStr = todayStr();
+  var day = state.day;
+  var summary = computeFinancialSummary(dateStr, day, state.workVolume);
+  var loadingOrError = '';
+  if(state.financialLoadError){
+    loadingOrError = '<div class="vc-warning-box">'+esc(state.financialLoadError)+'</div>';
+  }else if(!state.financialUnitPrices){
+    loadingOrError = '<div class="empty-note">読み込み中...</div>';
+  }
+  var summaryHtml = '';
+  if(summary){
+    var finRowsHtml = summary.rows.map(function(r){
+      return '<tr><td>'+esc(r.taskName)+'</td><td class="num">'+formatNum(r.qty)+esc(r.unitLabel)+'</td><td class="num">¥'+formatNum(r.pricePerUnit)+'</td><td class="num">¥'+formatNum(Math.round(r.sales))+'</td></tr>';
+    }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">単価が設定された作業がありません</td></tr>';
+    summaryHtml = '<div class="fin-summary-grid">'+
+      '<div class="fin-summary-card"><div class="fin-summary-label">売上</div><div class="fin-summary-value">¥'+formatNum(Math.round(summary.totalSales))+'</div></div>'+
+      '<div class="fin-summary-card"><div class="fin-summary-label">人件費</div><div class="fin-summary-value">¥'+formatNum(Math.round(summary.laborCost))+'</div></div>'+
+      '<div class="fin-summary-card"><div class="fin-summary-label">粗利</div><div class="fin-summary-value">¥'+formatNum(Math.round(summary.grossProfit))+'</div></div>'+
+      '<div class="fin-summary-card"><div class="fin-summary-label">利益率</div><div class="fin-summary-value">'+summary.margin.toFixed(1)+'%</div></div>'+
+    '</div>'+
+    '<table class="report-table" style="margin-top:14px;"><thead><tr><th>作業</th><th>数量</th><th>単価</th><th>売上</th></tr></thead><tbody>'+finRowsHtml+'</tbody></table>'+
+    '<div class="pool-hint" style="margin-top:8px;">総稼働'+summary.totalHours.toFixed(1)+'時間 ・ 本日('+esc(dateLabelFromStr(dateStr))+')分</div>';
+  }
+
+  var priceMap = {};
+  (state.financialUnitPrices||[]).forEach(function(p){ priceMap[p.task_id] = p; });
+  var todayTasks = tasksForDate(dateStr);
+  var priceRows = todayTasks.map(function(t){
+    var p = priceMap[t.id] || { price_per_unit:0, unit_label:'件' };
+    return '<div class="fin-price-row">'+
+      '<span class="fin-price-taskname">'+esc(t.name)+'</span>'+
+      '<input type="number" step="0.01" class="fin-price-input" data-fin-price-id="'+t.id+'" value="'+p.price_per_unit+'" placeholder="単価">'+
+      '<select class="fin-price-unit" data-fin-unit-id="'+t.id+'">'+
+        ['件','明細','ピース','ケース'].map(function(u){ return '<option value="'+u+'" '+(p.unit_label===u?'selected':'')+'>'+u+'あたり</option>'; }).join('')+
+      '</select>'+
+      '<button type="button" class="vc-manage-toggle-btn" data-fin-price-save="'+t.id+'">保存</button>'+
+    '</div>';
+  }).join('') || '<div class="empty-note">本日の作業がありません</div>';
+
+  return '<div class="mgr-wrap">'+
+    '<div class="panel">'+
+      '<div class="panel-title">💰 収支ダッシュボード <button class="pill-btn" id="mgrLogoutBtn" style="margin-left:10px;">ログアウト</button></div>'+
+      loadingOrError+
+      summaryHtml+
+    '</div>'+
+    '<details class="vc-manage-details" id="finPriceDetails" '+(state.finPriceOpen?'open':'')+' style="margin-top:16px;">'+
+      '<summary>単価マスタ・人件費設定</summary>'+
+      '<div style="margin-top:10px;">'+
+        '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">時給(人件費計算に使用)</label>'+
+        '<div style="display:flex;gap:8px;margin-bottom:16px;">'+
+          '<input type="number" id="finHourlyWage" value="'+((state.financialLaborCost&&state.financialLaborCost.hourly_wage)||0)+'" style="flex:1;border:1px solid var(--paper-line);border-radius:8px;padding:8px;">'+
+          '<button type="button" class="vc-manage-toggle-btn" id="finWageSaveBtn">保存</button>'+
+        '</div>'+
+        '<div class="pool-hint" style="margin-bottom:8px;">作業ごとの単価</div>'+
+        priceRows+
+      '</div>'+
+    '</details>'+
+  '</div>';
+}
+function bindFinancial(){
+  if(!hasManagerSession()){
+    var loginBtn = document.getElementById('mgrLoginBtn');
+    if(loginBtn){
+      loginBtn.addEventListener('click', async function(){
+        var email = document.getElementById('mgrLoginEmail').value.trim();
+        var password = document.getElementById('mgrLoginPassword').value;
+        if(!email || !password){ state.managerLoginError = 'メールアドレスとパスワードを入力してください'; render(); return; }
+        state.managerLoginBusy = true;
+        state.managerLoginError = '';
+        render();
+        var result = await managerSignIn(email, password);
+        state.managerLoginBusy = false;
+        if(!result.ok){
+          state.managerLoginError = result.error || 'ログインに失敗しました';
+          render();
+          return;
+        }
+        await appendAuditLog({ action:'収支ダッシュボードにログイン', target: email, before:null, after:'ログイン成功' });
+        await fetchFinancialData();
+        render();
+      });
+    }
+    return;
+  }
+  var logoutBtn = document.getElementById('mgrLogoutBtn');
+  if(logoutBtn){
+    logoutBtn.addEventListener('click', async function(){
+      var email = state.managerSession && state.managerSession.user ? state.managerSession.user.email : '';
+      await managerSignOut();
+      await appendAuditLog({ action:'収支ダッシュボードからログアウト', target: email, before:'ログイン中', after:'ログアウト' });
+      render();
+    });
+  }
+  var finPriceDetails = document.getElementById('finPriceDetails');
+  if(finPriceDetails){
+    finPriceDetails.addEventListener('toggle', function(){ state.finPriceOpen = finPriceDetails.open; });
+  }
+  document.querySelectorAll('[data-fin-price-save]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var taskId = el.getAttribute('data-fin-price-save');
+      var priceInput = document.querySelector('[data-fin-price-id="'+taskId+'"]');
+      var unitSelect = document.querySelector('[data-fin-unit-id="'+taskId+'"]');
+      var price = parseFloat(priceInput.value) || 0;
+      var unitLabel = unitSelect.value;
+      var ok = await saveUnitPrice(taskId, taskById(taskId).name, price, unitLabel);
+      if(ok){
+        await appendAuditLog({ action:'単価設定変更', target: taskById(taskId).name, before:null, after: price+'円/'+unitLabel });
+        showToast('「'+taskById(taskId).name+'」の単価を保存しました');
+        await fetchFinancialData();
+        render();
+      }else{
+        showToast('保存に失敗しました(権限をご確認ください)');
+      }
+    });
+  });
+  var finWageSaveBtn = document.getElementById('finWageSaveBtn');
+  if(finWageSaveBtn){
+    finWageSaveBtn.addEventListener('click', async function(){
+      var wage = parseFloat(document.getElementById('finHourlyWage').value) || 0;
+      var ok = await saveLaborCost(wage);
+      if(ok){
+        await appendAuditLog({ action:'時給設定変更', target:'labor_costs', before:null, after: wage+'円/時' });
+        showToast('時給を保存しました');
+        await fetchFinancialData();
+        render();
+      }else{
+        showToast('保存に失敗しました(権限をご確認ください)');
+      }
+    });
+  }
+}
 function renderHistory(){
   var dateStr = state.auditLogDate || todayStr();
   if(state.auditLogEntries===null){
@@ -2460,6 +2643,43 @@ function aggregateDays(days){
   });
   return { perStaff: perStaff, perTask: perTask };
 }
+function computeFinancialSummary(dateStr, day, workVolume){
+  if(!hasManagerSession()) return null;
+  if(!state.financialUnitPrices || !state.financialLaborCost) return null;
+  var agg = aggregateDays([day]);
+  var wv = workVolume || emptyWorkVolume();
+  var priceMap = {};
+  state.financialUnitPrices.forEach(function(p){ priceMap[p.task_id] = p; });
+  var rows = [];
+  var totalSales = 0;
+  Object.keys(agg.perTask).forEach(function(tid){
+    if(tid==='BREAK') return;
+    var price = priceMap[tid];
+    if(!price) return;
+    var wvTotals = wvTotalsForTask(wv, tid);
+    var qty = 0;
+    if(price.unit_label==='ピース') qty = wvTotals.totalQty;
+    else if(price.unit_label==='明細') qty = wvTotals.lineCount;
+    else if(price.unit_label==='ケース'){
+      var ledger = (state.vcCaseLedger && state.vcCaseLedger[tid]) || { entries: [] };
+      qty = vcCaseCurrentValue(ledger.entries);
+    }else{
+      qty = wvTotals.primaryCount;
+    }
+    var sales = qty * (price.price_per_unit||0);
+    totalSales += sales;
+    rows.push({ taskId: tid, taskName: taskById(tid).name, qty: qty, unitLabel: price.unit_label, pricePerUnit: price.price_per_unit, sales: sales });
+  });
+  var totalMs = 0;
+  Object.keys(agg.perStaff).forEach(function(sid){
+    totalMs += Math.max(0, (agg.perStaff[sid].ms||0) - (agg.perStaff[sid].breakMs||0));
+  });
+  var totalHours = totalMs/3600000;
+  var laborCost = totalHours * ((state.financialLaborCost && state.financialLaborCost.hourly_wage)||0);
+  var grossProfit = totalSales - laborCost;
+  var margin = totalSales>0 ? (grossProfit/totalSales*100) : 0;
+  return { rows: rows, totalSales: totalSales, laborCost: laborCost, totalHours: totalHours, grossProfit: grossProfit, margin: margin };
+}
 
 /* ---------- render root ---------- */
 function isUserBusy(){
@@ -2508,6 +2728,7 @@ function render(){
   else if(state.role==='calendar') html += renderCalendar();
   else if(state.role==='history') html += renderHistory();
   else if(state.role==='settings') html += renderSettings();
+  else if(state.role==='financial') html += renderFinancial();
   if(state.modal) html += renderModal();
   if(state.pinModal) html += renderPinModal();
   root.innerHTML = html;
@@ -2521,6 +2742,7 @@ function render(){
   if(state.role==='calendar') bindCalendar();
   if(state.role==='history') bindHistory();
   if(state.role==='settings') bindSettings();
+  if(state.role==='financial') bindFinancial();
   if(state.modal) bindModal();
   if(state.pinModal) bindPinModal();
   restoreScroll();
@@ -2582,6 +2804,12 @@ function renderGate(){
         '<div class="gate-icon" style="background:#F4EEE4;color:#8A6A3B;">&#9881;</div>'+
         '<div class="gate-card-title">設定</div>'+
         '<div class="gate-card-desc">自動出退勤・休憩・CSV取込バッチ管理・実績目標・管理者PIN(管理者専用)</div>'+
+      '</button>'+
+      '<button class="gate-card" data-role="financial">'+
+        '<div class="gate-lock-badge" title="管理者ログインが別途必要です">&#128274;&#128273;</div>'+
+        '<div class="gate-icon" style="background:#FDEEF2;color:#B33C63;">&#128176;</div>'+
+        '<div class="gate-card-title">収支ダッシュボード</div>'+
+        '<div class="gate-card-desc">売上・原価・人件費・粗利(管理者ログイン必須。PINとは別の認証です)</div>'+
       '</button>'+
     '</div>'+
     '<button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
@@ -2750,7 +2978,7 @@ function bindPinModal(){
 
 /* ---------- TOPBAR ---------- */
 function renderTopbar(){
-  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業実績入力', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定'}[state.role];
+  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業実績入力', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支ダッシュボード'}[state.role];
   var lockBtn = (state.isAdminUnlocked && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="管理者ロックをかけ直す">🔒 ロックする</button>' : '';
   return ''+
   '<div class="topbar">'+
@@ -2771,11 +2999,12 @@ function bindCommon(){
     render();
   });
   var lockBtn = document.getElementById('adminLockBtn');
-  if(lockBtn) lockBtn.addEventListener('click', function(){
+  if(lockBtn) lockBtn.addEventListener('click', async function(){
     state.isAdminUnlocked = false;
+    await managerSignOut();
     state.role = null; state.activeStaffId = null; state.modal = null;
     render();
-    showToast('管理者ロックをかけ直しました');
+    showToast('管理者ロックをかけ直しました(収支ダッシュボードのログインも解除しました)');
   });
 }
 
@@ -5291,6 +5520,85 @@ function csvLinkBadge(taskId, wvDataOverride){
     return '<span class="csv-link-badge csv-link-badge-on" title="数量はCSVから自動取得。現場での数量入力は不要です">📋 CSV連携</span>';
   }
   return '<span class="csv-link-badge csv-link-badge-off" title="現場で数量入力が必要です">✍️ 通常入力</span>';
+}
+/* ---------- 管理者(manager/admin)認証と収支データ ----------
+   重要: 以下の関数は、必ず「本物のSupabase Authセッションがあるか」を
+   確認してからデータ取得を行う。作業者(未ログイン=anon)のコード経路
+   からはこれらの関数が呼ばれることは一切ない(gate_financial系の
+   画面からのみ呼び出される)。データ取得自体をしないことで、
+   Networkタブにも収支データが一切現れないようにする。 */
+async function refreshManagerSession(){
+  if(!window.__supabaseClient) { state.managerSession = null; return null; }
+  try{
+    var res = await window.__supabaseClient.auth.getSession();
+    state.managerSession = (res.data && res.data.session) ? res.data.session : null;
+  }catch(e){ state.managerSession = null; }
+  return state.managerSession;
+}
+async function managerSignIn(email, password){
+  if(!window.__supabaseClient) return { ok:false, error:'Supabaseが設定されていません' };
+  try{
+    var res = await window.__supabaseClient.auth.signInWithPassword({ email: email, password: password });
+    if(res.error) return { ok:false, error: res.error.message };
+    state.managerSession = res.data.session;
+    return { ok:true };
+  }catch(e){
+    return { ok:false, error: 'ログインに失敗しました' };
+  }
+}
+async function managerSignOut(){
+  if(window.__supabaseClient){
+    try{ await window.__supabaseClient.auth.signOut(); }catch(e){}
+  }
+  state.managerSession = null;
+  state.financialUnitPrices = null;
+  state.financialLaborCost = null;
+}
+function hasManagerSession(){
+  return !!(state.managerSession && state.managerSession.user);
+}
+async function fetchFinancialData(){
+  state.financialLoadError = '';
+  if(!hasManagerSession() || !window.__supabaseClient){
+    state.financialUnitPrices = null;
+    state.financialLaborCost = null;
+    return;
+  }
+  try{
+    var upRes = await window.__supabaseClient.from('unit_prices').select('*');
+    var lcRes = await window.__supabaseClient.from('labor_costs').select('*').eq('id','default').maybeSingle();
+    if(upRes.error || lcRes.error){
+      state.financialLoadError = 'このアカウントには収支データの閲覧権限がありません';
+      state.financialUnitPrices = null;
+      state.financialLaborCost = null;
+      return;
+    }
+    state.financialUnitPrices = upRes.data || [];
+    state.financialLaborCost = lcRes.data || { id:'default', hourly_wage:0 };
+  }catch(e){
+    state.financialLoadError = '収支データの取得に失敗しました';
+    state.financialUnitPrices = null;
+    state.financialLaborCost = null;
+  }
+}
+async function saveUnitPrice(taskId, taskName, pricePerUnit, unitLabel){
+  if(!hasManagerSession() || !window.__supabaseClient) return false;
+  try{
+    var res = await window.__supabaseClient.from('unit_prices').upsert({
+      task_id: taskId, task_name: taskName, price_per_unit: pricePerUnit, unit_label: unitLabel,
+      updated_by: state.managerSession.user.id, updated_at: new Date().toISOString()
+    }, { onConflict: 'task_id' });
+    return !res.error;
+  }catch(e){ return false; }
+}
+async function saveLaborCost(hourlyWage){
+  if(!hasManagerSession() || !window.__supabaseClient) return false;
+  try{
+    var res = await window.__supabaseClient.from('labor_costs').upsert({
+      id:'default', hourly_wage: hourlyWage, updated_by: state.managerSession.user.id, updated_at: new Date().toISOString()
+    }, { onConflict: 'id' });
+    return !res.error;
+  }catch(e){ return false; }
 }
 function isCsvLinkedTask(taskId, wvDataOverride){
   var cfg = state.workVolumeConfig && state.workVolumeConfig[taskId];

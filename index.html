@@ -864,6 +864,13 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-09', items:[
+    '「収支・分析」画面の指標名を修正。曖昧だった「件数/PO」を「出荷件数」(通常出荷)と「PO数」(VC)に分離し、常に別々の項目として表示するように変更',
+    '「作業時間(案分)」を「人時(推計)」に名称変更。荷主・商品単位では実測できないため、作業枠全体の実測人時をピース数の割合で配分した推計値であることを画面上に明記しました',
+    '商品別分析に、商品コード・商品名・荷主の列と、ケース数・端数(現時点でCSVに該当列が無いため「取得不可」と表示)を追加。荷主→商品のドリルダウンは維持しています',
+    '将来のkintone連携に備え、単価取得処理を`getUnitPriceSource()`という1つの関数にまとめ、商品マスタ取得用の`getProductMasterInfo()`(現時点は常に情報なしを返すスタブ)を追加。収支計算のロジック自体はデータの取得元を意識しない設計のため、将来kintoneに切り替える際もこの2関数の中身を差し替えるだけで済みます。今回、kintoneへの実際のAPI接続は行っていません',
+    '実際の本番CSVを使ったテストで、出荷件数/PO数が作業の種類に応じて正しく分離されること、ケース数・端数が実在しない値を推測せず「取得不可」表示になることを確認済みです'
+  ]},
   { date:'2026-09-08', items:[
     '【荷主別・商品別の収支分析】「収支ダッシュボード」を「収支・分析」に拡張。期間・荷主・商品・作業種別を切り替えて、出荷件数/PO数・明細数・出荷個数・作業時間(案分)・売上・人件費・粗利・粗利率を確認できます。「荷主→商品」のドリルダウンに対応しています',
     'CSV取込時に、実際のCSVヘッダー(取引先名・商品ID・商品名)を確認したうえで、荷主別・商品別の内訳を新たに取得するように変更(既存の件数/明細/ピースの集計方法・既存フィールドは変更していません)。ケース数・端数は、判別できる列がCSVに存在しないことを確認したため、今回は対象外としています',
@@ -2401,22 +2408,44 @@ function renderFinancial(){
     if(state.finDrillCustomer){
       analyticsBody += '<div class="vc-import-status">「'+esc(state.finDrillCustomer)+'」の商品別 <button type="button" class="vc-manage-toggle-btn" id="finDrillBackBtn" style="margin-left:8px;">荷主一覧に戻る</button></div>';
     }
+    var isProductAxis = state.finAxis==='product';
+    var headCols = isProductAxis
+      ? '<th>商品コード</th><th>商品名</th><th>荷主</th><th>出荷件数</th><th>PO数</th><th>明細数</th><th>出荷個数</th><th>ケース数</th><th>端数</th><th>人時(推計)</th><th>売上</th><th>人件費</th><th>粗利</th><th>粗利率</th>'
+      : '<th></th><th>出荷件数</th><th>PO数</th><th>明細数</th><th>出荷個数</th><th>人時(推計)</th><th>売上</th><th>人件費</th><th>粗利</th><th>粗利率</th><th></th>';
+    var colCount = isProductAxis ? 14 : 10;
     var finRows2 = state.finAnalyticsRows.map(function(r){
+      var caseCell = '<td class="num" style="color:var(--slate-500);">'+(r.caseQty!==null?formatNum(r.caseQty):'取得不可')+'</td>';
+      var fractionCell = '<td class="num" style="color:var(--slate-500);">'+(r.fractionQty!==null?formatNum(r.fractionQty):'取得不可')+'</td>';
+      if(isProductAxis){
+        return '<tr><td>'+esc(r.productCode||r.key)+'</td><td>'+esc(r.productName||r.label)+'</td><td>'+esc(r.customerName||'')+'</td>'+
+          '<td class="num">'+formatNum(r.shipmentCount)+'</td>'+
+          '<td class="num">'+formatNum(r.poCount)+'</td>'+
+          '<td class="num">'+formatNum(r.lineCount)+'</td>'+
+          '<td class="num">'+formatNum(r.totalQty)+'</td>'+
+          caseCell+fractionCell+
+          '<td class="num">'+r.personHours.toFixed(1)+'h</td>'+
+          '<td class="num">¥'+formatNum(Math.round(r.sales))+'</td>'+
+          '<td class="num">¥'+formatNum(Math.round(r.laborCost))+'</td>'+
+          '<td class="num">¥'+formatNum(Math.round(r.grossProfit))+'</td>'+
+          '<td class="num">'+r.margin.toFixed(1)+'%</td>'+
+        '</tr>';
+      }
       var drillBtn = (state.finAxis==='customer') ? '<button type="button" class="vc-manage-toggle-btn" data-fin-drill="'+esc(r.key)+'">商品別を見る</button>' : '';
       return '<tr><td>'+esc(r.label)+'</td>'+
-        '<td class="num">'+formatNum(r.primaryCount)+'</td>'+
+        '<td class="num">'+formatNum(r.shipmentCount)+'</td>'+
+        '<td class="num">'+formatNum(r.poCount)+'</td>'+
         '<td class="num">'+formatNum(r.lineCount)+'</td>'+
         '<td class="num">'+formatNum(r.totalQty)+'</td>'+
-        '<td class="num">'+r.hours.toFixed(1)+'h</td>'+
+        '<td class="num">'+r.personHours.toFixed(1)+'h</td>'+
         '<td class="num">¥'+formatNum(Math.round(r.sales))+'</td>'+
         '<td class="num">¥'+formatNum(Math.round(r.laborCost))+'</td>'+
         '<td class="num">¥'+formatNum(Math.round(r.grossProfit))+'</td>'+
         '<td class="num">'+r.margin.toFixed(1)+'%</td>'+
         '<td class="num">'+drillBtn+'</td>'+
       '</tr>';
-    }).join('') || '<tr><td colspan="10" style="color:var(--slate-500);">該当するデータがありません(単価が未設定の可能性があります)</td></tr>';
-    analyticsBody += '<div style="overflow-x:auto;"><table class="report-table" style="margin-top:10px;"><thead><tr><th></th><th>件数/PO</th><th>明細</th><th>ピース</th><th>作業時間(案分)</th><th>売上</th><th>人件費</th><th>粗利</th><th>粗利率</th><th></th></tr></thead><tbody>'+finRows2+'</tbody></table></div>'+
-      '<div class="pool-hint" style="margin-top:8px;">※「作業時間(案分)」は、作業枠全体の実測時間を、荷主/商品ごとのピース数の割合で按分した推計値です(実測ではありません)</div>';
+    }).join('') || '<tr><td colspan="'+colCount+'" style="color:var(--slate-500);">該当するデータがありません(単価が未設定の可能性があります)</td></tr>';
+    analyticsBody += '<div style="overflow-x:auto;"><table class="report-table" style="margin-top:10px;"><thead><tr>'+headCols+'</tr></thead><tbody>'+finRows2+'</tbody></table></div>'+
+      '<div class="pool-hint" style="margin-top:8px;">※「人時(推計)」は、作業枠全体の実測人時を、荷主/商品ごとの出荷個数の割合で配分した推計値です(実測ではありません)。「ケース数」「端数」は、現在お使いのCSVに該当する列が無いため取得できません。</div>';
   }else{
     analyticsBody = '<div class="empty-note">期間を選び「集計する」を押してください。</div>';
   }
@@ -2842,17 +2871,22 @@ function computeAnalytics(days, volumes, axis, filterCustomer){
   var groups = {};
   var hourlyWage = (state.financialLaborCost && state.financialLaborCost.hourly_wage)||0;
 
-  function addToGroup(key, label, taskId, customerName, primaryCount, lineCount, totalQty){
-    if(!groups[key]) groups[key] = { key:key, label:label, primaryCount:0, lineCount:0, totalQty:0, hours:0, sales:0, customerName:customerName, taskIds:{} };
+  // 出荷件数(通常出荷)とPO数(VC)は意味が異なるため、別々の集計値として保持する。
+  // 明細数・出荷個数はもともと別項目として扱っていたため変更なし。
+  function addToGroup(key, label, taskId, taskKind, customerName, primaryCount, lineCount, totalQty){
+    if(!groups[key]) groups[key] = { key:key, label:label, shipmentCount:0, poCount:0, lineCount:0, totalQty:0, personHours:0, sales:0, customerName:customerName, taskIds:{} };
     var g = groups[key];
-    g.primaryCount += primaryCount;
+    if(taskKind==='vc') g.poCount += primaryCount;
+    else g.shipmentCount += primaryCount;
     g.lineCount += lineCount;
     g.totalQty += totalQty;
     g.taskIds[taskId] = true;
-    // 案分: このグループの、作業枠全体のピース数に対する割合ぶんだけ作業時間を按分する(実測ではなく推計です)
+    // 推計: このグループの、作業枠全体の出荷個数に対する割合ぶんだけ人時を配分する。
+    // 実測ではなく推計値。将来、荷主・商品単位で実測できるようになった場合は、
+    // ここをその実測値に置き換えられるよう、personHoursは常にこの1関数だけで算出する。
     var taskTotalQty = (taskVolumeTotals[taskId] && taskVolumeTotals[taskId].totalQty) || 0;
     var share = taskTotalQty>0 ? (totalQty/taskTotalQty) : 0;
-    g.hours += (taskHours[taskId]||0) * share;
+    g.personHours += (taskHours[taskId]||0) * share;
     var price = priceLookup(state.financialUnitPrices, taskId, customerName);
     if(price){
       var qtyForPrice = price.unit_label==='ピース' ? totalQty : (price.unit_label==='明細' ? lineCount : primaryCount);
@@ -2864,7 +2898,7 @@ function computeAnalytics(days, volumes, axis, filterCustomer){
     allImports.forEach(function(imp){
       Object.keys(imp.byCustomer||{}).forEach(function(cust){
         var c = imp.byCustomer[cust];
-        addToGroup(cust, cust, imp.taskId, cust, c.primaryCount, c.lineCount, c.totalQty);
+        addToGroup(cust, cust, imp.taskId, imp.taskKind, cust, c.primaryCount, c.lineCount, c.totalQty);
       });
     });
   }else if(axis==='product'){
@@ -2872,22 +2906,31 @@ function computeAnalytics(days, volumes, axis, filterCustomer){
       Object.keys(imp.byProduct||{}).forEach(function(code){
         var p = imp.byProduct[code];
         if(filterCustomer && p.customerName!==filterCustomer) return;
-        addToGroup(code, (p.productName||code)+'('+code+')', imp.taskId, p.customerName, p.primaryCount, p.lineCount, p.totalQty);
+        addToGroup(code, (p.productName||code), imp.taskId, imp.taskKind, p.customerName, p.primaryCount, p.lineCount, p.totalQty);
+        groups[code].productCode = code;
+        groups[code].productName = p.productName||'';
       });
     });
   }else{
     Object.keys(taskVolumeTotals).forEach(function(tid){
       var v = taskVolumeTotals[tid];
-      addToGroup(tid, taskById(tid).name, tid, null, v.primaryCount, v.lineCount, v.totalQty);
+      var kindForTask = allImports.find(function(imp){ return imp.taskId===tid; });
+      addToGroup(tid, taskById(tid).name, tid, kindForTask ? kindForTask.taskKind : 'normal', null, v.primaryCount, v.lineCount, v.totalQty);
     });
   }
 
   var rows = Object.keys(groups).map(function(k){
     var g = groups[k];
-    var laborCost = g.hours * hourlyWage;
+    var laborCost = g.personHours * hourlyWage;
     var grossProfit = g.sales - laborCost;
     var margin = g.sales>0 ? (grossProfit/g.sales*100) : 0;
-    return { key:g.key, label:g.label, primaryCount:g.primaryCount, lineCount:g.lineCount, totalQty:g.totalQty, hours:g.hours, sales:g.sales, laborCost:laborCost, grossProfit:grossProfit, margin:margin, customerName:g.customerName };
+    return {
+      key:g.key, label:g.label, productCode:g.productCode, productName:g.productName,
+      shipmentCount:g.shipmentCount, poCount:g.poCount, lineCount:g.lineCount, totalQty:g.totalQty,
+      caseQty:null, fractionQty:null, // CSVに該当列が無いため現時点では取得不可(推測計算はしない)
+      personHours:g.personHours, sales:g.sales, laborCost:laborCost, grossProfit:grossProfit, margin:margin,
+      customerName:g.customerName
+    };
   });
   rows.sort(function(a,b){ return b.sales-a.sales; });
   return rows;
@@ -5807,6 +5850,29 @@ async function managerSignOut(){
 function hasManagerSession(){
   return !!(state.managerSession && state.managerSession.user);
 }
+/* ---------- 単価データの取得元(将来kintoneへの切替ポイント) ----------
+   現在はSupabaseのunit_pricesテーブルから取得しているが、将来的に
+   kintoneの単価マスタをAPI経由で取得する形に切り替える場合は、
+   この関数の中身だけを差し替えればよい設計にしてある。
+   呼び出し側(fetchFinancialData等)や集計エンジン(computeAnalytics)は
+   一切変更不要。
+   ※今回はkintone API連携そのものは実装していません(Supabaseから取得する
+   現行の実装のまま)。 */
+async function getUnitPriceSource(){
+  if(!window.__supabaseClient) return { ok:false, rows:[] };
+  var res = await window.__supabaseClient.from('unit_prices').select('*');
+  if(res.error) return { ok:false, rows:[] };
+  return { ok:true, rows: res.data || [] };
+}
+/* ---------- 商品マスタ情報の取得(将来kintone連携用のスタブ) ----------
+   商品コードをキーに、ケース入数・才数などをkintoneの商品マスタから
+   取得する想定の関数。現時点ではkintone連携が無いため、常にnullを返す。
+   将来この関数の中身をkintone APIコールに差し替えるだけで、
+   ケース数・端数・才数の計算が有効になる設計にしてある。
+   (収支・分析側は、この関数がnullを返す間は「取得不可」と表示する) */
+async function getProductMasterInfo(productCode){
+  return null; // 将来: kintone商品マスタAPIから { caseQty, saijou, ... } を返す
+}
 async function fetchFinancialData(){
   state.financialLoadError = '';
   if(!hasManagerSession() || !window.__supabaseClient){
@@ -5815,15 +5881,15 @@ async function fetchFinancialData(){
     return;
   }
   try{
-    var upRes = await window.__supabaseClient.from('unit_prices').select('*');
+    var upResult = await getUnitPriceSource();
     var lcRes = await window.__supabaseClient.from('labor_costs').select('*').eq('id','default').maybeSingle();
-    if(upRes.error || lcRes.error){
+    if(!upResult.ok || lcRes.error){
       state.financialLoadError = 'このアカウントには収支データの閲覧権限がありません';
       state.financialUnitPrices = null;
       state.financialLaborCost = null;
       return;
     }
-    state.financialUnitPrices = upRes.data || [];
+    state.financialUnitPrices = upResult.rows;
     state.financialLaborCost = lcRes.data || { id:'default', hourly_wage:0 };
   }catch(e){
     state.financialLoadError = '収支データの取得に失敗しました';

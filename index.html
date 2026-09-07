@@ -864,6 +864,12 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-10', items:[
+    '将来のkintone連携に備えた設計を精緻化(APIの実装は今回も行っていません)',
+    '商品マスタ情報の取得を、商品コード1件ごとに問い合わせる方式ではなく、分析対象の商品コードをまとめて1回で問い合わせ、結果をメモリ上でキャッシュする方式(`getProductMasterInfoBatch`)に設計。同じ商品コードを再度集計しても再問い合わせが発生しません',
+    '単価マスタの取得元を切り替える`UNIT_PRICE_SOURCE`フラグを追加。将来kintoneを正本にする際にこの値を切り替えると、「単価マスタ・人件費設定」画面が自動的に読み取り専用表示(「kintoneで管理してください」)に切り替わる構造にしました。現在は引き続きSupabaseでの手入力・保存が可能です',
+    '実際にコードを実行するテストで、5件の商品コードをまとめて要求した際に問い合わせが1回だけ発生すること、同じコードを再要求しても再問い合わせが発生しないこと、新しいコードが混ざった場合は新しい分だけ問い合わせされることを確認済みです'
+  ]},
   { date:'2026-09-09', items:[
     '「収支・分析」画面の指標名を修正。曖昧だった「件数/PO」を「出荷件数」(通常出荷)と「PO数」(VC)に分離し、常に別々の項目として表示するように変更',
     '「作業時間(案分)」を「人時(推計)」に名称変更。荷主・商品単位では実測できないため、作業枠全体の実測人時をピース数の割合で配分した推計値であることを画面上に明記しました',
@@ -2381,8 +2387,12 @@ function renderFinancial(){
   var priceMap = {};
   (state.financialUnitPrices||[]).forEach(function(p){ priceMap[p.task_id] = p; });
   var todayTasks = tasksForDate(dateStr);
+  var isPriceEditable = (UNIT_PRICE_SOURCE==='supabase');
   var priceRows = todayTasks.map(function(t){
     var p = priceMap[t.id] || { price_per_unit:0, unit_label:'件' };
+    if(!isPriceEditable){
+      return '<div class="fin-price-row"><span class="fin-price-taskname">'+esc(t.name)+'</span><span class="pool-hint" style="margin:0;">'+formatNum(p.price_per_unit)+'円/'+esc(p.unit_label)+'</span></div>';
+    }
     return '<div class="fin-price-row">'+
       '<span class="fin-price-taskname">'+esc(t.name)+'</span>'+
       '<input type="number" step="0.01" class="fin-price-input" data-fin-price-id="'+t.id+'" value="'+p.price_per_unit+'" placeholder="単価">'+
@@ -2392,6 +2402,7 @@ function renderFinancial(){
       '<button type="button" class="vc-manage-toggle-btn" data-fin-price-save="'+t.id+'">保存</button>'+
     '</div>';
   }).join('') || '<div class="empty-note">本日の作業がありません</div>';
+  var priceSourceNote = isPriceEditable ? '' : '<div class="vc-warning-box">単価はkintoneのマスタで管理されています。物流ボードからは変更できません。単価の変更はkintone側で行ってください。</div>';
 
   if(!state.finStartDate) state.finStartDate = dateStr;
   if(!state.finEndDate) state.finEndDate = dateStr;
@@ -2472,6 +2483,7 @@ function renderFinancial(){
     '<details class="vc-manage-details" id="finPriceDetails" '+(state.finPriceOpen?'open':'')+' style="margin-top:16px;">'+
       '<summary>単価マスタ・人件費設定</summary>'+
       '<div style="margin-top:10px;">'+
+        priceSourceNote+
         '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">時給(人件費計算に使用)</label>'+
         '<div style="display:flex;gap:8px;margin-bottom:16px;">'+
           '<input type="number" id="finHourlyWage" value="'+((state.financialLaborCost&&state.financialLaborCost.hourly_wage)||0)+'" style="flex:1;border:1px solid var(--paper-line);border-radius:8px;padding:8px;">'+
@@ -2540,7 +2552,7 @@ function bindFinancial(){
       state.finDrillCustomer = null;
       render();
       var collected = await collectDaysAndVolumeForRange(state.finStartDate, state.finEndDate);
-      state.finAnalyticsRows = computeAnalytics(collected.days, collected.volumes, state.finAxis, null);
+      state.finAnalyticsRows = await computeAnalytics(collected.days, collected.volumes, state.finAxis, null);
       state.finAnalyticsLoading = false;
       render();
     });
@@ -2553,7 +2565,7 @@ function bindFinancial(){
       state.finAnalyticsLoading = true;
       render();
       var collected = await collectDaysAndVolumeForRange(state.finStartDate, state.finEndDate);
-      state.finAnalyticsRows = computeAnalytics(collected.days, collected.volumes, 'product', customerName);
+      state.finAnalyticsRows = await computeAnalytics(collected.days, collected.volumes, 'product', customerName);
       state.finAnalyticsLoading = false;
       render();
     });
@@ -2566,7 +2578,7 @@ function bindFinancial(){
       state.finAnalyticsLoading = true;
       render();
       var collected = await collectDaysAndVolumeForRange(state.finStartDate, state.finEndDate);
-      state.finAnalyticsRows = computeAnalytics(collected.days, collected.volumes, 'customer', null);
+      state.finAnalyticsRows = await computeAnalytics(collected.days, collected.volumes, 'customer', null);
       state.finAnalyticsLoading = false;
       render();
     });
@@ -2848,7 +2860,7 @@ function priceLookup(priceRows, taskId, customerName){
   }
   return { days: days, volumes: volumes };
 }
-function computeAnalytics(days, volumes, axis, filterCustomer){
+async function computeAnalytics(days, volumes, axis, filterCustomer){
   if(!hasManagerSession()) return null;
   if(!state.financialUnitPrices || !state.financialLaborCost) return null;
   var agg = aggregateDays(days);
@@ -2927,11 +2939,26 @@ function computeAnalytics(days, volumes, axis, filterCustomer){
     return {
       key:g.key, label:g.label, productCode:g.productCode, productName:g.productName,
       shipmentCount:g.shipmentCount, poCount:g.poCount, lineCount:g.lineCount, totalQty:g.totalQty,
-      caseQty:null, fractionQty:null, // CSVに該当列が無いため現時点では取得不可(推測計算はしない)
+      caseQty:null, fractionQty:null, // 下でまとめて商品マスタ情報を取得し、あれば上書きする
       personHours:g.personHours, sales:g.sales, laborCost:laborCost, grossProfit:grossProfit, margin:margin,
       customerName:g.customerName
     };
   });
+
+  if(axis==='product' && rows.length){
+    // 商品コードをまとめて集め、1回のバッチ呼び出しで商品マスタ情報を取得する
+    // (商品ごとに1件ずつ問い合わせない。getProductMasterInfoBatch側でキャッシュも効く)
+    var codes = rows.map(function(r){ return r.productCode; }).filter(Boolean);
+    var masterInfo = await getProductMasterInfoBatch(codes);
+    rows.forEach(function(r){
+      var info = r.productCode ? masterInfo[r.productCode] : null;
+      if(info){
+        r.caseQty = (typeof info.caseQty==='number') ? info.caseQty : null;
+        r.fractionQty = (typeof info.fractionQty==='number') ? info.fractionQty : null;
+      }
+    });
+  }
+
   rows.sort(function(a,b){ return b.sales-a.sales; });
   return rows;
 }
@@ -5851,27 +5878,58 @@ function hasManagerSession(){
   return !!(state.managerSession && state.managerSession.user);
 }
 /* ---------- 単価データの取得元(将来kintoneへの切替ポイント) ----------
-   現在はSupabaseのunit_pricesテーブルから取得しているが、将来的に
-   kintoneの単価マスタをAPI経由で取得する形に切り替える場合は、
-   この関数の中身だけを差し替えればよい設計にしてある。
+   現在はSupabaseのunit_pricesテーブルから取得・編集している。
+   将来kintoneの単価マスタを正本にする場合は、UNIT_PRICE_SOURCE を
+   'kintone' に切り替え、getUnitPriceSource() の中身をkintone APIコールに
+   差し替える。物流ボード側からの編集(saveUnitPrice)は二重管理を避けるため
+   行わなくなり、「単価マスタ・人件費設定」画面は自動的に読み取り専用表示
+   (「kintoneで管理してください」)に切り替わる(renderFinancial参照)。
    呼び出し側(fetchFinancialData等)や集計エンジン(computeAnalytics)は
    一切変更不要。
-   ※今回はkintone API連携そのものは実装していません(Supabaseから取得する
-   現行の実装のまま)。 */
+   ※今回はkintone API連携そのものは実装していません(Supabaseから取得・
+   編集する現行の実装のまま。UNIT_PRICE_SOURCE も 'supabase' のままです)。 */
+var UNIT_PRICE_SOURCE = 'supabase'; // 将来: 'kintone' に切り替えると単価編集UIが読み取り専用になる
 async function getUnitPriceSource(){
   if(!window.__supabaseClient) return { ok:false, rows:[] };
   var res = await window.__supabaseClient.from('unit_prices').select('*');
   if(res.error) return { ok:false, rows:[] };
   return { ok:true, rows: res.data || [] };
 }
-/* ---------- 商品マスタ情報の取得(将来kintone連携用のスタブ) ----------
+/* ---------- 商品マスタ情報の取得(将来kintone連携用。バッチ取得+キャッシュ設計) ----------
    商品コードをキーに、ケース入数・才数などをkintoneの商品マスタから
-   取得する想定の関数。現時点ではkintone連携が無いため、常にnullを返す。
-   将来この関数の中身をkintone APIコールに差し替えるだけで、
-   ケース数・端数・才数の計算が有効になる設計にしてある。
-   (収支・分析側は、この関数がnullを返す間は「取得不可」と表示する) */
-async function getProductMasterInfo(productCode){
-  return null; // 将来: kintone商品マスタAPIから { caseQty, saijou, ... } を返す
+   取得する想定のインターフェース。
+
+   重要: 実際にkintone APIを実装する際は、商品コード1件につき1リクエストを
+   発行する方式にはしない。分析対象の商品コードをすべて集めたうえで、
+     1) まだキャッシュに無いコードだけを抽出
+     2) kintoneに「これらのコードに該当するレコード」を1回(または
+        必要であれば分割しても少数回)のクエリでまとめて問い合わせる
+     3) 結果を商品コードをキーにしたオブジェクトに変換し、キャッシュへ格納
+     4) 呼び出し元には、キャッシュ済み分+今回取得した分をまとめて返す
+   という流れにする。下記の関数はこの形で呼び出せるよう、最初から
+   「複数コードをまとめて受け取り、まとめて返す」シグネチャにしてある。
+
+   現時点ではkintone連携が無いため、内部の実問い合わせ部分
+   (fetchProductMasterFromKintone)は常に空を返すダミーのままだが、
+   バッチ化・キャッシュの構造自体は今回のうちに整えておく。 */
+var productMasterCache = {}; // productCode -> {caseQty, saijou, ...} | null(取得したが情報なし)
+async function fetchProductMasterFromKintone(productCodes){
+  // 将来: kintoneの商品マスタアプリへ、productCodes をまとめて問い合わせる。
+  // 例: 「商品コード in (…)」のようなクエリで1回のAPIコールにまとめる想定。
+  // 今回はkintone連携を実装しないため、常に空を返す。
+  return {}; // { [productCode]: {caseQty, saijou, ...} }
+}
+async function getProductMasterInfoBatch(productCodes){
+  var uncached = productCodes.filter(function(code){ return !(code in productMasterCache); });
+  if(uncached.length){
+    var fetched = await fetchProductMasterFromKintone(uncached);
+    uncached.forEach(function(code){
+      productMasterCache[code] = (fetched && fetched[code]) ? fetched[code] : null;
+    });
+  }
+  var result = {};
+  productCodes.forEach(function(code){ result[code] = productMasterCache[code] || null; });
+  return result;
 }
 async function fetchFinancialData(){
   state.financialLoadError = '';

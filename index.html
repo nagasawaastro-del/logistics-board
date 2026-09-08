@@ -869,6 +869,14 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-15', items:[
+    '【得意先・作業枠マスターとCSV自動紐付け】設定に「得意先・作業枠マスター」を追加。CSVの「取引先名」から、あらかじめ登録した対応表をもとに自動で作業枠を判定できるようになりました。得意先の追加・編集・削除・有効/無効の切替に対応しています',
+    '判定は完全一致のみを使用(全角/半角の違いなど明らかなゆらぎのみ吸収)。「株式会社A」と「株式会社A物流」のような曖昧な推測は行わず、マスターに無い得意先は「未紐付け」として扱われ、自動では取り込まれません',
+    '「設定→マスター設定」に、対象作業を選ばずCSVを取り込める「🔗 得意先マスターで自動振り分けて取り込む」を追加。1つのCSVに複数の得意先が含まれる場合、対応する複数の作業枠へ自動的に振り分けて登録します。取込前のプレビューで、作業枠ごとの内訳と未紐付けの得意先を確認でき、未紐付けの得意先はその場で「マスターに追加」して即座に振り分け直せます。未紐付けがあっても、他の正常なデータの取込は失敗扱いにしません',
+    'CSV解析→得意先マスター照合→作業枠決定、の処理は独立した共通関数として実装しており、将来の共有フォルダ自動取込からも同じ処理を呼び出せる構造にしています(今回、共有フォルダ自動取込そのものは実装していません)',
+    '既存の「対象作業を選んで取り込む」手動フローは一切変更していません。新しい自動振り分け機能は、その並びに追加されたものです',
+    '実際にコードを実行するテストで、完全一致による自動紐付け、あいまいな名前(「株式会社A物流」)が誤って紐付かないこと、無効化した対応が使われないこと、1つのCSVが複数の作業枠に正しく振り分けられること、未紐付けデータが実データを失うことなく分離されること、を確認済みです'
+  ]},
   { date:'2026-09-14', items:[
     '「管理者」「設定」の両画面に、収支・分析と同じ本物のログイン(管理者PINとは別のSupabase Auth)を必須化。PINだけでは中身が一切表示されず、ログインして初めて各タブ(今日の状況・人員配置・生産性・収支・分析/スタッフ設定・作業設定など)が開けるようになりました。ログイン状態は「管理者」「設定」の間で共有されます',
     '「スタッフ設定」(氏名の追加・削除、出勤パターン、本日の出退勤切替、祝日設定、終業延長)を管理者画面から独立させ、設定→スタッフ設定に移動しました。管理者画面には移動先へのボタンのみ残しています',
@@ -1232,6 +1240,12 @@ var state = {
   productivityMaster: null,
   staffingSuggestion: null,
   staffingSuggestionLoaded: false,
+  customerTaskMapping: null,
+  customerMappingEditingId: null,
+  customerMappingDraftName: '',
+  customerMappingDraftTaskId: '',
+  autoMapImporting: false,
+  autoMapPreviewData: null,
   staffingLoading: false,
   staffingPriorityOpen: false,
   nextTaskSuggestModal: null,
@@ -1850,6 +1864,92 @@ async function saveStaffingSuggestion(dateStr, data){
   try{ await window.storage.set('staffing-suggestion:'+dateStr, JSON.stringify(data), true); }catch(e){}
 }
 
+/* ---------- 得意先・作業枠マスター(取引先名 → 作業枠 の自動紐付け) ---------- */
+async function loadCustomerTaskMapping(){
+  try{
+    var r = await window.storage.get('customer-task-mapping', true);
+    return r && r.value ? JSON.parse(r.value) : { entries: [] };
+  }catch(e){ return { entries: [] }; }
+}
+async function saveCustomerTaskMapping(data){
+  try{ await window.storage.set('customer-task-mapping', JSON.stringify(data), true); }catch(e){}
+}
+/* 全角/半角・前後の空白程度の単純なゆらぎのみ吸収する。曖昧な部分一致は行わない(完全一致優先の方針)。 */
+function normalizeCustomerName(name){
+  if(!name) return '';
+  return name.trim()
+    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, function(ch){ return String.fromCharCode(ch.charCodeAt(0)-0xFEE0); })
+    .replace(/\s+/g, '');
+}
+function findMappingForCustomer(mapping, customerName){
+  var norm = normalizeCustomerName(customerName);
+  return (mapping.entries||[]).find(function(e){ return e.enabled && normalizeCustomerName(e.customerName)===norm; }) || null;
+}
+/* 共通の紐付け解決処理。手動CSV取込・将来の自動取込のどちらからも、この関数を呼び出す想定。
+   shipperGroups(荷主出荷NO単位、customerNameを保持)を、作業枠ごとにグループ化する。
+   マスターに無い得意先は絶対に推測せず、unmappedとして返す。 */
+function resolveCustomerTaskMapping(shipperGroups, mapping){
+  var byTask = {}; // taskId -> shipperGroups[]
+  var unmappedByCustomer = {}; // customerName -> shipperGroups[]
+  shipperGroups.forEach(function(g){
+    var m = findMappingForCustomer(mapping, g.customerName);
+    if(m){
+      if(!byTask[m.taskId]) byTask[m.taskId] = [];
+      byTask[m.taskId].push(g);
+    }else{
+      var key = g.customerName || '(不明)';
+      if(!unmappedByCustomer[key]) unmappedByCustomer[key] = [];
+      unmappedByCustomer[key].push(g);
+    }
+  });
+  return { byTask: byTask, unmappedByCustomer: unmappedByCustomer };
+}
+/* shipperGroupsの一部集合から、primaryCount/lineCount/totalQty/byCustomer/byProductを再集計する。
+   parseCsvForWorkVolumeの集計ロジックと同じ考え方をshipperGroups単位に適用する。 */
+function summarizeShipperGroups(groupsSubset){
+  var primaryCount = groupsSubset.length;
+  var lineCount = groupsSubset.reduce(function(a,g){ return a+g.lineCount; }, 0);
+  var totalQty = groupsSubset.reduce(function(a,g){ return a+g.totalQty; }, 0);
+  var byCustomer = {};
+  groupsSubset.forEach(function(g){
+    var key = g.customerName || '(不明)';
+    if(!byCustomer[key]) byCustomer[key] = { primaryCount:0, lineCount:0, totalQty:0 };
+    byCustomer[key].primaryCount += 1;
+    byCustomer[key].lineCount += g.lineCount;
+    byCustomer[key].totalQty += g.totalQty;
+  });
+  return { primaryCount:primaryCount, lineCount:lineCount, totalQty:totalQty, byCustomer:byCustomer };
+}
+/* ---------- CSV → 得意先マスター照合 → 作業枠ごとの取込計画、の共通パイプライン ----------
+   手動CSV取込・将来の共有フォルダ自動取込のどちらからも、この関数を呼び出す想定。
+   DOM操作を一切行わない純粋なデータ処理関数。 */
+function buildAutoMappedImportPlan(parseResult, mapping){
+  var resolved = resolveCustomerTaskMapping(parseResult.shipperGroups, mapping);
+  var taskPlans = Object.keys(resolved.byTask).map(function(taskId){
+    var groupsSubset = resolved.byTask[taskId];
+    var summary = summarizeShipperGroups(groupsSubset);
+    var customerNamesInTask = {};
+    groupsSubset.forEach(function(g){ customerNamesInTask[g.customerName] = true; });
+    var byProductForTask = {};
+    Object.keys(parseResult.byProduct||{}).forEach(function(code){
+      var p = parseResult.byProduct[code];
+      if(customerNamesInTask[p.customerName]) byProductForTask[code] = p;
+    });
+    return {
+      taskId: taskId,
+      primaryCount: summary.primaryCount, lineCount: summary.lineCount, totalQty: summary.totalQty,
+      byCustomer: summary.byCustomer, byProduct: byProductForTask,
+      shipperNos: groupsSubset.map(function(g){ return g.shipperNo; })
+    };
+  });
+  var unmapped = Object.keys(resolved.unmappedByCustomer).map(function(customerName){
+    var groupsSubset = resolved.unmappedByCustomer[customerName];
+    var summary = summarizeShipperGroups(groupsSubset);
+    return { customerName: customerName, primaryCount: summary.primaryCount, lineCount: summary.lineCount, totalQty: summary.totalQty };
+  });
+  return { taskPlans: taskPlans, unmapped: unmapped };
+}
+
 /* ---------- 配置アルゴリズム ---------- */
 function staffRemainingMinutes(staffId, day, nowDate, shiftSettings){
   var endStr = (day.shiftEndOverrides && day.shiftEndOverrides[staffId]) || (shiftSettings && shiftSettings.enabled ? shiftSettings.end : null) || '18:00';
@@ -2191,9 +2291,11 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
       rows.forEach(function(r){
         var shipperNo = (r['荷主出荷NO']||'').trim();
         if(!shipperNo) return;
+        var rowCustomerName = (r['取引先名']||'').trim() || '(不明)';
         if(!groups[shipperNo]){
           groups[shipperNo] = {
             shipperNo: shipperNo,
+            customerName: rowCustomerName,
             pickLocation: locCol ? (r[locCol]||'').trim() : '',
             invoiceType: invCol ? (r[invCol]||'').trim() : '',
             lineCount:0, totalQty:0
@@ -2206,7 +2308,7 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
         groups[shipperNo].totalQty += qty;
 
         // 荷主(取引先名)別・商品(商品ID)別の内訳(実CSVの列名で取得。無ければ「(不明)」扱い)
-        var customerName = (r['取引先名']||'').trim() || '(不明)';
+        var customerName = rowCustomerName;
         if(!byCustomer[customerName]) byCustomer[customerName] = { primaryShipperNos:{}, lineCount:0, totalQty:0 };
         byCustomer[customerName].primaryShipperNos[shipperNo] = true;
         byCustomer[customerName].lineCount++;
@@ -3958,6 +4060,131 @@ function bindAdminHub(){
   else if(state.adminHubTab==='financial') bindFinancial();
   else bindManager();
 }
+function renderCustomerMappingPanel(){
+  if(state.customerTaskMapping===null){
+    loadCustomerTaskMapping().then(function(d){ state.customerTaskMapping = d; render(); });
+    return '<div class="empty-note">読み込み中...</div>';
+  }
+  var mapping = state.customerTaskMapping;
+  var todayTasks = tasksForDate(todayStr());
+  var editingId = state.customerMappingEditingId;
+  var editing = editingId ? mapping.entries.find(function(e){ return e.id===editingId; }) : null;
+  var draftName = editing ? editing.customerName : (state.customerMappingDraftName||'');
+  var draftTaskId = editing ? editing.taskId : (state.customerMappingDraftTaskId||(todayTasks[0]?todayTasks[0].id:''));
+  var taskOptions = todayTasks.map(function(t){
+    return '<option value="'+t.id+'" '+(draftTaskId===t.id?'selected':'')+'>'+esc(t.name)+'</option>';
+  }).join('') || '<option value="">本日の作業がありません</option>';
+
+  var formHtml = '<div class="panel" style="margin-bottom:14px;">'+
+    '<div class="panel-title" style="font-size:15px;">'+(editing?'得意先の編集':'+ 得意先を追加')+'</div>'+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin:8px 0 4px;">得意先名(取引先名)</label>'+
+    '<input type="text" id="customerMappingNameInput" value="'+esc(draftName)+'" placeholder="例: 株式会社A" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;margin-bottom:8px;">'+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業枠</label>'+
+    '<select id="customerMappingTaskSelect" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;margin-bottom:10px;">'+taskOptions+'</select>'+
+    '<div style="display:flex;gap:8px;">'+
+      '<button type="button" class="add-btn" id="customerMappingSaveBtn">保存</button>'+
+      (editing ? '<button type="button" class="vc-manage-toggle-btn" id="customerMappingCancelEditBtn">キャンセル</button>' : '')+
+    '</div>'+
+  '</div>';
+
+  var rows = mapping.entries.map(function(e){
+    var t = taskById(e.taskId);
+    return '<tr>'+
+      '<td>'+esc(e.customerName)+'</td>'+
+      '<td>'+esc(t.name)+'</td>'+
+      '<td class="num"><button type="button" class="vc-manage-toggle-btn" data-mapping-toggle="'+e.id+'">'+(e.enabled?'✓ 有効':'無効')+'</button></td>'+
+      '<td class="num"><button type="button" class="vc-manage-toggle-btn" data-mapping-edit="'+e.id+'">編集</button> <button type="button" class="log-stop-btn" data-mapping-delete="'+e.id+'">削除</button></td>'+
+    '</tr>';
+  }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">まだ登録がありません</td></tr>';
+
+  return '<div class="panel">'+
+    '<div class="panel-title">🔗 得意先・作業枠マスター</div>'+
+    '<div class="pool-hint" style="margin-bottom:14px;">CSVの「取引先名」から、自動的にどの作業枠に取り込むかを判定するための対応表です。完全一致(全角/半角の違いは吸収)のみで判定し、あいまいな推測は行いません。登録の無い得意先は「未紐付け」として自動取込されません。</div>'+
+    formHtml+
+    '<table class="report-table"><thead><tr><th>得意先名</th><th>作業枠</th><th>状態</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>'+
+  '</div>';
+}
+function bindCustomerMappingPanel(){
+  var nameInput = document.getElementById('customerMappingNameInput');
+  var taskSelect = document.getElementById('customerMappingTaskSelect');
+  if(nameInput){
+    nameInput.addEventListener('focusin', function(){ state.suppressRender = true; });
+    nameInput.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+    nameInput.addEventListener('input', function(){ state.customerMappingDraftName = nameInput.value; });
+  }
+  if(taskSelect){
+    taskSelect.addEventListener('change', function(){ state.customerMappingDraftTaskId = taskSelect.value; });
+  }
+  var saveBtn = document.getElementById('customerMappingSaveBtn');
+  if(saveBtn){
+    saveBtn.addEventListener('click', async function(){
+      var name = (nameInput.value||'').trim();
+      var taskId = taskSelect.value;
+      if(!name){ showToast('得意先名を入力してください'); return; }
+      if(!taskId){ showToast('作業枠を選択してください'); return; }
+      if(!state.customerTaskMapping) state.customerTaskMapping = { entries: [] };
+      var editingId = state.customerMappingEditingId;
+      if(editingId){
+        var entry = state.customerTaskMapping.entries.find(function(e){ return e.id===editingId; });
+        if(entry){
+          var before = entry.customerName+' → '+taskById(entry.taskId).name;
+          entry.customerName = name;
+          entry.taskId = taskId;
+          await appendAuditLog({ action:'得意先マスター編集', target: name, before: before, after: name+' → '+taskById(taskId).name });
+        }
+        state.customerMappingEditingId = null;
+      }else{
+        state.customerTaskMapping.entries.push({ id: uid(), customerName: name, taskId: taskId, enabled: true });
+        await appendAuditLog({ action:'得意先マスター追加', target: name, before: null, after: name+' → '+taskById(taskId).name });
+      }
+      await saveCustomerTaskMapping(state.customerTaskMapping);
+      state.customerMappingDraftName = '';
+      state.customerMappingDraftTaskId = '';
+      state.suppressRender = false;
+      showToast('保存しました');
+      render();
+    });
+  }
+  var cancelEditBtn = document.getElementById('customerMappingCancelEditBtn');
+  if(cancelEditBtn){
+    cancelEditBtn.addEventListener('click', function(){
+      state.customerMappingEditingId = null;
+      state.customerMappingDraftName = '';
+      state.customerMappingDraftTaskId = '';
+      render();
+    });
+  }
+  document.querySelectorAll('[data-mapping-edit]').forEach(function(el){
+    el.addEventListener('click', function(){
+      state.customerMappingEditingId = el.getAttribute('data-mapping-edit');
+      render();
+    });
+  });
+  document.querySelectorAll('[data-mapping-toggle]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var id = el.getAttribute('data-mapping-toggle');
+      var entry = state.customerTaskMapping.entries.find(function(e){ return e.id===id; });
+      if(!entry) return;
+      entry.enabled = !entry.enabled;
+      await saveCustomerTaskMapping(state.customerTaskMapping);
+      await appendAuditLog({ action:'得意先マスター状態変更', target: entry.customerName, before:null, after: entry.enabled?'有効':'無効' });
+      render();
+    });
+  });
+  document.querySelectorAll('[data-mapping-delete]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var id = el.getAttribute('data-mapping-delete');
+      var entry = state.customerTaskMapping.entries.find(function(e){ return e.id===id; });
+      if(!entry) return;
+      if(!confirm('「'+entry.customerName+'」の紐付けを削除しますか?')) return;
+      state.customerTaskMapping.entries = state.customerTaskMapping.entries.filter(function(e){ return e.id!==id; });
+      await saveCustomerTaskMapping(state.customerTaskMapping);
+      await appendAuditLog({ action:'得意先マスター削除', target: entry.customerName, before: entry.customerName+' → '+taskById(entry.taskId).name, after:'削除' });
+      showToast('削除しました');
+      render();
+    });
+  });
+}
 function renderStaffSettingsPanel(){
   var WD = ['日','月','火','水','木','金','土'];
   var day = state.day;
@@ -4365,6 +4592,15 @@ function renderSettingsPanels(){
     '</div>'+
     (state.wvImporting ? '<div class="empty-note">取り込み中...</div>' : '')+
     wvHistoryHtml+
+    '<div class="vc-manage-details" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--paper-line);">'+
+      '<div class="panel-title" style="font-size:15px;">🔗 得意先マスターで自動振り分けて取り込む</div>'+
+      '<div class="pool-hint" style="margin-bottom:10px;">対象作業を選ばずにCSVを取り込み、「設定→得意先・作業枠マスター」の対応表から自動的に作業枠を判定します。マスターに無い得意先は取り込まれず、一覧で確認できます。</div>'+
+      '<div style="display:flex;gap:10px;">'+
+        '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">対象日付</label><input type="date" id="autoMapTargetDate" value="'+(state.wvTargetDate||todayStr())+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
+        '<div style="flex:2;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="autoMapCsvInput" accept=".csv" style="display:block;"></div>'+
+      '</div>'+
+      (state.autoMapImporting ? '<div class="empty-note">解析中...</div>' : '')+
+    '</div>'+
   '</div>';
 
   var breakPanel = '<div class="panel" style="margin-top:14px;">'+
@@ -4406,6 +4642,7 @@ var SETTINGS_HUB_TABS = [
   { key:'task', label:'作業設定', icon:'📦' },
   { key:'shift', label:'勤務時間設定', icon:'⏰' },
   { key:'productivity', label:'生産性設定', icon:'📈' },
+  { key:'customerMapping', label:'得意先・作業枠マスター', icon:'🔗' },
   { key:'master', label:'マスター設定', icon:'🗂' },
   { key:'history', label:'操作履歴', icon:'📜' },
   { key:'system', label:'システム設定', icon:'🔧' }
@@ -4433,6 +4670,8 @@ function renderSettingsHub(){
     var content;
     if(state.settingsHubTab==='staff'){
       content = renderStaffSettingsPanel();
+    }else if(state.settingsHubTab==='customerMapping'){
+      content = renderCustomerMappingPanel();
     }else if(state.settingsHubTab==='shift'){
       content = panels.shiftPanel + panels.breakPanel;
     }else if(state.settingsHubTab==='productivity'){
@@ -4462,6 +4701,7 @@ function bindSettingsHub(){
   if(state.settingsHubTab==='task') bindRegister();
   else if(state.settingsHubTab==='history') bindHistory();
   else if(state.settingsHubTab==='staff') bindStaffSettingsPanel();
+  else if(state.settingsHubTab==='customerMapping') bindCustomerMappingPanel();
   else bindSettings();
 }
 
@@ -4836,6 +5076,64 @@ function bindSettings(){
       state.wvTargetDate = newDate;
       state.wvViewData = await getWorkVolumeForDate(newDate);
       render();
+    });
+  }
+  var autoMapTargetDateInput = document.getElementById('autoMapTargetDate');
+  if(autoMapTargetDateInput){
+    autoMapTargetDateInput.addEventListener('change', function(){
+      state.wvTargetDate = autoMapTargetDateInput.value || todayStr();
+    });
+  }
+  var autoMapCsvInput = document.getElementById('autoMapCsvInput');
+  if(autoMapCsvInput){
+    autoMapCsvInput.addEventListener('change', async function(){
+      var file = autoMapCsvInput.files[0];
+      if(!file) return;
+      var targetDate = (autoMapTargetDateInput && autoMapTargetDateInput.value) || state.wvTargetDate || todayStr();
+      state.autoMapImporting = true;
+      render();
+
+      var fingerprint, fileSize = file.size, fileName = file.name;
+      try{
+        fingerprint = await computeFileFingerprint(file);
+      }catch(e){
+        state.autoMapImporting = false;
+        showToast('ファイルの読み取りに失敗しました');
+        autoMapCsvInput.value = '';
+        render();
+        return;
+      }
+      var fpIndex = await loadCsvFingerprintIndex();
+      var dup = findDuplicateFingerprint(fpIndex, fingerprint, fileSize, fileName);
+      if(dup){
+        state.autoMapImporting = false;
+        autoMapCsvInput.value = '';
+        alert('このファイル(「'+fileName+'」)は '+dup.date+' に既に取り込み済みです。同じファイルの二重取込はできません。');
+        render();
+        return;
+      }
+
+      var mapping = state.customerTaskMapping || await loadCustomerTaskMapping();
+      state.customerTaskMapping = mapping;
+
+      parseCsvForWorkVolume(file, {}, function(result){
+        var plan = buildAutoMappedImportPlan(result, mapping);
+        state.autoMapPreviewData = {
+          fileName: fileName, targetDate: targetDate, fingerprint: fingerprint, fileSize: fileSize,
+          rowCount: result.rowCount, missingColumns: result.missingColumns||[],
+          rawParseResult: result,
+          taskPlans: plan.taskPlans, unmapped: plan.unmapped
+        };
+        state.autoMapImporting = false;
+        autoMapCsvInput.value = '';
+        state.modal = { kind:'autoMapPreview' };
+        render();
+      }, function(errMsg){
+        state.autoMapImporting = false;
+        autoMapCsvInput.value = '';
+        showToast(errMsg);
+        render();
+      });
     });
   }
   var wvCsvInput = document.getElementById('wvCsvInput');
@@ -7261,6 +7559,7 @@ function renderModal(){
   if(m.kind==='qtyBreakdown') return renderQtyBreakdownModal(m);
   if(m.kind==='addLog') return renderAddLogModal(m);
   if(m.kind==='vcPreview') return renderVcPreviewModal(m);
+  if(m.kind==='autoMapPreview') return renderAutoMapPreviewModal(m);
   if(m.kind==='pickSubcat') return renderPickSubcatModal(m);
   if(m.kind!=='qty') return '';
   return '<div class="modal-overlay" id="modalOverlay">'+
@@ -7459,6 +7758,114 @@ function bindPickSubcatModal(m){
     render();
   });
 }
+function renderAutoMapPreviewModal(m){
+  var d = state.autoMapPreviewData;
+  if(!d) return '';
+  var todayTasks = tasksForDate(d.targetDate);
+  var warnHtml = '';
+  if(d.missingColumns && d.missingColumns.length){
+    warnHtml += '<div class="vc-warning-box">⚠️ 必須列が見つかりません: '+d.missingColumns.map(esc).join('、')+'</div>';
+  }
+  var taskRows = d.taskPlans.map(function(p){
+    var t = taskById(p.taskId);
+    return '<div class="checklist-item">'+
+      '<div class="checklist-item-title">✓ '+esc(t.name)+'</div>'+
+      '<div class="checklist-item-action">件数/PO数 '+formatNum(p.primaryCount)+' ・ 明細 '+formatNum(p.lineCount)+' ・ ピース '+formatNum(p.totalQty)+'('+Object.keys(p.byCustomer).length+'得意先)</div>'+
+    '</div>';
+  }).join('') || '<div class="empty-note">自動紐付けできた作業枠はありません</div>';
+
+  var unmappedRows = d.unmapped.map(function(u){
+    var taskOpts = todayTasks.map(function(t){ return '<option value="'+t.id+'">'+esc(t.name)+'</option>'; }).join('');
+    return '<div class="checklist-item">'+
+      '<div class="checklist-item-title">⚠️ '+esc(u.customerName)+'</div>'+
+      '<div class="checklist-item-action">件数 '+formatNum(u.primaryCount)+' ・ 明細 '+formatNum(u.lineCount)+' ・ ピース '+formatNum(u.totalQty)+' — マスター未登録のため、この内容は取り込まれません</div>'+
+      '<div class="checklist-item-actions">'+
+        '<select data-unmapped-task-select="'+esc(u.customerName)+'" style="border:1px solid var(--paper-line);border-radius:8px;padding:4px 6px;font-size:12px;">'+taskOpts+'</select>'+
+        '<button type="button" class="vc-manage-toggle-btn" data-unmapped-add="'+esc(u.customerName)+'">マスターに追加</button>'+
+      '</div>'+
+    '</div>';
+  }).join('') || '<div class="empty-note">未紐付けの得意先はありません</div>';
+
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card" style="max-width:560px;text-align:left;max-height:80vh;overflow-y:auto;">'+
+      '<div class="modal-task-name" style="text-align:center;margin-bottom:6px;">CSV自動振り分けプレビュー</div>'+
+      '<div class="pool-hint" style="text-align:center;margin-bottom:14px;">対象日付: '+esc(dateLabelFromStr(d.targetDate))+' ・ 取込行数 '+formatNum(d.rowCount)+'</div>'+
+      warnHtml+
+      '<div class="panel-title" style="font-size:14px;">✓ 自動紐付け済み('+d.taskPlans.length+'作業枠)</div>'+
+      taskRows+
+      '<div class="panel-title" style="font-size:14px;margin-top:14px;color:#C1521F;">⚠️ 未紐付け('+d.unmapped.length+'件)</div>'+
+      unmappedRows+
+      '<div class="modal-actions" style="margin-top:14px;">'+
+        '<button class="modal-cancel" id="autoMapPreviewCancelBtn">キャンセル</button>'+
+        '<button class="modal-confirm" id="autoMapPreviewConfirmBtn">この内容で確定する</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+function bindAutoMapPreviewModal(m){
+  var cancelBtn = document.getElementById('autoMapPreviewCancelBtn');
+  if(cancelBtn) cancelBtn.addEventListener('click', function(){
+    state.autoMapPreviewData = null;
+    state.modal = null;
+    render();
+  });
+  document.querySelectorAll('[data-unmapped-add]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var customerName = el.getAttribute('data-unmapped-add');
+      var select = document.querySelector('[data-unmapped-task-select="'+customerName+'"]');
+      var taskId = select ? select.value : '';
+      if(!taskId){ showToast('作業枠を選択してください'); return; }
+      if(!state.customerTaskMapping) state.customerTaskMapping = { entries: [] };
+      state.customerTaskMapping.entries.push({ id: uid(), customerName: customerName, taskId: taskId, enabled: true });
+      await saveCustomerTaskMapping(state.customerTaskMapping);
+      await appendAuditLog({ action:'得意先マスター追加(CSVプレビューから)', target: customerName, before:null, after: customerName+' → '+taskById(taskId).name });
+      // 取込プレビューを再計算(この得意先が未紐付けから該当作業枠へ移動する)
+      var d = state.autoMapPreviewData;
+      var plan = buildAutoMappedImportPlan(d.rawParseResult, state.customerTaskMapping);
+      d.taskPlans = plan.taskPlans;
+      d.unmapped = plan.unmapped;
+      showToast('「'+customerName+'」を「'+taskById(taskId).name+'」に追加しました');
+      render();
+    });
+  });
+  var confirmBtn = document.getElementById('autoMapPreviewConfirmBtn');
+  if(confirmBtn){
+    confirmBtn.addEventListener('click', async function(){
+      var d = state.autoMapPreviewData;
+      if(!d.taskPlans.length){
+        showToast('自動紐付けできた作業枠がないため、確定できません');
+        return;
+      }
+      var targetData = await getWorkVolumeForDate(d.targetDate);
+      var groupImportId = uid(); // 同一CSVから生成された取込群であることが分かるように共通のグループIDを持たせる
+      for(var i=0;i<d.taskPlans.length;i++){
+        var p = d.taskPlans[i];
+        var importId = uid();
+        targetData.imports.push({
+          id: importId, importedAt: new Date().toISOString(), fileName: d.fileName, taskId: p.taskId,
+          taskKind: (state.workVolumeConfig && state.workVolumeConfig[p.taskId] && state.workVolumeConfig[p.taskId].taskKind) || 'normal',
+          primaryCount: p.primaryCount, lineCount: p.lineCount, totalQty: p.totalQty,
+          fileFingerprint: d.fingerprint, fileSize: d.fileSize, shipperNos: p.shipperNos,
+          byCustomer: p.byCustomer||{}, byProduct: p.byProduct||{},
+          autoMappedGroupId: groupImportId,
+          deletedAt: null, deletedBy: null, deleteReason: null
+        });
+      }
+      var saveOk = await saveWorkVolume(d.targetDate, targetData);
+      if(d.targetDate===todayStr()) state.workVolume = targetData;
+      if(state.wvTargetDate===d.targetDate) state.wvViewData = targetData;
+      if(saveOk) await registerFileFingerprint(d.fingerprint, d.fileSize, d.fileName, d.targetDate, '(自動振り分け・複数作業枠)', groupImportId);
+      await appendAuditLog({ action:'CSV自動振り分け取込確定', target: d.fileName, before:null, after: d.taskPlans.length+'作業枠に振り分け、未紐付け'+d.unmapped.length+'件('+d.targetDate+')' });
+      var msg = saveOk
+        ? d.taskPlans.length+'件の作業枠に取り込みました'+(d.unmapped.length?'(未紐付け'+d.unmapped.length+'件は取り込まれていません)':'')
+        : '保存に失敗した可能性があります。本日の確認事項をご確認ください。';
+      state.autoMapPreviewData = null;
+      state.modal = null;
+      showToast(msg);
+      render();
+    });
+  }
+}
 function renderVcPreviewModal(m){
   var vp = state.vcPreview;
   if(!vp) return '';
@@ -7638,6 +8045,7 @@ function bindModal(){
   if(m.kind==='qtyBreakdown'){ bindQtyBreakdownModal(m); return; }
   if(m.kind==='addLog'){ bindAddLogModal(m); return; }
   if(m.kind==='vcPreview'){ bindVcPreviewModal(m); return; }
+  if(m.kind==='autoMapPreview'){ bindAutoMapPreviewModal(m); return; }
   if(m.kind==='pickSubcat'){ bindPickSubcatModal(m); return; }
   document.querySelectorAll('[data-qty-delta]').forEach(function(el){
     el.addEventListener('click', function(){

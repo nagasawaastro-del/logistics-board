@@ -869,6 +869,12 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-12', items:[
+    '【人員配置の偏り防止】配置アルゴリズムに、作業負荷(本日これまでの実績時間+この配置案内での割当予定時間)と、同一作業への連続配置を考慮する仕組みを追加しました。締切に十分な余裕がある作業では、生産性が高い人に無条件で作業を集中させず、負荷が低い人・直前と違う作業の人を優先します。一方、締切が厳しい作業(逼迫度が高い場合)では、この調整を行わず、常に最も早く終えられる人を優先します(公平性より納期達成)',
+    '配置案の「理由」表示を拡充。「Aさんの作業負荷が高いためBさんを配置」「作業の偏りを抑えるため」「この作業の必要工数が大きいため」など、なぜその人がその作業に配置されたのかが分かるようにしました',
+    'スキルマスタ・KING OF TIME連携・残作業量の時間ベース推定・複雑な最適化アルゴリズムは、引き続き導入していません。「配置案を作成/再計算する」による都度計算、管理者による最終確認・確定という運用も変更していません',
+    '実際にコードを実行するテストで、(1) 締切に余裕がある場合は負荷の低い人が優先されること、(2) 締切が厳しい場合は負荷に関わらず最速の人が優先されること、(3) 生産性・負荷が同じ場合は直前と同じ作業を避けて別の人が優先されること、をそれぞれ確認済みです'
+  ]},
   { date:'2026-09-11', items:[
     '【人員配置・次作業自動指示】トップ画面に「👥 人員配置」を追加(管理者専用)。作業ごとに締切・優先順位を設定し、「配置案を作成/再計算する」で、出勤者・各人の生産性・締切から配置案を自動作成します。単純に生産性が一番高い人を優先するのではなく、各作業の「締切までの余裕に対する必要人時の比率(逼迫度)」で優先順位を決め、各候補者を「その作業の締切までの持ち時間でどれだけ処理できるか」で選ぶため、短時間しか働けない人を締切の近い小さな作業に、長く働ける人を分量の多い作業に、といった配置が自然に起こります',
     '生産性は「作業種別 × 作業者」で蓄積します。同じ作業に複数人が同時に入っていた日は、個人ごとの内訳が分からないため個人の生産性データには使わず、作業全体の標準値の算出にのみ使います(個人の生産性は、その作業を1人で完結させた日の実績だけから計算します)。個人の実績が少ない(5日未満)場合は作業全体の標準生産性を使い、それも無い場合は「不明」とし、推測値は使いません',
@@ -1878,7 +1884,7 @@ function computeStaffingSuggestion(day, workVolume, taskPriority, productivityMa
   var dateStr = day.date;
   var tasks = tasksWithVolumeForDate(backlog, dateStr, workVolume);
   var urgencies = tasks.map(function(t){ return computeTaskUrgency(t, workVolume, taskPriority, productivityMaster, nowDate); });
-  // 逼迫度が高い順(不明[-1]は最後)、同点は優先順位(数値が小さいほど優先)
+  // 逼迫度が高い順(不明[-1]は最後)、同点は優先順位(数値が小さいほど優先) ※納期・優先度を最優先する順序は維持
   urgencies.sort(function(a,b){
     if(a.urgency===-1 && b.urgency!==-1) return 1;
     if(b.urgency===-1 && a.urgency!==-1) return -1;
@@ -1893,22 +1899,82 @@ function computeStaffingSuggestion(day, workVolume, taskPriority, productivityMa
     return !log; // 現在何もアクティブな作業をしていない人だけを配置対象にする
   }).map(function(s){ return s.id; });
 
+  // ---- 作業負荷・直近作業の把握(偏り防止のための追加情報。納期・優先度より優先度は下) ----
+  var STANDARD_WORKDAY_MIN = 480; // 8時間を「1日分の負荷」の基準値として正規化に使う
+  var URGENCY_STRICT_THRESHOLD = 0.75; // これ以上の逼迫度は「納期厳守モード」とし、負荷分散よりも納期達成を優先する
+  var REPEAT_PENALTY_RATIO = 0.25; // 同一作業への連続配置に対する評価の目安の割引率(除外はしない)
+
+  var agg = aggregateDays([day]);
+  var workedMinutesToday = {}; // これまでの実績作業時間(休憩含む合計から休憩を除く)
+  roster.forEach(function(s){
+    var info = agg.perStaff[s.id];
+    workedMinutesToday[s.id] = info ? Math.max(0, (info.ms - (info.breakMs||0)))/60000 : 0;
+  });
+  var assignedMinutesInPlan = {}; // 今回の配置案の中で、すでに割り当てた(予定)分数
+  roster.forEach(function(s){ assignedMinutesInPlan[s.id] = 0; });
+  var lastTaskForStaff = {}; // 本日その人が最後に従事していた作業(進行中 or 直近で終了したもの)
+  roster.forEach(function(s){
+    var logsForStaff = (day.logs||[]).filter(function(l){ return l.staffId===s.id && l.taskId!=='BREAK'; });
+    if(logsForStaff.length){
+      logsForStaff.sort(function(a,b){ return new Date(b.start)-new Date(a.start); });
+      lastTaskForStaff[s.id] = logsForStaff[0].taskId;
+    }
+  });
+
   var assignments = [];
   var expectedQty = {}; // taskId -> 見込み処理量の累計
   urgencies.forEach(function(u){ expectedQty[u.taskId] = 0; });
 
+  /* 候補者ごとにスコアを計算する。
+     スコア = 見込み処理量(納期までの持ち時間 × 生産性)を基準に、
+     納期に十分な余裕がある場合のみ、
+       ・作業負荷(実績+この配置案内での割当予定)が高い人を割り引く
+       ・同一作業への連続配置を軽く割り引く
+     という調整を行う。納期が厳しい作業(urgent)では調整を行わず、
+     常に「その作業を一番早く終えられる人」を優先する(公平性より納期達成)。 */
   function bestCandidateFor(u){
-    var best = null, bestQty = -1;
+    var urgent = (u.urgency!==-1 && u.urgency>=URGENCY_STRICT_THRESHOLD);
+    var rawBest = null, rawBestQty = -1; // 調整前の「最速」候補(理由説明用に別途保持)
+    var best = null, bestScore = -Infinity;
     candidates.forEach(function(sid){
       var remainMin = staffRemainingMinutes(sid, day, nowDate, state.shiftSettings);
       if(remainMin<=0) return;
       var effectiveMin = (u.deadlineMinutes!==null) ? Math.min(remainMin, u.deadlineMinutes) : remainMin;
       var prod = productivityRateFor(productivityMaster, u.taskId, sid);
       if(!prod.rate) return; // 生産性が全く分からない人は見積りに使わない
-      var q = (effectiveMin/60)*prod.rate;
-      if(q>bestQty){ bestQty = q; best = { staffId: sid, qty:q, basis: prod.basis, rate: prod.rate }; }
+      var qty = (effectiveMin/60)*prod.rate;
+      var totalLoadMin = (workedMinutesToday[sid]||0) + (assignedMinutesInPlan[sid]||0);
+      var loadPenalty = Math.min(0.5, totalLoadMin/STANDARD_WORKDAY_MIN); // 最大50%までの割引に抑える
+      var isRepeat = (lastTaskForStaff[sid]===u.taskId);
+      if(qty>rawBestQty){ rawBestQty = qty; rawBest = { staffId: sid, qty:qty, basis:prod.basis, rate:prod.rate, hasLoadPenalty: loadPenalty>0.02, hasRepeatPenalty: isRepeat }; }
+
+      var score = qty;
+      if(!urgent){
+        if(loadPenalty>0.02) score = score*(1-loadPenalty);
+        if(isRepeat) score = score*(1-REPEAT_PENALTY_RATIO);
+      }
+      if(score>bestScore){ bestScore = score; best = { staffId:sid, qty:qty, basis:prod.basis, rate:prod.rate }; }
     });
+    if(best) best.rawBest = rawBest;
     return best;
+  }
+  function buildReason(u, pick){
+    if(u.deadlineMinutes!==null && u.urgency!==-1 && u.urgency>=URGENCY_STRICT_THRESHOLD){
+      return '締切まで残りわずかなため('+Math.round(u.deadlineMinutes)+'分)';
+    }
+    if(u.priorityLevel<=2){
+      return '優先度が高いため';
+    }
+    if(u.roughHours!==null && u.roughHours>=3){
+      return 'この作業の必要工数が大きいため';
+    }
+    if(pick.rawBest && pick.rawBest.staffId!==pick.staffId){
+      var rawName = staffById(pick.rawBest.staffId).name;
+      if(pick.rawBest.hasRepeatPenalty) return '作業の偏りを抑えるため';
+      if(pick.rawBest.hasLoadPenalty) return rawName+'さんの作業負荷が高いため'+staffById(pick.staffId).name+'さんを配置';
+    }
+    if(pick.basis==='individual') return staffById(pick.staffId).name+'さんはこの作業の生産性が高いため';
+    return '担当者確保のため';
   }
 
   urgencies.forEach(function(u){
@@ -1919,9 +1985,13 @@ function computeStaffingSuggestion(day, workVolume, taskPriority, productivityMa
       assignments.push({
         staffId: pick.staffId, taskId: u.taskId,
         expectedQty: Math.round(pick.qty), productivityBasis: pick.basis, rate: pick.rate,
-        reason: u.deadlineMinutes!==null ? ('締切まで残りわずかなため('+Math.round(u.deadlineMinutes)+'分)') : (u.priorityLevel<=2 ? '優先度が高いため' : '担当者確保のため')
+        reason: buildReason(u, pick)
       });
       expectedQty[u.taskId] += pick.qty;
+      var remainMinForPick = staffRemainingMinutes(pick.staffId, day, nowDate, state.shiftSettings);
+      var effMinForPick = (u.deadlineMinutes!==null) ? Math.min(remainMinForPick, u.deadlineMinutes) : remainMinForPick;
+      assignedMinutesInPlan[pick.staffId] = (assignedMinutesInPlan[pick.staffId]||0) + effMinForPick;
+      lastTaskForStaff[pick.staffId] = u.taskId;
       candidates.splice(candidates.indexOf(pick.staffId),1);
       if(u.roughHours===null) break; // 生産性不明タスクは1人配置したら次へ(目安が無いため積み増ししない)
     }

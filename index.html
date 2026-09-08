@@ -869,6 +869,12 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-14', items:[
+    '「管理者」「設定」の両画面に、収支・分析と同じ本物のログイン(管理者PINとは別のSupabase Auth)を必須化。PINだけでは中身が一切表示されず、ログインして初めて各タブ(今日の状況・人員配置・生産性・収支・分析/スタッフ設定・作業設定など)が開けるようになりました。ログイン状態は「管理者」「設定」の間で共有されます',
+    '「スタッフ設定」(氏名の追加・削除、出勤パターン、本日の出退勤切替、祝日設定、終業延長)を管理者画面から独立させ、設定→スタッフ設定に移動しました。管理者画面には移動先へのボタンのみ残しています',
+    '実装中に発見した不具合を修正: スタッフ設定を切り出す際、曜日表示に使う内部の定数が抜けており、設定画面のスタッフ設定タブがエラーになる状態でした',
+    '実際にコードを実行するテストで、ログインなしでは管理者・設定のどちらも中身(タブ)が一切表示されないこと、ログイン後は両方に同じセッションでアクセスできること、ログアウト後は再度ブロックされること、誤ったパスワードは拒否されること、スタッフ設定タブでの出退勤切替・スタッフ追加・出勤パターン変更が正しく動作することを確認済みです'
+  ]},
   { date:'2026-09-13', items:[
     '【トップページの整理】トップページのカードを11個から6個(実績入力・集計・モニター表示・カレンダー・管理者・設定)に整理しました。既存の画面・機能・データは一切削除しておらず、管理者向け機能(今日の状況・人員配置・生産性・収支・分析)は「管理者」の中のタブに、設定・マスター系機能(基本設定・スタッフ設定・作業設定・勤務時間設定・生産性設定・マスター設定・操作履歴・システム設定)は「設定」の中のタブにまとめました',
     '「実績入力」画面(名前をタップして作業する現場向け画面)の操作フローは一切変更していません',
@@ -2832,33 +2838,57 @@ function bindStaffing(){
     });
   }
 }
-function renderFinancial(){
-  if(!state.managerSessionChecked && window.__supabaseClient){
-    state.managerSessionChecked = true;
-    refreshManagerSession().then(function(){
-      if(hasManagerSession() && state.financialUnitPrices===null){
-        fetchFinancialData().then(render);
-      }else{
+function renderManagerLoginForm(title, description){
+  return '<div class="mgr-wrap" style="max-width:420px;">'+
+    '<div class="panel">'+
+      '<div class="panel-title">'+title+'</div>'+
+      '<div class="pool-hint" style="margin-bottom:14px;">'+description+'</div>'+
+      (state.managerLoginError ? '<div style="color:var(--rust-600);font-size:12px;margin-bottom:10px;">'+esc(state.managerLoginError)+'</div>' : '')+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">メールアドレス</label>'+
+      '<input type="email" id="mgrLoginEmail" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:10px;margin-bottom:10px;">'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">パスワード</label>'+
+      '<input type="password" id="mgrLoginPassword" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:10px;margin-bottom:14px;">'+
+      '<button type="button" class="add-btn" id="mgrLoginBtn" style="width:100%;" '+(state.managerLoginBusy?'disabled':'')+'>'+(state.managerLoginBusy?'ログイン中...':'ログイン')+'</button>'+
+    '</div>'+
+  '</div>';
+}
+function bindManagerLoginForm(onSuccess){
+  var loginBtn = document.getElementById('mgrLoginBtn');
+  if(loginBtn){
+    loginBtn.addEventListener('click', async function(){
+      var email = document.getElementById('mgrLoginEmail').value.trim();
+      var password = document.getElementById('mgrLoginPassword').value;
+      if(!email || !password){ state.managerLoginError = 'メールアドレスとパスワードを入力してください'; render(); return; }
+      state.managerLoginBusy = true;
+      state.managerLoginError = '';
+      render();
+      var result = await managerSignIn(email, password);
+      state.managerLoginBusy = false;
+      if(!result.ok){
+        state.managerLoginError = result.error || 'ログインに失敗しました';
         render();
+        return;
       }
+      state.managerLoginError = '';
+      await appendAuditLog({ action:'管理者ログイン', target: email, before:null, after:'ログイン成功' });
+      if(onSuccess) await onSuccess();
+      render();
     });
   }
+}
+function ensureManagerSessionChecked(){
+  if(!state.managerSessionChecked && window.__supabaseClient){
+    state.managerSessionChecked = true;
+    refreshManagerSession().then(function(){ render(); });
+  }
+}
+function renderFinancial(){
+  ensureManagerSessionChecked();
   if(hasManagerSession() && state.financialUnitPrices===null){
     fetchFinancialData().then(render);
   }
   if(!hasManagerSession()){
-    return '<div class="mgr-wrap" style="max-width:420px;">'+
-      '<div class="panel">'+
-        '<div class="panel-title">💰 収支・分析</div>'+
-        '<div class="pool-hint" style="margin-bottom:14px;">この画面は売上・原価・人件費・粗利などの経営情報を扱います。閲覧には管理者アカウントでのログインが必要です(管理者PINとは別の、本物のログインです)。</div>'+
-        (state.managerLoginError ? '<div style="color:var(--rust-600);font-size:12px;margin-bottom:10px;">'+esc(state.managerLoginError)+'</div>' : '')+
-        '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">メールアドレス</label>'+
-        '<input type="email" id="mgrLoginEmail" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:10px;margin-bottom:10px;">'+
-        '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">パスワード</label>'+
-        '<input type="password" id="mgrLoginPassword" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:10px;margin-bottom:14px;">'+
-        '<button type="button" class="add-btn" id="mgrLoginBtn" style="width:100%;" '+(state.managerLoginBusy?'disabled':'')+'>'+(state.managerLoginBusy?'ログイン中...':'ログイン')+'</button>'+
-      '</div>'+
-    '</div>';
+    return renderManagerLoginForm('💰 収支・分析', 'この画面は売上・原価・人件費・粗利などの経営情報を扱います。閲覧には管理者アカウントでのログインが必要です(管理者PINとは別の、本物のログインです)。');
   }
   var dateStr = todayStr();
   var day = state.day;
@@ -2997,27 +3027,9 @@ function renderFinancial(){
 }
 function bindFinancial(){
   if(!hasManagerSession()){
-    var loginBtn = document.getElementById('mgrLoginBtn');
-    if(loginBtn){
-      loginBtn.addEventListener('click', async function(){
-        var email = document.getElementById('mgrLoginEmail').value.trim();
-        var password = document.getElementById('mgrLoginPassword').value;
-        if(!email || !password){ state.managerLoginError = 'メールアドレスとパスワードを入力してください'; render(); return; }
-        state.managerLoginBusy = true;
-        state.managerLoginError = '';
-        render();
-        var result = await managerSignIn(email, password);
-        state.managerLoginBusy = false;
-        if(!result.ok){
-          state.managerLoginError = result.error || 'ログインに失敗しました';
-          render();
-          return;
-        }
-        await appendAuditLog({ action:'収支ダッシュボードにログイン', target: email, before:null, after:'ログイン成功' });
-        await fetchFinancialData();
-        render();
-      });
-    }
+    bindManagerLoginForm(async function(){
+      await fetchFinancialData();
+    });
     return;
   }
   var logoutBtn = document.getElementById('mgrLogoutBtn');
@@ -3912,6 +3924,10 @@ var ADMIN_HUB_TABS = [
   { key:'financial', label:'収支・分析', icon:'💰' }
 ];
 function renderAdminHub(){
+  ensureManagerSessionChecked();
+  if(!hasManagerSession()){
+    return renderManagerLoginForm('👔 管理者', 'この画面は出退勤・作業割り当て・人員配置・生産性・収支など、管理業務全般を扱います。閲覧・操作には管理者アカウントでのログインが必要です(管理者PINとは別の、本物のログインです)。');
+  }
   if(!state.adminHubTab) state.adminHubTab = 'today';
   var tabsHtml = '<div class="vc-tabs" style="margin:0 0 14px;">'+
     ADMIN_HUB_TABS.map(function(t){
@@ -3927,6 +3943,10 @@ function renderAdminHub(){
   return body.replace(/^(<div[^>]*>)/, '$1'+tabsHtml);
 }
 function bindAdminHub(){
+  if(!hasManagerSession()){
+    bindManagerLoginForm();
+    return;
+  }
   document.querySelectorAll('[data-admin-hub-tab]').forEach(function(el){
     el.addEventListener('click', function(){
       state.adminHubTab = el.getAttribute('data-admin-hub-tab');
@@ -3937,6 +3957,160 @@ function bindAdminHub(){
   else if(state.adminHubTab==='productivity') bindProductivityTab();
   else if(state.adminHubTab==='financial') bindFinancial();
   else bindManager();
+}
+function renderStaffSettingsPanel(){
+  var WD = ['日','月','火','水','木','金','土'];
+  var day = state.day;
+  var roster = state.roster.filter(function(s){ return !s.archived; });
+  var rosterHtml = roster.map(function(s){
+    var on = !!day.attendance[s.id];
+    var pattern = s.pattern || defaultPattern();
+    var dayToggles = pattern.map(function(v,i){
+      return '<button class="pattern-day '+(v?'on':'')+'" data-pattern-toggle="'+s.id+'|'+i+'">'+WD[i]+'</button>';
+    }).join('');
+    var currentAvatarColor = avatarColorForStaff(s);
+    var avatarSwatches = TASK_COLORS.map(function(c){
+      return '<div class="avatar-swatch '+(currentAvatarColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-avatar-color="'+s.id+'|'+c.hex+'"></div>';
+    }).join('');
+    var overtimeRow = '';
+    if(state.shiftSettings && state.shiftSettings.enabled){
+      var overrideVal = (day.shiftEndOverrides && day.shiftEndOverrides[s.id]) || '';
+      overtimeRow = '<div class="overtime-row">'+
+        '<span class="overtime-label">🕐 本日の終業を延長</span>'+
+        '<input type="time" class="overtime-input" data-overtime-end="'+s.id+'" value="'+esc(overrideVal)+'">'+
+      '</div>';
+    }
+    return '<div class="roster-item">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
+        '<span class="roster-name">'+esc(s.name)+'</span>'+
+        '<div class="roster-controls">'+
+          '<button class="toggle-att '+(on?'on':'off')+'" data-toggle-att="'+s.id+'">'+(on?'出勤中':'欠勤')+'</button>'+
+          '<button class="icon-x" data-del-staff="'+s.id+'" title="'+esc(s.name)+'を削除" aria-label="'+esc(s.name)+'を削除">&times;</button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="pattern-row">'+dayToggles+'</div>'+
+      '<button class="holiday-off-toggle '+(s.offOnHolidays?'on':'')+'" data-holiday-off-toggle="'+s.id+'">🎌 祝日も休みにする</button>'+
+      overtimeRow+
+      '<div class="avatar-swatch-row" title="アバターカラー(累計実績画面のキャラクターの色)">'+avatarSwatches+'</div>'+
+    '</div>';
+  }).join('') || '<div class="empty-note">スタッフを登録してください。</div>';
+
+  return '<div class="panel">'+
+    '<div class="panel-title">スタッフ設定 <span class="count-badge">'+roster.filter(function(s){ return day.attendance[s.id]; }).length+' / '+roster.length+'(本日出勤)</span></div>'+
+    '<div class="pool-hint" style="margin-bottom:8px;">曜日ボタンで通常の出勤パターンを設定。本日の出退勤はボタンで個別に切替できます。</div>'+
+    '<div class="roster-list">'+rosterHtml+'</div>'+
+    '<div class="add-row">'+
+      '<input type="text" id="newStaffInput" placeholder="名前を入力" value="'+esc(state.newStaffDraftName)+'">'+
+      '<button class="add-btn" id="addStaffBtn">追加</button>'+
+    '</div>'+
+  '</div>';
+}
+function bindStaffSettingsPanel(){
+  document.querySelectorAll('[data-toggle-att]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var id = el.getAttribute('data-toggle-att');
+      var day = state.day;
+      var before = !!day.attendance[id];
+      day.attendance[id] = !day.attendance[id];
+      await saveDay(day);
+      await appendAuditLog({ action:'出勤状態変更', target: staffById(id).name, before: (before?'出勤中':'欠勤'), after: (day.attendance[id]?'出勤中':'欠勤') });
+      render();
+    });
+  });
+  document.querySelectorAll('[data-del-staff]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var id = el.getAttribute('data-del-staff');
+      var s = state.roster.find(function(s){ return s.id===id; });
+      if(!s) return;
+      if(!confirm('スタッフ「'+s.name+'」を削除しますか?(名簿から非表示になります。過去の記録は残ります)')) return;
+      s.archived = true;
+      await saveRoster(state.roster);
+      await appendAuditLog({ action:'スタッフ削除', target: s.name, before:'在籍', after:'削除(名簿非表示)' });
+      render();
+      showToast('「'+s.name+'」を削除しました', '元に戻す', async function(){
+        var cur = state.roster.find(function(x){ return x.id===id; });
+        if(cur){
+          cur.archived = false;
+          await saveRoster(state.roster);
+          await appendAuditLog({ action:'スタッフ削除の取り消し', target: cur.name, before:'削除(名簿非表示)', after:'在籍' });
+          render();
+        }
+      });
+    });
+  });
+  var newStaffInput = document.getElementById('newStaffInput');
+  var addStaffBtn = document.getElementById('addStaffBtn');
+  function staffFocusGuard(el){
+    el.addEventListener('focusin', function(){ state.suppressRender = true; });
+    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+  }
+  if(newStaffInput){
+    staffFocusGuard(newStaffInput);
+    newStaffInput.addEventListener('input', function(){ state.newStaffDraftName = newStaffInput.value; });
+    newStaffInput.addEventListener('keydown', function(e){ if(e.key==='Enter') addStaffBtn.click(); });
+  }
+  if(addStaffBtn){
+    addStaffBtn.addEventListener('click', async function(){
+      var name = (newStaffInput.value||'').trim();
+      if(!name) return;
+      state.roster.push({id:uid(), name:name, archived:false, pattern:defaultPattern()});
+      state.newStaffDraftName = '';
+      state.suppressRender = false;
+      await saveRoster(state.roster);
+      render();
+    });
+  }
+  document.querySelectorAll('[data-pattern-toggle]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var parts = el.getAttribute('data-pattern-toggle').split('|');
+      var sid = parts[0], idx = parseInt(parts[1],10);
+      var s = state.roster.find(function(s){ return s.id===sid; });
+      if(!s) return;
+      var pattern = (s.pattern || defaultPattern()).slice();
+      pattern[idx] = !pattern[idx];
+      s.pattern = pattern;
+      await saveRoster(state.roster);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-avatar-color]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var parts = el.getAttribute('data-avatar-color').split('|');
+      var sid = parts[0], color = parts[1];
+      var s = state.roster.find(function(s){ return s.id===sid; });
+      if(!s) return;
+      s.avatarColor = color;
+      await saveRoster(state.roster);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-holiday-off-toggle]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var sid = el.getAttribute('data-holiday-off-toggle');
+      var s = state.roster.find(function(s){ return s.id===sid; });
+      if(!s) return;
+      s.offOnHolidays = !s.offOnHolidays;
+      await saveRoster(state.roster);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-overtime-end]').forEach(function(el){
+    el.addEventListener('focusin', function(){ state.suppressRender = true; });
+    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+    el.addEventListener('change', async function(){
+      var sid = el.getAttribute('data-overtime-end');
+      var day = state.day;
+      if(!day.shiftEndOverrides) day.shiftEndOverrides = {};
+      if(el.value){
+        day.shiftEndOverrides[sid] = el.value;
+      }else{
+        delete day.shiftEndOverrides[sid];
+      }
+      state.suppressRender = false;
+      await saveDay(day);
+      render();
+    });
+  });
 }
 function renderManager(){
   var viewDate = managerActiveDate();
@@ -3971,38 +4145,6 @@ function renderManager(){
     (isToday ? '<span class="date-nav-today-badge">本日</span>' : '<button class="date-nav-today-btn" id="dateNavToday">本日に戻る</button>')+
   '</div>';
 
-  var rosterHtml = roster.map(function(s){
-    var on = !!day.attendance[s.id];
-    var pattern = s.pattern || defaultPattern();
-    var dayToggles = pattern.map(function(v,i){
-      return '<button class="pattern-day '+(v?'on':'')+'" data-pattern-toggle="'+s.id+'|'+i+'">'+WD[i]+'</button>';
-    }).join('');
-    var currentAvatarColor = avatarColorForStaff(s);
-    var avatarSwatches = TASK_COLORS.map(function(c){
-      return '<div class="avatar-swatch '+(currentAvatarColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-avatar-color="'+s.id+'|'+c.hex+'"></div>';
-    }).join('');
-    var overtimeRow = '';
-    if(state.shiftSettings && state.shiftSettings.enabled){
-      var overrideVal = (day.shiftEndOverrides && day.shiftEndOverrides[s.id]) || '';
-      overtimeRow = '<div class="overtime-row">'+
-        '<span class="overtime-label">🕐 この日の終業を延長</span>'+
-        '<input type="time" class="overtime-input" data-overtime-end="'+s.id+'" value="'+esc(overrideVal)+'">'+
-      '</div>';
-    }
-    return '<div class="roster-item">'+
-      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
-        '<span class="roster-name">'+esc(s.name)+'</span>'+
-        '<div class="roster-controls">'+
-          '<button class="toggle-att '+(on?'on':'off')+'" data-toggle-att="'+s.id+'">'+(on?'出勤中':'欠勤')+'</button>'+
-          '<button class="icon-x" data-del-staff="'+s.id+'" title="'+esc(s.name)+'を削除" aria-label="'+esc(s.name)+'を削除">&times;</button>'+
-        '</div>'+
-      '</div>'+
-      '<div class="pattern-row">'+dayToggles+'</div>'+
-      '<button class="holiday-off-toggle '+(s.offOnHolidays?'on':'')+'" data-holiday-off-toggle="'+s.id+'">🎌 祝日も休みにする</button>'+
-      overtimeRow+
-      '<div class="avatar-swatch-row" title="アバターカラー(累計実績画面のキャラクターの色)">'+avatarSwatches+'</div>'+
-    '</div>';
-  }).join('') || '<div class="empty-note">スタッフを登録してください。</div>';
 
   var poolHtml = present.map(function(s){
     var isUnassigned = !(day.assignments[s.id]||[]).length;
@@ -4107,12 +4249,8 @@ function renderManager(){
     '<div class="mgr-grid">'+
       '<div class="panel">'+
         '<div class="panel-title">出勤スタッフ <span class="count-badge">'+present.length+' / '+roster.length+'</span></div>'+
-        '<div class="pool-hint" style="margin-bottom:8px;">曜日ボタンで通常の出勤パターンを設定。この日の出退勤はボタンで個別に切替。</div>'+
-        '<div class="roster-list">'+rosterHtml+'</div>'+
-        '<div class="add-row">'+
-          '<input type="text" id="newStaffInput" placeholder="名前を入力" value="'+esc(state.newStaffDraftName)+'">'+
-          '<button class="add-btn" id="addStaffBtn">追加</button>'+
-        '</div>'+
+        '<div class="pool-hint" style="margin-bottom:8px;">出勤の切替・出勤パターン・スタッフの追加は「設定 → スタッフ設定」に移動しました。</div>'+
+        '<button type="button" class="vc-manage-toggle-btn" id="goToStaffSettingsBtn">⚙️ スタッフ設定を開く</button>'+
       '</div>'+
       '<div class="panel">'+
         '<div class="panel-title">'+esc(dateLabelFromStr(viewDate))+'の作業 <span class="count-badge">'+tasks.length+'件</span></div>'+
@@ -4273,6 +4411,10 @@ var SETTINGS_HUB_TABS = [
   { key:'system', label:'システム設定', icon:'🔧' }
 ];
 function renderSettingsHub(){
+  ensureManagerSessionChecked();
+  if(!hasManagerSession()){
+    return renderManagerLoginForm('⚙️ 設定', 'この画面はスタッフ設定・作業設定・マスター設定・操作履歴など、システム設定全般を扱います。閲覧・操作には管理者アカウントでのログインが必要です(管理者PINとは別の、本物のログインです)。');
+  }
   if(!state.settingsHubTab) state.settingsHubTab = 'basic';
   var tabsHtml = '<div class="panel-title" style="font-size:20px;margin-bottom:4px;">⚙️ 設定</div>'+
     '<div class="vc-tabs" style="margin:0 0 14px;flex-wrap:wrap;">'+
@@ -4290,7 +4432,7 @@ function renderSettingsHub(){
     var panels = renderSettingsPanels();
     var content;
     if(state.settingsHubTab==='staff'){
-      content = '<div class="pool-hint">スタッフの追加・編集・出勤パターン設定は、管理者→今日の状況の画面から行えます(出退勤の管理と一体のため、そちらに残しています)。</div>';
+      content = renderStaffSettingsPanel();
     }else if(state.settingsHubTab==='shift'){
       content = panels.shiftPanel + panels.breakPanel;
     }else if(state.settingsHubTab==='productivity'){
@@ -4307,6 +4449,10 @@ function renderSettingsHub(){
   return body.replace(/^(<div[^>]*>)/, '$1'+tabsHtml);
 }
 function bindSettingsHub(){
+  if(!hasManagerSession()){
+    bindManagerLoginForm();
+    return;
+  }
   document.querySelectorAll('[data-settings-hub-tab]').forEach(function(el){
     el.addEventListener('click', function(){
       state.settingsHubTab = el.getAttribute('data-settings-hub-tab');
@@ -4315,6 +4461,7 @@ function bindSettingsHub(){
   });
   if(state.settingsHubTab==='task') bindRegister();
   else if(state.settingsHubTab==='history') bindHistory();
+  else if(state.settingsHubTab==='staff') bindStaffSettingsPanel();
   else bindSettings();
 }
 
@@ -4384,60 +4531,12 @@ function bindManager(){
     if(errDateInput) errDateInput.addEventListener('change', function(){ switchManagerDate(errDateInput.value); });
     return;
   }
-  document.querySelectorAll('[data-toggle-att]').forEach(function(el){
-    el.addEventListener('click', async function(){
-      var id = el.getAttribute('data-toggle-att');
-      var day = managerActiveDay();
-      var before = !!day.attendance[id];
-      day.attendance[id] = !day.attendance[id];
-      await saveDay(day);
-      await appendAuditLog({ action:'出勤状態変更', target: staffById(id).name, before: (before?'出勤中':'欠勤'), after: (day.attendance[id]?'出勤中':'欠勤') });
-      render();
-    });
+  var goToStaffSettingsBtn = document.getElementById('goToStaffSettingsBtn');
+  if(goToStaffSettingsBtn) goToStaffSettingsBtn.addEventListener('click', function(){
+    state.role = 'settingsHub';
+    state.settingsHubTab = 'staff';
+    render();
   });
-  document.querySelectorAll('[data-del-staff]').forEach(function(el){
-    el.addEventListener('click', async function(){
-      var id = el.getAttribute('data-del-staff');
-      var s = state.roster.find(function(s){ return s.id===id; });
-      if(!s) return;
-      if(!confirm('スタッフ「'+s.name+'」を削除しますか?(名簿から非表示になります。過去の記録は残ります)')) return;
-      s.archived = true;
-      await saveRoster(state.roster);
-      await appendAuditLog({ action:'スタッフ削除', target: s.name, before:'在籍', after:'削除(名簿非表示)' });
-      render();
-      showToast('「'+s.name+'」を削除しました', '元に戻す', async function(){
-        var cur = state.roster.find(function(x){ return x.id===id; });
-        if(cur){
-          cur.archived = false;
-          await saveRoster(state.roster);
-          await appendAuditLog({ action:'スタッフ削除の取り消し', target: cur.name, before:'削除(名簿非表示)', after:'在籍' });
-          render();
-        }
-      });
-    });
-  });
-  var newStaffInput = document.getElementById('newStaffInput');
-  var addStaffBtn = document.getElementById('addStaffBtn');
-  function focusGuard(el){
-    el.addEventListener('focusin', function(){ state.suppressRender = true; });
-    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
-  }
-  if(newStaffInput){
-    focusGuard(newStaffInput);
-    newStaffInput.addEventListener('input', function(){ state.newStaffDraftName = newStaffInput.value; });
-    newStaffInput.addEventListener('keydown', function(e){ if(e.key==='Enter') addStaffBtn.click(); });
-  }
-  if(addStaffBtn){
-    addStaffBtn.addEventListener('click', async function(){
-      var name = (newStaffInput.value||'').trim();
-      if(!name) return;
-      state.roster.push({id:uid(), name:name, archived:false, pattern:defaultPattern()});
-      state.newStaffDraftName = '';
-      state.suppressRender = false;
-      await saveRoster(state.roster);
-      render();
-    });
-  }
   document.querySelectorAll('[data-edit-task-col]').forEach(function(el){
     el.addEventListener('click', function(){
       var id = el.getAttribute('data-edit-task-col');
@@ -4465,40 +4564,6 @@ function bindManager(){
           render();
         }
       });
-    });
-  });
-  document.querySelectorAll('[data-pattern-toggle]').forEach(function(el){
-    el.addEventListener('click', async function(){
-      var parts = el.getAttribute('data-pattern-toggle').split('|');
-      var sid = parts[0], idx = parseInt(parts[1],10);
-      var s = state.roster.find(function(s){ return s.id===sid; });
-      if(!s) return;
-      var pattern = (s.pattern || defaultPattern()).slice();
-      pattern[idx] = !pattern[idx];
-      s.pattern = pattern;
-      await saveRoster(state.roster);
-      render();
-    });
-  });
-  document.querySelectorAll('[data-avatar-color]').forEach(function(el){
-    el.addEventListener('click', async function(){
-      var parts = el.getAttribute('data-avatar-color').split('|');
-      var sid = parts[0], color = parts[1];
-      var s = state.roster.find(function(s){ return s.id===sid; });
-      if(!s) return;
-      s.avatarColor = color;
-      await saveRoster(state.roster);
-      render();
-    });
-  });
-  document.querySelectorAll('[data-holiday-off-toggle]').forEach(function(el){
-    el.addEventListener('click', async function(){
-      var sid = el.getAttribute('data-holiday-off-toggle');
-      var s = state.roster.find(function(s){ return s.id===sid; });
-      if(!s) return;
-      s.offOnHolidays = !s.offOnHolidays;
-      await saveRoster(state.roster);
-      render();
     });
   });
   document.querySelectorAll('[data-unassign]').forEach(function(el){
@@ -4930,23 +4995,6 @@ function bindSettings(){
     });
   });
 
-  document.querySelectorAll('[data-overtime-end]').forEach(function(el){
-    el.addEventListener('focusin', function(){ state.suppressRender = true; });
-    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
-    el.addEventListener('change', async function(){
-      var sid = el.getAttribute('data-overtime-end');
-      var day = managerActiveDay();
-      if(!day.shiftEndOverrides) day.shiftEndOverrides = {};
-      if(el.value){
-        day.shiftEndOverrides[sid] = el.value;
-      }else{
-        delete day.shiftEndOverrides[sid];
-      }
-      state.suppressRender = false;
-      await saveDay(day);
-      render();
-    });
-  });
 
   var achievementTargetInput = document.getElementById('achievementTargetInput');
   if(achievementTargetInput){

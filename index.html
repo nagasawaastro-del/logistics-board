@@ -869,6 +869,14 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-13', items:[
+    '【トップページの整理】トップページのカードを11個から6個(実績入力・集計・モニター表示・カレンダー・管理者・設定)に整理しました。既存の画面・機能・データは一切削除しておらず、管理者向け機能(今日の状況・人員配置・生産性・収支・分析)は「管理者」の中のタブに、設定・マスター系機能(基本設定・スタッフ設定・作業設定・勤務時間設定・生産性設定・マスター設定・操作履歴・システム設定)は「設定」の中のタブにまとめました',
+    '「実績入力」画面(名前をタップして作業する現場向け画面)の操作フローは一切変更していません',
+    '「実績」画面(今月のチーム記録・過去最高)は、今回の新しい7分類のどこにも明記されていなかったため、削除はせず「集計」画面から「🏆 実績を見る」のリンクでアクセスできるようにしました',
+    '「管理者」「設定」の中のタブは、既存のそれぞれの画面(今日の状況=旧・管理者画面、作業設定=旧・作業登録画面、操作履歴=旧・操作履歴画面など)の処理をそのまま呼び出しているだけで、内部のロジック・データの扱いは変更していません',
+    '今後、新しい機能が増えても、トップページのカードを増やすのではなく、「管理者」または「設定」の中にタブを追加していく方針とします',
+    '実際にコードを実行するテストで、両方のハブ画面のすべてのタブが例外なく描画されること、タブごとに正しく異なる画面内容が表示されること、タブ切り替えボタンが正しく動作すること、カレンダーから管理者画面への遷移が新しい構成でも動作することを確認済みです'
+  ]},
   { date:'2026-09-12', items:[
     '【人員配置の偏り防止】配置アルゴリズムに、作業負荷(本日これまでの実績時間+この配置案内での割当予定時間)と、同一作業への連続配置を考慮する仕組みを追加しました。締切に十分な余裕がある作業では、生産性が高い人に無条件で作業を集中させず、負荷が低い人・直前と違う作業の人を優先します。一方、締切が厳しい作業(逼迫度が高い場合)では、この調整を行わず、常に最も早く終えられる人を優先します(公平性より納期達成)',
     '配置案の「理由」表示を拡充。「Aさんの作業負荷が高いためBさんを配置」「作業の偏りを抑えるため」「この作業の必要工数が大きいため」など、なぜその人がその作業に配置されたのかが分かるようにしました',
@@ -1670,7 +1678,7 @@ async function loadAdminPinHash(){
 async function saveAdminPinHash(hash){
   try{ await window.storage.set('admin-pin-hash', hash, true); }catch(e){}
 }
-function ADMIN_GATED_ROLES(){ return ['manager','register','history','settings','financial','staffing']; }
+function ADMIN_GATED_ROLES(){ return ['adminHub','settingsHub']; }
 /* ---------- audit log ---------- */
 async function loadAuditLog(dateStr){
   try{
@@ -2636,13 +2644,70 @@ function bindCalendar(){
       var dateStr = el.getAttribute('data-cal-date');
       if(!state.isAdminUnlocked){
         state.pendingCalendarDate = dateStr;
-        openPinGate('manager');
+        openPinGate('adminHub');
         return;
       }
-      state.role = 'manager';
+      state.role = 'adminHub';
+      state.adminHubTab = 'today';
       switchManagerDate(dateStr);
     });
   });
+}
+function renderProductivityTab(){
+  if(state.productivityMaster===null){
+    loadProductivityMaster().then(function(d){ state.productivityMaster = d; render(); });
+    return '<div class="empty-note">読み込み中...</div>';
+  }
+  var master = state.productivityMaster||{};
+  var taskIds = Object.keys(master);
+  var rows = taskIds.map(function(tid){
+    var m = master[tid];
+    var avgRate = (m.taskAverage && m.taskAverage.totalHours>0) ? (m.taskAverage.totalQty/m.taskAverage.totalHours) : null;
+    var staffRows = Object.keys(m.byStaff||{}).map(function(sid){
+      var s = m.byStaff[sid];
+      var rate = s.totalHours>0 ? s.totalQty/s.totalHours : null;
+      var enough = s.sampleCount>=PRODUCTIVITY_MIN_SAMPLES;
+      return '<div class="checklist-item-action">'+esc(staffById(sid).name)+': '+(rate?rate.toFixed(1):'-')+'/h(サンプル'+s.sampleCount+'日'+(enough?'':'・配置には未反映(5日未満)')+')</div>';
+    }).join('') || '<div class="checklist-item-action">個人別の実績はまだありません</div>';
+    return '<div class="checklist-item">'+
+      '<div class="checklist-item-title">'+esc(taskById(tid).name)+' — 作業全体の標準生産性: '+(avgRate?avgRate.toFixed(1)+'/h':'不明')+'(サンプル'+((m.taskAverage&&m.taskAverage.sampleCount)||0)+'日)</div>'+
+      staffRows+
+    '</div>';
+  }).join('') || '<div class="empty-note">まだ生産性データがありません。下のボタンで実績から作成してください。</div>';
+
+  return '<div class="mgr-wrap"><div class="panel">'+
+    '<div class="panel-title">📈 生産性</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">作業種別×作業者ごとの生産性実績です。複数人が同時に従事した日は個人の実績には使われません(作業全体の標準値のみ更新されます)。個人の実績が5日未満の場合、人員配置では作業全体の標準値が使われます。</div>'+
+    '<button type="button" class="add-btn" id="staffingRefreshProductivityBtn" style="margin-bottom:14px;">生産性データを最新の実績で更新する</button>'+
+    rows+
+  '</div></div>';
+}
+function bindProductivityTab(){
+  var staffingRefreshProductivityBtn = document.getElementById('staffingRefreshProductivityBtn');
+  if(staffingRefreshProductivityBtn){
+    staffingRefreshProductivityBtn.addEventListener('click', async function(){
+      staffingRefreshProductivityBtn.disabled = true;
+      staffingRefreshProductivityBtn.textContent = '更新中...';
+      var master = await loadProductivityMaster();
+      var todayD = new Date();
+      var updatedDays = 0;
+      for(var i=0;i<30;i++){ // 直近30日分から蓄積する
+        var d = new Date(todayD.getTime() - i*86400000);
+        var dStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+        var day = (dStr===todayStr()) ? state.day : await loadDayByDate(dStr);
+        if(!day || !day.logs || !day.logs.length) continue;
+        var wv = await getWorkVolumeForDate(dStr);
+        if(!wv) continue;
+        updateProductivityMasterFromDay(master, dStr, day, wv);
+        updatedDays++;
+      }
+      await saveProductivityMaster(master);
+      state.productivityMaster = master;
+      await appendAuditLog({ action:'生産性データ更新', target:'productivity-master', before:null, after: updatedDays+'日分を反映' });
+      showToast('直近30日のうち、実績のあった'+updatedDays+'日分を生産性データに反映しました');
+      render();
+    });
+  }
 }
 function renderStaffing(){
   var dateStr = todayStr();
@@ -2717,7 +2782,6 @@ function renderStaffing(){
       '</details>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">'+
         '<button type="button" class="add-btn" id="staffingCreateBtn">配置案を作成/再計算する</button>'+
-        '<button type="button" class="vc-manage-toggle-btn" id="staffingRefreshProductivityBtn">生産性データを最新の実績で更新する</button>'+
       '</div>'+
       resultHtml+
     '</div>'+
@@ -2741,33 +2805,6 @@ function bindStaffing(){
       render();
     });
   });
-  var staffingRefreshProductivityBtn = document.getElementById('staffingRefreshProductivityBtn');
-  if(staffingRefreshProductivityBtn){
-    staffingRefreshProductivityBtn.addEventListener('click', async function(){
-      staffingRefreshProductivityBtn.disabled = true;
-      staffingRefreshProductivityBtn.textContent = '更新中...';
-      var master = await loadProductivityMaster();
-      var todayD = new Date();
-      var updatedDays = 0;
-      for(var i=0;i<30;i++){ // 直近30日分から蓄積する
-        var d = new Date(todayD.getTime() - i*86400000);
-        var dStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-        var day = (dStr===todayStr()) ? state.day : await loadDayByDate(dStr);
-        if(!day || !day.logs || !day.logs.length) continue;
-        var wv = await getWorkVolumeForDate(dStr);
-        if(!wv) continue;
-        updateProductivityMasterFromDay(master, dStr, day, wv);
-        updatedDays++;
-      }
-      await saveProductivityMaster(master);
-      state.productivityMaster = master;
-      await appendAuditLog({ action:'生産性データ更新', target:'productivity-master', before:null, after: updatedDays+'日分を反映' });
-      showToast('直近30日のうち、実績のあった'+updatedDays+'日分を生産性データに反映しました');
-      staffingRefreshProductivityBtn.disabled = false;
-      staffingRefreshProductivityBtn.textContent = '生産性データを最新の実績で更新する';
-      render();
-    });
-  }
   var staffingCreateBtn = document.getElementById('staffingCreateBtn');
   if(staffingCreateBtn){
     staffingCreateBtn.addEventListener('click', async function(){
@@ -3512,6 +3549,8 @@ function render(){
   else if(state.role==='settings') html += renderSettings();
   else if(state.role==='financial') html += renderFinancial();
   else if(state.role==='staffing') html += renderStaffing();
+  else if(state.role==='adminHub') html += renderAdminHub();
+  else if(state.role==='settingsHub') html += renderSettingsHub();
   if(state.modal) html += renderModal();
   if(state.pinModal) html += renderPinModal();
   root.innerHTML = html;
@@ -3527,6 +3566,8 @@ function render(){
   if(state.role==='settings') bindSettings();
   if(state.role==='financial') bindFinancial();
   if(state.role==='staffing') bindStaffing();
+  if(state.role==='adminHub') bindAdminHub();
+  if(state.role==='settingsHub') bindSettingsHub();
   if(state.modal) bindModal();
   if(state.pinModal) bindPinModal();
   restoreScroll();
@@ -3540,66 +3581,37 @@ function renderGate(){
     '<h1 class="gate-title">物流センター 作業割り当てボード</h1>'+
     '<p class="gate-sub">このアプリのデータは全員で共有されます。使う画面の役割を選んでください。</p>'+
     '<div class="gate-grid">'+
-      '<button class="gate-card" data-role="manager">'+
-        (state.isAdminUnlocked?'':'<div class="gate-lock-badge" title="管理者専用">&#128274;</div>')+
-        '<div class="gate-icon" style="background:#EFEBE2;color:#1B2333;">&#128203;</div>'+
-        '<div class="gate-card-title">管理者</div>'+
-        '<div class="gate-card-desc">当日分の作業に出勤者を割り当て</div>'+
-      '</button>'+
-      '<button class="gate-card" data-role="register">'+
-        (state.isAdminUnlocked?'':'<div class="gate-lock-badge" title="管理者専用">&#128274;</div>')+
-        '<div class="gate-icon" style="background:#E9F2F0;color:#0F6E56;">&#128221;</div>'+
-        '<div class="gate-card-title">作業登録</div>'+
-        '<div class="gate-card-desc">日付指定の単発作業や、毎日/曜日で繰り返す作業を登録</div>'+
-      '</button>'+
       '<button class="gate-card" data-role="input">'+
         '<div class="gate-icon" style="background:#FFF3DE;color:#D98E1F;">&#9997;</div>'+
-        '<div class="gate-card-title">作業実績入力</div>'+
+        '<div class="gate-card-title">実績入力</div>'+
         '<div class="gate-card-desc">タップだけで作業の開始・切り替え・件数入力</div>'+
-      '</button>'+
-      '<button class="gate-card" data-role="monitor">'+
-        '<div class="gate-icon" style="background:#111827;color:#F2A93B;">&#128225;</div>'+
-        '<div class="gate-card-title">モニター表示</div>'+
-        '<div class="gate-card-desc">共有モニターに稼働状況をリアルタイム表示</div>'+
       '</button>'+
       '<button class="gate-card" data-role="report">'+
         '<div class="gate-icon" style="background:#EEF0FB;color:#4C5FD5;">&#128202;</div>'+
         '<div class="gate-card-title">集計</div>'+
         '<div class="gate-card-desc">日別・期間別にスタッフ/作業ごとの実績を集計</div>'+
       '</button>'+
-      '<button class="gate-card" data-role="achievements">'+
-        '<div class="gate-icon" style="background:#FFF3DE;color:#C1521F;">&#127942;</div>'+
-        '<div class="gate-card-title">実績</div>'+
-        '<div class="gate-card-desc">今月のチーム記録・過去最高・前年比をチームで見る</div>'+
+      '<button class="gate-card" data-role="monitor">'+
+        '<div class="gate-icon" style="background:#111827;color:#F2A93B;">&#128225;</div>'+
+        '<div class="gate-card-title">モニター表示</div>'+
+        '<div class="gate-card-desc">共有モニターに稼働状況をリアルタイム表示</div>'+
       '</button>'+
       '<button class="gate-card" data-role="calendar">'+
         '<div class="gate-icon" style="background:#E9F2F0;color:#0F6E56;">&#128197;</div>'+
         '<div class="gate-card-title">カレンダー</div>'+
         '<div class="gate-card-desc">登録済みの作業・出勤予定を月ごとに確認して編集</div>'+
       '</button>'+
-      '<button class="gate-card" data-role="history">'+
+      '<button class="gate-card" data-role="adminHub">'+
         (state.isAdminUnlocked?'':'<div class="gate-lock-badge" title="管理者専用">&#128274;</div>')+
-        '<div class="gate-icon" style="background:#EEF0FB;color:#4C5FD5;">&#128220;</div>'+
-        '<div class="gate-card-title">操作履歴</div>'+
-        '<div class="gate-card-desc">作業・出勤・割り当て・実績の変更/削除履歴(管理者専用)</div>'+
+        '<div class="gate-icon" style="background:#EFEBE2;color:#1B2333;">&#128100;</div>'+
+        '<div class="gate-card-title">管理者</div>'+
+        '<div class="gate-card-desc">今日の状況・人員配置・生産性・収支分析(管理者専用)</div>'+
       '</button>'+
-      '<button class="gate-card" data-role="settings">'+
+      '<button class="gate-card" data-role="settingsHub">'+
         (state.isAdminUnlocked?'':'<div class="gate-lock-badge" title="管理者専用">&#128274;</div>')+
         '<div class="gate-icon" style="background:#F4EEE4;color:#8A6A3B;">&#9881;</div>'+
         '<div class="gate-card-title">設定</div>'+
-        '<div class="gate-card-desc">自動出退勤・休憩・CSV取込バッチ管理・実績目標・管理者PIN(管理者専用)</div>'+
-      '</button>'+
-      '<button class="gate-card" data-role="financial">'+
-        '<div class="gate-lock-badge" title="管理者ログインが別途必要です">&#128274;&#128273;</div>'+
-        '<div class="gate-icon" style="background:#FDEEF2;color:#B33C63;">&#128176;</div>'+
-        '<div class="gate-card-title">収支・分析</div>'+
-        '<div class="gate-card-desc">売上・原価・粗利・荷主別/商品別分析(管理者ログイン必須。PINとは別の認証です)</div>'+
-      '</button>'+
-      '<button class="gate-card" data-role="staffing">'+
-        (state.isAdminUnlocked?'':'<div class="gate-lock-badge" title="管理者専用">&#128274;</div>')+
-        '<div class="gate-icon" style="background:#EAF1FB;color:#2E5FA3;">&#128101;</div>'+
-        '<div class="gate-card-title">人員配置</div>'+
-        '<div class="gate-card-desc">締切・優先順位から配置案を自動作成(管理者専用)</div>'+
+        '<div class="gate-card-desc">作業設定・勤務時間設定・マスター設定・操作履歴など(管理者専用)</div>'+
       '</button>'+
     '</div>'+
     '<button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
@@ -3723,6 +3735,7 @@ function bindPinModal(){
       state.pendingCalendarDate = null;
       if(wasSetup && pendingRole){
         state.role = pendingRole;
+        if(pendingRole==='adminHub') state.adminHubTab = 'today';
         render();
         startPolling();
         if(pendingDate) switchManagerDate(pendingDate);
@@ -3747,6 +3760,7 @@ function bindPinModal(){
         state.pinModal = null;
         state.pendingCalendarDate = null;
         state.role = pendingRole;
+        if(pendingRole==='adminHub') state.adminHubTab = 'today';
         render();
         startPolling();
         if(pendingDate) switchManagerDate(pendingDate);
@@ -3768,7 +3782,7 @@ function bindPinModal(){
 
 /* ---------- TOPBAR ---------- */
 function renderTopbar(){
-  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業実績入力', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置'}[state.role];
+  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'実績入力', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定'}[state.role];
   var lockBtn = (state.isAdminUnlocked && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="管理者ロックをかけ直す">🔒 ロックする</button>' : '';
   return ''+
   '<div class="topbar">'+
@@ -3890,6 +3904,39 @@ function renderDailyChecklist(){
     '<div class="panel-title">⚠️ 本日の確認事項 <span class="count-badge">'+items.length+'件</span></div>'+
     rows+
   '</div>';
+}
+var ADMIN_HUB_TABS = [
+  { key:'today', label:'今日の状況', icon:'📋' },
+  { key:'staffing', label:'人員配置', icon:'👥' },
+  { key:'productivity', label:'生産性', icon:'📈' },
+  { key:'financial', label:'収支・分析', icon:'💰' }
+];
+function renderAdminHub(){
+  if(!state.adminHubTab) state.adminHubTab = 'today';
+  var tabsHtml = '<div class="vc-tabs" style="margin:0 0 14px;">'+
+    ADMIN_HUB_TABS.map(function(t){
+      return '<button type="button" class="vc-tab-btn'+(state.adminHubTab===t.key?' active':'')+'" data-admin-hub-tab="'+t.key+'">'+t.icon+' '+t.label+'</button>';
+    }).join('')+
+  '</div>';
+  var body;
+  if(state.adminHubTab==='staffing') body = renderStaffing();
+  else if(state.adminHubTab==='productivity') body = renderProductivityTab();
+  else if(state.adminHubTab==='financial') body = renderFinancial();
+  else body = renderManager();
+  // 各画面は自前の外枠(mgr-wrap等)を持っているため、タブバーをその内側の先頭に差し込む
+  return body.replace(/^(<div[^>]*>)/, '$1'+tabsHtml);
+}
+function bindAdminHub(){
+  document.querySelectorAll('[data-admin-hub-tab]').forEach(function(el){
+    el.addEventListener('click', function(){
+      state.adminHubTab = el.getAttribute('data-admin-hub-tab');
+      render();
+    });
+  });
+  if(state.adminHubTab==='staffing') bindStaffing();
+  else if(state.adminHubTab==='productivity') bindProductivityTab();
+  else if(state.adminHubTab==='financial') bindFinancial();
+  else bindManager();
 }
 function renderManager(){
   var viewDate = managerActiveDate();
@@ -4213,13 +4260,62 @@ function renderSettingsPanels(){
     '<button type="button" class="add-btn" id="backupDownloadBtn">この日のバックアップをダウンロード</button>'+
   '</div>';
 
-  return shiftPanel + workVolumePanel + breakPanel + achievementPanel + pinChangeHtml + backupPanel;
+  return { shiftPanel:shiftPanel, workVolumePanel:workVolumePanel, breakPanel:breakPanel, achievementPanel:achievementPanel, pinChangeHtml:pinChangeHtml, backupPanel:backupPanel };
 }
-function renderSettings(){
-  return '<div class="mgr-wrap"><div class="panel-title" style="font-size:20px;margin-bottom:4px;">⚙️ 設定</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">自動出退勤・休憩・CSV取込バッチ管理・実績目標・管理者PINをここでまとめて設定できます。</div>'+
-    renderSettingsPanels()+
+var SETTINGS_HUB_TABS = [
+  { key:'basic', label:'基本設定', icon:'🏠' },
+  { key:'staff', label:'スタッフ設定', icon:'🧑' },
+  { key:'task', label:'作業設定', icon:'📦' },
+  { key:'shift', label:'勤務時間設定', icon:'⏰' },
+  { key:'productivity', label:'生産性設定', icon:'📈' },
+  { key:'master', label:'マスター設定', icon:'🗂' },
+  { key:'history', label:'操作履歴', icon:'📜' },
+  { key:'system', label:'システム設定', icon:'🔧' }
+];
+function renderSettingsHub(){
+  if(!state.settingsHubTab) state.settingsHubTab = 'basic';
+  var tabsHtml = '<div class="panel-title" style="font-size:20px;margin-bottom:4px;">⚙️ 設定</div>'+
+    '<div class="vc-tabs" style="margin:0 0 14px;flex-wrap:wrap;">'+
+    SETTINGS_HUB_TABS.map(function(t){
+      return '<button type="button" class="vc-tab-btn'+(state.settingsHubTab===t.key?' active':'')+'" data-settings-hub-tab="'+t.key+'">'+t.icon+' '+t.label+'</button>';
+    }).join('')+
   '</div>';
+
+  var body;
+  if(state.settingsHubTab==='task'){
+    body = renderRegister();
+  }else if(state.settingsHubTab==='history'){
+    body = renderHistory();
+  }else{
+    var panels = renderSettingsPanels();
+    var content;
+    if(state.settingsHubTab==='staff'){
+      content = '<div class="pool-hint">スタッフの追加・編集・出勤パターン設定は、管理者→今日の状況の画面から行えます(出退勤の管理と一体のため、そちらに残しています)。</div>';
+    }else if(state.settingsHubTab==='shift'){
+      content = panels.shiftPanel + panels.breakPanel;
+    }else if(state.settingsHubTab==='productivity'){
+      content = '<div class="pool-hint">生産性データの内容・更新は、管理者→生産性の画面で確認・更新できます。ここでは設定できる項目は現在ありません。</div>';
+    }else if(state.settingsHubTab==='master'){
+      content = panels.workVolumePanel;
+    }else if(state.settingsHubTab==='system'){
+      content = panels.pinChangeHtml + panels.backupPanel;
+    }else{ // basic
+      content = panels.achievementPanel;
+    }
+    body = '<div class="mgr-wrap">'+content+'</div>';
+  }
+  return body.replace(/^(<div[^>]*>)/, '$1'+tabsHtml);
+}
+function bindSettingsHub(){
+  document.querySelectorAll('[data-settings-hub-tab]').forEach(function(el){
+    el.addEventListener('click', function(){
+      state.settingsHubTab = el.getAttribute('data-settings-hub-tab');
+      render();
+    });
+  });
+  if(state.settingsHubTab==='task') bindRegister();
+  else if(state.settingsHubTab==='history') bindHistory();
+  else bindSettings();
 }
 
 function renderTaskForm(){
@@ -5188,7 +5284,8 @@ function renderReport(){
     '<button class="report-mode-btn '+(state.reportMode==='single'?'active':'')+'" data-report-mode="single">特定の1日</button>'+
     '<button class="report-mode-btn '+(state.reportMode==='range'?'active':'')+'" data-report-mode="range">期間で合計</button>'+
     '<button class="report-mode-btn '+(state.reportMode==='rpg'?'active':'')+'" data-report-mode="rpg">🎮 累計実績</button>'+
-  '</div>';
+  '</div>'+
+  '<button type="button" class="pill-btn" id="goToAchievementsBtn" style="margin-bottom:14px;">🏆 実績(今月のチーム記録・過去最高)を見る</button>';
 
   var controls, body;
   if(state.reportMode==='single'){
@@ -5957,6 +6054,11 @@ async function runRangeReport(startStr, endStr){
   render();
 }
 function bindReport(){
+  var goToAchievementsBtn = document.getElementById('goToAchievementsBtn');
+  if(goToAchievementsBtn) goToAchievementsBtn.addEventListener('click', function(){
+    state.role = 'achievements';
+    render();
+  });
   document.querySelectorAll('[data-report-mode]').forEach(function(el){
     el.addEventListener('click', function(){
       state.reportMode = el.getAttribute('data-report-mode');

@@ -869,6 +869,12 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-16', items:[
+    '「作業ごとのCSV作業量設定」(この作業でCSVを使う/バッチ分類基準/名前テンプレート/CSV列名指定)を全廃しました。CSV連携の判定は「実際に取込データがあるか」だけで行われ、通常/VCの種別は各作業の編集画面(「作業を編集」)で直接設定する方式に一本化しています。前回実装した得意先マスターでの自動判定と合わせて、より単純な仕組みになりました',
+    'CSV取込(手動・得意先マスターでの自動振り分けの両方)を、設定→マスター設定から設定→作業設定に移動しました。作業の登録・編集とCSV取込が同じ画面でまとめて行えます。中身が無くなった「マスター設定」タブは削除し、「得意先・作業枠マスター」タブに一本化しました',
+    '日次締めチェックの「CSV連携が有効なのに取込がない」という警告は、「有効」という概念自体が無くなったため削除しました。「取込済みだが実績0時間」の警告は従来通り機能します',
+    '実際にコードを実行するテストで、作業設定タブに手動・自動振り分け両方のCSV取込UIが表示されること、旧マスター設定タブが表示されないこと、作業編集画面で通常/VCを設定できること、CSV連携の自動判定が実際の取込データの有無だけで正しく動作することを確認済みです。既存の全機能への回帰もありません'
+  ]},
   { date:'2026-09-15', items:[
     '【得意先・作業枠マスターとCSV自動紐付け】設定に「得意先・作業枠マスター」を追加。CSVの「取引先名」から、あらかじめ登録した対応表をもとに自動で作業枠を判定できるようになりました。得意先の追加・編集・削除・有効/無効の切替に対応しています',
     '判定は完全一致のみを使用(全角/半角の違いなど明らかなゆらぎのみ吸収)。「株式会社A」と「株式会社A物流」のような曖昧な推測は行わず、マスターに無い得意先は「未紐付け」として扱われ、自動では取り込まれません',
@@ -3947,27 +3953,17 @@ function computeDailyChecklist(){
 
   var todayTasks = tasksForDate(today);
   var wv = state.workVolume || emptyWorkVolume();
-  var wvCfgAll = state.workVolumeConfig || {};
   var agg = aggregateDays([day]);
 
   todayTasks.forEach(function(t){
-    var cfg = wvCfgAll[t.id];
-    if(cfg && cfg.enabled){
-      var hasImport = wvActiveImports(wv).some(function(i){ return i.taskId===t.id; });
-      if(!hasImport){
+    if(isCsvLinkedTask(t.id, wv)){
+      var info = agg.perTask[t.id];
+      var ms = info ? info.ms : 0;
+      if(ms===0){
         items.push({
-          id: 'no_import_'+t.id, title: '「'+t.name+'」はCSV連携が有効ですが、本日の有効な取込がありません',
-          target: t.name, action: 'CSVを取り込むか、連携設定を確認してください'
+          id: 'zero_hours_'+t.id, title: '「'+t.name+'」はCSV取込済みですが、作業実績が0時間です',
+          target: t.name, action: '現場で作業が開始されているか確認してください'
         });
-      }else{
-        var info = agg.perTask[t.id];
-        var ms = info ? info.ms : 0;
-        if(ms===0){
-          items.push({
-            id: 'zero_hours_'+t.id, title: '「'+t.name+'」はCSV取込済みですが、作業実績が0時間です',
-            target: t.name, action: '現場で作業が開始されているか確認してください'
-          });
-        }
       }
     }
     if(isVcKindTask(t.id)){
@@ -4181,6 +4177,194 @@ function bindCustomerMappingPanel(){
       await saveCustomerTaskMapping(state.customerTaskMapping);
       await appendAuditLog({ action:'得意先マスター削除', target: entry.customerName, before: entry.customerName+' → '+taskById(entry.taskId).name, after:'削除' });
       showToast('削除しました');
+      render();
+    });
+  });
+}
+function bindCsvImportPanel(){
+  var wvHistoryDetails = document.getElementById('wvHistoryDetails');
+  if(wvHistoryDetails){
+    wvHistoryDetails.addEventListener('toggle', function(){
+      state.wvHistoryOpen = wvHistoryDetails.open;
+    });
+  }
+  var wvTaskSelect = document.getElementById('wvTaskSelect');
+  if(wvTaskSelect) wvTaskSelect.addEventListener('change', function(){
+    state.wvImportTaskId = wvTaskSelect.value;
+    render();
+  });
+  var wvTargetDateInput = document.getElementById('wvTargetDate');
+  if(wvTargetDateInput){
+    wvTargetDateInput.addEventListener('change', async function(){
+      var newDate = wvTargetDateInput.value || todayStr();
+      state.wvTargetDate = newDate;
+      state.wvViewData = await getWorkVolumeForDate(newDate);
+      render();
+    });
+  }
+  var autoMapTargetDateInput = document.getElementById('autoMapTargetDate');
+  if(autoMapTargetDateInput){
+    autoMapTargetDateInput.addEventListener('change', function(){
+      state.wvTargetDate = autoMapTargetDateInput.value || todayStr();
+    });
+  }
+  var autoMapCsvInput = document.getElementById('autoMapCsvInput');
+  if(autoMapCsvInput){
+    autoMapCsvInput.addEventListener('change', async function(){
+      var file = autoMapCsvInput.files[0];
+      if(!file) return;
+      var targetDate = (autoMapTargetDateInput && autoMapTargetDateInput.value) || state.wvTargetDate || todayStr();
+      state.autoMapImporting = true;
+      render();
+
+      var fingerprint, fileSize = file.size, fileName = file.name;
+      try{
+        fingerprint = await computeFileFingerprint(file);
+      }catch(e){
+        state.autoMapImporting = false;
+        showToast('ファイルの読み取りに失敗しました');
+        autoMapCsvInput.value = '';
+        render();
+        return;
+      }
+      var fpIndex = await loadCsvFingerprintIndex();
+      var dup = findDuplicateFingerprint(fpIndex, fingerprint, fileSize, fileName);
+      if(dup){
+        state.autoMapImporting = false;
+        autoMapCsvInput.value = '';
+        alert('このファイル(「'+fileName+'」)は '+dup.date+' に既に取り込み済みです。同じファイルの二重取込はできません。');
+        render();
+        return;
+      }
+
+      var mapping = state.customerTaskMapping || await loadCustomerTaskMapping();
+      state.customerTaskMapping = mapping;
+
+      parseCsvForWorkVolume(file, {}, function(result){
+        var plan = buildAutoMappedImportPlan(result, mapping);
+        state.autoMapPreviewData = {
+          fileName: fileName, targetDate: targetDate, fingerprint: fingerprint, fileSize: fileSize,
+          rowCount: result.rowCount, missingColumns: result.missingColumns||[],
+          rawParseResult: result,
+          taskPlans: plan.taskPlans, unmapped: plan.unmapped
+        };
+        state.autoMapImporting = false;
+        autoMapCsvInput.value = '';
+        state.modal = { kind:'autoMapPreview' };
+        render();
+      }, function(errMsg){
+        state.autoMapImporting = false;
+        autoMapCsvInput.value = '';
+        showToast(errMsg);
+        render();
+      });
+    });
+  }
+  var wvCsvInput = document.getElementById('wvCsvInput');
+  if(wvCsvInput){
+    wvCsvInput.addEventListener('change', async function(){
+      var file = wvCsvInput.files[0];
+      if(!file) return;
+      var taskId = state.wvImportTaskId || (document.getElementById('wvTaskSelect') ? document.getElementById('wvTaskSelect').value : '');
+      if(!taskId){ showToast('対象作業を選択してください'); wvCsvInput.value=''; return; }
+      var targetDate = state.wvTargetDate || todayStr();
+      var cfg = { taskKind: taskById(taskId).taskKind || 'normal' };
+      state.wvImporting = true;
+      render();
+
+      var fingerprint, fileSize = file.size, fileName = file.name;
+      try{
+        fingerprint = await computeFileFingerprint(file);
+      }catch(e){
+        state.wvImporting = false;
+        showToast('ファイルの読み取りに失敗しました');
+        wvCsvInput.value = '';
+        render();
+        return;
+      }
+      var fpIndex = await loadCsvFingerprintIndex();
+      var dup = findDuplicateFingerprint(fpIndex, fingerprint, fileSize, fileName);
+      if(dup){
+        state.wvImporting = false;
+        wvCsvInput.value = '';
+        alert('このファイル(「'+fileName+'」)は '+dup.date+' に既に取り込み済みです。同じファイルの二重取込はできません。\n\n誤って取り込んだ場合は、その取込履歴を削除してから、正しいファイルを取り込み直してください。');
+        render();
+        return;
+      }
+
+      var targetData = await getWorkVolumeForDate(targetDate);
+      var attemptId = uid();
+      var attemptsData = await loadVcImportAttempts(targetDate);
+      attemptsData.attempts.push({ id: attemptId, taskId: taskId, startedAt: new Date().toISOString(), status:'pending', fileName: fileName });
+      await saveVcImportAttempts(targetDate, attemptsData);
+      if(targetDate===todayStr()) state.vcImportAttemptsToday = attemptsData;
+
+      parseCsvForWorkVolume(file, {}, async function(result){
+        var importId = uid();
+        var newBatches = [];
+        var shipperNos = result.shipperGroups.map(function(g){ return g.shipperNo; });
+        var prevImport = findPreviousImportForTaskDate(targetData, taskId, importId);
+        var anomaly = computeAnomalyWarning({primaryCount:result.primaryCount, lineCount:result.lineCount, totalQty:result.totalQty}, prevImport);
+        var overlap = findShipperNoOverlap(shipperNos, targetData, taskId, importId);
+        state.vcPreview = {
+          taskId: taskId, importId: importId, fileName: fileName, cfg: cfg, targetDate: targetDate,
+          attemptId: attemptId,
+          primaryCount: result.primaryCount, lineCount: result.lineCount, totalQty: result.totalQty,
+          batches: newBatches, shipperNos: shipperNos,
+          fingerprint: fingerprint, fileSize: fileSize,
+          missingColumns: result.missingColumns||[], anomaly: anomaly, overlap: overlap,
+          byCustomer: result.byCustomer||{}, byProduct: result.byProduct||{}
+        };
+        state.wvImporting = false;
+        wvCsvInput.value = '';
+        state.modal = { kind:'vcPreview' };
+        render();
+      }, async function(errMsg){
+        await markImportAttemptStatus(targetDate, attemptId, 'failed');
+        state.wvImporting = false;
+        showToast(errMsg);
+        render();
+      });
+    });
+  }
+  document.querySelectorAll('[data-wv-import-delete]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var importId = el.getAttribute('data-wv-import-delete');
+      var viewDate = state.wvTargetDate || todayStr();
+      var data = state.wvViewData || (viewDate===todayStr() ? state.workVolume : null);
+      var imp = data && data.imports.find(function(i){ return i.id===importId; });
+      if(!imp) return;
+      if(!confirm('この取込(「'+imp.fileName+'」)を削除しますか?(論理削除。あとで復元できます)')) return;
+      var reason = prompt('削除理由を入力してください(任意)', '') || '';
+      await deleteWvImport(viewDate, importId, reason);
+      await appendAuditLog({ action:'作業量取込削除', target: taskById(imp.taskId).name+' / '+imp.fileName, before:'有効', after:'削除(理由: '+reason+')' });
+      showToast('取込を削除しました');
+      render();
+    });
+  });
+  document.querySelectorAll('[data-wv-import-restore]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var importId = el.getAttribute('data-wv-import-restore');
+      var viewDate = state.wvTargetDate || todayStr();
+      var data = state.wvViewData || (viewDate===todayStr() ? state.workVolume : null);
+      var imp = data && data.imports.find(function(i){ return i.id===importId; });
+      if(!imp) return;
+      await restoreWvImport(viewDate, importId);
+      await appendAuditLog({ action:'作業量取込復元', target: taskById(imp.taskId).name+' / '+imp.fileName, before:'削除', after:'復元' });
+      showToast('取込を復元しました');
+      render();
+    });
+  });
+  document.querySelectorAll('[data-wv-import-move]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var importId = el.getAttribute('data-wv-import-move');
+      var viewDate = state.wvTargetDate || todayStr();
+      var newDate = prompt('移動先の日付を入力してください(例: 2026-09-10)', viewDate);
+      if(!newDate) return;
+      var result = await moveWvImportDate(viewDate, newDate, importId);
+      if(!result.ok){ showToast(result.msg); return; }
+      await appendAuditLog({ action:'作業量取込の日付変更', target: taskById(result.imp.taskId).name+' / '+result.imp.fileName, before: viewDate, after: newDate });
+      showToast('取込の対象日付を'+newDate+'に変更しました');
       render();
     });
   });
@@ -4499,21 +4683,10 @@ function renderManager(){
   '</div>';
 }
 
-function renderSettingsPanels(){
-  var shiftPanel = '<div class="panel" style="margin-top:14px;">'+
-    '<div class="panel-title">出退勤の自動設定</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">曜日パターンで出勤予定になっているスタッフを、設定した始業時間に自動で「出勤中」に、終業時間に自動で「欠勤(退勤済み)」にします。一度手動で切り替えた後は、その日はその状態を優先し、自動処理は再度上書きしません。</div>'+
-    '<label class="break-toggle-row"><input type="checkbox" id="shiftEnabledInput" '+(state.shiftSettings.enabled?'checked':'')+'> 自動出退勤を有効にする</label>'+
-    '<div class="break-time-row">'+
-      '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">始業時間</label><input type="time" id="shiftStartInput" value="'+esc(state.shiftSettings.start)+'"></div>'+
-      '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">終業時間</label><input type="time" id="shiftEndInput" value="'+esc(state.shiftSettings.end)+'"></div>'+
-    '</div>'+
-  '</div>';
-
+function renderCsvImportPanel(){
   var wvTargetDate = state.wvTargetDate || todayStr();
   var workVolumePanel = '';
   if(!state.workVolume) state.workVolume = emptyWorkVolume();
-  if(!state.workVolumeConfig) state.workVolumeConfig = {};
   var wvViewData = state.wvViewData || (wvTargetDate===todayStr() ? state.workVolume : emptyWorkVolume());
   var wvDateTasks = tasksForDate(wvTargetDate);
   if(state.wvImportTaskId===null){
@@ -4524,8 +4697,7 @@ function renderSettingsPanels(){
   var wvTaskOptions = wvDateTasks.map(function(t){
     return '<option value="'+t.id+'" '+(wvTaskId===t.id ? 'selected':'')+'>'+esc(t.name)+'</option>';
   }).join('') || '<option value="">この日付の作業がありません</option>';
-  var wvCfg = state.workVolumeConfig[wvTaskId] || { enabled:false, taskKind:'normal', criteria:'none', nameTemplate:'{作業名} / {引当ロケーション} / {送り状区分}', evenSplitMaxSlips:15, columnMap:{pickLocation:'',invoiceType:''} };
-  var wvPrimaryLabel = wvCfg.taskKind==='vc' ? 'PO数' : '件数';
+  var wvPrimaryLabel = (wvTask.taskKind==='vc') ? 'PO数' : '件数';
   var wvTotals = wvTotalsForTask(wvViewData, wvTaskId);
 
   var wvStatusHtml = '';
@@ -4535,17 +4707,15 @@ function renderSettingsPanels(){
 
   var wvImportRows = wvActiveImports(wvViewData).filter(function(i){ return i.taskId===wvTaskId; }).map(function(imp){
     var lbl = imp.taskKind==='vc' ? 'PO数' : '件数';
-    var batchCount = wvActiveBatches(wvViewData).filter(function(b){ return b.importId===imp.id; }).length;
     return '<tr>'+
       '<td>'+fmtClock(imp.importedAt)+'</td>'+
       '<td>'+esc(imp.fileName)+'</td>'+
       '<td class="num">'+lbl+' '+formatNum(imp.primaryCount)+'</td>'+
       '<td class="num">明細'+formatNum(imp.lineCount)+'</td>'+
       '<td class="num">ピース'+formatNum(imp.totalQty)+'</td>'+
-      '<td class="num">'+batchCount+'バッチ</td>'+
       '<td class="num"><button type="button" class="vc-manage-toggle-btn" data-wv-import-move="'+imp.id+'">日付変更</button> <button type="button" class="log-stop-btn" data-wv-import-delete="'+imp.id+'">削除</button></td>'+
     '</tr>';
-  }).join('') || '<tr><td colspan="7" style="color:var(--slate-500);">この作業の取込履歴はまだありません</td></tr>';
+  }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この作業の取込履歴はまだありません</td></tr>';
   var wvDeletedImports = (wvViewData.imports||[]).filter(function(i){ return i.deletedAt && i.taskId===wvTaskId; });
   var wvDeletedHtml = wvDeletedImports.map(function(imp){
     return '<div class="vc-slip-row">'+esc(imp.fileName)+'(削除: '+fmtClock(imp.deletedAt)+') <button type="button" class="vc-manage-toggle-btn" data-wv-import-restore="'+imp.id+'">復元</button></div>';
@@ -4553,39 +4723,16 @@ function renderSettingsPanels(){
 
   var wvHistoryHtml = '<details class="vc-manage-details" id="wvHistoryDetails" '+(state.wvHistoryOpen?'open':'')+'>'+
     '<summary>取込履歴・削除済み(この作業)</summary>'+
-    '<div style="margin-top:10px;overflow-x:auto;"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>合計</th><th>明細</th><th>ピース</th><th>バッチ</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
+    '<div style="margin-top:10px;overflow-x:auto;"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>合計</th><th>明細</th><th>ピース</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
     '<div class="vc-queue-title" style="margin-top:12px;">削除済み</div><div class="vc-slip-list">'+wvDeletedHtml+'</div>'+
-  '</details>';
-
-  var wvConfigHtml = '<details class="vc-manage-details" id="wvConfigDetails" '+(state.wvConfigOpen?'open':'')+'>'+
-    '<summary>作業量の設定(この作業: '+esc(wvTask.name)+')</summary>'+
-    '<div style="margin-top:10px;">'+
-      '<label class="break-toggle-row"><input type="checkbox" id="wvEnabledInput" '+(wvCfg.enabled?'checked':'')+'> この作業でCSV作業量を使う</label>'+
-      '<div class="pool-hint" style="margin:8px 0;">この作業の種類</div>'+
-      '<label style="display:block;font-size:13px;margin:4px 0;"><input type="radio" name="wvKind" value="normal" '+(wvCfg.taskKind==='normal'?'checked':'')+'> 通常出荷(荷主出荷番号→件数)</label>'+
-      '<label style="display:block;font-size:13px;margin:4px 0;"><input type="radio" name="wvKind" value="vc" '+(wvCfg.taskKind==='vc'?'checked':'')+'> VC(荷主出荷番号→PO)</label>'+
-      '<div class="pool-hint" style="margin:8px 0;">バッチ分類の基準(任意。作業量をさらに細分化して集計したい場合)</div>'+
-      ['none:バッチ分類しない','location:引当ロケーションごと','invoice:送り状区分ごと','location_invoice:引当ロケーション×送り状区分','even_split:件数で均等分割'].map(function(opt){
-        var parts = opt.split(':'); var val=parts[0], label=parts[1];
-        return '<label style="display:block;font-size:13px;margin:4px 0;"><input type="radio" name="wvCriteria" value="'+val+'" '+(wvCfg.criteria===val?'checked':'')+'> '+label+'</label>';
-      }).join('')+
-      '<div style="margin:8px 0;"><label style="font-size:11px;color:var(--slate-500);">1バッチあたり最大件数(均等分割の場合)</label><input type="number" id="wvEvenSplitMax" min="1" value="'+(wvCfg.evenSplitMaxSlips||15)+'" style="width:100px;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
-      '<div style="margin:8px 0;"><label style="font-size:11px;color:var(--slate-500);display:block;">バッチ名のルール(使える置き換え: {引当ロケーション} {送り状区分} {作業名} {連番})</label><input type="text" id="wvNameTemplate" value="'+esc(wvCfg.nameTemplate||'')+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
-      '<div style="display:flex;gap:10px;margin:8px 0;">'+
-        '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;">「引当ロケーション」のCSV列名</label><input type="text" id="wvColLocation" value="'+esc((wvCfg.columnMap&&wvCfg.columnMap.pickLocation)||'')+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
-        '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;">「送り状区分」のCSV列名</label><input type="text" id="wvColInvoice" value="'+esc((wvCfg.columnMap&&wvCfg.columnMap.invoiceType)||'')+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;"></div>'+
-      '</div>'+
-      '<button type="button" class="add-btn" id="wvSaveConfigBtn">この作業の設定を保存</button>'+
-    '</div>'+
   '</details>';
 
   workVolumePanel = '<div class="panel" style="margin-top:14px;">'+
     '<div class="panel-title">📋 作業量CSV取込</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">CSVから件数(VCはPO数)・明細数・ピース数を自動集計し、作業枠に紐づけて表示します。時間の計測とは別のデータとして扱われ、パートさんへの数字入力は求めません。取込は履歴として積み上がり、既存の取込を上書きすることはありません。</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">CSVから件数(VCはPO数)・明細数・ピース数を自動集計し、作業枠に紐づけて表示します。時間の計測とは別のデータとして扱われ、パートさんへの数字入力は求めません。取込は履歴として積み上がり、既存の取込を上書きすることはありません。件数/PO数の種別は、各作業の編集画面(通常/VC)で設定してください。</div>'+
     '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">対象作業</label>'+
     '<select id="wvTaskSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:10px;">'+wvTaskOptions+'</select>'+
     wvStatusHtml+
-    wvConfigHtml+
     '<div style="margin-top:12px;display:flex;gap:10px;">'+
       '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">対象日付</label><input type="date" id="wvTargetDate" value="'+(state.wvTargetDate||todayStr())+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
       '<div style="flex:2;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="wvCsvInput" accept=".csv" style="display:block;"></div>'+
@@ -4600,6 +4747,20 @@ function renderSettingsPanels(){
         '<div style="flex:2;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="autoMapCsvInput" accept=".csv" style="display:block;"></div>'+
       '</div>'+
       (state.autoMapImporting ? '<div class="empty-note">解析中...</div>' : '')+
+    '</div>'+
+  '</div>';
+
+  return workVolumePanel;
+}
+
+function renderSettingsPanels(){
+  var shiftPanel = '<div class="panel" style="margin-top:14px;">'+
+    '<div class="panel-title">出退勤の自動設定</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">曜日パターンで出勤予定になっているスタッフを、設定した始業時間に自動で「出勤中」に、終業時間に自動で「欠勤(退勤済み)」にします。一度手動で切り替えた後は、その日はその状態を優先し、自動処理は再度上書きしません。</div>'+
+    '<label class="break-toggle-row"><input type="checkbox" id="shiftEnabledInput" '+(state.shiftSettings.enabled?'checked':'')+'> 自動出退勤を有効にする</label>'+
+    '<div class="break-time-row">'+
+      '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">始業時間</label><input type="time" id="shiftStartInput" value="'+esc(state.shiftSettings.start)+'"></div>'+
+      '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">終業時間</label><input type="time" id="shiftEndInput" value="'+esc(state.shiftSettings.end)+'"></div>'+
     '</div>'+
   '</div>';
 
@@ -4634,7 +4795,7 @@ function renderSettingsPanels(){
     '<button type="button" class="add-btn" id="backupDownloadBtn">この日のバックアップをダウンロード</button>'+
   '</div>';
 
-  return { shiftPanel:shiftPanel, workVolumePanel:workVolumePanel, breakPanel:breakPanel, achievementPanel:achievementPanel, pinChangeHtml:pinChangeHtml, backupPanel:backupPanel };
+  return { shiftPanel:shiftPanel, breakPanel:breakPanel, achievementPanel:achievementPanel, pinChangeHtml:pinChangeHtml, backupPanel:backupPanel };
 }
 var SETTINGS_HUB_TABS = [
   { key:'basic', label:'基本設定', icon:'🏠' },
@@ -4643,7 +4804,6 @@ var SETTINGS_HUB_TABS = [
   { key:'shift', label:'勤務時間設定', icon:'⏰' },
   { key:'productivity', label:'生産性設定', icon:'📈' },
   { key:'customerMapping', label:'得意先・作業枠マスター', icon:'🔗' },
-  { key:'master', label:'マスター設定', icon:'🗂' },
   { key:'history', label:'操作履歴', icon:'📜' },
   { key:'system', label:'システム設定', icon:'🔧' }
 ];
@@ -4676,8 +4836,6 @@ function renderSettingsHub(){
       content = panels.shiftPanel + panels.breakPanel;
     }else if(state.settingsHubTab==='productivity'){
       content = '<div class="pool-hint">生産性データの内容・更新は、管理者→生産性の画面で確認・更新できます。ここでは設定できる項目は現在ありません。</div>';
-    }else if(state.settingsHubTab==='master'){
-      content = panels.workVolumePanel;
     }else if(state.settingsHubTab==='system'){
       content = panels.pinChangeHtml + panels.backupPanel;
     }else{ // basic
@@ -5028,223 +5186,6 @@ function bindSettings(){
       backupDownloadBtn.textContent = 'この日のバックアップをダウンロード';
     });
   }
-  var wvConfigDetails = document.getElementById('wvConfigDetails');
-  if(wvConfigDetails){
-    wvConfigDetails.addEventListener('toggle', function(){
-      state.wvConfigOpen = wvConfigDetails.open;
-    });
-  }
-  var wvHistoryDetails = document.getElementById('wvHistoryDetails');
-  if(wvHistoryDetails){
-    wvHistoryDetails.addEventListener('toggle', function(){
-      state.wvHistoryOpen = wvHistoryDetails.open;
-    });
-  }
-  var wvTaskSelect = document.getElementById('wvTaskSelect');
-  if(wvTaskSelect) wvTaskSelect.addEventListener('change', function(){
-    state.wvImportTaskId = wvTaskSelect.value;
-    render();
-  });
-  var wvSaveConfigBtn = document.getElementById('wvSaveConfigBtn');
-  if(wvSaveConfigBtn){
-    wvSaveConfigBtn.addEventListener('click', async function(){
-      var taskId = state.wvImportTaskId;
-      var enabled = document.getElementById('wvEnabledInput').checked;
-      var kindEl = document.querySelector('input[name="wvKind"]:checked');
-      var taskKind = kindEl ? kindEl.value : 'normal';
-      var criteriaEl = document.querySelector('input[name="wvCriteria"]:checked');
-      var criteria = criteriaEl ? criteriaEl.value : 'none';
-      var maxSlips = parseInt(document.getElementById('wvEvenSplitMax').value,10) || 15;
-      var nameTemplate = document.getElementById('wvNameTemplate').value;
-      var colLoc = document.getElementById('wvColLocation').value.trim();
-      var colInv = document.getElementById('wvColInvoice').value.trim();
-      if(!state.workVolumeConfig) state.workVolumeConfig = {};
-      state.workVolumeConfig[taskId] = {
-        enabled: enabled, taskKind: taskKind, criteria: criteria, nameTemplate: nameTemplate,
-        evenSplitMaxSlips: maxSlips, columnMap: { pickLocation: colLoc, invoiceType: colInv }
-      };
-      await saveWorkVolumeConfig(state.workVolumeConfig);
-      await appendAuditLog({ action:'作業量設定変更', target: taskById(taskId).name, before:null, after: (taskKind==='vc'?'VC(PO)':'通常(件数)')+' / '+criteriaLabel(criteria) });
-      showToast('「'+esc(taskById(taskId).name)+'」の作業量設定を保存しました');
-      render();
-    });
-  }
-  var wvTargetDateInput = document.getElementById('wvTargetDate');
-  if(wvTargetDateInput){
-    wvTargetDateInput.addEventListener('change', async function(){
-      var newDate = wvTargetDateInput.value || todayStr();
-      state.wvTargetDate = newDate;
-      state.wvViewData = await getWorkVolumeForDate(newDate);
-      render();
-    });
-  }
-  var autoMapTargetDateInput = document.getElementById('autoMapTargetDate');
-  if(autoMapTargetDateInput){
-    autoMapTargetDateInput.addEventListener('change', function(){
-      state.wvTargetDate = autoMapTargetDateInput.value || todayStr();
-    });
-  }
-  var autoMapCsvInput = document.getElementById('autoMapCsvInput');
-  if(autoMapCsvInput){
-    autoMapCsvInput.addEventListener('change', async function(){
-      var file = autoMapCsvInput.files[0];
-      if(!file) return;
-      var targetDate = (autoMapTargetDateInput && autoMapTargetDateInput.value) || state.wvTargetDate || todayStr();
-      state.autoMapImporting = true;
-      render();
-
-      var fingerprint, fileSize = file.size, fileName = file.name;
-      try{
-        fingerprint = await computeFileFingerprint(file);
-      }catch(e){
-        state.autoMapImporting = false;
-        showToast('ファイルの読み取りに失敗しました');
-        autoMapCsvInput.value = '';
-        render();
-        return;
-      }
-      var fpIndex = await loadCsvFingerprintIndex();
-      var dup = findDuplicateFingerprint(fpIndex, fingerprint, fileSize, fileName);
-      if(dup){
-        state.autoMapImporting = false;
-        autoMapCsvInput.value = '';
-        alert('このファイル(「'+fileName+'」)は '+dup.date+' に既に取り込み済みです。同じファイルの二重取込はできません。');
-        render();
-        return;
-      }
-
-      var mapping = state.customerTaskMapping || await loadCustomerTaskMapping();
-      state.customerTaskMapping = mapping;
-
-      parseCsvForWorkVolume(file, {}, function(result){
-        var plan = buildAutoMappedImportPlan(result, mapping);
-        state.autoMapPreviewData = {
-          fileName: fileName, targetDate: targetDate, fingerprint: fingerprint, fileSize: fileSize,
-          rowCount: result.rowCount, missingColumns: result.missingColumns||[],
-          rawParseResult: result,
-          taskPlans: plan.taskPlans, unmapped: plan.unmapped
-        };
-        state.autoMapImporting = false;
-        autoMapCsvInput.value = '';
-        state.modal = { kind:'autoMapPreview' };
-        render();
-      }, function(errMsg){
-        state.autoMapImporting = false;
-        autoMapCsvInput.value = '';
-        showToast(errMsg);
-        render();
-      });
-    });
-  }
-  var wvCsvInput = document.getElementById('wvCsvInput');
-  if(wvCsvInput){
-    wvCsvInput.addEventListener('change', async function(){
-      var file = wvCsvInput.files[0];
-      if(!file) return;
-      var taskId = state.wvImportTaskId || (document.getElementById('wvTaskSelect') ? document.getElementById('wvTaskSelect').value : '');
-      if(!taskId){ showToast('対象作業を選択してください'); wvCsvInput.value=''; return; }
-      var targetDate = state.wvTargetDate || todayStr();
-      if(!state.workVolumeConfig) state.workVolumeConfig = {};
-      var cfg = state.workVolumeConfig[taskId] || { enabled:false, taskKind:'normal', criteria:'none', nameTemplate:'', evenSplitMaxSlips:15, columnMap:{} };
-      state.wvImporting = true;
-      render();
-
-      var fingerprint, fileSize = file.size, fileName = file.name;
-      try{
-        fingerprint = await computeFileFingerprint(file);
-      }catch(e){
-        state.wvImporting = false;
-        showToast('ファイルの読み取りに失敗しました');
-        wvCsvInput.value = '';
-        render();
-        return;
-      }
-      var fpIndex = await loadCsvFingerprintIndex();
-      var dup = findDuplicateFingerprint(fpIndex, fingerprint, fileSize, fileName);
-      if(dup){
-        state.wvImporting = false;
-        wvCsvInput.value = '';
-        alert('このファイル(「'+fileName+'」)は '+dup.date+' に既に取り込み済みです。同じファイルの二重取込はできません。\n\n誤って取り込んだ場合は、その取込履歴を削除してから、正しいファイルを取り込み直してください。');
-        render();
-        return;
-      }
-
-      var targetData = await getWorkVolumeForDate(targetDate);
-      var attemptId = uid();
-      var attemptsData = await loadVcImportAttempts(targetDate);
-      attemptsData.attempts.push({ id: attemptId, taskId: taskId, startedAt: new Date().toISOString(), status:'pending', fileName: fileName });
-      await saveVcImportAttempts(targetDate, attemptsData);
-      if(targetDate===todayStr()) state.vcImportAttemptsToday = attemptsData;
-
-      parseCsvForWorkVolume(file, cfg.columnMap, async function(result){
-        var importId = uid();
-        var newBatches = (cfg.enabled && cfg.criteria!=='none') ? generateWorkVolumeBatches(result.shipperGroups, cfg, taskId, taskById(taskId).name, importId) : [];
-        var shipperNos = result.shipperGroups.map(function(g){ return g.shipperNo; });
-        var prevImport = findPreviousImportForTaskDate(targetData, taskId, importId);
-        var anomaly = computeAnomalyWarning({primaryCount:result.primaryCount, lineCount:result.lineCount, totalQty:result.totalQty}, prevImport);
-        var overlap = findShipperNoOverlap(shipperNos, targetData, taskId, importId);
-        state.vcPreview = {
-          taskId: taskId, importId: importId, fileName: fileName, cfg: cfg, targetDate: targetDate,
-          attemptId: attemptId,
-          primaryCount: result.primaryCount, lineCount: result.lineCount, totalQty: result.totalQty,
-          batches: newBatches, shipperNos: shipperNos,
-          fingerprint: fingerprint, fileSize: fileSize,
-          missingColumns: result.missingColumns||[], anomaly: anomaly, overlap: overlap,
-          byCustomer: result.byCustomer||{}, byProduct: result.byProduct||{}
-        };
-        state.wvImporting = false;
-        wvCsvInput.value = '';
-        state.modal = { kind:'vcPreview' };
-        render();
-      }, async function(errMsg){
-        await markImportAttemptStatus(targetDate, attemptId, 'failed');
-        state.wvImporting = false;
-        showToast(errMsg);
-        render();
-      });
-    });
-  }
-  document.querySelectorAll('[data-wv-import-delete]').forEach(function(el){
-    el.addEventListener('click', async function(){
-      var importId = el.getAttribute('data-wv-import-delete');
-      var viewDate = state.wvTargetDate || todayStr();
-      var data = state.wvViewData || (viewDate===todayStr() ? state.workVolume : null);
-      var imp = data && data.imports.find(function(i){ return i.id===importId; });
-      if(!imp) return;
-      if(!confirm('この取込(「'+imp.fileName+'」)を削除しますか?(論理削除。あとで復元できます)')) return;
-      var reason = prompt('削除理由を入力してください(任意)', '') || '';
-      await deleteWvImport(viewDate, importId, reason);
-      await appendAuditLog({ action:'作業量取込削除', target: taskById(imp.taskId).name+' / '+imp.fileName, before:'有効', after:'削除(理由: '+reason+')' });
-      showToast('取込を削除しました');
-      render();
-    });
-  });
-  document.querySelectorAll('[data-wv-import-restore]').forEach(function(el){
-    el.addEventListener('click', async function(){
-      var importId = el.getAttribute('data-wv-import-restore');
-      var viewDate = state.wvTargetDate || todayStr();
-      var data = state.wvViewData || (viewDate===todayStr() ? state.workVolume : null);
-      var imp = data && data.imports.find(function(i){ return i.id===importId; });
-      if(!imp) return;
-      await restoreWvImport(viewDate, importId);
-      await appendAuditLog({ action:'作業量取込復元', target: taskById(imp.taskId).name+' / '+imp.fileName, before:'削除', after:'復元' });
-      showToast('取込を復元しました');
-      render();
-    });
-  });
-  document.querySelectorAll('[data-wv-import-move]').forEach(function(el){
-    el.addEventListener('click', async function(){
-      var importId = el.getAttribute('data-wv-import-move');
-      var viewDate = state.wvTargetDate || todayStr();
-      var newDate = prompt('移動先の日付を入力してください(例: 2026-09-10)', viewDate);
-      if(!newDate) return;
-      var result = await moveWvImportDate(viewDate, newDate, importId);
-      if(!result.ok){ showToast(result.msg); return; }
-      await appendAuditLog({ action:'作業量取込の日付変更', target: taskById(result.imp.taskId).name+' / '+result.imp.fileName, before: viewDate, after: newDate });
-      showToast('取込の対象日付を'+newDate+'に変更しました');
-      render();
-    });
-  });
   var shiftEnabledInput = document.getElementById('shiftEnabledInput');
   var shiftStartInput = document.getElementById('shiftStartInput');
   var shiftEndInput = document.getElementById('shiftEndInput');
@@ -5428,9 +5369,12 @@ function renderRegister(){
       '<input type="text" id="regSearchInput" class="reg-search" placeholder="作業名で絞り込み..." value="'+esc(state.regSearchQuery)+'">'+
       listHtml+
     '</div>'+
-  '</div></div>';
+  '</div>'+
+  renderCsvImportPanel()+
+  '</div>';
 }
 function bindRegister(){
+  bindCsvImportPanel();
   var dateInput = document.getElementById('regDate');
   var nameInput = document.getElementById('regName');
   var unitInput = document.getElementById('regUnit');
@@ -5679,7 +5623,7 @@ function renderSubcatProductivity(agg, workVolume){
     var t = taskById(tid);
     var info = agg.perTask[tid];
     var wvTotals = workVolume ? wvTotalsForTask(workVolume, tid) : null;
-    var cfg = state.workVolumeConfig && state.workVolumeConfig[tid];
+    var cfg = taskById(tid);
     var primaryLabel = (cfg && cfg.taskKind==='vc') ? 'PO' : '件数';
     Object.keys(info.subMs).filter(function(k){ return info.subMs[k]>0; }).forEach(function(scName){
       var hours = info.subMs[scName]/3600000;
@@ -6948,15 +6892,12 @@ async function saveLaborCost(hourlyWage){
   }catch(e){ return false; }
 }
 function isCsvLinkedTask(taskId, wvDataOverride){
-  var cfg = state.workVolumeConfig && state.workVolumeConfig[taskId];
-  if(cfg && cfg.enabled) return true;
   var wv = wvDataOverride || state.workVolume;
-  if(wv && wvActiveImports(wv).some(function(i){ return i.taskId===taskId; })) return true;
-  return false;
+  return !!(wv && wvActiveImports(wv).some(function(i){ return i.taskId===taskId; }));
 }
 function isVcKindTask(taskId, wvDataOverride){
-  var cfg = state.workVolumeConfig && state.workVolumeConfig[taskId];
-  if(cfg && cfg.enabled) return cfg.taskKind==='vc';
+  var task = taskById(taskId);
+  if(task && task.taskKind) return task.taskKind==='vc';
   var wv = wvDataOverride || state.workVolume;
   var imp = wv && wvActiveImports(wv).find(function(i){ return i.taskId===taskId; });
   return !!(imp && imp.taskKind==='vc');
@@ -7354,7 +7295,7 @@ function bindEditLogModal(m){
 }
 
 function openEditTaskModal(task){
-  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate, subcatsList: (task.subcategories||[]).slice(), subcatDraft: {name:'', unit:''}, category: taskCategory(task), fromTemplate: task.fromTemplate || null };
+  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate, subcatsList: (task.subcategories||[]).slice(), subcatDraft: {name:'', unit:''}, category: taskCategory(task), fromTemplate: task.fromTemplate || null, taskKind: task.taskKind || 'normal' };
   state.suppressRender = true;
   render();
 }
@@ -7373,6 +7314,8 @@ async function saveEditTask(){
   task.workDate = dateInput.value || task.workDate;
   task.subcategories = (m.subcatsList||[]).slice();
   task.category = m.category || 'その他';
+  var kindEl = document.querySelector('input[name="editTaskKind"]:checked');
+  task.taskKind = kindEl ? kindEl.value : 'normal';
   state.modal = null;
   state.suppressRender = false;
   await saveBacklog(state.backlog);
@@ -7843,7 +7786,7 @@ function bindAutoMapPreviewModal(m){
         var importId = uid();
         targetData.imports.push({
           id: importId, importedAt: new Date().toISOString(), fileName: d.fileName, taskId: p.taskId,
-          taskKind: (state.workVolumeConfig && state.workVolumeConfig[p.taskId] && state.workVolumeConfig[p.taskId].taskKind) || 'normal',
+          taskKind: (taskById(p.taskId).taskKind) || 'normal',
           primaryCount: p.primaryCount, lineCount: p.lineCount, totalQty: p.totalQty,
           fileFingerprint: d.fingerprint, fileSize: d.fileSize, shipperNos: p.shipperNos,
           byCustomer: p.byCustomer||{}, byProduct: p.byProduct||{},
@@ -8001,6 +7944,9 @@ function renderEditTaskModal(m){
       '<input type="text" id="editTaskName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">区分(実績画面の出荷/入庫集計に使われます)</label>'+
       renderCategoryToggle('editTask', m.category)+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">CSV作業量の種類(この作業でCSVを取り込む場合の件数/PO数の表記に使われます)</label>'+
+      '<label style="display:block;font-size:13px;margin:4px 0;"><input type="radio" name="editTaskKind" value="normal" '+((m.taskKind||'normal')==='normal'?'checked':'')+'> 通常出荷(件数)</label>'+
+      '<label style="display:block;font-size:13px;margin:4px 0 10px;"><input type="radio" name="editTaskKind" value="vc" '+(m.taskKind==='vc'?'checked':'')+'> VC(PO数)</label>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
       renderSubcatTagInput(m.subcatsList,'editTask','editTaskSubcatText',m.unit)+
       (hasSubcats ? '' : '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">単位</label><input type="text" id="editTaskUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;">')+
@@ -8358,8 +8304,6 @@ async function pollTick(){
     state.day = day;
     var freshWorkVolume = await loadWorkVolume(todayStr());
     if(freshWorkVolume) state.workVolume = freshWorkVolume;
-    var freshWvConfig = await loadWorkVolumeConfig();
-    if(freshWvConfig) state.workVolumeConfig = freshWvConfig;
     var freshCaseLedger = await loadVcCaseLedger(todayStr());
     if(freshCaseLedger) state.vcCaseLedger = freshCaseLedger;
     var freshAck = await loadChecklistAck(todayStr());
@@ -8439,7 +8383,6 @@ async function init(){
   state.day = await loadDay();
   state.workVolume = await loadWorkVolume(todayStr());
   if(!state.workVolume) state.workVolume = emptyWorkVolume();
-  state.workVolumeConfig = await loadWorkVolumeConfig();
   state.vcCaseLedger = await loadVcCaseLedger(todayStr());
   state.dailyChecklistAck = await loadChecklistAck(todayStr());
   state.taskPriority = await loadTaskPriority(todayStr());

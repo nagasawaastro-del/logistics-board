@@ -869,6 +869,13 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-17', items:[
+    '【重要な不具合修正】実績入力・モニター表示で作業が「(削除済み)」と表示され、実績入力ができなくなる不具合を修正しました。根本原因は、4秒ごとの自動更新処理が、通信の一時的な不具合(例外を投げずに空の結果が返る場合)を「作業が本当に0件になった」と誤認識し、メモリ上の作業一覧を空にしてしまうことでした。さらに悪いことに、その直後に走る「本日の繰り返し作業を自動生成する処理」が、空になった一覧を見て「まだ作業が無い」と誤判定し、重複した作業を作成したうえで、その状態を保存してしまう場合があることも突き止めました',
+    '自動更新処理を修正し、「直前まで1件以上あった一覧が、今回の取得で急に0件になった」場合は、通信の不具合の可能性が高いと判断して上書きせず、直前のデータを保持するようにしました(元々0件だった場合は正常に0件として扱います)。「通信失敗 ≠ データが空」という原則を、スタッフ一覧・作業一覧・繰り返し作業一覧のすべてに適用しています',
+    '管理者画面に既存で備わっていた「壊れた割り当てを修復する」ボタンに、安全対策を追加しました。作業一覧そのものが完全に空の場合(＝取得できていない可能性が高い状態)は、割り当てを全て壊れているとみなして消してしまう恐れがあるため、実行を中止して案内を表示するようにしています',
+    '実績入力・作業開始・作業切替・実績時間計測・削除済み作業の履歴保持・CSV連携判定など、既存の動作は一切変更していません。実績データ・出勤情報・CSV取込データ・得意先マスターなど、既存のデータも変更・削除していません',
+    '実際にコードを実行し、ご報告いただいた不具合の症状(「(削除済み)」表示・実績入力不可)を意図的に再現したうえで、修正後にこの症状が発生しないこと、さらに修正前のコードでは同じ手順で症状が実際に再現すること(比較検証)を確認しました。あわせて、作業の開始・切替・削除後も履歴が残ること、CSV連携の判定、ページ再読み込み後のデータ整合性についても確認済みです'
+  ]},
   { date:'2026-09-16', items:[
     '「作業ごとのCSV作業量設定」(この作業でCSVを使う/バッチ分類基準/名前テンプレート/CSV列名指定)を全廃しました。CSV連携の判定は「実際に取込データがあるか」だけで行われ、通常/VCの種別は各作業の編集画面(「作業を編集」)で直接設定する方式に一本化しています。前回実装した得意先マスターでの自動判定と合わせて、より単純な仕組みになりました',
     'CSV取込(手動・得意先マスターでの自動振り分けの両方)を、設定→マスター設定から設定→作業設定に移動しました。作業の登録・編集とCSV取込が同じ画面でまとめて行えます。中身が無くなった「マスター設定」タブは削除し、「得意先・作業枠マスター」タブに一本化しました',
@@ -4990,6 +4997,10 @@ function bindManager(){
   var clearBrokenBtn = document.getElementById('clearBrokenAssignBtn');
   if(clearBrokenBtn){
     clearBrokenBtn.addEventListener('click', async function(){
+      if(!state.backlog || state.backlog.length===0){
+        alert('作業データを正しく取得できていない可能性があるため、この操作を中止しました。\n\nページを再読み込みしてから、もう一度お試しください。(作業が本当に1件も無い状態でこの操作を行うと、割り当てを誤って全て消してしまう可能性があるための安全対策です)');
+        return;
+      }
       var day = managerActiveDay();
       var validTaskIds = tasksForDate(managerActiveDate()).map(function(t){ return t.id; });
       var affectedStaffIds = [];
@@ -5008,6 +5019,7 @@ function bindManager(){
         day.assignments[sid] = cleaned;
       });
       await saveDay(day);
+      await appendAuditLog({ action:'壊れた割り当てを修復', target: managerActiveDate(), before:null, after: affectedStaffIds.length+'名の割り当てを修復' });
       showToast('壊れた割り当てを修復し、対象のスタッフを本日の有効な作業('+validTaskIds.length+'件)に割り当て直しました。');
       render();
     });
@@ -8276,9 +8288,28 @@ async function pollTick(){
     var oldBacklog = state.backlog;
     var oldDay = state.day;
     var roster = state.roster, backlog = state.backlog, templates = state.templates;
-    try{ roster = await fetchRosterRaw(); }catch(e){}
-    try{ backlog = await fetchBacklogRaw(); }catch(e){}
-    try{ templates = await fetchTemplatesRaw(); }catch(e){}
+    /* 通信失敗 ≠ データが空、の原則を徹底する。
+       fetchXRaw()は取得できなかった場合に必ず例外を投げるとは限らず(一時的な不具合で
+       「成功したが空」という結果を返すことがある)、既存データが1件以上あったのに
+       今回の取得結果が0件だった場合は、実際に全削除されたのではなく取得の不具合である
+       可能性が高いため、直前のデータを保持し、上書きしない(安全側に倒す)。
+       これを怠ると、直後のensureTemplateTasksForToday()が「今日の作業がまだ無い」と
+       誤判定して重複作成し、その空の状態をsaveBacklog()で永続化してしまう恐れがある。 */
+    try{
+      var fetchedRoster = await fetchRosterRaw();
+      if(fetchedRoster.length>0 || oldRoster.length===0) roster = fetchedRoster;
+      else console.warn('スタッフ一覧の取得結果が予期せず空でした。直前のデータを保持します。');
+    }catch(e){}
+    try{
+      var fetchedBacklog = await fetchBacklogRaw();
+      if(fetchedBacklog.length>0 || oldBacklog.length===0) backlog = fetchedBacklog;
+      else console.warn('作業一覧の取得結果が予期せず空でした。直前のデータを保持します。');
+    }catch(e){}
+    try{
+      var fetchedTemplates = await fetchTemplatesRaw();
+      if(fetchedTemplates.length>0 || state.templates.length===0) templates = fetchedTemplates;
+      else console.warn('繰り返し作業一覧の取得結果が予期せず空でした。直前のデータを保持します。');
+    }catch(e){}
     var breakSettings = await loadBreakSettings();
     var shiftSettings = await loadShiftSettings();
     var achievementSettings = await loadAchievementSettings();

@@ -869,6 +869,12 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-19', items:[
+    '管理者に「🗓 実績管理」タブを新設。作業日ごと(期間指定可能)に実績(作業時間の記録)をまとめて確認し、「選択した実績をまとめて削除」「選択した実績を別の作業日にまとめて移動」ができるようになりました',
+    '安全のため、進行中(まだ終了していない)実績は一覧に表示はされますが、削除・日付変更の対象には一切できません(チェックボックスがグレー表示になり選択不可)。誤って選択リストに紛れ込んでいても、実際の処理では自動的に除外されます',
+    '個別の実績内容(開始・終了時刻や数量の訂正)は、従来通り管理者→今日の状況の各実績の「編集」から行えます。今回追加したのは、まとめて削除・まとめて日付変更の操作です',
+    '実際にコードを実行するテストで、複数日にまたがる実績の一括削除・一括日付変更が正しく動作すること、進行中の実績が誤って選択された場合でも処理対象から除外されること、削除・移動の対象にならなかった実績が影響を受けないことを確認済みです。既存の全機能への回帰もありません'
+  ]},
   { date:'2026-09-18', items:[
     '設定→作業設定のCSV取込UIを整理しました。「得意先マスターで自動振り分けて取り込む」を常時表示の基本の取込方法とし、従来の「対象作業を選んで手動で取り込む」は折りたたみ(初期状態は閉じた表示)にしました。機能・データは変更しておらず、必要なときはクリックして開いてこれまで通り使えます'
   ]},
@@ -1262,6 +1268,12 @@ var state = {
   customerMappingDraftTaskId: '',
   autoMapImporting: false,
   autoMapPreviewData: null,
+  logMgmtStartDate: null,
+  logMgmtEndDate: null,
+  logMgmtEntries: null,
+  logMgmtLoading: false,
+  logMgmtSelected: {},
+  logMgmtMoveTargetDate: '',
   staffingLoading: false,
   staffingPriorityOpen: false,
   nextTaskSuggestModal: null,
@@ -2576,6 +2588,70 @@ async function saveDay(day){
   finally{ pendingSaves--; }
 }
 
+/* ---------- 実績管理(作業日ごと・期間指定でのまとめて編集/削除) ----------
+   重要: 進行中のログ(end===null、つまりまだ計測が終わっていない実績)は、
+   一括削除・一括日付変更のどちらの対象にもしない(安全のため常に除外する)。 */
+async function loadLogEntriesForRange(startDate, endDate){
+  var dates = dateRangeList(startDate, endDate);
+  var entries = [];
+  for(var i=0;i<dates.length;i++){
+    var dateStr = dates[i];
+    var day = (dateStr===todayStr()) ? state.day : await loadDayByDate(dateStr);
+    if(!day) continue;
+    (day.logs||[]).forEach(function(log){
+      entries.push({ dateStr: dateStr, log: log });
+    });
+  }
+  entries.sort(function(a,b){
+    if(a.dateStr!==b.dateStr) return a.dateStr<b.dateStr?-1:1;
+    return new Date(a.log.start) - new Date(b.log.start);
+  });
+  return entries;
+}
+async function bulkDeleteLogs(startDate, endDate, selectedIds){
+  var dates = dateRangeList(startDate, endDate);
+  var deletedCount = 0;
+  for(var i=0;i<dates.length;i++){
+    var dateStr = dates[i];
+    var day = (dateStr===todayStr()) ? state.day : await loadDayByDate(dateStr);
+    if(!day || !day.logs || !day.logs.length) continue;
+    var before = day.logs.length;
+    day.logs = day.logs.filter(function(l){
+      if(selectedIds[l.id] && l.end!==null){ deletedCount++; return false; }
+      return true;
+    });
+    if(day.logs.length !== before) await saveDay(day);
+  }
+  return deletedCount;
+}
+async function bulkMoveLogs(startDate, endDate, selectedIds, targetDate){
+  var dates = dateRangeList(startDate, endDate);
+  var allMoved = [];
+  for(var i=0;i<dates.length;i++){
+    var dateStr = dates[i];
+    if(dateStr===targetDate) continue;
+    var day = (dateStr===todayStr()) ? state.day : await loadDayByDate(dateStr);
+    if(!day || !day.logs || !day.logs.length) continue;
+    var remaining = [];
+    var movedThisDay = [];
+    day.logs.forEach(function(l){
+      if(selectedIds[l.id] && l.end!==null) movedThisDay.push(l);
+      else remaining.push(l);
+    });
+    if(movedThisDay.length){
+      day.logs = remaining;
+      await saveDay(day);
+      allMoved = allMoved.concat(movedThisDay);
+    }
+  }
+  if(allMoved.length){
+    var targetDay = (targetDate===todayStr()) ? state.day : ((await loadDayByDate(targetDate)) || freshDay(targetDate));
+    targetDay.logs = (targetDay.logs||[]).concat(allMoved);
+    await saveDay(targetDay);
+  }
+  return allMoved.length;
+}
+
 /* ---------- derived data ---------- */
 function presentStaff(){
   return state.roster.filter(function(s){ return !s.archived && state.day.attendance[s.id]; });
@@ -2777,6 +2853,133 @@ function bindCalendar(){
       switchManagerDate(dateStr);
     });
   });
+}
+function renderLogManagementTab(){
+  if(!state.logMgmtStartDate) state.logMgmtStartDate = todayStr();
+  if(!state.logMgmtEndDate) state.logMgmtEndDate = todayStr();
+  var body;
+  if(state.logMgmtLoading){
+    body = '<div class="empty-note">読み込み中...</div>';
+  }else if(state.logMgmtEntries===null){
+    body = '<div class="empty-note">期間を選んで「表示する」を押してください。</div>';
+  }else{
+    var rows = state.logMgmtEntries.map(function(e){
+      var log = e.log;
+      var s = staffById(log.staffId);
+      var t = taskById(log.taskId==='BREAK' ? 'BREAK' : log.taskId);
+      var inProgress = log.end===null;
+      var checked = state.logMgmtSelected[log.id] ? 'checked' : '';
+      var qtyLabel = log.quantity!==null && log.quantity!==undefined ? formatNum(log.quantity)+esc(t.unit||'') : '-';
+      return '<tr'+(inProgress?' style="opacity:0.55;"':'')+'>'+
+        '<td class="num"><input type="checkbox" data-logmgmt-check="'+log.id+'" '+checked+' '+(inProgress?'disabled title="進行中のため対象外です"':'')+'></td>'+
+        '<td>'+esc(dateLabelFromStr(e.dateStr))+'</td>'+
+        '<td>'+esc(s.name)+'</td>'+
+        '<td><span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span> '+esc(t.name)+(inProgress?' <span style="color:var(--rust-600);font-size:11px;">(進行中)</span>':'')+'</td>'+
+        '<td class="num">'+fmtClock(log.start)+'</td>'+
+        '<td class="num">'+(log.end?fmtClock(log.end):'-')+'</td>'+
+        '<td class="num">'+qtyLabel+'</td>'+
+      '</tr>';
+    }).join('') || '<tr><td colspan="7" style="color:var(--slate-500);">この期間の実績はありません</td></tr>';
+
+    var selectedCount = Object.keys(state.logMgmtSelected).filter(function(id){ return state.logMgmtSelected[id]; }).length;
+    var inProgressCount = state.logMgmtEntries.filter(function(e){ return e.log.end===null; }).length;
+
+    body = '<div style="overflow-x:auto;"><table class="report-table"><thead><tr>'+
+        '<th><input type="checkbox" id="logMgmtSelectAll"></th><th>日付</th><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>数量</th>'+
+      '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+      (inProgressCount ? '<div class="pool-hint" style="margin-top:8px;">進行中の実績('+inProgressCount+'件)は、削除・日付変更の対象にできません(選択欄がグレー表示されています)。</div>' : '')+
+      '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--paper-line);">'+
+        '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">選択中: '+selectedCount+'件</div>'+
+        '<button type="button" class="log-stop-btn" id="logMgmtDeleteBtn" '+(selectedCount?'':'disabled')+'>選択した実績をまとめて削除する</button>'+
+        '<div style="display:flex;gap:8px;align-items:flex-end;margin-top:12px;flex-wrap:wrap;">'+
+          '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">移動先の作業日</label><input type="date" id="logMgmtMoveTarget" value="'+esc(state.logMgmtMoveTargetDate||todayStr())+'"></div>'+
+          '<button type="button" class="vc-manage-toggle-btn" id="logMgmtMoveBtn" '+(selectedCount?'':'disabled')+'>選択した実績をこの日付にまとめて移動する</button>'+
+        '</div>'+
+      '</div>';
+  }
+
+  return '<div class="mgr-wrap"><div class="panel">'+
+    '<div class="panel-title">🗓 実績管理</div>'+
+    '<div class="pool-hint" style="margin-bottom:12px;">作業日ごと(期間指定可)に実績(作業時間の記録)をまとめて確認・削除・日付変更できます。進行中の実績は安全のため対象になりません。個別の内容修正(時刻の訂正等)は、管理者→今日の状況の各実績の「編集」から行えます。</div>'+
+    '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;">'+
+      '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">開始日</label><input type="date" id="logMgmtStartDate" value="'+state.logMgmtStartDate+'"></div>'+
+      '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">終了日</label><input type="date" id="logMgmtEndDate" value="'+state.logMgmtEndDate+'"></div>'+
+      '<button type="button" class="add-btn" id="logMgmtLoadBtn">表示する</button>'+
+    '</div>'+
+    body+
+  '</div></div>';
+}
+function bindLogManagementTab(){
+  var startInput = document.getElementById('logMgmtStartDate');
+  if(startInput) startInput.addEventListener('change', function(){ state.logMgmtStartDate = startInput.value; });
+  var endInput = document.getElementById('logMgmtEndDate');
+  if(endInput) endInput.addEventListener('change', function(){ state.logMgmtEndDate = endInput.value; });
+  var loadBtn = document.getElementById('logMgmtLoadBtn');
+  if(loadBtn){
+    loadBtn.addEventListener('click', async function(){
+      if(state.logMgmtStartDate > state.logMgmtEndDate){
+        showToast('開始日は終了日より前にしてください');
+        return;
+      }
+      state.logMgmtLoading = true;
+      state.logMgmtSelected = {};
+      render();
+      state.logMgmtEntries = await loadLogEntriesForRange(state.logMgmtStartDate, state.logMgmtEndDate);
+      state.logMgmtLoading = false;
+      render();
+    });
+  }
+  document.querySelectorAll('[data-logmgmt-check]').forEach(function(el){
+    el.addEventListener('change', function(){
+      var id = el.getAttribute('data-logmgmt-check');
+      if(el.checked) state.logMgmtSelected[id] = true;
+      else delete state.logMgmtSelected[id];
+      render();
+    });
+  });
+  var selectAll = document.getElementById('logMgmtSelectAll');
+  if(selectAll){
+    selectAll.addEventListener('change', function(){
+      if(!state.logMgmtEntries) return;
+      state.logMgmtEntries.forEach(function(e){
+        if(e.log.end===null) return; // 進行中は対象外
+        if(selectAll.checked) state.logMgmtSelected[e.log.id] = true;
+        else delete state.logMgmtSelected[e.log.id];
+      });
+      render();
+    });
+  }
+  var moveTargetInput = document.getElementById('logMgmtMoveTarget');
+  if(moveTargetInput) moveTargetInput.addEventListener('change', function(){ state.logMgmtMoveTargetDate = moveTargetInput.value; });
+  var deleteBtn = document.getElementById('logMgmtDeleteBtn');
+  if(deleteBtn){
+    deleteBtn.addEventListener('click', async function(){
+      var count = Object.keys(state.logMgmtSelected).filter(function(id){ return state.logMgmtSelected[id]; }).length;
+      if(!count) return;
+      if(!confirm('選択した'+count+'件の実績を削除します。この操作は元に戻せません。よろしいですか?')) return;
+      var deleted = await bulkDeleteLogs(state.logMgmtStartDate, state.logMgmtEndDate, state.logMgmtSelected);
+      await appendAuditLog({ action:'実績の一括削除', target: state.logMgmtStartDate+'〜'+state.logMgmtEndDate, before:null, after: deleted+'件を削除' });
+      state.logMgmtSelected = {};
+      state.logMgmtEntries = await loadLogEntriesForRange(state.logMgmtStartDate, state.logMgmtEndDate);
+      showToast(deleted+'件の実績を削除しました');
+      render();
+    });
+  }
+  var moveBtn = document.getElementById('logMgmtMoveBtn');
+  if(moveBtn){
+    moveBtn.addEventListener('click', async function(){
+      var count = Object.keys(state.logMgmtSelected).filter(function(id){ return state.logMgmtSelected[id]; }).length;
+      if(!count) return;
+      var targetDate = state.logMgmtMoveTargetDate || todayStr();
+      if(!confirm('選択した'+count+'件の実績を、'+dateLabelFromStr(targetDate)+'の記録として移動します。よろしいですか?')) return;
+      var moved = await bulkMoveLogs(state.logMgmtStartDate, state.logMgmtEndDate, state.logMgmtSelected, targetDate);
+      await appendAuditLog({ action:'実績の一括日付変更', target: state.logMgmtStartDate+'〜'+state.logMgmtEndDate, before:null, after: moved+'件を'+targetDate+'へ移動' });
+      state.logMgmtSelected = {};
+      state.logMgmtEntries = await loadLogEntriesForRange(state.logMgmtStartDate, state.logMgmtEndDate);
+      showToast(moved+'件の実績を'+dateLabelFromStr(targetDate)+'に移動しました');
+      render();
+    });
+  }
 }
 function renderProductivityTab(){
   if(state.productivityMaster===null){
@@ -4028,6 +4231,7 @@ function renderDailyChecklist(){
 }
 var ADMIN_HUB_TABS = [
   { key:'today', label:'今日の状況', icon:'📋' },
+  { key:'logMgmt', label:'実績管理', icon:'🗓' },
   { key:'staffing', label:'人員配置', icon:'👥' },
   { key:'productivity', label:'生産性', icon:'📈' },
   { key:'financial', label:'収支・分析', icon:'💰' }
@@ -4047,6 +4251,7 @@ function renderAdminHub(){
   if(state.adminHubTab==='staffing') body = renderStaffing();
   else if(state.adminHubTab==='productivity') body = renderProductivityTab();
   else if(state.adminHubTab==='financial') body = renderFinancial();
+  else if(state.adminHubTab==='logMgmt') body = renderLogManagementTab();
   else body = renderManager();
   // 各画面は自前の外枠(mgr-wrap等)を持っているため、タブバーをその内側の先頭に差し込む
   return body.replace(/^(<div[^>]*>)/, '$1'+tabsHtml);
@@ -4065,6 +4270,7 @@ function bindAdminHub(){
   if(state.adminHubTab==='staffing') bindStaffing();
   else if(state.adminHubTab==='productivity') bindProductivityTab();
   else if(state.adminHubTab==='financial') bindFinancial();
+  else if(state.adminHubTab==='logMgmt') bindLogManagementTab();
   else bindManager();
 }
 function renderCustomerMappingPanel(){

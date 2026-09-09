@@ -869,6 +869,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-18', items:[
+    '設定→作業設定のCSV取込UIを整理しました。「得意先マスターで自動振り分けて取り込む」を常時表示の基本の取込方法とし、従来の「対象作業を選んで手動で取り込む」は折りたたみ(初期状態は閉じた表示)にしました。機能・データは変更しておらず、必要なときはクリックして開いてこれまで通り使えます'
+  ]},
   { date:'2026-09-17', items:[
     '【重要な不具合修正】実績入力・モニター表示で作業が「(削除済み)」と表示され、実績入力ができなくなる不具合を修正しました。根本原因は、4秒ごとの自動更新処理が、通信の一時的な不具合(例外を投げずに空の結果が返る場合)を「作業が本当に0件になった」と誤認識し、メモリ上の作業一覧を空にしてしまうことでした。さらに悪いことに、その直後に走る「本日の繰り返し作業を自動生成する処理」が、空になった一覧を見て「まだ作業が無い」と誤判定し、重複した作業を作成したうえで、その状態を保存してしまう場合があることも突き止めました',
     '自動更新処理を修正し、「直前まで1件以上あった一覧が、今回の取得で急に0件になった」場合は、通信の不具合の可能性が高いと判断して上書きせず、直前のデータを保持するようにしました(元々0件だった場合は正常に0件として扱います)。「通信失敗 ≠ データが空」という原則を、スタッフ一覧・作業一覧・繰り返し作業一覧のすべてに適用しています',
@@ -1298,6 +1301,7 @@ var state = {
   wvImporting: false,
   wvConfigOpen: false,
   wvHistoryOpen: false,
+  wvManualOpen: false,
   vcCaseLedger: null,
   dailyChecklistAck: null,
   vcImportAttemptsToday: null,
@@ -4189,6 +4193,12 @@ function bindCustomerMappingPanel(){
   });
 }
 function bindCsvImportPanel(){
+  var wvManualDetails = document.getElementById('wvManualDetails');
+  if(wvManualDetails){
+    wvManualDetails.addEventListener('toggle', function(){
+      state.wvManualOpen = wvManualDetails.open;
+    });
+  }
   var wvHistoryDetails = document.getElementById('wvHistoryDetails');
   if(wvHistoryDetails){
     wvHistoryDetails.addEventListener('toggle', function(){
@@ -4736,25 +4746,29 @@ function renderCsvImportPanel(){
 
   workVolumePanel = '<div class="panel" style="margin-top:14px;">'+
     '<div class="panel-title">📋 作業量CSV取込</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">CSVから件数(VCはPO数)・明細数・ピース数を自動集計し、作業枠に紐づけて表示します。時間の計測とは別のデータとして扱われ、パートさんへの数字入力は求めません。取込は履歴として積み上がり、既存の取込を上書きすることはありません。件数/PO数の種別は、各作業の編集画面(通常/VC)で設定してください。</div>'+
-    '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">対象作業</label>'+
-    '<select id="wvTaskSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:10px;">'+wvTaskOptions+'</select>'+
-    wvStatusHtml+
-    '<div style="margin-top:12px;display:flex;gap:10px;">'+
-      '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">対象日付</label><input type="date" id="wvTargetDate" value="'+(state.wvTargetDate||todayStr())+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
-      '<div style="flex:2;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="wvCsvInput" accept=".csv" style="display:block;"></div>'+
+    '<div class="pool-hint" style="margin-bottom:14px;">CSVから件数(VCはPO数)・明細数・ピース数を自動集計し、作業枠に紐づけて表示します。時間の計測とは別のデータとして扱われ、パートさんへの数字入力は求めません。取込は履歴として積み上がり、既存の取込を上書きすることはありません。</div>'+
+    '<div class="panel-title" style="font-size:15px;">🔗 得意先マスターで自動振り分けて取り込む</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">対象作業を選ばずにCSVを取り込み、「設定→得意先・作業枠マスター」の対応表から自動的に作業枠を判定します。マスターに無い得意先は取り込まれず、一覧で確認できます。</div>'+
+    '<div style="display:flex;gap:10px;">'+
+      '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">対象日付</label><input type="date" id="autoMapTargetDate" value="'+(state.wvTargetDate||todayStr())+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
+      '<div style="flex:2;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="autoMapCsvInput" accept=".csv" style="display:block;"></div>'+
     '</div>'+
-    (state.wvImporting ? '<div class="empty-note">取り込み中...</div>' : '')+
-    wvHistoryHtml+
-    '<div class="vc-manage-details" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--paper-line);">'+
-      '<div class="panel-title" style="font-size:15px;">🔗 得意先マスターで自動振り分けて取り込む</div>'+
-      '<div class="pool-hint" style="margin-bottom:10px;">対象作業を選ばずにCSVを取り込み、「設定→得意先・作業枠マスター」の対応表から自動的に作業枠を判定します。マスターに無い得意先は取り込まれず、一覧で確認できます。</div>'+
-      '<div style="display:flex;gap:10px;">'+
-        '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">対象日付</label><input type="date" id="autoMapTargetDate" value="'+(state.wvTargetDate||todayStr())+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
-        '<div style="flex:2;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="autoMapCsvInput" accept=".csv" style="display:block;"></div>'+
+    (state.autoMapImporting ? '<div class="empty-note">解析中...</div>' : '')+
+    '<details class="vc-manage-details" id="wvManualDetails" '+(state.wvManualOpen?'open':'')+' style="margin-top:18px;padding-top:16px;border-top:1px solid var(--paper-line);">'+
+      '<summary>✋ 作業を指定して手動で取り込む(通常は上の自動振り分けをお使いください)</summary>'+
+      '<div style="margin-top:10px;">'+
+        '<div class="pool-hint" style="margin-bottom:10px;">件数/PO数の種別は、各作業の編集画面(通常/VC)で設定してください。</div>'+
+        '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">対象作業</label>'+
+        '<select id="wvTaskSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:10px;">'+wvTaskOptions+'</select>'+
+        wvStatusHtml+
+        '<div style="margin-top:12px;display:flex;gap:10px;">'+
+          '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">対象日付</label><input type="date" id="wvTargetDate" value="'+(state.wvTargetDate||todayStr())+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
+          '<div style="flex:2;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="wvCsvInput" accept=".csv" style="display:block;"></div>'+
+        '</div>'+
+        (state.wvImporting ? '<div class="empty-note">取り込み中...</div>' : '')+
+        wvHistoryHtml+
       '</div>'+
-      (state.autoMapImporting ? '<div class="empty-note">解析中...</div>' : '')+
-    '</div>'+
+    '</details>'+
   '</div>';
 
   return workVolumePanel;

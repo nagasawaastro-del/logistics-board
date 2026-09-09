@@ -869,6 +869,15 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-20', items:[
+    '【管理者権限の認証方式を統一】管理者PIN(4桁の数字によるロック)を廃止し、Supabase Auth(メールアドレス+パスワード)によるログインに一本化しました。「管理者」「人員配置」「収支・分析」「設定」など管理系の画面は、すべて同じログインで保護されます。実績入力・集計・モニター表示・カレンダーなど、現場で使う画面は今まで通りログイン不要です',
+    'PIN関連のコード(PIN入力・設定・変更画面、PINのハッシュ保存、PIN一致判定)をすべて削除しました。トップ画面のカードをタップすると、PINを経由せず直接ログイン画面(未ログイン時)へ進みます',
+    'トップバーの「ロックする」ボタンを「ログアウト」に変更。Supabase Authの実際のセッションを破棄する、本来の意味でのログアウトになりました',
+    'ログイン失敗時のメッセージを「メールアドレスまたはパスワードが正しくありません」に統一しました',
+    '設定→システム設定のPIN変更欄を、ログイン中のアカウント表示と、管理者追加はSupabaseダッシュボードから行う旨の案内に置き換えました',
+    '収支データ(売上・原価・人件費・粗利)の保護は、以前のセッションで実装済みのSupabase側のアクセス制御(RLS・user_rolesテーブル)と、未ログイン時は取得処理自体を呼ばないクライアント側の設計を、そのまま引き継いでいます。今回はその手前にあったPIN層を取り除いただけで、保護の仕組み自体は変更していません',
+    '実際にコードを実行するテストで、現場画面がログイン不要で開けること、管理系の画面がPINを経由せず直接ログイン画面になること、正しいログイン・誤ったログイン・ログアウト・リロード後のセッション維持・未ログイン状態での収支データ取得不可を、それぞれ確認済みです。既存の全機能への回帰もありません'
+  ]},
   { date:'2026-09-19', items:[
     '管理者に「🗓 実績管理」タブを新設。作業日ごと(期間指定可能)に実績(作業時間の記録)をまとめて確認し、「選択した実績をまとめて削除」「選択した実績を別の作業日にまとめて移動」ができるようになりました',
     '安全のため、進行中(まだ終了していない)実績は一覧に表示はされますが、削除・日付変更の対象には一切できません(チェックボックスがグレー表示になり選択不可)。誤って選択リストに紛れ込んでいても、実際の処理では自動的に除外されます',
@@ -1248,8 +1257,6 @@ var CHANGELOG = [
 var state = {
   role: null,
   showChangelog: false,
-  isAdminUnlocked: false,
-  adminPinHash: null,
   managerSession: null,
   managerSessionChecked: false,
   managerLoginError: '',
@@ -1284,7 +1291,6 @@ var state = {
   finAnalyticsRows: null,
   finAnalyticsLoading: false,
   finDrillCustomer: null,
-  pinModal: null,
   pendingCalendarDate: null,
   auditLogDate: null,
   focusBusy: false,
@@ -1713,20 +1719,6 @@ async function saveAchievementSettings(settings){
   finally{ pendingSaves--; }
 }
 /* ---------- admin PIN lock ---------- */
-async function hashPin(pin){
-  var enc = new TextEncoder().encode('wdb-pin-salt-v1:'+pin);
-  var buf = await crypto.subtle.digest('SHA-256', enc);
-  return Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
-}
-async function loadAdminPinHash(){
-  try{
-    var r = await window.storage.get('admin-pin-hash', true);
-    return r ? r.value : null;
-  }catch(e){ return null; }
-}
-async function saveAdminPinHash(hash){
-  try{ await window.storage.set('admin-pin-hash', hash, true); }catch(e){}
-}
 function ADMIN_GATED_ROLES(){ return ['adminHub','settingsHub']; }
 /* ---------- audit log ---------- */
 async function loadAuditLog(dateStr){
@@ -2843,13 +2835,13 @@ function bindCalendar(){
   document.querySelectorAll('[data-cal-date]').forEach(function(el){
     el.addEventListener('click', function(){
       var dateStr = el.getAttribute('data-cal-date');
-      if(!state.isAdminUnlocked){
-        state.pendingCalendarDate = dateStr;
-        openPinGate('adminHub');
-        return;
-      }
       state.role = 'adminHub';
       state.adminHubTab = 'today';
+      if(!hasManagerSession()){
+        state.pendingCalendarDate = dateStr;
+        render();
+        return;
+      }
       switchManagerDate(dateStr);
     });
   });
@@ -3210,7 +3202,7 @@ function renderFinancial(){
     fetchFinancialData().then(render);
   }
   if(!hasManagerSession()){
-    return renderManagerLoginForm('💰 収支・分析', 'この画面は売上・原価・人件費・粗利などの経営情報を扱います。閲覧には管理者アカウントでのログインが必要です(管理者PINとは別の、本物のログインです)。');
+    return renderManagerLoginForm('💰 収支・分析', 'この画面は売上・原価・人件費・粗利などの経営情報を扱います。閲覧には管理者アカウントでのログインが必要です。');
   }
   var dateStr = todayStr();
   var day = state.day;
@@ -3840,7 +3832,6 @@ function isUserBusy(){
   if(state.focusBusy) return true;
   if(state.isDragging) return true;
   if(state.modal) return true;
-  if(state.pinModal) return true;
   if(state.wvImporting) return true;
   if(state.showOtherTasks) return true;
   return false;
@@ -3860,11 +3851,9 @@ function render(){
   if(!state.role){
     var gateHtml = renderGate();
     if(state.showChangelog) gateHtml += renderChangelogModal();
-    if(state.pinModal) gateHtml += renderPinModal();
     root.innerHTML = gateHtml;
     bindGate();
     if(state.showChangelog) bindChangelogModal();
-    if(state.pinModal) bindPinModal();
     restoreScroll();
     return;
   }
@@ -3886,7 +3875,6 @@ function render(){
   else if(state.role==='adminHub') html += renderAdminHub();
   else if(state.role==='settingsHub') html += renderSettingsHub();
   if(state.modal) html += renderModal();
-  if(state.pinModal) html += renderPinModal();
   root.innerHTML = html;
   bindCommon();
   if(state.role==='manager') bindManager();
@@ -3903,7 +3891,6 @@ function render(){
   if(state.role==='adminHub') bindAdminHub();
   if(state.role==='settingsHub') bindSettingsHub();
   if(state.modal) bindModal();
-  if(state.pinModal) bindPinModal();
   restoreScroll();
 }
 
@@ -3936,16 +3923,16 @@ function renderGate(){
         '<div class="gate-card-desc">登録済みの作業・出勤予定を月ごとに確認して編集</div>'+
       '</button>'+
       '<button class="gate-card" data-role="adminHub">'+
-        (state.isAdminUnlocked?'':'<div class="gate-lock-badge" title="管理者専用">&#128274;</div>')+
+        '<div class="gate-lock-badge" title="管理者ログインが必要です">&#128274;</div>'+
         '<div class="gate-icon" style="background:#EFEBE2;color:#1B2333;">&#128100;</div>'+
         '<div class="gate-card-title">管理者</div>'+
-        '<div class="gate-card-desc">今日の状況・人員配置・生産性・収支分析(管理者専用)</div>'+
+        '<div class="gate-card-desc">今日の状況・人員配置・生産性・収支分析(管理者ログインが必要です)</div>'+
       '</button>'+
       '<button class="gate-card" data-role="settingsHub">'+
-        (state.isAdminUnlocked?'':'<div class="gate-lock-badge" title="管理者専用">&#128274;</div>')+
+        '<div class="gate-lock-badge" title="管理者ログインが必要です">&#128274;</div>'+
         '<div class="gate-icon" style="background:#F4EEE4;color:#8A6A3B;">&#9881;</div>'+
         '<div class="gate-card-title">設定</div>'+
-        '<div class="gate-card-desc">作業設定・勤務時間設定・マスター設定・操作履歴など(管理者専用)</div>'+
+        '<div class="gate-card-desc">作業設定・勤務時間設定・マスター設定・操作履歴など(管理者ログインが必要です)</div>'+
       '</button>'+
     '</div>'+
     '<button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
@@ -3971,10 +3958,6 @@ function bindGate(){
   document.querySelectorAll('.gate-card').forEach(function(btn){
     btn.addEventListener('click', function(){
       var role = btn.getAttribute('data-role');
-      if(ADMIN_GATED_ROLES().indexOf(role)!==-1 && !state.isAdminUnlocked){
-        openPinGate(role);
-        return;
-      }
       state.role = role;
       render();
       startPolling();
@@ -3999,125 +3982,11 @@ function bindChangelogModal(){
 }
 
 /* ---------- ADMIN PIN MODAL ---------- */
-async function openPinGate(pendingRole){
-  if(state.adminPinHash===null){
-    state.adminPinHash = await loadAdminPinHash();
-  }
-  if(!state.adminPinHash){
-    state.pinModal = { mode:'setup', pendingRole: pendingRole, error:'' };
-  }else{
-    state.pinModal = { mode:'enter', pendingRole: pendingRole, error:'' };
-  }
-  render();
-}
-function renderPinModal(){
-  var m = state.pinModal;
-  var errHtml = m.error ? '<div style="color:var(--rust-600);font-size:12px;margin-bottom:10px;">'+esc(m.error)+'</div>' : '';
-  var inputStyle = 'width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:16px;margin-bottom:10px;letter-spacing:.3em;text-align:center;';
-  if(m.mode==='setup' || m.mode==='change'){
-    return '<div class="modal-overlay" id="pinModalOverlay">'+
-      '<div class="modal-card" style="max-width:360px;">'+
-        '<div class="modal-task-name" style="text-align:center;margin-bottom:10px;">管理者PINを'+(m.mode==='change'?'変更':'設定')+'</div>'+
-        (m.mode==='setup' ? '<div class="pool-hint" style="margin-bottom:14px;">まだ管理者PINが設定されていません。今後、管理者専用の画面に入るときに必要になります。4桁以上の数字を設定してください。</div>' : '<div class="pool-hint" style="margin-bottom:14px;">新しいPINを入力してください。</div>')+
-        '<input type="password" inputmode="numeric" id="pinInput1" placeholder="新しいPIN" style="'+inputStyle+'">'+
-        '<input type="password" inputmode="numeric" id="pinInput2" placeholder="もう一度入力" style="'+inputStyle+'">'+
-        errHtml+
-        '<div class="modal-actions">'+
-          '<button class="modal-cancel" id="pinCancelBtn">キャンセル</button>'+
-          '<button class="modal-confirm" id="pinSetupBtn">'+(m.mode==='change'?'変更する':'設定する')+'</button>'+
-        '</div>'+
-      '</div>'+
-    '</div>';
-  }
-  return '<div class="modal-overlay" id="pinModalOverlay">'+
-    '<div class="modal-card" style="max-width:340px;">'+
-      '<div class="modal-task-name" style="text-align:center;margin-bottom:10px;">管理者PIN</div>'+
-      '<div class="pool-hint" style="margin-bottom:14px;">この画面は管理者専用です。PINを入力してください。</div>'+
-      '<input type="password" inputmode="numeric" id="pinInputEnter" placeholder="PIN" style="'+inputStyle+'">'+
-      errHtml+
-      '<div class="modal-actions">'+
-        '<button class="modal-cancel" id="pinCancelBtn">キャンセル</button>'+
-        '<button class="modal-confirm" id="pinEnterBtn">解除する</button>'+
-      '</div>'+
-    '</div>'+
-  '</div>';
-}
-function bindPinModal(){
-  var m = state.pinModal;
-  var cancelBtn = document.getElementById('pinCancelBtn');
-  if(cancelBtn) cancelBtn.addEventListener('click', function(){
-    state.pinModal = null;
-    state.pendingCalendarDate = null;
-    render();
-  });
-  if(m.mode==='setup' || m.mode==='change'){
-    var setupBtn = document.getElementById('pinSetupBtn');
-    var doSetup = async function(){
-      var p1El = document.getElementById('pinInput1');
-      var p2El = document.getElementById('pinInput2');
-      var p1 = p1El.value, p2 = p2El.value;
-      if(p1.length<4){ m.error='4桁以上で入力してください'; render(); return; }
-      if(p1!==p2){ m.error='2つの入力が一致しません'; render(); return; }
-      var hash = await hashPin(p1);
-      await saveAdminPinHash(hash);
-      state.adminPinHash = hash;
-      state.isAdminUnlocked = true;
-      var pendingRole = m.pendingRole;
-      var pendingDate = state.pendingCalendarDate;
-      var wasSetup = m.mode==='setup';
-      state.pinModal = null;
-      state.pendingCalendarDate = null;
-      if(wasSetup && pendingRole){
-        state.role = pendingRole;
-        if(pendingRole==='adminHub') state.adminHubTab = 'today';
-        render();
-        startPolling();
-        if(pendingDate) switchManagerDate(pendingDate);
-      }else{
-        showToast('管理者PINを変更しました');
-        render();
-      }
-    };
-    if(setupBtn) setupBtn.addEventListener('click', doSetup);
-    [document.getElementById('pinInput1'), document.getElementById('pinInput2')].forEach(function(el){
-      if(el) el.addEventListener('keydown', function(e){ if(e.key==='Enter') doSetup(); });
-    });
-  }else{
-    var enterBtn = document.getElementById('pinEnterBtn');
-    var doEnter = async function(){
-      var input = document.getElementById('pinInputEnter');
-      var hash = await hashPin(input.value);
-      if(hash===state.adminPinHash){
-        state.isAdminUnlocked = true;
-        var pendingRole = m.pendingRole;
-        var pendingDate = state.pendingCalendarDate;
-        state.pinModal = null;
-        state.pendingCalendarDate = null;
-        state.role = pendingRole;
-        if(pendingRole==='adminHub') state.adminHubTab = 'today';
-        render();
-        startPolling();
-        if(pendingDate) switchManagerDate(pendingDate);
-      }else{
-        m.error = 'PINが違います';
-        render();
-        var freshInput = document.getElementById('pinInputEnter');
-        if(freshInput) freshInput.focus();
-      }
-    };
-    if(enterBtn) enterBtn.addEventListener('click', doEnter);
-    var enterInput = document.getElementById('pinInputEnter');
-    if(enterInput){
-      enterInput.focus();
-      enterInput.addEventListener('keydown', function(e){ if(e.key==='Enter') doEnter(); });
-    }
-  }
-}
 
 /* ---------- TOPBAR ---------- */
 function renderTopbar(){
   var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'実績入力', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定'}[state.role];
-  var lockBtn = (state.isAdminUnlocked && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="管理者ロックをかけ直す">🔒 ロックする</button>' : '';
+  var lockBtn = (hasManagerSession() && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="ログアウトする">🔓 ログアウト</button>' : '';
   return ''+
   '<div class="topbar">'+
     '<div class="topbar-left">'+
@@ -4138,11 +4007,10 @@ function bindCommon(){
   });
   var lockBtn = document.getElementById('adminLockBtn');
   if(lockBtn) lockBtn.addEventListener('click', async function(){
-    state.isAdminUnlocked = false;
     await managerSignOut();
     state.role = null; state.activeStaffId = null; state.modal = null;
     render();
-    showToast('管理者ロックをかけ直しました(収支・分析のログインも解除しました)');
+    showToast('ログアウトしました');
   });
 }
 
@@ -4239,7 +4107,7 @@ var ADMIN_HUB_TABS = [
 function renderAdminHub(){
   ensureManagerSessionChecked();
   if(!hasManagerSession()){
-    return renderManagerLoginForm('👔 管理者', 'この画面は出退勤・作業割り当て・人員配置・生産性・収支など、管理業務全般を扱います。閲覧・操作には管理者アカウントでのログインが必要です(管理者PINとは別の、本物のログインです)。');
+    return renderManagerLoginForm('👔 管理者', 'この画面は出退勤・作業割り当て・人員配置・生産性・収支など、管理業務全般を扱います。閲覧・操作には管理者アカウントでのログインが必要です。');
   }
   if(!state.adminHubTab) state.adminHubTab = 'today';
   var tabsHtml = '<div class="vc-tabs" style="margin:0 0 14px;">'+
@@ -4258,7 +4126,11 @@ function renderAdminHub(){
 }
 function bindAdminHub(){
   if(!hasManagerSession()){
-    bindManagerLoginForm();
+    bindManagerLoginForm(async function(){
+      var pendingDate = state.pendingCalendarDate;
+      state.pendingCalendarDate = null;
+      if(pendingDate) await switchManagerDate(pendingDate);
+    });
     return;
   }
   document.querySelectorAll('[data-admin-hub-tab]').forEach(function(el){
@@ -5008,10 +4880,10 @@ function renderSettingsPanels(){
     '<input type="number" id="achievementTargetInput" min="0" step="100" value="'+((state.achievementSettings&&state.achievementSettings.monthlyTargetPieces)||25000)+'" style="width:200px;border:1px solid var(--paper-line);border-radius:8px;padding:8px 10px;font-size:14px;font-family:var(--font-mono);">'+
   '</div>';
 
-  var pinChangeHtml = '<div class="panel" style="margin-top:14px;">'+
-    '<div class="panel-title">🔒 管理者PIN</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">管理者画面・作業登録・操作履歴に入るためのPINです。忘れた場合は、Supabaseの管理画面から「admin-pin-hash」のキーを削除すると、次回アクセス時に再設定できます。</div>'+
-    '<button type="button" class="add-btn" id="changePinBtn">PINを変更する</button>'+
+  var accountInfoHtml = '<div class="panel" style="margin-top:14px;">'+
+    '<div class="panel-title">👤 管理者アカウント</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">'+(hasManagerSession() && state.managerSession.user ? 'ログイン中: '+esc(state.managerSession.user.email) : 'ログインしていません')+'</div>'+
+    '<div class="pool-hint">管理者を追加したい場合は、Supabaseダッシュボードの Authentication → Users からアカウントを作成し、user_roles テーブルに役割(manager/admin)を登録してください。物流ボード側での追加操作は不要です。</div>'+
   '</div>';
 
   var backupPanel = '<div class="panel" style="margin-top:14px;">'+
@@ -5022,7 +4894,7 @@ function renderSettingsPanels(){
     '<button type="button" class="add-btn" id="backupDownloadBtn">この日のバックアップをダウンロード</button>'+
   '</div>';
 
-  return { shiftPanel:shiftPanel, breakPanel:breakPanel, achievementPanel:achievementPanel, pinChangeHtml:pinChangeHtml, backupPanel:backupPanel };
+  return { shiftPanel:shiftPanel, breakPanel:breakPanel, achievementPanel:achievementPanel, accountInfoHtml:accountInfoHtml, backupPanel:backupPanel };
 }
 var SETTINGS_HUB_TABS = [
   { key:'basic', label:'基本設定', icon:'🏠' },
@@ -5037,7 +4909,7 @@ var SETTINGS_HUB_TABS = [
 function renderSettingsHub(){
   ensureManagerSessionChecked();
   if(!hasManagerSession()){
-    return renderManagerLoginForm('⚙️ 設定', 'この画面はスタッフ設定・作業設定・マスター設定・操作履歴など、システム設定全般を扱います。閲覧・操作には管理者アカウントでのログインが必要です(管理者PINとは別の、本物のログインです)。');
+    return renderManagerLoginForm('⚙️ 設定', 'この画面はスタッフ設定・作業設定・マスター設定・操作履歴など、システム設定全般を扱います。閲覧・操作には管理者アカウントでのログインが必要です。');
   }
   if(!state.settingsHubTab) state.settingsHubTab = 'basic';
   var tabsHtml = '<div class="panel-title" style="font-size:20px;margin-bottom:4px;">⚙️ 設定</div>'+
@@ -5064,7 +4936,7 @@ function renderSettingsHub(){
     }else if(state.settingsHubTab==='productivity'){
       content = '<div class="pool-hint">生産性データの内容・更新は、管理者→生産性の画面で確認・更新できます。ここでは設定できる項目は現在ありません。</div>';
     }else if(state.settingsHubTab==='system'){
-      content = panels.pinChangeHtml + panels.backupPanel;
+      content = panels.accountInfoHtml + panels.backupPanel;
     }else{ // basic
       content = panels.achievementPanel;
     }
@@ -5391,13 +5263,6 @@ function bindSettings(){
   if(mgrSettingsDetails){
     mgrSettingsDetails.addEventListener('toggle', function(){
       state.mgrSettingsOpen = mgrSettingsDetails.open;
-    });
-  }
-  var changePinBtn = document.getElementById('changePinBtn');
-  if(changePinBtn){
-    changePinBtn.addEventListener('click', function(){
-      state.pinModal = { mode:'change', error:'' };
-      render();
     });
   }
   var backupDownloadBtn = document.getElementById('backupDownloadBtn');
@@ -7007,7 +6872,13 @@ async function managerSignIn(email, password){
   if(!window.__supabaseClient) return { ok:false, error:'Supabaseが設定されていません' };
   try{
     var res = await window.__supabaseClient.auth.signInWithPassword({ email: email, password: password });
-    if(res.error) return { ok:false, error: res.error.message };
+    if(res.error){
+      var msg = (res.error.message||'').toLowerCase();
+      if(msg.indexOf('invalid login credentials')!==-1 || msg.indexOf('invalid email or password')!==-1){
+        return { ok:false, error:'メールアドレスまたはパスワードが正しくありません' };
+      }
+      return { ok:false, error: res.error.message };
+    }
     state.managerSession = res.data.session;
     return { ok:true };
   }catch(e){

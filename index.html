@@ -905,6 +905,21 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-26', items:[
+    'CSV取込の方法・反映先は変更していません(従来通り、親作業に紐付けたままです)。ご要望に沿って、内訳作業(ピッキング・梱包など)ごとに、その内訳の単位(ピース・件など)で生産性を計算する機能を追加しました',
+    '例:「アスクル」という親作業の中の内訳「ピッキング(ピース)」「梱包(件)」それぞれについて、内訳ごとに計測された時間と、作業者が入力した内訳ごとの数量から、内訳ごとの生産性(◯◯/時間)を算出します。この数量・時間のデータ自体は、以前から実績に記録されていたものをそのまま使っています(新たに何かを入力させる変更はしていません)',
+    '内訳ごとの生産性は、親作業のCSV連携の有無に関わらず計算されます(内訳の数量・時間は実績データから独立して求まるため)。管理者→生産性の画面で、親作業全体の生産性(従来通り)の下に、内訳ごとの生産性が表示されます',
+    '親作業全体の生産性計算(人員配置の判断などに使われる既存のロジック)は一切変更していません',
+    '実際にコードを実行するテストで、ご提示いただいた例(ピッキング120ピース÷45分=160ピース/時、梱包120件÷35分)の通りに計算されること、CSV連携の有無に関わらず内訳の生産性が正しく計算されること、複数日分の実績が正しく積み上がることを確認済みです。既存の全回帰テスト(29スイート)にも影響はありません'
+  ]},
+  { date:'2026-09-25', items:[
+    '【作業マスタ登録の第一段階】設定→「作業設定」を「作業マスタ」に名称変更しました。調査の結果、ご要望の「親作業・内訳作業・発生曜日による自動生成」の仕組みの大部分は、既存の作業登録(単発作業・繰り返し作業テンプレート)としてすでに実装済みであることを確認しました。今回は、まだ無かった「内訳作業ごとの安定ID」「内訳作業ごとのCSV連携・単価設定」を追加しました',
+    '内訳作業(親作業の下にぶら下がる、実際に時間計測する単位)に、安定したID・CSV連携の有無・単価を設定できるようになりました。各内訳の⚙ボタンから開閉できます。設定すると、チップに📥(CSV連携)・💴(単価設定済み)のアイコンが表示されます',
+    '既存の内訳作業データ(文字列のみ、またはID無しのもの)は、アプリ起動時に安全に自動移行され、安定したIDが補完されます。実績データ(作業時間・数量の記録)は引き続き内訳名で紐付いており、変更していません。過去の実績表示・生産性計算には一切影響しません',
+    'この移行処理は、以前実装した「データ読み込みが不確実な場合は保存しない」安全装置を尊重しており、通信状況が悪い場合に誤って保存してしまうことはありません',
+    '今回追加したCSV連携・単価の設定は、内訳作業マスタへの「登録」までです。実際のCSV取込処理・収支計算への反映は、まだ配線していません(次の段階の作業とさせてください)',
+    '実際にコードを実行するテストで、新旧データ形式どちらでも正しく動作すること、新規追加した内訳に自動でIDが付与されること、既存データの移行が安全に行われ何度実行しても壊れないこと(冪等性)、CSV連携チェックボックス・単価入力のUI操作が正しく反映されることを確認済みです。既存の全回帰テスト(27スイート)にも影響はありません'
+  ]},
   { date:'2026-09-24', items:[
     '実績管理画面に、作業項目・スタッフによる絞り込みを追加しました。それぞれ単独でも、組み合わせて(AND条件)も使用でき、「すべて」に戻せば元の全件表示に戻ります',
     '「まとめてチェック」が、現在の絞り込み結果だけを対象にするよう設計し直しました。絞り込みで非表示になっている実績の選択状態には一切触れません。絞り込み条件を変更しただけでは、既存の選択状態は消えないようにしています(明示的に「まとめてチェック」をOFFにした場合のみ、表示中の選択を解除します)',
@@ -1352,6 +1367,7 @@ var state = {
   finAnalyticsLoading: false,
   finDrillCustomer: null,
   pendingCalendarDate: null,
+  subcatDetailOpen: {},
   dataLoadUncertain: false,
   auditLogDate: null,
   focusBusy: false,
@@ -1461,6 +1477,20 @@ function subcatUnit(sc, fallback){
   if(typeof sc==='string') return fallback || '件';
   return (sc && sc.unit) || fallback || '件';
 }
+/* 内訳作業の安定ID。既存データ(古い文字列のみ、またid未設定の{name,unit})には
+   IDが無いため、その場合は名前を代替キーとして返す(過去データを壊さないための
+   後方互換フォールバック)。新規追加・編集時には必ずIDを持たせる。 */
+function subcatId(sc){
+  if(typeof sc==='string') return sc;
+  return (sc && sc.id) || (sc && sc.name) || '';
+}
+function subcatCsvLinked(sc){
+  return !!(sc && typeof sc==='object' && sc.csvLinked);
+}
+function subcatUnitPrice(sc){
+  if(!sc || typeof sc!=='object') return null;
+  return (typeof sc.unitPrice==='number') ? sc.unitPrice : null;
+}
 function subcatUnitMap(task){
   var map = {};
   (task.subcategories||[]).forEach(function(sc){
@@ -1528,8 +1558,27 @@ function subcatDraftRef(context){
   return null;
 }
 function renderSubcatTagInput(list, context, textId, defaultUnit){
+  if(!state.subcatDetailOpen) state.subcatDetailOpen = {};
   var chips = (list||[]).map(function(sc,i){
-    return '<span class="subcat-chip">'+esc(subcatName(sc))+' <span class="subcat-chip-unit">('+esc(subcatUnit(sc, defaultUnit))+')</span><button type="button" data-subcat-remove="'+context+'|'+i+'" title="内訳「'+esc(subcatName(sc))+'」を削除" aria-label="内訳「'+esc(subcatName(sc))+'」を削除">&times;</button></span>';
+    var key = context+'|'+subcatId(sc);
+    var isOpen = !!state.subcatDetailOpen[key];
+    var csvOn = subcatCsvLinked(sc);
+    var price = subcatUnitPrice(sc);
+    var detailHtml = isOpen ? '<div class="subcat-detail-panel">'+
+      '<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:8px;">'+
+        '<input type="checkbox" data-subcat-csv-toggle="'+context+'|'+i+'" '+(csvOn?'checked':'')+'> この内訳はCSVから数量を取得する(作業者への数量入力を省略)'+
+      '</label>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">単価(収支・分析で使用。任意)</label>'+
+      '<input type="number" step="0.01" class="subcat-price-input" data-subcat-price="'+context+'|'+i+'" value="'+(price!==null?price:'')+'" placeholder="未設定" style="width:120px;">'+
+    '</div>' : '';
+    return '<span class="subcat-chip-wrap">'+
+      '<span class="subcat-chip">'+esc(subcatName(sc))+' <span class="subcat-chip-unit">('+esc(subcatUnit(sc, defaultUnit))+')</span>'+
+      (csvOn?' <span class="subcat-chip-flag" title="CSV連携">📥</span>':'')+
+      (price!==null?' <span class="subcat-chip-flag" title="単価設定済み">💴</span>':'')+
+      '<button type="button" class="subcat-chip-gear" data-subcat-toggle-detail="'+key+'" title="詳細設定">⚙</button>'+
+      '<button type="button" data-subcat-remove="'+context+'|'+i+'" title="内訳「'+esc(subcatName(sc))+'」を削除" aria-label="内訳「'+esc(subcatName(sc))+'」を削除">&times;</button></span>'+
+      detailHtml+
+    '</span>';
   }).join('') || '<span class="pool-hint" style="margin:0;">まだ内訳がありません</span>';
   var draftRef = subcatDraftRef(context);
   var draft = (draftRef && draftRef.get()) || {};
@@ -1608,7 +1657,7 @@ function bindSubcatTagControls(){
       if(!ref) return;
       var list = (ref.get()||[]).slice();
       if(!list.some(function(sc){ return subcatName(sc)===name; })){
-        list.push({name:name, unit:unit});
+        list.push({id:uid(), name:name, unit:unit, csvLinked:false, unitPrice:null});
       }
       ref.set(list);
       var draftRef = subcatDraftRef(ctx);
@@ -1628,6 +1677,46 @@ function bindSubcatTagControls(){
       ref.set(list);
       if(!inModal) state.suppressRender = false;
       render();
+    });
+  });
+  document.querySelectorAll('[data-subcat-toggle-detail]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var key = el.getAttribute('data-subcat-toggle-detail');
+      if(!state.subcatDetailOpen) state.subcatDetailOpen = {};
+      state.subcatDetailOpen[key] = !state.subcatDetailOpen[key];
+      if(!inModal) state.suppressRender = false;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-subcat-csv-toggle]').forEach(function(el){
+    el.addEventListener('change', function(){
+      var parts = el.getAttribute('data-subcat-csv-toggle').split('|');
+      var ctx = parts[0], idx = parseInt(parts[1],10);
+      var ref = subcatListRef(ctx);
+      if(!ref) return;
+      var list = (ref.get()||[]).slice();
+      if(list[idx]) list[idx] = Object.assign({}, list[idx], { csvLinked: el.checked });
+      ref.set(list);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-subcat-price]').forEach(function(el){
+    el.addEventListener('focusin', function(){ state.suppressRender = true; });
+    el.addEventListener('focusout', function(){
+      setTimeout(function(){
+        if(!inModal) state.suppressRender = false;
+        render();
+      }, 150);
+    });
+    el.addEventListener('change', function(){
+      var parts = el.getAttribute('data-subcat-price').split('|');
+      var ctx = parts[0], idx = parseInt(parts[1],10);
+      var ref = subcatListRef(ctx);
+      if(!ref) return;
+      var list = (ref.get()||[]).slice();
+      var val = el.value.trim()==='' ? null : parseFloat(el.value);
+      if(list[idx]) list[idx] = Object.assign({}, list[idx], { unitPrice: (val!==null && !isNaN(val)) ? val : null });
+      ref.set(list);
     });
   });
   document.querySelectorAll('.subcat-add-row').forEach(function(wrap){
@@ -1930,6 +2019,14 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume){
   var agg = aggregateDays([day]);
   Object.keys(agg.perTask).forEach(function(tid){
     if(tid==='BREAK') return;
+    // 内訳(内訳作業)ごとの生産性は、CSV連携の有無に関わらず計算する。
+    // 親作業(タスク)全体のCSV数量とは独立して、内訳ごとの数量(log.breakdown)・
+    // 時間(log.subTimes)から求められるため。
+    if(!master[tid]) master[tid] = { unit:'個', taskAverage:{ totalQty:0, totalHours:0, sampleCount:0 }, byStaff:{}, bySubcat:{} };
+    if(!master[tid].bySubcat) master[tid].bySubcat = {};
+    updateSubcatProductivityFromDayLogs(master[tid].bySubcat, tid, day);
+
+    // 作業全体(親作業)の生産性は、従来通りCSVの出荷数量を使って計算する(変更なし)。
     var wvTotals = wvTotalsForTask(workVolume||emptyWorkVolume(), tid);
     if(!wvTotals || !wvTotals.primaryCount && !wvTotals.totalQty) return;
     var qty = wvTotals.totalQty; // 出荷個数を基本の作業量単位とする
@@ -1937,7 +2034,6 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume){
     var taskMs = agg.perTask[tid].ms || 0;
     if(taskMs<=0) return;
     var taskHours = taskMs/3600000;
-    if(!master[tid]) master[tid] = { unit:'個', taskAverage:{ totalQty:0, totalHours:0, sampleCount:0 }, byStaff:{} };
     var m = master[tid];
     m.taskAverage.totalQty += qty;
     m.taskAverage.totalHours += taskHours;
@@ -1959,6 +2055,40 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume){
     }
   });
   return master;
+}
+function updateSubcatProductivityFromDayLogs(bySubcat, tid, day){
+  var task = taskById(tid);
+  if(!task.subcategories || !task.subcategories.length) return;
+  var unitMap = subcatUnitMap(task);
+  var perSubcat = {}; // subcatName -> {qty, ms}
+  (day.logs||[]).forEach(function(log){
+    if(log.taskId!==tid || !log.breakdown) return;
+    Object.keys(log.breakdown).forEach(function(scName){
+      var qty = log.breakdown[scName] || 0;
+      var ms = (log.subTimes && log.subTimes[scName]) || 0;
+      if(qty<=0 || ms<=0) return;
+      if(!perSubcat[scName]) perSubcat[scName] = { qty:0, ms:0 };
+      perSubcat[scName].qty += qty;
+      perSubcat[scName].ms += ms;
+    });
+  });
+  Object.keys(perSubcat).forEach(function(scName){
+    var hours = perSubcat[scName].ms/3600000;
+    if(hours<=0) return;
+    if(!bySubcat[scName]) bySubcat[scName] = { unit: unitMap[scName]||task.unit, taskAverage:{ totalQty:0, totalHours:0, sampleCount:0 } };
+    bySubcat[scName].unit = unitMap[scName] || bySubcat[scName].unit; // 単位はマスタの最新設定を優先
+    bySubcat[scName].taskAverage.totalQty += perSubcat[scName].qty;
+    bySubcat[scName].taskAverage.totalHours += hours;
+    bySubcat[scName].taskAverage.sampleCount += 1;
+  });
+}
+function subcatProductivityRateFor(master, taskId, subcatName){
+  var m = master && master[taskId];
+  var sm = m && m.bySubcat && m.bySubcat[subcatName];
+  if(!sm || !sm.taskAverage || sm.taskAverage.sampleCount<1 || sm.taskAverage.totalHours<=0){
+    return { rate:null, unit:null, sampleCount:0 };
+  }
+  return { rate: sm.taskAverage.totalQty/sm.taskAverage.totalHours, unit: sm.unit, sampleCount: sm.taskAverage.sampleCount };
 }
 function productivityRateFor(master, taskId, staffId){
   var m = master && master[taskId];
@@ -3151,9 +3281,18 @@ function renderProductivityTab(){
       var enough = s.sampleCount>=PRODUCTIVITY_MIN_SAMPLES;
       return '<div class="checklist-item-action">'+esc(staffById(sid).name)+': '+(rate?rate.toFixed(1):'-')+'/h(サンプル'+s.sampleCount+'日'+(enough?'':'・配置には未反映(5日未満)')+')</div>';
     }).join('') || '<div class="checklist-item-action">個人別の実績はまだありません</div>';
+    var subcatNames = Object.keys(m.bySubcat||{});
+    var subcatRows = subcatNames.length ? '<div class="task-tile-live-counters" style="margin-top:10px;">'+
+      '<div class="task-tile-live-title">内訳ごとの生産性</div>'+
+      subcatNames.map(function(scName){
+        var sr = subcatProductivityRateFor(master, tid, scName);
+        return '<div class="checklist-item-action">'+esc(scName)+': '+(sr.rate?sr.rate.toFixed(1):'-')+esc(sr.unit||'')+'/h(サンプル'+sr.sampleCount+'日)</div>';
+      }).join('')+
+    '</div>' : '';
     return '<div class="checklist-item">'+
       '<div class="checklist-item-title">'+esc(taskById(tid).name)+' — 作業全体の標準生産性: '+(avgRate?avgRate.toFixed(1)+'/h':'不明')+'(サンプル'+((m.taskAverage&&m.taskAverage.sampleCount)||0)+'日)</div>'+
       staffRows+
+      subcatRows+
     '</div>';
   }).join('') || '<div class="empty-note">まだ生産性データがありません。下のボタンで実績から作成してください。</div>';
 
@@ -5102,7 +5241,7 @@ function renderSettingsPanels(){
 var SETTINGS_HUB_TABS = [
   { key:'basic', label:'基本設定', icon:'🏠' },
   { key:'staff', label:'スタッフ設定', icon:'🧑' },
-  { key:'task', label:'作業設定', icon:'📦' },
+  { key:'task', label:'作業マスタ', icon:'📦' },
   { key:'shift', label:'勤務時間設定', icon:'⏰' },
   { key:'productivity', label:'生産性設定', icon:'📈' },
   { key:'pricing', label:'単価・人件費設定', icon:'💴' },
@@ -8693,6 +8832,33 @@ function renderSupabaseWarning(){
     '<p class="gate-sub" style="max-width:520px;">config.js に SupabaseプロジェクトのURLとanonキーが設定されていません。<br><br>Supabaseダッシュボード → Project Settings → API から値を取得し、config.js の url / anonKey を書き換えてから、もう一度このページを開いてください。</p>'+
   '</div>';
 }
+/* 既存の内訳作業(subcategories)に、過去データを壊さずに安定IDを補完する。
+   実績ログ(breakdown/activeSubcat)は引き続き名前で紐付いており、ここでは変更しない。
+   IDは今後、内訳ごとのCSV連携・単価マスタを引くためのキーとして使う。 */
+function migrateSubcatIds(list){
+  var changed = false;
+  (list||[]).forEach(function(t){
+    if(!t.subcategories || !t.subcategories.length) return;
+    t.subcategories = t.subcategories.map(function(sc){
+      if(typeof sc==='string') sc = { name: sc, unit: t.unit };
+      if(!sc.id){ sc = Object.assign({}, sc, { id: uid() }); changed = true; }
+      if(sc.csvLinked===undefined) sc.csvLinked = false;
+      if(sc.unitPrice===undefined) sc.unitPrice = null;
+      return sc;
+    });
+  });
+  return changed;
+}
+async function migrateSubcatIdsIfNeeded(){
+  if(state.dataLoadUncertain){
+    console.warn('データ読み込みが不確実なため、内訳作業IDの補完をスキップしました。');
+    return;
+  }
+  var backlogChanged = migrateSubcatIds(state.backlog);
+  var templatesChanged = migrateSubcatIds(state.templates);
+  if(backlogChanged) await saveBacklog(state.backlog);
+  if(templatesChanged) await saveTemplates(state.templates);
+}
 async function init(){
   if(!window.SUPABASE_CONFIG || !window.SUPABASE_CONFIG.url || window.SUPABASE_CONFIG.url.indexOf('YOUR-PROJECT')!==-1){
     document.getElementById('app').innerHTML = renderSupabaseWarning();
@@ -8705,6 +8871,7 @@ async function init(){
   state.roster = await loadRoster();
   state.backlog = await loadBacklog();
   state.templates = await loadTemplates();
+  await migrateSubcatIdsIfNeeded();
   state.breakSettings = await loadBreakSettings();
   state.shiftSettings = await loadShiftSettings();
   state.achievementSettings = await loadAchievementSettings();

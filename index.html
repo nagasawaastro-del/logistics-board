@@ -905,6 +905,13 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-24', items:[
+    '実績管理画面に、作業項目・スタッフによる絞り込みを追加しました。それぞれ単独でも、組み合わせて(AND条件)も使用でき、「すべて」に戻せば元の全件表示に戻ります',
+    '「まとめてチェック」が、現在の絞り込み結果だけを対象にするよう設計し直しました。絞り込みで非表示になっている実績の選択状態には一切触れません。絞り込み条件を変更しただけでは、既存の選択状態は消えないようにしています(明示的に「まとめてチェック」をOFFにした場合のみ、表示中の選択を解除します)',
+    '絞り込み結果の件数(「◯件の実績」)を表示するようにしました',
+    'ご報告いただいた「まとめてチェックOFFで全部OFFにならない」現象について、絞り込み機能が無い単純なケースで直接検証しましたが、その状態では再現しませんでした。絞り込み機能の追加に伴い、表示中の対象と選択状態が常に一致する設計に作り直しているため、今回の変更で併せて解消していることを期待しています。もし同様の症状が続く場合は、具体的な操作手順を教えていただけますと再調査いたします',
+    '実際にコードを実行するテストで、ご指定のテスト①〜⑦(まとめてチェックON/OFF・作業項目検索・スタッフ検索・複合検索・条件クリア・絞り込み後のまとめてチェック)と、件数表示・選択状態の保持について、すべて確認済みです。既存の削除・日付変更機能や他の全機能への影響もありません'
+  ]},
   { date:'2026-09-23', items:[
     '【重要な不具合修正・第2弾】「改修のたびにモニター表示の作業項目が削除済みになる」不具合の根本原因を追加調査し、修正しました。以前の修正は「4秒ごとの自動更新中」の保護でしたが、今回わかったのは、アプリを開いた瞬間(特に新しいコードをデプロイした直後、ブラウザがSupabaseへの接続を新規に確立するタイミング)には、この保護が及んでいなかったことです',
     'スタッフ一覧・作業一覧・繰り返し作業一覧の取得処理に、間隔を空けながら最大3回まで自動的に再試行する仕組みを追加しました。また、再試行してもなお取得が不確実だった場合は、「本日の繰り返し作業を自動生成する処理」が、その不確実なデータを元に誤って保存してしまうことを防ぐ安全装置を追加しました',
@@ -1332,6 +1339,8 @@ var state = {
   logMgmtLoading: false,
   logMgmtSelected: {},
   logMgmtMoveTargetDate: '',
+  logMgmtFilterTaskId: '',
+  logMgmtFilterStaffId: '',
   staffingLoading: false,
   staffingPriorityOpen: false,
   nextTaskSuggestModal: null,
@@ -2934,6 +2943,14 @@ function bindCalendar(){
     });
   });
 }
+function getFilteredLogMgmtEntries(){
+  if(!state.logMgmtEntries) return [];
+  return state.logMgmtEntries.filter(function(e){
+    if(state.logMgmtFilterTaskId && e.log.taskId!==state.logMgmtFilterTaskId) return false;
+    if(state.logMgmtFilterStaffId && e.log.staffId!==state.logMgmtFilterStaffId) return false;
+    return true;
+  });
+}
 function renderLogManagementTab(){
   if(!state.logMgmtStartDate) state.logMgmtStartDate = todayStr();
   if(!state.logMgmtEndDate) state.logMgmtEndDate = todayStr();
@@ -2943,7 +2960,31 @@ function renderLogManagementTab(){
   }else if(state.logMgmtEntries===null){
     body = '<div class="empty-note">期間を選んで「表示する」を押してください。</div>';
   }else{
-    var rows = state.logMgmtEntries.map(function(e){
+    var filteredEntries = getFilteredLogMgmtEntries();
+    // 絞り込み条件のプルダウン用に、読み込んだ範囲内に実際に登場する作業・スタッフだけを候補にする
+    var taskIdsInRange = {}, staffIdsInRange = {};
+    state.logMgmtEntries.forEach(function(e){ taskIdsInRange[e.log.taskId]=true; staffIdsInRange[e.log.staffId]=true; });
+    var taskFilterOptions = '<option value="">すべて</option>'+Object.keys(taskIdsInRange).map(function(tid){
+      var t = taskById(tid==='BREAK'?'BREAK':tid);
+      return '<option value="'+tid+'" '+(state.logMgmtFilterTaskId===tid?'selected':'')+'>'+esc(t.name)+'</option>';
+    }).join('');
+    var staffFilterOptions = '<option value="">すべて</option>'+Object.keys(staffIdsInRange).map(function(sid){
+      var s = staffById(sid);
+      return '<option value="'+sid+'" '+(state.logMgmtFilterStaffId===sid?'selected':'')+'>'+esc(s.name)+'</option>';
+    }).join('');
+    var filterBarHtml = '<div class="panel" style="margin-bottom:14px;background:var(--paper-100);">'+
+      '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">'+
+        '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業項目</label>'+
+          '<select id="logMgmtFilterTask">'+taskFilterOptions+'</select>'+
+        '</div>'+
+        '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">スタッフ</label>'+
+          '<select id="logMgmtFilterStaff">'+staffFilterOptions+'</select>'+
+        '</div>'+
+        '<button type="button" class="vc-manage-toggle-btn" id="logMgmtFilterClearBtn">条件クリア</button>'+
+      '</div>'+
+    '</div>';
+
+    var rows = filteredEntries.map(function(e){
       var log = e.log;
       var s = staffById(log.staffId);
       var t = taskById(log.taskId==='BREAK' ? 'BREAK' : log.taskId);
@@ -2959,13 +3000,19 @@ function renderLogManagementTab(){
         '<td class="num">'+(log.end?fmtClock(log.end):'-')+'</td>'+
         '<td class="num">'+qtyLabel+'</td>'+
       '</tr>';
-    }).join('') || '<tr><td colspan="7" style="color:var(--slate-500);">この期間の実績はありません</td></tr>';
+    }).join('') || '<tr><td colspan="7" style="color:var(--slate-500);">条件に一致する実績はありません</td></tr>';
 
-    var selectedCount = Object.keys(state.logMgmtSelected).filter(function(id){ return state.logMgmtSelected[id]; }).length;
-    var inProgressCount = state.logMgmtEntries.filter(function(e){ return e.log.end===null; }).length;
+    var visibleIds = {};
+    filteredEntries.forEach(function(e){ visibleIds[e.log.id] = true; });
+    var selectedCount = Object.keys(state.logMgmtSelected).filter(function(id){ return state.logMgmtSelected[id] && visibleIds[id]; }).length;
+    var inProgressCount = filteredEntries.filter(function(e){ return e.log.end===null; }).length;
+    var selectableCount = filteredEntries.length - inProgressCount;
+    var allSelected = selectableCount>0 && selectedCount===selectableCount;
 
-    body = '<div style="overflow-x:auto;"><table class="report-table"><thead><tr>'+
-        '<th><input type="checkbox" id="logMgmtSelectAll"></th><th>日付</th><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>数量</th>'+
+    body = filterBarHtml+
+      '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">'+filteredEntries.length+'件の実績</div>'+
+      '<div style="overflow-x:auto;"><table class="report-table"><thead><tr>'+
+        '<th><input type="checkbox" id="logMgmtSelectAll" '+(allSelected?'checked':'')+'></th><th>日付</th><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>数量</th>'+
       '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
       (inProgressCount ? '<div class="pool-hint" style="margin-top:8px;">進行中の実績('+inProgressCount+'件)は、削除・日付変更の対象にできません(選択欄がグレー表示されています)。</div>' : '')+
       '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--paper-line);">'+
@@ -3003,9 +3050,33 @@ function bindLogManagementTab(){
       }
       state.logMgmtLoading = true;
       state.logMgmtSelected = {};
+      state.logMgmtFilterTaskId = '';
+      state.logMgmtFilterStaffId = '';
       render();
       state.logMgmtEntries = await loadLogEntriesForRange(state.logMgmtStartDate, state.logMgmtEndDate);
       state.logMgmtLoading = false;
+      render();
+    });
+  }
+  var filterTaskSelect = document.getElementById('logMgmtFilterTask');
+  if(filterTaskSelect){
+    filterTaskSelect.addEventListener('change', function(){
+      state.logMgmtFilterTaskId = filterTaskSelect.value;
+      render(); // 絞り込み条件の変更だけでは選択状態(state.logMgmtSelected)は変更しない
+    });
+  }
+  var filterStaffSelect = document.getElementById('logMgmtFilterStaff');
+  if(filterStaffSelect){
+    filterStaffSelect.addEventListener('change', function(){
+      state.logMgmtFilterStaffId = filterStaffSelect.value;
+      render();
+    });
+  }
+  var filterClearBtn = document.getElementById('logMgmtFilterClearBtn');
+  if(filterClearBtn){
+    filterClearBtn.addEventListener('click', function(){
+      state.logMgmtFilterTaskId = '';
+      state.logMgmtFilterStaffId = '';
       render();
     });
   }
@@ -3020,10 +3091,13 @@ function bindLogManagementTab(){
   var selectAll = document.getElementById('logMgmtSelectAll');
   if(selectAll){
     selectAll.addEventListener('change', function(){
-      if(!state.logMgmtEntries) return;
-      state.logMgmtEntries.forEach(function(e){
+      // 重要: 「まとめてチェック」は、現在の絞り込み条件で表示されている実績だけを対象にする。
+      // 絞り込みで非表示になっている実績の選択状態には一切触れない。
+      var visibleEntries = getFilteredLogMgmtEntries();
+      var wantChecked = selectAll.checked;
+      visibleEntries.forEach(function(e){
         if(e.log.end===null) return; // 進行中は対象外
-        if(selectAll.checked) state.logMgmtSelected[e.log.id] = true;
+        if(wantChecked) state.logMgmtSelected[e.log.id] = true;
         else delete state.logMgmtSelected[e.log.id];
       });
       render();

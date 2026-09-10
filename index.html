@@ -905,6 +905,14 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-29', items:[
+    '【CSV取込画面の整理】旧「作業を指定して手動で取り込む」方式を廃止しました。CSV取込は「得意先・作業枠マスターによる自動振り分け」に一本化されています。対象作業を手動で選ぶ入力欄はもうありません',
+    '【重要な発見と対応】調査の結果、荷主出荷番号の重複防止は、廃止する旧手動取込にのみ組み込まれており、自動振り分け側には未適用だったことが判明しました。廃止する前に、重複防止のロジックを自動振り分けフローへ正しく移植し、今後もCSVの二重取込防止が維持されるようにしました',
+    '取込履歴を折りたたみ表示から常時表示に変更しました。開いて確認する必要はありません。対象作業を選ばなくても分かるよう、履歴の各行に作業名を追加しました。削除済みのみ、折りたたみ可能なままにしています',
+    '取込プレビューに「新規取込: N件 / 重複スキップ: M件」を表示するようにしました(自動振り分け・手動取込のUIは廃止済みのため、実質的に自動振り分け側の表示です)',
+    '既存のCSV集計ロジック・荷主出荷番号重複防止のコア処理・Supabaseの既存データは変更していません。過去の取込履歴・実績データも一切削除していません',
+    '実際にコードを実行するテストで、旧UIがもう表示されないこと、取込履歴が常時表示されること、自動振り分けが従来通り動作すること、荷主出荷番号の重複防止が自動振り分け側でも正しく機能すること(1回目取込→2回目全件重複でスキップ)を確認済みです。既存の全回帰テスト(33スイート)にも影響はありません'
+  ]},
   { date:'2026-09-28', items:[
     '【荷主出荷番号単位でのグローバルな重複取込防止】手動CSV取込で、荷主出荷番号を基準に、作業枠・日付をまたいで過去に取り込み済みかどうかを判定するようにしました。ファイル単位ではなく、荷主出荷番号そのものを基準にしています',
     '同じCSV内に同じ荷主出荷番号の明細行が複数あっても、1出荷として正しくまとめて扱います。一部の荷主出荷番号だけが既に取込済みの場合、その番号だけをスキップし、残りは正常に取り込みます(全体を止めません)',
@@ -1415,6 +1423,7 @@ var state = {
   wvConfigOpen: false,
   wvHistoryOpen: false,
   wvManualOpen: false,
+  wvDeletedOpen: false,
   vcCaseLedger: null,
   dailyChecklistAck: null,
   vcImportAttemptsToday: null,
@@ -4698,36 +4707,19 @@ function bindCustomerMappingPanel(){
   });
 }
 function bindCsvImportPanel(){
-  var wvManualDetails = document.getElementById('wvManualDetails');
-  if(wvManualDetails){
-    wvManualDetails.addEventListener('toggle', function(){
-      state.wvManualOpen = wvManualDetails.open;
-    });
-  }
-  var wvHistoryDetails = document.getElementById('wvHistoryDetails');
-  if(wvHistoryDetails){
-    wvHistoryDetails.addEventListener('toggle', function(){
-      state.wvHistoryOpen = wvHistoryDetails.open;
-    });
-  }
-  var wvTaskSelect = document.getElementById('wvTaskSelect');
-  if(wvTaskSelect) wvTaskSelect.addEventListener('change', function(){
-    state.wvImportTaskId = wvTaskSelect.value;
-    render();
-  });
-  var wvTargetDateInput = document.getElementById('wvTargetDate');
-  if(wvTargetDateInput){
-    wvTargetDateInput.addEventListener('change', async function(){
-      var newDate = wvTargetDateInput.value || todayStr();
-      state.wvTargetDate = newDate;
-      state.wvViewData = await getWorkVolumeForDate(newDate);
-      render();
+  var wvDeletedDetails = document.getElementById('wvDeletedDetails');
+  if(wvDeletedDetails){
+    wvDeletedDetails.addEventListener('toggle', function(){
+      state.wvDeletedOpen = wvDeletedDetails.open;
     });
   }
   var autoMapTargetDateInput = document.getElementById('autoMapTargetDate');
   if(autoMapTargetDateInput){
-    autoMapTargetDateInput.addEventListener('change', function(){
-      state.wvTargetDate = autoMapTargetDateInput.value || todayStr();
+    autoMapTargetDateInput.addEventListener('change', async function(){
+      var newDate = autoMapTargetDateInput.value || todayStr();
+      state.wvTargetDate = newDate;
+      state.wvViewData = await getWorkVolumeForDate(newDate);
+      render();
     });
   }
   var autoMapCsvInput = document.getElementById('autoMapCsvInput');
@@ -4762,12 +4754,23 @@ function bindCsvImportPanel(){
       var mapping = state.customerTaskMapping || await loadCustomerTaskMapping();
       state.customerTaskMapping = mapping;
 
-      parseCsvForWorkVolume(file, {}, function(result){
-        var plan = buildAutoMappedImportPlan(result, mapping);
+      parseCsvForWorkVolume(file, {}, async function(result){
+        var registry = await loadShipperNoRegistry();
+        var split = splitShipperGroupsByRegistry(result.shipperGroups, registry);
+        var newGroups = split.newGroups, skippedShipperNos = split.skippedShipperNos;
+        var keepSet = {};
+        newGroups.forEach(function(g){ keepSet[g.shipperNo] = true; });
+        var filteredResult = {
+          rowCount: result.rowCount, headers: result.headers, missingColumns: result.missingColumns,
+          shipperGroups: newGroups,
+          byProduct: filterByProductForShipperNos(result.byProduct, keepSet)
+        };
+        var plan = buildAutoMappedImportPlan(filteredResult, mapping);
         state.autoMapPreviewData = {
           fileName: fileName, targetDate: targetDate, fingerprint: fingerprint, fileSize: fileSize,
           rowCount: result.rowCount, missingColumns: result.missingColumns||[],
-          rawParseResult: result,
+          rawParseResult: filteredResult,
+          skippedShipperNos: skippedShipperNos,
           taskPlans: plan.taskPlans, unmapped: plan.unmapped
         };
         state.autoMapImporting = false;
@@ -4777,80 +4780,6 @@ function bindCsvImportPanel(){
       }, function(errMsg){
         state.autoMapImporting = false;
         autoMapCsvInput.value = '';
-        showToast(errMsg);
-        render();
-      });
-    });
-  }
-  var wvCsvInput = document.getElementById('wvCsvInput');
-  if(wvCsvInput){
-    wvCsvInput.addEventListener('change', async function(){
-      var file = wvCsvInput.files[0];
-      if(!file) return;
-      var taskId = state.wvImportTaskId || (document.getElementById('wvTaskSelect') ? document.getElementById('wvTaskSelect').value : '');
-      if(!taskId){ showToast('対象作業を選択してください'); wvCsvInput.value=''; return; }
-      var targetDate = state.wvTargetDate || todayStr();
-      var cfg = { taskKind: taskById(taskId).taskKind || 'normal' };
-      state.wvImporting = true;
-      render();
-
-      var fingerprint, fileSize = file.size, fileName = file.name;
-      try{
-        fingerprint = await computeFileFingerprint(file);
-      }catch(e){
-        state.wvImporting = false;
-        showToast('ファイルの読み取りに失敗しました');
-        wvCsvInput.value = '';
-        render();
-        return;
-      }
-      var fpIndex = await loadCsvFingerprintIndex();
-      var dup = findDuplicateFingerprint(fpIndex, fingerprint, fileSize, fileName);
-      if(dup){
-        state.wvImporting = false;
-        wvCsvInput.value = '';
-        alert('このファイル(「'+fileName+'」)は '+dup.date+' に既に取り込み済みです。同じファイルの二重取込はできません。\n\n誤って取り込んだ場合は、その取込履歴を削除してから、正しいファイルを取り込み直してください。');
-        render();
-        return;
-      }
-
-      var targetData = await getWorkVolumeForDate(targetDate);
-      var attemptId = uid();
-      var attemptsData = await loadVcImportAttempts(targetDate);
-      attemptsData.attempts.push({ id: attemptId, taskId: taskId, startedAt: new Date().toISOString(), status:'pending', fileName: fileName });
-      await saveVcImportAttempts(targetDate, attemptsData);
-      if(targetDate===todayStr()) state.vcImportAttemptsToday = attemptsData;
-
-      parseCsvForWorkVolume(file, {}, async function(result){
-        var importId = uid();
-        var newBatches = [];
-        var registry = await loadShipperNoRegistry();
-        var split = splitShipperGroupsByRegistry(result.shipperGroups, registry);
-        var newGroups = split.newGroups, skippedShipperNos = split.skippedShipperNos;
-        var summary = summarizeShipperGroups(newGroups);
-        var keepSet = {};
-        newGroups.forEach(function(g){ keepSet[g.shipperNo] = true; });
-        var byProductFiltered = filterByProductForShipperNos(result.byProduct, keepSet);
-        var shipperNos = newGroups.map(function(g){ return g.shipperNo; });
-        var prevImport = findPreviousImportForTaskDate(targetData, taskId, importId);
-        var anomaly = computeAnomalyWarning({primaryCount:summary.primaryCount, lineCount:summary.lineCount, totalQty:summary.totalQty}, prevImport);
-        var overlap = findShipperNoOverlap(shipperNos, targetData, taskId, importId);
-        state.vcPreview = {
-          taskId: taskId, importId: importId, fileName: fileName, cfg: cfg, targetDate: targetDate,
-          attemptId: attemptId,
-          primaryCount: summary.primaryCount, lineCount: summary.lineCount, totalQty: summary.totalQty,
-          batches: newBatches, shipperNos: shipperNos, skippedShipperNos: skippedShipperNos,
-          fingerprint: fingerprint, fileSize: fileSize,
-          missingColumns: result.missingColumns||[], anomaly: anomaly, overlap: overlap,
-          byCustomer: summary.byCustomer||{}, byProduct: byProductFiltered||{}
-        };
-        state.wvImporting = false;
-        wvCsvInput.value = '';
-        state.modal = { kind:'vcPreview' };
-        render();
-      }, async function(errMsg){
-        await markImportAttemptStatus(targetDate, attemptId, 'failed');
-        state.wvImporting = false;
         showToast(errMsg);
         render();
       });
@@ -5242,70 +5171,45 @@ function renderCsvImportPanel(){
   var workVolumePanel = '';
   if(!state.workVolume) state.workVolume = emptyWorkVolume();
   var wvViewData = state.wvViewData || (wvTargetDate===todayStr() ? state.workVolume : emptyWorkVolume());
-  var wvDateTasks = tasksForDate(wvTargetDate);
-  if(state.wvImportTaskId===null){
-    state.wvImportTaskId = wvDateTasks[0] ? wvDateTasks[0].id : '';
-  }
-  var wvTaskId = state.wvImportTaskId;
-  var wvTask = taskById(wvTaskId);
-  var wvTaskOptions = wvDateTasks.map(function(t){
-    return '<option value="'+t.id+'" '+(wvTaskId===t.id ? 'selected':'')+'>'+esc(t.name)+'</option>';
-  }).join('') || '<option value="">この日付の作業がありません</option>';
-  var wvPrimaryLabel = (wvTask.taskKind==='vc') ? 'PO数' : '件数';
-  var wvTotals = wvTotalsForTask(wvViewData, wvTaskId);
 
-  var wvStatusHtml = '';
-  if(wvTotals.importCount){
-    wvStatusHtml = '<div class="vc-import-status">「'+esc(wvTask.name)+'」の'+esc(dateLabelFromStr(wvTargetDate))+'の作業量(取込'+wvTotals.importCount+'回の合計): '+wvPrimaryLabel+' '+formatNum(wvTotals.primaryCount)+' / 明細 '+formatNum(wvTotals.lineCount)+' / ピース '+formatNum(wvTotals.totalQty)+'</div>';
-  }
-
-  var wvImportRows = wvActiveImports(wvViewData).filter(function(i){ return i.taskId===wvTaskId; }).map(function(imp){
+  // 取込履歴: 対象日付に取り込まれた全作業枠の履歴を、常時表示(折りたたまない)。
+  var wvImportRows = wvActiveImports(wvViewData).slice().sort(function(a,b){
+    return new Date(b.importedAt) - new Date(a.importedAt);
+  }).map(function(imp){
+    var t = taskById(imp.taskId);
     var lbl = imp.taskKind==='vc' ? 'PO数' : '件数';
     return '<tr>'+
       '<td>'+fmtClock(imp.importedAt)+'</td>'+
       '<td>'+esc(imp.fileName)+'</td>'+
+      '<td><span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span> '+esc(t.name)+'</td>'+
       '<td class="num">'+lbl+' '+formatNum(imp.primaryCount)+'</td>'+
       '<td class="num">明細'+formatNum(imp.lineCount)+'</td>'+
       '<td class="num">ピース'+formatNum(imp.totalQty)+'</td>'+
       '<td class="num"><button type="button" class="vc-manage-toggle-btn" data-wv-import-move="'+imp.id+'">日付変更</button> <button type="button" class="log-stop-btn" data-wv-import-delete="'+imp.id+'">削除</button></td>'+
     '</tr>';
-  }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この作業の取込履歴はまだありません</td></tr>';
-  var wvDeletedImports = (wvViewData.imports||[]).filter(function(i){ return i.deletedAt && i.taskId===wvTaskId; });
+  }).join('') || '<tr><td colspan="7" style="color:var(--slate-500);">この日付の取込履歴はまだありません</td></tr>';
+  var wvDeletedImports = (wvViewData.imports||[]).filter(function(i){ return i.deletedAt; });
   var wvDeletedHtml = wvDeletedImports.map(function(imp){
-    return '<div class="vc-slip-row">'+esc(imp.fileName)+'(削除: '+fmtClock(imp.deletedAt)+') <button type="button" class="vc-manage-toggle-btn" data-wv-import-restore="'+imp.id+'">復元</button></div>';
+    var t = taskById(imp.taskId);
+    return '<div class="vc-slip-row">'+esc(t.name)+' / '+esc(imp.fileName)+'(削除: '+fmtClock(imp.deletedAt)+') <button type="button" class="vc-manage-toggle-btn" data-wv-import-restore="'+imp.id+'">復元</button></div>';
   }).join('') || '<div class="empty-note">削除済みの取込はありません</div>';
 
-  var wvHistoryHtml = '<details class="vc-manage-details" id="wvHistoryDetails" '+(state.wvHistoryOpen?'open':'')+'>'+
-    '<summary>取込履歴・削除済み(この作業)</summary>'+
-    '<div style="margin-top:10px;overflow-x:auto;"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>合計</th><th>明細</th><th>ピース</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
-    '<div class="vc-queue-title" style="margin-top:12px;">削除済み</div><div class="vc-slip-list">'+wvDeletedHtml+'</div>'+
-  '</details>';
+  var wvHistoryHtml = '<div class="panel-title" style="font-size:15px;margin-top:18px;">📜 取込履歴('+esc(dateLabelFromStr(wvTargetDate))+')</div>'+
+    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>作業</th><th>合計</th><th>明細</th><th>ピース</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
+    '<details class="vc-manage-details" id="wvDeletedDetails" '+(state.wvDeletedOpen?'open':'')+' style="margin-top:12px;">'+
+      '<summary>🗑 削除済み'+(wvDeletedImports.length?'('+wvDeletedImports.length+'件)':'')+'</summary>'+
+      '<div class="vc-slip-list" style="margin-top:8px;">'+wvDeletedHtml+'</div>'+
+    '</details>';
 
   workVolumePanel = '<div class="panel" style="margin-top:14px;">'+
     '<div class="panel-title">📋 作業量CSV取込</div>'+
-    '<div class="pool-hint" style="margin-bottom:14px;">CSVから件数(VCはPO数)・明細数・ピース数を自動集計し、作業枠に紐づけて表示します。時間の計測とは別のデータとして扱われ、パートさんへの数字入力は求めません。取込は履歴として積み上がり、既存の取込を上書きすることはありません。</div>'+
-    '<div class="panel-title" style="font-size:15px;">🔗 得意先マスターで自動振り分けて取り込む</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">対象作業を選ばずにCSVを取り込み、「設定→得意先・作業枠マスター」の対応表から自動的に作業枠を判定します。マスターに無い得意先は取り込まれず、一覧で確認できます。</div>'+
+    '<div class="pool-hint" style="margin-bottom:14px;">CSVから件数(VCはPO数)・明細数・ピース数を自動集計します。得意先・作業枠マスターに基づいて自動振り分けします。時間の計測とは別のデータとして扱われ、パートさんへの数字入力は求めません。取込は履歴として積み上がり、既存の取込を上書きすることはありません。</div>'+
     '<div style="display:flex;gap:10px;">'+
       '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">対象日付</label><input type="date" id="autoMapTargetDate" value="'+(state.wvTargetDate||todayStr())+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
       '<div style="flex:2;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="autoMapCsvInput" accept=".csv" style="display:block;"></div>'+
     '</div>'+
     (state.autoMapImporting ? '<div class="empty-note">解析中...</div>' : '')+
-    '<details class="vc-manage-details" id="wvManualDetails" '+(state.wvManualOpen?'open':'')+' style="margin-top:18px;padding-top:16px;border-top:1px solid var(--paper-line);">'+
-      '<summary>✋ 作業を指定して手動で取り込む(通常は上の自動振り分けをお使いください)</summary>'+
-      '<div style="margin-top:10px;">'+
-        '<div class="pool-hint" style="margin-bottom:10px;">件数/PO数の種別は、各作業の編集画面(通常/VC)で設定してください。</div>'+
-        '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">対象作業</label>'+
-        '<select id="wvTaskSelect" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:10px;">'+wvTaskOptions+'</select>'+
-        wvStatusHtml+
-        '<div style="margin-top:12px;display:flex;gap:10px;">'+
-          '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">対象日付</label><input type="date" id="wvTargetDate" value="'+(state.wvTargetDate||todayStr())+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
-          '<div style="flex:2;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="wvCsvInput" accept=".csv" style="display:block;"></div>'+
-        '</div>'+
-        (state.wvImporting ? '<div class="empty-note">取り込み中...</div>' : '')+
-        wvHistoryHtml+
-      '</div>'+
-    '</details>'+
+    wvHistoryHtml+
   '</div>';
 
   return workVolumePanel;
@@ -8297,6 +8201,7 @@ function renderAutoMapPreviewModal(m){
       '<div class="modal-task-name" style="text-align:center;margin-bottom:6px;">CSV自動振り分けプレビュー</div>'+
       '<div class="pool-hint" style="text-align:center;margin-bottom:14px;">対象日付: '+esc(dateLabelFromStr(d.targetDate))+' ・ 取込行数 '+formatNum(d.rowCount)+'</div>'+
       warnHtml+
+      ((d.skippedShipperNos && d.skippedShipperNos.length) ? '<div class="vc-import-status" style="background:var(--paper-100);color:var(--slate-500);border-color:var(--paper-line);">新規取込対象: '+d.taskPlans.reduce(function(a,p){return a+p.primaryCount;},0)+'件 / 重複スキップ: '+d.skippedShipperNos.length+'件<br><span style="font-size:11px;">スキップ理由: 既に取り込み済みの荷主出荷番号</span></div>' : '')+
       '<div class="panel-title" style="font-size:14px;">✓ 自動紐付け済み('+d.taskPlans.length+'作業枠)</div>'+
       taskRows+
       '<div class="panel-title" style="font-size:14px;margin-top:14px;color:#F04438;">⚠️ 未紐付け('+d.unmapped.length+'件)</div>'+
@@ -8360,10 +8265,16 @@ function bindAutoMapPreviewModal(m){
       var saveOk = await saveWorkVolume(d.targetDate, targetData);
       if(d.targetDate===todayStr()) state.workVolume = targetData;
       if(state.wvTargetDate===d.targetDate) state.wvViewData = targetData;
-      if(saveOk) await registerFileFingerprint(d.fingerprint, d.fileSize, d.fileName, d.targetDate, '(自動振り分け・複数作業枠)', groupImportId);
-      await appendAuditLog({ action:'CSV自動振り分け取込確定', target: d.fileName, before:null, after: d.taskPlans.length+'作業枠に振り分け、未紐付け'+d.unmapped.length+'件('+d.targetDate+')' });
+      if(saveOk){
+        await registerFileFingerprint(d.fingerprint, d.fileSize, d.fileName, d.targetDate, '(自動振り分け・複数作業枠)', groupImportId);
+        var allImportedShipperNos = [];
+        d.taskPlans.forEach(function(p){ allImportedShipperNos = allImportedShipperNos.concat(p.shipperNos||[]); });
+        await registerShipperNos(allImportedShipperNos, d.targetDate, '(自動振り分け)');
+      }
+      var skippedCount = (d.skippedShipperNos||[]).length;
+      await appendAuditLog({ action:'CSV自動振り分け取込確定', target: d.fileName, before:null, after: d.taskPlans.length+'作業枠に振り分け、未紐付け'+d.unmapped.length+'件('+d.targetDate+')'+(skippedCount?'、'+skippedCount+'件スキップ(既取込)':'') });
       var msg = saveOk
-        ? d.taskPlans.length+'件の作業枠に取り込みました'+(d.unmapped.length?'(未紐付け'+d.unmapped.length+'件は取り込まれていません)':'')
+        ? d.taskPlans.length+'件の作業枠に取り込みました'+(d.unmapped.length?'(未紐付け'+d.unmapped.length+'件は取り込まれていません)':'')+(skippedCount?'。'+skippedCount+'件は既に取込済みのためスキップしました':'')
         : '保存に失敗した可能性があります。本日の確認事項をご確認ください。';
       state.autoMapPreviewData = null;
       state.modal = null;

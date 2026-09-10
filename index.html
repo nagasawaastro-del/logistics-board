@@ -905,6 +905,12 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-23', items:[
+    '【重要な不具合修正・第2弾】「改修のたびにモニター表示の作業項目が削除済みになる」不具合の根本原因を追加調査し、修正しました。以前の修正は「4秒ごとの自動更新中」の保護でしたが、今回わかったのは、アプリを開いた瞬間(特に新しいコードをデプロイした直後、ブラウザがSupabaseへの接続を新規に確立するタイミング)には、この保護が及んでいなかったことです',
+    'スタッフ一覧・作業一覧・繰り返し作業一覧の取得処理に、間隔を空けながら最大3回まで自動的に再試行する仕組みを追加しました。また、再試行してもなお取得が不確実だった場合は、「本日の繰り返し作業を自動生成する処理」が、その不確実なデータを元に誤って保存してしまうことを防ぐ安全装置を追加しました',
+    '【管理者・設定タブの仕分け整理】トップページは一切変更していません。「CSV取込」(手動・自動振り分けの両方)を設定→作業設定から管理者の新しいタブへ、「単価・人件費設定」を管理者→収支・分析の中から設定の新しいタブへ、それぞれ移動しました。処理内容(判定ロジック・保存先)は変更していません',
+    '実際にコードを実行するテストで、(1) 一時的な取得不具合が2回続いても3回目で正しく復旧すること、(2) 取得が最終的に不確実だった場合は自動生成処理が保存をスキップして安全側に倒れること、(3) 通常時は今まで通り正常に動作することを、それぞれ確認済みです。CSV取込・単価設定の新しい配置についても、正しく移動されていること、トップページが完全に無変更であることを確認しています'
+  ]},
   { date:'2026-09-21', items:[
     '【UI/UXを刷新】「温かみのある紙・チケット風」だったデザインを、モダンなSaaS管理画面の見た目に刷新しました。機能・データ・操作ロジックは変更していません',
     '配色を、白・薄いグレー・濃いグレーを基調に、単一のアクセント色(インディゴ)と、緑=完了・青=作業中・黄=注意・赤=遅延、という状態色に整理しました。書体もOswald/JetBrains Monoの混在をやめ、Inter一本に統一しています',
@@ -1337,6 +1343,7 @@ var state = {
   finAnalyticsLoading: false,
   finDrillCustomer: null,
   pendingCalendarDate: null,
+  dataLoadUncertain: false,
   auditLogDate: null,
   focusBusy: false,
   isDragging: false,
@@ -1669,12 +1676,34 @@ var pendingSaves = 0;
 function storageAvailable(){
   return !!(window.storage && typeof window.storage.get==='function' && typeof window.storage.set==='function');
 }
+/* 通信失敗・接続確立直後(特にデプロイ直後のページ再読み込み時)の一時的な不具合で、
+   例外を投げずに「成功したが空」という結果が返ることがある。これを「本当にデータが無い」
+   と区別できないまま受け入れてしまうと、直後の自動処理が誤ってbacklog等を再構築し、
+   その空の状態を保存してしまう恐れがある(過去に実際に発生した不具合)。
+   そのため、値が取得できなかった場合は間隔を空けて複数回再試行してから判断する。 */
+async function fetchWithRetry(key, retries){
+  retries = retries || 3;
+  var lastErr = null;
+  for(var attempt=0; attempt<retries; attempt++){
+    try{
+      var r = await window.storage.get(key, true);
+      if(r && r.value!==undefined && r.value!==null) return { ok:true, value: r.value };
+      // 例外は投げなかったが値が空 -> 一時的な不具合の可能性があるため再試行する
+      lastErr = null;
+    }catch(e){
+      lastErr = e;
+    }
+    if(attempt<retries-1) await new Promise(function(res){ setTimeout(res, 250*(attempt+1)); });
+  }
+  return { ok:false, error: lastErr };
+}
 async function fetchRosterRaw(){
-  var r = await window.storage.get('roster', true);
-  return r ? JSON.parse(r.value) : [];
+  var res = await fetchWithRetry('roster');
+  if(!res.ok){ if(res.error) throw res.error; return []; }
+  return JSON.parse(res.value);
 }
 async function loadRoster(){
-  try{ return await fetchRosterRaw(); }catch(e){ return []; }
+  try{ var r = await fetchRosterRaw(); state.dataLoadUncertain = false; return r; }catch(e){ state.dataLoadUncertain = true; return []; }
 }
 async function saveRoster(list){
   state.roster = list;
@@ -1683,11 +1712,12 @@ async function saveRoster(list){
   finally{ pendingSaves--; }
 }
 async function fetchBacklogRaw(){
-  var r = await window.storage.get('task-backlog', true);
-  return r ? JSON.parse(r.value) : [];
+  var res = await fetchWithRetry('task-backlog');
+  if(!res.ok){ if(res.error) throw res.error; return []; }
+  return JSON.parse(res.value);
 }
 async function loadBacklog(){
-  try{ return await fetchBacklogRaw(); }catch(e){ return []; }
+  try{ var r = await fetchBacklogRaw(); state.dataLoadUncertain = false; return r; }catch(e){ state.dataLoadUncertain = true; return []; }
 }
 async function saveBacklog(list){
   if(state.day && state.day.date===todayStr()){
@@ -1715,11 +1745,12 @@ async function saveBacklog(list){
   finally{ pendingSaves--; }
 }
 async function fetchTemplatesRaw(){
-  var r = await window.storage.get('task-templates', true);
-  return r ? JSON.parse(r.value) : [];
+  var res = await fetchWithRetry('task-templates');
+  if(!res.ok){ if(res.error) throw res.error; return []; }
+  return JSON.parse(res.value);
 }
 async function loadTemplates(){
-  try{ return await fetchTemplatesRaw(); }catch(e){ return []; }
+  try{ var r = await fetchTemplatesRaw(); state.dataLoadUncertain = false; return r; }catch(e){ state.dataLoadUncertain = true; return []; }
 }
 async function saveTemplates(list){
   state.templates = list;
@@ -1805,7 +1836,13 @@ function ensureTemplateTasksForDateSync(dateStr){
 }
 async function ensureTemplateTasksForDate(dateStr){
   var changed = ensureTemplateTasksForDateSync(dateStr);
-  if(changed) await saveBacklog(state.backlog);
+  if(changed){
+    if(state.dataLoadUncertain){
+      console.warn('作業一覧の読み込みが不確実なため、繰り返し作業の自動作成をスキップしました(データ保護のため)。');
+      return;
+    }
+    await saveBacklog(state.backlog);
+  }
 }
 async function ensureTemplateTasksForToday(){
   return ensureTemplateTasksForDate(todayStr());
@@ -1818,7 +1855,13 @@ async function ensureTemplateTasksForUpcoming(numDays){
     var dateStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
     if(ensureTemplateTasksForDateSync(dateStr)) anyChanged = true;
   }
-  if(anyChanged) await saveBacklog(state.backlog);
+  if(anyChanged){
+    if(state.dataLoadUncertain){
+      console.warn('作業一覧の読み込みが不確実なため、繰り返し作業の自動作成をスキップしました(データ保護のため)。');
+      return;
+    }
+    await saveBacklog(state.backlog);
+  }
 }
 function defaultPattern(){
   return [false,true,true,true,true,true,false];
@@ -3241,6 +3284,88 @@ function ensureManagerSessionChecked(){
     refreshManagerSession().then(function(){ render(); });
   }
 }
+function renderUnitPricePanel(){
+  ensureManagerSessionChecked();
+  if(!hasManagerSession()){
+    return renderManagerLoginForm('💴 単価・人件費設定', 'この画面は物流売上の計算に使う単価と、人件費計算に使う時給を設定します。閲覧・変更には管理者アカウントでのログインが必要です。');
+  }
+  if(state.financialUnitPrices===null){
+    fetchFinancialData().then(render);
+    return '<div class="mgr-wrap"><div class="empty-note">読み込み中...</div></div>';
+  }
+  var dateStr = todayStr();
+  var priceMap = {};
+  (state.financialUnitPrices||[]).forEach(function(p){ priceMap[p.task_id] = p; });
+  var todayTasks = tasksForDate(dateStr);
+  var isPriceEditable = (UNIT_PRICE_SOURCE==='supabase');
+  var priceRows = todayTasks.map(function(t){
+    var p = priceMap[t.id] || { price_per_unit:0, unit_label:'件' };
+    if(!isPriceEditable){
+      return '<div class="fin-price-row"><span class="fin-price-taskname">'+esc(t.name)+'</span><span class="pool-hint" style="margin:0;">'+formatNum(p.price_per_unit)+'円/'+esc(p.unit_label)+'</span></div>';
+    }
+    return '<div class="fin-price-row">'+
+      '<span class="fin-price-taskname">'+esc(t.name)+'</span>'+
+      '<input type="number" step="0.01" class="fin-price-input" data-fin-price-id="'+t.id+'" value="'+p.price_per_unit+'" placeholder="単価">'+
+      '<select class="fin-price-unit" data-fin-unit-id="'+t.id+'">'+
+        ['件','明細','ピース','ケース'].map(function(u){ return '<option value="'+u+'" '+(p.unit_label===u?'selected':'')+'>'+u+'あたり</option>'; }).join('')+
+      '</select>'+
+      '<button type="button" class="vc-manage-toggle-btn" data-fin-price-save="'+t.id+'">保存</button>'+
+    '</div>';
+  }).join('') || '<div class="empty-note">本日の作業がありません</div>';
+  var priceSourceNote = isPriceEditable ? '' : '<div class="vc-warning-box">単価はkintoneのマスタで管理されています。物流ボードからは変更できません。単価の変更はkintone側で行ってください。</div>';
+
+  return '<div class="mgr-wrap"><div class="panel">'+
+    '<div class="panel-title">💴 単価マスタ・人件費設定</div>'+
+    '<div class="pool-hint" style="margin-bottom:12px;">物流売上・人件費の計算に使用する基準値です。日々の実績入力とは別の、基本設定です。</div>'+
+    priceSourceNote+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">時給(人件費計算に使用)</label>'+
+    '<div style="display:flex;gap:8px;margin-bottom:16px;">'+
+      '<input type="number" id="finHourlyWage" value="'+((state.financialLaborCost&&state.financialLaborCost.hourly_wage)||0)+'" style="flex:1;border:1px solid var(--paper-line);border-radius:8px;padding:8px;">'+
+      '<button type="button" class="vc-manage-toggle-btn" id="finWageSaveBtn">保存</button>'+
+    '</div>'+
+    '<div class="pool-hint" style="margin-bottom:8px;">作業ごとの標準単価(荷主別単価は収支・分析画面の商品別分析結果から個別に設定できます)</div>'+
+    priceRows+
+  '</div></div>';
+}
+function bindUnitPricePanel(){
+  if(!hasManagerSession()){
+    bindManagerLoginForm();
+    return;
+  }
+  document.querySelectorAll('[data-fin-price-save]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var taskId = el.getAttribute('data-fin-price-save');
+      var priceInput = document.querySelector('[data-fin-price-id="'+taskId+'"]');
+      var unitSelect = document.querySelector('[data-fin-unit-id="'+taskId+'"]');
+      var price = parseFloat(priceInput.value) || 0;
+      var unitLabel = unitSelect.value;
+      var ok = await saveUnitPrice(taskId, taskById(taskId).name, price, unitLabel);
+      if(ok){
+        await appendAuditLog({ action:'単価設定変更', target: taskById(taskId).name, before:null, after: price+'円/'+unitLabel });
+        showToast('「'+taskById(taskId).name+'」の単価を保存しました');
+        await fetchFinancialData();
+        render();
+      }else{
+        showToast('保存に失敗しました(権限をご確認ください)');
+      }
+    });
+  });
+  var finWageSaveBtn = document.getElementById('finWageSaveBtn');
+  if(finWageSaveBtn){
+    finWageSaveBtn.addEventListener('click', async function(){
+      var wage = parseFloat(document.getElementById('finHourlyWage').value) || 0;
+      var ok = await saveLaborCost(wage);
+      if(ok){
+        await appendAuditLog({ action:'時給設定変更', target:'labor_costs', before:null, after: wage+'円/時' });
+        showToast('時給を保存しました');
+        await fetchFinancialData();
+        render();
+      }else{
+        showToast('保存に失敗しました(権限をご確認ください)');
+      }
+    });
+  }
+}
 function renderFinancial(){
   ensureManagerSessionChecked();
   if(hasManagerSession() && state.financialUnitPrices===null){
@@ -3272,26 +3397,6 @@ function renderFinancial(){
     '<table class="report-table" style="margin-top:14px;"><thead><tr><th>作業</th><th>数量</th><th>単価</th><th>売上</th></tr></thead><tbody>'+finRowsHtml+'</tbody></table>'+
     '<div class="pool-hint" style="margin-top:8px;">総稼働'+summary.totalHours.toFixed(1)+'時間 ・ 本日('+esc(dateLabelFromStr(dateStr))+')分</div>';
   }
-
-  var priceMap = {};
-  (state.financialUnitPrices||[]).forEach(function(p){ priceMap[p.task_id] = p; });
-  var todayTasks = tasksForDate(dateStr);
-  var isPriceEditable = (UNIT_PRICE_SOURCE==='supabase');
-  var priceRows = todayTasks.map(function(t){
-    var p = priceMap[t.id] || { price_per_unit:0, unit_label:'件' };
-    if(!isPriceEditable){
-      return '<div class="fin-price-row"><span class="fin-price-taskname">'+esc(t.name)+'</span><span class="pool-hint" style="margin:0;">'+formatNum(p.price_per_unit)+'円/'+esc(p.unit_label)+'</span></div>';
-    }
-    return '<div class="fin-price-row">'+
-      '<span class="fin-price-taskname">'+esc(t.name)+'</span>'+
-      '<input type="number" step="0.01" class="fin-price-input" data-fin-price-id="'+t.id+'" value="'+p.price_per_unit+'" placeholder="単価">'+
-      '<select class="fin-price-unit" data-fin-unit-id="'+t.id+'">'+
-        ['件','明細','ピース','ケース'].map(function(u){ return '<option value="'+u+'" '+(p.unit_label===u?'selected':'')+'>'+u+'あたり</option>'; }).join('')+
-      '</select>'+
-      '<button type="button" class="vc-manage-toggle-btn" data-fin-price-save="'+t.id+'">保存</button>'+
-    '</div>';
-  }).join('') || '<div class="empty-note">本日の作業がありません</div>';
-  var priceSourceNote = isPriceEditable ? '' : '<div class="vc-warning-box">単価はkintoneのマスタで管理されています。物流ボードからは変更できません。単価の変更はkintone側で行ってください。</div>';
 
   if(!state.finStartDate) state.finStartDate = dateStr;
   if(!state.finEndDate) state.finEndDate = dateStr;
@@ -3369,19 +3474,7 @@ function renderFinancial(){
       summaryHtml+
     '</div>'+
     analyticsPanel+
-    '<details class="vc-manage-details" id="finPriceDetails" '+(state.finPriceOpen?'open':'')+' style="margin-top:16px;">'+
-      '<summary>単価マスタ・人件費設定</summary>'+
-      '<div style="margin-top:10px;">'+
-        priceSourceNote+
-        '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">時給(人件費計算に使用)</label>'+
-        '<div style="display:flex;gap:8px;margin-bottom:16px;">'+
-          '<input type="number" id="finHourlyWage" value="'+((state.financialLaborCost&&state.financialLaborCost.hourly_wage)||0)+'" style="flex:1;border:1px solid var(--paper-line);border-radius:8px;padding:8px;">'+
-          '<button type="button" class="vc-manage-toggle-btn" id="finWageSaveBtn">保存</button>'+
-        '</div>'+
-        '<div class="pool-hint" style="margin-bottom:8px;">作業ごとの標準単価(荷主別単価は今後、商品別分析結果から個別に設定できます)</div>'+
-        priceRows+
-      '</div>'+
-    '</details>'+
+    '<div class="pool-hint" style="margin-top:14px;">単価・人件費の設定は「設定→単価・人件費設定」に移動しました。</div>'+
   '</div>';
 }
 function bindFinancial(){
@@ -3399,10 +3492,6 @@ function bindFinancial(){
       await appendAuditLog({ action:'収支ダッシュボードからログアウト', target: email, before:'ログイン中', after:'ログアウト' });
       render();
     });
-  }
-  var finPriceDetails = document.getElementById('finPriceDetails');
-  if(finPriceDetails){
-    finPriceDetails.addEventListener('toggle', function(){ state.finPriceOpen = finPriceDetails.open; });
   }
   var finStartDateInput = document.getElementById('finStartDateInput');
   if(finStartDateInput) finStartDateInput.addEventListener('change', function(){ state.finStartDate = finStartDateInput.value; });
@@ -3452,39 +3541,6 @@ function bindFinancial(){
       state.finAnalyticsRows = await computeAnalytics(collected.days, collected.volumes, 'customer', null);
       state.finAnalyticsLoading = false;
       render();
-    });
-  }
-  document.querySelectorAll('[data-fin-price-save]').forEach(function(el){
-    el.addEventListener('click', async function(){
-      var taskId = el.getAttribute('data-fin-price-save');
-      var priceInput = document.querySelector('[data-fin-price-id="'+taskId+'"]');
-      var unitSelect = document.querySelector('[data-fin-unit-id="'+taskId+'"]');
-      var price = parseFloat(priceInput.value) || 0;
-      var unitLabel = unitSelect.value;
-      var ok = await saveUnitPrice(taskId, taskById(taskId).name, price, unitLabel);
-      if(ok){
-        await appendAuditLog({ action:'単価設定変更', target: taskById(taskId).name, before:null, after: price+'円/'+unitLabel });
-        showToast('「'+taskById(taskId).name+'」の単価を保存しました');
-        await fetchFinancialData();
-        render();
-      }else{
-        showToast('保存に失敗しました(権限をご確認ください)');
-      }
-    });
-  });
-  var finWageSaveBtn = document.getElementById('finWageSaveBtn');
-  if(finWageSaveBtn){
-    finWageSaveBtn.addEventListener('click', async function(){
-      var wage = parseFloat(document.getElementById('finHourlyWage').value) || 0;
-      var ok = await saveLaborCost(wage);
-      if(ok){
-        await appendAuditLog({ action:'時給設定変更', target:'labor_costs', before:null, after: wage+'円/時' });
-        showToast('時給を保存しました');
-        await fetchFinancialData();
-        render();
-      }else{
-        showToast('保存に失敗しました(権限をご確認ください)');
-      }
     });
   }
 }
@@ -4144,6 +4200,7 @@ function renderDailyChecklist(){
 }
 var ADMIN_HUB_TABS = [
   { key:'today', label:'今日の状況', icon:'📋' },
+  { key:'csvImport', label:'CSV取込', icon:'📥' },
   { key:'logMgmt', label:'実績管理', icon:'🗓' },
   { key:'staffing', label:'人員配置', icon:'👥' },
   { key:'productivity', label:'生産性', icon:'📈' },
@@ -4165,6 +4222,7 @@ function renderAdminHub(){
   else if(state.adminHubTab==='productivity') body = renderProductivityTab();
   else if(state.adminHubTab==='financial') body = renderFinancial();
   else if(state.adminHubTab==='logMgmt') body = renderLogManagementTab();
+  else if(state.adminHubTab==='csvImport') body = '<div class="mgr-wrap">'+renderCsvImportPanel()+'</div>';
   else body = renderManager();
   // 各画面は自前の外枠(mgr-wrap等)を持っているため、タブバーをその内側の先頭に差し込む
   return body.replace(/^(<div[^>]*>)/, '$1'+tabsHtml);
@@ -4188,6 +4246,7 @@ function bindAdminHub(){
   else if(state.adminHubTab==='productivity') bindProductivityTab();
   else if(state.adminHubTab==='financial') bindFinancial();
   else if(state.adminHubTab==='logMgmt') bindLogManagementTab();
+  else if(state.adminHubTab==='csvImport') bindCsvImportPanel();
   else bindManager();
 }
 function renderCustomerMappingPanel(){
@@ -4972,6 +5031,7 @@ var SETTINGS_HUB_TABS = [
   { key:'task', label:'作業設定', icon:'📦' },
   { key:'shift', label:'勤務時間設定', icon:'⏰' },
   { key:'productivity', label:'生産性設定', icon:'📈' },
+  { key:'pricing', label:'単価・人件費設定', icon:'💴' },
   { key:'customerMapping', label:'得意先・作業枠マスター', icon:'🔗' },
   { key:'history', label:'操作履歴', icon:'📜' },
   { key:'system', label:'システム設定', icon:'🔧' }
@@ -4994,6 +5054,8 @@ function renderSettingsHub(){
     body = renderRegister();
   }else if(state.settingsHubTab==='history'){
     body = renderHistory();
+  }else if(state.settingsHubTab==='pricing'){
+    body = renderUnitPricePanel();
   }else{
     var panels = renderSettingsPanels();
     var content;
@@ -5029,6 +5091,7 @@ function bindSettingsHub(){
   else if(state.settingsHubTab==='history') bindHistory();
   else if(state.settingsHubTab==='staff') bindStaffSettingsPanel();
   else if(state.settingsHubTab==='customerMapping') bindCustomerMappingPanel();
+  else if(state.settingsHubTab==='pricing') bindUnitPricePanel();
   else bindSettings();
 }
 
@@ -5536,12 +5599,9 @@ function renderRegister(){
       '<input type="text" id="regSearchInput" class="reg-search" placeholder="作業名で絞り込み..." value="'+esc(state.regSearchQuery)+'">'+
       listHtml+
     '</div>'+
-  '</div>'+
-  renderCsvImportPanel()+
-  '</div>';
+  '</div></div>';
 }
 function bindRegister(){
-  bindCsvImportPanel();
   var dateInput = document.getElementById('regDate');
   var nameInput = document.getElementById('regName');
   var unitInput = document.getElementById('regUnit');

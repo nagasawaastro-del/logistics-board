@@ -905,6 +905,14 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-27', items:[
+    '【第2段階】調査の結果、「親作業・内訳作業・発生曜日・安定ID・CSV連携設定・単価設定・モニターの親作業のみ表示」はすでに実装済みであることを確認しました。旧「作業登録(register)」も、トップ画面・各種ナビゲーションのどこからも遷移できない、実質的に廃止済みの状態であることを確認しました',
+    '未使用になっていた古い画面遷移のコード(role指定によるmanager/register/settings/financial/staffingへの直接遷移)を整理しました。これらは以前から管理者・設定タブに統合済みで、実際には使われていなかった部分です。関数自体は削除せず、到達できない分岐だけを取り除いています',
+    '実績管理を、親作業→内訳作業の階層表示にしました。親作業ごとにグループ化され、クリックで内訳(担当者・時間・数量)を開閉できます。異なる単位(ピース・ケース・件など)を混同せず、内訳ごとの単位で表示します',
+    '「削除済み」問題は、4回前の改修で根本原因(初回読み込み時の通信不具合)を特定・修正済みです。今回あらためて確認しましたが、IDの紐付けが壊れているわけではありませんでした',
+    'CSVの実際の取込処理は、以前からの通り、親作業単位のまま変更していません。内訳作業へのCSV配線(得意先・商品コードからの自動紐付け)は、今回は対象外としています',
+    '実際にコードを実行するテストで、ご提示いただいた例(VC出庫の中でピッキング120ケース・梱包120ケース・ラベル貼り120ピースが、単位を混同せず正しく表示される)を確認しました。既存の一括削除・日付変更・絞り込み機能が、階層表示になっても正しく動作すること(折りたたんでいても選択対象から漏れないこと)も確認済みです。既存の全回帰テスト(32スイート)にも影響はありません'
+  ]},
   { date:'2026-09-26', items:[
     'CSV取込の方法・反映先は変更していません(従来通り、親作業に紐付けたままです)。ご要望に沿って、内訳作業(ピッキング・梱包など)ごとに、その内訳の単位(ピース・件など)で生産性を計算する機能を追加しました',
     '例:「アスクル」という親作業の中の内訳「ピッキング(ピース)」「梱包(件)」それぞれについて、内訳ごとに計測された時間と、作業者が入力した内訳ごとの数量から、内訳ごとの生産性(◯◯/時間)を算出します。この数量・時間のデータ自体は、以前から実績に記録されていたものをそのまま使っています(新たに何かを入力させる変更はしていません)',
@@ -1356,6 +1364,7 @@ var state = {
   logMgmtMoveTargetDate: '',
   logMgmtFilterTaskId: '',
   logMgmtFilterStaffId: '',
+  logMgmtGroupOpen: {},
   staffingLoading: false,
   staffingPriorityOpen: false,
   nextTaskSuggestModal: null,
@@ -3114,22 +3123,61 @@ function renderLogManagementTab(){
       '</div>'+
     '</div>';
 
-    var rows = filteredEntries.map(function(e){
-      var log = e.log;
-      var s = staffById(log.staffId);
-      var t = taskById(log.taskId==='BREAK' ? 'BREAK' : log.taskId);
-      var inProgress = log.end===null;
-      var checked = state.logMgmtSelected[log.id] ? 'checked' : '';
-      var qtyLabel = log.quantity!==null && log.quantity!==undefined ? formatNum(log.quantity)+esc(t.unit||'') : '-';
-      return '<tr'+(inProgress?' style="opacity:0.55;"':'')+'>'+
-        '<td class="num"><input type="checkbox" data-logmgmt-check="'+log.id+'" '+checked+' '+(inProgress?'disabled title="進行中のため対象外です"':'')+'></td>'+
-        '<td>'+esc(dateLabelFromStr(e.dateStr))+'</td>'+
-        '<td>'+esc(s.name)+'</td>'+
-        '<td><span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span> '+esc(t.name)+(inProgress?' <span style="color:var(--rust-600);font-size:11px;">(進行中)</span>':'')+'</td>'+
-        '<td class="num">'+fmtClock(log.start)+'</td>'+
-        '<td class="num">'+(log.end?fmtClock(log.end):'-')+'</td>'+
-        '<td class="num">'+qtyLabel+'</td>'+
+    if(!state.logMgmtGroupOpen) state.logMgmtGroupOpen = {};
+    // 親作業(taskId)ごとにグループ化して表示する。実績管理は「親作業 → 内訳作業」の階層で確認できるようにする。
+    var groupOrder = [];
+    var groups = {};
+    filteredEntries.forEach(function(e){
+      var tid = e.log.taskId;
+      if(!groups[tid]){ groups[tid] = []; groupOrder.push(tid); }
+      groups[tid].push(e);
+    });
+    var rows = groupOrder.map(function(tid){
+      var groupEntries = groups[tid];
+      var t = taskById(tid==='BREAK' ? 'BREAK' : tid);
+      var isOpen = state.logMgmtGroupOpen[tid]!==false; // 既定は開いた状態
+      var groupMs = 0;
+      groupEntries.forEach(function(e){
+        var end = e.log.end ? new Date(e.log.end) : new Date();
+        groupMs += Math.max(0, end - new Date(e.log.start));
+      });
+      var headerRow = '<tr class="logmgmt-group-header">'+
+        '<td colspan="7">'+
+          '<button type="button" class="vc-manage-toggle-btn" data-logmgmt-group-toggle="'+tid+'" style="margin-right:8px;">'+(isOpen?'▼':'▶')+'</button>'+
+          '<span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span> '+
+          '<strong>'+esc(t.name)+'</strong>'+
+          ' <span class="pool-hint" style="margin:0;">('+groupEntries.length+'件・合計 '+fmtHM(groupMs)+')</span>'+
+        '</td>'+
       '</tr>';
+      if(!isOpen) return headerRow;
+      var childRows = groupEntries.map(function(e){
+        var log = e.log;
+        var s = staffById(log.staffId);
+        var inProgress = log.end===null;
+        var checked = state.logMgmtSelected[log.id] ? 'checked' : '';
+        // 内訳(内訳作業)がある場合は、内訳ごとの数量・単位で表示する(単位が異なるものを合算しない)
+        var workLabel, qtyLabel;
+        if(log.breakdown && Object.keys(log.breakdown).length){
+          var unitMap = subcatUnitMap(t);
+          workLabel = esc(t.name)+' / '+esc(log.activeSubcat || Object.keys(log.breakdown).join('・'));
+          qtyLabel = Object.keys(log.breakdown).map(function(scName){
+            return formatNum(log.breakdown[scName])+esc(unitMap[scName]||t.unit);
+          }).join('・');
+        }else{
+          workLabel = esc(t.name);
+          qtyLabel = log.quantity!==null && log.quantity!==undefined ? formatNum(log.quantity)+esc(t.unit||'') : '-';
+        }
+        return '<tr'+(inProgress?' style="opacity:0.55;"':'')+'>'+
+          '<td class="num"><input type="checkbox" data-logmgmt-check="'+log.id+'" '+checked+' '+(inProgress?'disabled title="進行中のため対象外です"':'')+'></td>'+
+          '<td>'+esc(dateLabelFromStr(e.dateStr))+'</td>'+
+          '<td>'+esc(s.name)+'</td>'+
+          '<td style="padding-left:24px;">'+workLabel+(inProgress?' <span style="color:var(--rust-600);font-size:11px;">(進行中)</span>':'')+'</td>'+
+          '<td class="num">'+fmtClock(log.start)+'</td>'+
+          '<td class="num">'+(log.end?fmtClock(log.end):'-')+'</td>'+
+          '<td class="num">'+qtyLabel+'</td>'+
+        '</tr>';
+      }).join('');
+      return headerRow + childRows;
     }).join('') || '<tr><td colspan="7" style="color:var(--slate-500);">条件に一致する実績はありません</td></tr>';
 
     var visibleIds = {};
@@ -3167,6 +3215,14 @@ function renderLogManagementTab(){
   '</div></div>';
 }
 function bindLogManagementTab(){
+  document.querySelectorAll('[data-logmgmt-group-toggle]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var tid = el.getAttribute('data-logmgmt-group-toggle');
+      if(!state.logMgmtGroupOpen) state.logMgmtGroupOpen = {};
+      state.logMgmtGroupOpen[tid] = (state.logMgmtGroupOpen[tid]===false) ? true : false;
+      render();
+    });
+  });
   var startInput = document.getElementById('logMgmtStartDate');
   if(startInput) startInput.addEventListener('change', function(){ state.logMgmtStartDate = startInput.value; });
   var endInput = document.getElementById('logMgmtEndDate');
@@ -4175,33 +4231,23 @@ function render(){
   if(state.role !== 'monitor'){
     html += renderTopbar();
   }
-  if(state.role==='manager') html += renderManager();
-  else if(state.role==='register') html += renderRegister();
-  else if(state.role==='report') html += renderReport();
+  if(state.role==='report') html += renderReport();
   else if(state.role==='input') html += renderInput();
   else if(state.role==='monitor') html += renderMonitor();
   else if(state.role==='achievements') html += renderAchievements();
   else if(state.role==='calendar') html += renderCalendar();
   else if(state.role==='history') html += renderHistory();
-  else if(state.role==='settings') html += renderSettings();
-  else if(state.role==='financial') html += renderFinancial();
-  else if(state.role==='staffing') html += renderStaffing();
   else if(state.role==='adminHub') html += renderAdminHub();
   else if(state.role==='settingsHub') html += renderSettingsHub();
   if(state.modal) html += renderModal();
   root.innerHTML = html;
   bindCommon();
-  if(state.role==='manager') bindManager();
-  if(state.role==='register') bindRegister();
   if(state.role==='report') bindReport();
   if(state.role==='input') bindInput();
   if(state.role==='monitor') bindMonitor();
   if(state.role==='achievements') bindAchievements();
   if(state.role==='calendar') bindCalendar();
   if(state.role==='history') bindHistory();
-  if(state.role==='settings') bindSettings();
-  if(state.role==='financial') bindFinancial();
-  if(state.role==='staffing') bindStaffing();
   if(state.role==='adminHub') bindAdminHub();
   if(state.role==='settingsHub') bindSettingsHub();
   if(state.modal) bindModal();

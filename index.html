@@ -905,6 +905,15 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-28', items:[
+    '【荷主出荷番号単位でのグローバルな重複取込防止】手動CSV取込で、荷主出荷番号を基準に、作業枠・日付をまたいで過去に取り込み済みかどうかを判定するようにしました。ファイル単位ではなく、荷主出荷番号そのものを基準にしています',
+    '同じCSV内に同じ荷主出荷番号の明細行が複数あっても、1出荷として正しくまとめて扱います。一部の荷主出荷番号だけが既に取込済みの場合、その番号だけをスキップし、残りは正常に取り込みます(全体を止めません)',
+    '取込プレビューに「取込: N件 / スキップ: M件(既に取込済みの荷主出荷番号)」を表示するようにしました。全件が重複していた場合は、空の取込データを作らずに、取込自体を行いません',
+    '調査の結果、CSVの実際の列は「荷主出荷NO・取引先名・商品ID・商品名・出荷指示数」であり、指示書で例示されていた列番号(D列・P列等)とは異なる、既存の列名ベースの実装のままであることを確認しました。既存の実装を変更せず、そのまま利用しています',
+    '内訳作業(ピッキング・梱包等)へのCSV数量の自動振り分けについては、ご相談のうえ、今回は現状維持としました(内訳ごとの実績数量は、従来通り作業者が完了時に入力する方式のままです)。親作業への紐付け(得意先→作業枠の自動マッピング)は、以前実装済みの仕組みをそのまま利用しています',
+    '自動振り分け取込(得意先マスターを使った取込)への同様の重複防止の適用は、今回未実装です。今回対応したのは手動CSV取込のみです',
+    '実際にコードを実行するテストで、ご指定のテスト1〜6(新規取込・重複スキップ・同一出荷の複数明細・明細を失わないこと・一部重複時の正常処理・ファイルをまたいだ重複判定)を確認しました。実際のアップロード操作を模したテストで、1回目の取込→2回目(全件重複)の取込→重複データが保存されないことまで、一連の流れを確認済みです。既存の全回帰テスト(34スイート)にも影響はありません'
+  ]},
   { date:'2026-09-27', items:[
     '【第2段階】調査の結果、「親作業・内訳作業・発生曜日・安定ID・CSV連携設定・単価設定・モニターの親作業のみ表示」はすでに実装済みであることを確認しました。旧「作業登録(register)」も、トップ画面・各種ナビゲーションのどこからも遷移できない、実質的に廃止済みの状態であることを確認しました',
     '未使用になっていた古い画面遷移のコード(role指定によるmanager/register/settings/financial/staffingへの直接遷移)を整理しました。これらは以前から管理者・設定タブに統合済みで、実際には使われていなかった部分です。関数自体は削除せず、到達できない分岐だけを取り除いています',
@@ -2163,6 +2172,58 @@ function resolveCustomerTaskMapping(shipperGroups, mapping){
 }
 /* shipperGroupsの一部集合から、primaryCount/lineCount/totalQty/byCustomer/byProductを再集計する。
    parseCsvForWorkVolumeの集計ロジックと同じ考え方をshipperGroups単位に適用する。 */
+/* ---------- 荷主出荷番号単位でのグローバルな重複取込防止 ----------
+   ファイル単位(fingerprint)の重複防止とは別に、荷主出荷番号そのものを基準に、
+   taskId・日付をまたいで過去に取り込み済みかどうかを判定する。
+   1つの荷主出荷番号=1出荷として扱い、その出荷に属する複数の商品明細行は
+   まとめて1単位として取込/スキップを判定する(明細を個別に間引かない)。 */
+async function loadShipperNoRegistry(){
+  try{
+    var r = await window.storage.get('shipper-no-registry', true);
+    return r && r.value ? JSON.parse(r.value) : {};
+  }catch(e){ return {}; }
+}
+async function saveShipperNoRegistry(registry){
+  try{ await window.storage.set('shipper-no-registry', JSON.stringify(registry), true); }catch(e){}
+}
+/* shipperGroups(荷主出荷NO単位、明細行はlineCount/totalQtyに集約済み)を、
+   レジストリと照合して「新規」と「既に取込済み(スキップ対象)」に分割する。
+   DOM操作なしの純粋関数。 */
+function splitShipperGroupsByRegistry(shipperGroups, registry){
+  var newGroups = [], skippedShipperNos = [];
+  shipperGroups.forEach(function(g){
+    if(registry && registry[g.shipperNo]) skippedShipperNos.push(g.shipperNo);
+    else newGroups.push(g);
+  });
+  return { newGroups: newGroups, skippedShipperNos: skippedShipperNos };
+}
+/* newGroupsに含まれる荷主出荷番号の集合でbyProductを絞り込み、正確に再集計する。
+   (byProductはCSV全行から作られているため、スキップした出荷の分だけ正しく除外する) */
+function filterByProductForShipperNos(byProduct, keepShipperNoSet){
+  var result = {};
+  Object.keys(byProduct||{}).forEach(function(code){
+    var p = byProduct[code];
+    var byShipperNo = p.byShipperNo || {};
+    var keptShipperNos = Object.keys(byShipperNo).filter(function(sn){ return keepShipperNoSet[sn]; });
+    if(!keptShipperNos.length) return;
+    var lineCount = 0, totalQty = 0, primaryShipperNos = {};
+    keptShipperNos.forEach(function(sn){
+      lineCount += byShipperNo[sn].lineCount;
+      totalQty += byShipperNo[sn].totalQty;
+      primaryShipperNos[sn] = true;
+    });
+    result[code] = { productName: p.productName, customerName: p.customerName, primaryShipperNos: primaryShipperNos, lineCount: lineCount, totalQty: totalQty, byShipperNo: byShipperNo };
+  });
+  return result;
+}
+async function registerShipperNos(shipperNos, dateStr, taskId){
+  var registry = await loadShipperNoRegistry();
+  var now = new Date().toISOString();
+  shipperNos.forEach(function(sn){
+    registry[sn] = { date: dateStr, taskId: taskId, importedAt: now };
+  });
+  await saveShipperNoRegistry(registry);
+}
 function summarizeShipperGroups(groupsSubset){
   var primaryCount = groupsSubset.length;
   var lineCount = groupsSubset.reduce(function(a,g){ return a+g.lineCount; }, 0);
@@ -2574,10 +2635,13 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
         var productCode = (r['商品ID']||'').trim();
         if(productCode){
           var productName = (r['商品名']||'').trim();
-          if(!byProduct[productCode]) byProduct[productCode] = { productName: productName, customerName: customerName, primaryShipperNos:{}, lineCount:0, totalQty:0 };
+          if(!byProduct[productCode]) byProduct[productCode] = { productName: productName, customerName: customerName, primaryShipperNos:{}, lineCount:0, totalQty:0, byShipperNo:{} };
           byProduct[productCode].primaryShipperNos[shipperNo] = true;
           byProduct[productCode].lineCount++;
           byProduct[productCode].totalQty += qty;
+          if(!byProduct[productCode].byShipperNo[shipperNo]) byProduct[productCode].byShipperNo[shipperNo] = { lineCount:0, totalQty:0 };
+          byProduct[productCode].byShipperNo[shipperNo].lineCount++;
+          byProduct[productCode].byShipperNo[shipperNo].totalQty += qty;
         }
       });
       var shipperGroups = order.map(function(sn){ return groups[sn]; });
@@ -4760,18 +4824,25 @@ function bindCsvImportPanel(){
       parseCsvForWorkVolume(file, {}, async function(result){
         var importId = uid();
         var newBatches = [];
-        var shipperNos = result.shipperGroups.map(function(g){ return g.shipperNo; });
+        var registry = await loadShipperNoRegistry();
+        var split = splitShipperGroupsByRegistry(result.shipperGroups, registry);
+        var newGroups = split.newGroups, skippedShipperNos = split.skippedShipperNos;
+        var summary = summarizeShipperGroups(newGroups);
+        var keepSet = {};
+        newGroups.forEach(function(g){ keepSet[g.shipperNo] = true; });
+        var byProductFiltered = filterByProductForShipperNos(result.byProduct, keepSet);
+        var shipperNos = newGroups.map(function(g){ return g.shipperNo; });
         var prevImport = findPreviousImportForTaskDate(targetData, taskId, importId);
-        var anomaly = computeAnomalyWarning({primaryCount:result.primaryCount, lineCount:result.lineCount, totalQty:result.totalQty}, prevImport);
+        var anomaly = computeAnomalyWarning({primaryCount:summary.primaryCount, lineCount:summary.lineCount, totalQty:summary.totalQty}, prevImport);
         var overlap = findShipperNoOverlap(shipperNos, targetData, taskId, importId);
         state.vcPreview = {
           taskId: taskId, importId: importId, fileName: fileName, cfg: cfg, targetDate: targetDate,
           attemptId: attemptId,
-          primaryCount: result.primaryCount, lineCount: result.lineCount, totalQty: result.totalQty,
-          batches: newBatches, shipperNos: shipperNos,
+          primaryCount: summary.primaryCount, lineCount: summary.lineCount, totalQty: summary.totalQty,
+          batches: newBatches, shipperNos: shipperNos, skippedShipperNos: skippedShipperNos,
           fingerprint: fingerprint, fileSize: fileSize,
           missingColumns: result.missingColumns||[], anomaly: anomaly, overlap: overlap,
-          byCustomer: result.byCustomer||{}, byProduct: result.byProduct||{}
+          byCustomer: summary.byCustomer||{}, byProduct: byProductFiltered||{}
         };
         state.wvImporting = false;
         wvCsvInput.value = '';
@@ -8322,6 +8393,13 @@ function renderVcPreviewModal(m){
   if(vp.overlap && vp.overlap.length){
     warningsHtml += '<div class="vc-warning-box">⚠️ 前回までの取込と重複する可能性がある荷主出荷NOが'+vp.overlap.length+'件あります('+vp.overlap.slice(0,5).map(esc).join('、')+(vp.overlap.length>5?' 他':'')+')。二重計上でないかご確認ください。</div>';
   }
+  var skippedHtml = '';
+  if(vp.skippedShipperNos && vp.skippedShipperNos.length){
+    skippedHtml = '<div class="vc-import-status" style="background:var(--paper-100);color:var(--slate-500);border-color:var(--paper-line);">'+
+      '取込: '+vp.primaryCount+primaryLabel+' / スキップ: '+vp.skippedShipperNos.length+'件'+
+      '<br><span style="font-size:11px;">スキップ理由: 既に取り込み済みの荷主出荷番号('+vp.skippedShipperNos.slice(0,5).map(esc).join('、')+(vp.skippedShipperNos.length>5?' 他':'')+')</span>'+
+    '</div>';
+  }
   var body;
   if(vp.cfg.enabled && vp.batches.length){
     var rows = vp.batches.map(function(b){
@@ -8343,6 +8421,7 @@ function renderVcPreviewModal(m){
       '<div class="pool-hint" style="text-align:center;margin-bottom:6px;">対象日付: '+esc(dateLabelFromStr(vp.targetDate))+'</div>'+
       '<div class="pool-hint" style="text-align:center;margin-bottom:14px;">'+vp.primaryCount+primaryLabel+' / '+vp.lineCount+'明細 / 合計'+formatNum(vp.totalQty)+'ピース</div>'+
       warningsHtml+
+      skippedHtml+
       body+
       '<div class="modal-actions" style="margin-top:14px;">'+
         '<button class="modal-cancel" id="vcPreviewCancelBtn">キャンセル</button>'+
@@ -8381,6 +8460,18 @@ function bindVcPreviewModal(m){
   if(confirmBtn){
     confirmBtn.addEventListener('click', async function(){
       var vp = state.vcPreview;
+      var primaryLabel = (vp.cfg.taskKind==='vc') ? 'PO数' : '件数';
+      var skippedCount = (vp.skippedShipperNos||[]).length;
+      if(vp.primaryCount===0){
+        // 全件が既に取込済み(荷主出荷番号がすべて重複)だった場合は、空の取込を作成しない
+        await markImportAttemptStatus(vp.targetDate, vp.attemptId, 'cancelled');
+        await appendAuditLog({ action:'CSV作業量取込(全件スキップ)', target: taskById(vp.taskId).name+' / '+vp.fileName, before:null, after: '既に取込済みの荷主出荷番号のみのため、新規取込なし('+skippedCount+'件スキップ)' });
+        state.vcPreview = null;
+        state.modal = null;
+        showToast('すべての荷主出荷番号が取込済みのため、新規の取込は行いませんでした('+skippedCount+'件スキップ)');
+        render();
+        return;
+      }
       var finalBatches = vp.batches.filter(function(b){ return !b._excluded; });
       finalBatches.forEach(function(b){ delete b._excluded; });
       var targetData = await getWorkVolumeForDate(vp.targetDate);
@@ -8397,11 +8488,13 @@ function bindVcPreviewModal(m){
       if(vp.targetDate===todayStr()) state.workVolume = targetData;
       if(state.wvTargetDate===vp.targetDate) state.wvViewData = targetData;
       await markImportAttemptStatus(vp.targetDate, vp.attemptId, saveOk ? 'done' : 'failed');
-      if(saveOk) await registerFileFingerprint(vp.fingerprint, vp.fileSize, vp.fileName, vp.targetDate, vp.taskId, vp.importId);
-      var primaryLabel = (vp.cfg.taskKind==='vc') ? 'PO数' : '件数';
-      await appendAuditLog({ action:'CSV作業量取込確定', target: taskById(vp.taskId).name+' / '+vp.fileName, before:null, after: vp.primaryCount+primaryLabel+'、'+finalBatches.length+'件のバッチ('+vp.targetDate+')' });
+      if(saveOk){
+        await registerFileFingerprint(vp.fingerprint, vp.fileSize, vp.fileName, vp.targetDate, vp.taskId, vp.importId);
+        await registerShipperNos(vp.shipperNos, vp.targetDate, vp.taskId);
+      }
+      await appendAuditLog({ action:'CSV作業量取込確定', target: taskById(vp.taskId).name+' / '+vp.fileName, before:null, after: vp.primaryCount+primaryLabel+'、'+finalBatches.length+'件のバッチ('+vp.targetDate+')'+(skippedCount?'、'+skippedCount+'件スキップ(既取込)':'') });
       var msg = saveOk
-        ? '取込を確定しました('+vp.primaryCount+primaryLabel+' / '+vp.lineCount+'明細 / '+formatNum(vp.totalQty)+'ピース)'+(finalBatches.length?'。'+finalBatches.length+'件のバッチを作成しました':'')
+        ? '取込を確定しました('+vp.primaryCount+primaryLabel+' / '+vp.lineCount+'明細 / '+formatNum(vp.totalQty)+'ピース)'+(skippedCount?'。'+skippedCount+'件は既に取込済みのためスキップしました':'')+(finalBatches.length?'。'+finalBatches.length+'件のバッチを作成しました':'')
         : '保存に失敗した可能性があります。本日の確認事項をご確認ください。';
       state.vcPreview = null;
       state.modal = null;

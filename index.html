@@ -101,9 +101,10 @@ input,select{font-family:inherit;}
 
 /* ---------- TOPBAR ---------- */
 .topbar{
-  background:var(--ink-900);color:#fff;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;
+  background:var(--ink-900);color:#fff;padding:0;
   border-bottom:1px solid var(--ink-800);position:sticky;top:0;z-index:20;
 }
+.topbar-main-row{padding:12px 20px;display:flex;align-items:center;justify-content:space-between;}
 .topbar-left{display:flex;align-items:baseline;gap:12px;}
 .topbar-title{font-family:var(--font-display);font-weight:600;font-size:15px;letter-spacing:-.01em;}
 .topbar-date{font-family:var(--font-mono);font-size:12px;color:#9AA4B8;}
@@ -113,10 +114,25 @@ input,select{font-family:inherit;}
   padding:7px 14px;font-size:12.5px;font-weight:500;transition:background .12s,border-color .12s;
 }
 .pill-btn:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.24);color:#fff;}
+.topbar-nav{display:flex;gap:4px;padding:0 16px 10px;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+.topbar-nav-item{
+  flex:none;background:transparent;border:none;color:#9AA4B8;border-radius:7px;
+  padding:6px 12px;font-size:12.5px;font-weight:500;white-space:nowrap;transition:background .12s,color .12s;
+}
+.topbar-nav-item:hover{background:rgba(255,255,255,.08);color:#E4E7EC;}
+.topbar-nav-item.active{background:var(--amber-500);color:#fff;font-weight:700;}
+.mon-nav{display:flex;gap:4px;align-items:center;}
+.mon-nav-item{
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:#E4E7EC;border-radius:7px;
+  width:34px;height:34px;font-size:15px;display:flex;align-items:center;justify-content:center;
+}
+.mon-nav-item:hover{background:rgba(255,255,255,.14);}
 @media (max-width:640px){
-  .topbar{flex-wrap:wrap;gap:8px;padding:10px 14px;}
+  .topbar{flex-wrap:wrap;gap:8px;padding:0;}
+  .topbar-main-row{flex-wrap:wrap;gap:8px;padding:10px 14px;}
   .topbar-left{flex-wrap:wrap;gap:6px;}
   .topbar-title{font-size:14px;}
+  .topbar-nav{padding:0 10px 10px;}
   .mgr-wrap{padding:12px;}
   .mgr-settings-summary{font-size:13px;}
   .vc-relink-row{flex-wrap:wrap;}
@@ -919,6 +935,14 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-04', items:[
+    '【調査結果】このアプリはURLルーティングを一切使用しておらず(単一のstate変数で画面切替)、「URLを直接入力してのアクセス」という概念自体が存在しないことを確認しました。ただし、その等価にあたる「state.roleを不正に管理者画面へ直接切り替える」操作に対する保護は、以前のセッションで実装済みの各画面自身の認証チェック(hasManagerSession())により、既に確保されていることを確認しました(今回変更していません)',
+    '全画面共通のトップバー(実績入力・集計・モニター・カレンダーなど、ページ上部に既存で表示されていた共通部分)に、他の主要画面へ直接移動できるナビゲーションを追加しました。現在の画面はハイライト表示されます',
+    '管理者・設定への項目は、実際にログイン済みの場合のみナビゲーションに表示されます。判定には既存の権限確認の仕組み(ADMIN_GATED_ROLES/hasManagerSession)をそのまま利用しており、新しい権限管理は作っていません',
+    'モニター画面は、現場の常時表示用に元々ヘッダー(共通ナビの土台)自体が無い設計だったため、既存のヘッダー領域に最小限のコンパクトなアイコンナビを追加しました。モニター自体の表示内容・集計処理は変更していません',
+    'トップページ(最初のカード選択画面)は、今回のナビゲーションの対象外です(元々別レイアウトのため)。レイアウト・カード配置・ボタン配置は一切変更していません',
+    '実際にコードを実行するテストで、各画面から他画面へホームを経由せず直接移動できること、管理者専用ナビが未ログイン時は表示されずログアウト後に消えること、そして最も重要な点として「state.roleを不正に管理者画面へ直接切り替えても、未ログインならページの中身(データ)は一切表示されずログインフォームのみが出ること」を確認しました。既存の全回帰テスト(39スイート)にも影響はありません'
+  ]},
   { date:'2026-10-03', items:[
     '【調査結果】「作業を指定して取り込む」の廃止・取込履歴の常時表示・荷主出荷番号単位のグローバルな重複防止(削除済みデータも重複扱いになる仕様を含む)・本日の作業へのCSV件数/ピース数表示は、いずれも既に実装済みであることを確認しました。今回は、まだ無かった2点(取込データの編集・モニターへのCSV表示)のみを実装しています',
     '【新機能】取込履歴の各行に「編集」ボタンを追加しました。CSVを再取込することなく、既存の取込データの「紐付け先の作業枠」だけを変更できます。CSV明細・荷主出荷番号・数量・取込日時・得意先情報などの元データは一切変更されません。変更内容は既存の操作履歴に記録されます(新しいデータ構造は追加していません)',
@@ -4483,22 +4507,57 @@ function bindChangelogModal(){
 /* ---------- ADMIN PIN MODAL ---------- */
 
 /* ---------- TOPBAR ---------- */
+var COMMON_NAV_ITEMS = [
+  { role:'input', label:'実績入力', icon:'📋' },
+  { role:'report', label:'集計', icon:'📊' },
+  { role:'monitor', label:'モニター', icon:'🖥' },
+  { role:'calendar', label:'カレンダー', icon:'📅' }
+];
+var ADMIN_NAV_ITEMS = [
+  { role:'adminHub', label:'管理者', icon:'👔' },
+  { role:'settingsHub', label:'設定', icon:'⚙️' }
+];
 function renderTopbar(){
   var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'実績入力', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定'}[state.role];
   var lockBtn = (hasManagerSession() && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="ログアウトする">🔓 ログアウト</button>' : '';
+  // 共通ナビゲーション: どのページからでも他の主要ページへ直接移動できるようにする。
+  // 管理者専用項目(管理者/設定)は、実際にログイン済みの場合のみ表示する
+  // (表示判定は既存のhasManagerSession()をそのまま利用。各ページ自体の権限チェックは
+  //  renderAdminHub()/renderSettingsHub()側で別途、常に行われているため、ここは利便性のための表示制御)。
+  var navItems = COMMON_NAV_ITEMS.slice();
+  if(hasManagerSession()) navItems = navItems.concat(ADMIN_NAV_ITEMS);
+  var navHtml = '<div class="topbar-nav">'+
+    '<button type="button" class="topbar-nav-item'+(!state.role?' active':'')+'" data-nav-role="">🏠 ホーム</button>'+
+    navItems.map(function(item){
+      return '<button type="button" class="topbar-nav-item'+(state.role===item.role?' active':'')+'" data-nav-role="'+item.role+'">'+item.icon+' '+item.label+'</button>';
+    }).join('')+
+  '</div>';
   return ''+
   '<div class="topbar">'+
-    '<div class="topbar-left">'+
-      '<span class="topbar-title">物流センター 作業割り当てボード</span>'+
-      '<span class="topbar-date">'+todayLabel()+' / '+roleLabel+'</span>'+
+    '<div class="topbar-main-row">'+
+      '<div class="topbar-left">'+
+        '<span class="topbar-title">物流センター 作業割り当てボード</span>'+
+        '<span class="topbar-date">'+todayLabel()+' / '+roleLabel+'</span>'+
+      '</div>'+
+      '<div class="topbar-right">'+
+        lockBtn+
+        '<button class="pill-btn" id="switchRoleBtn">役割を変更</button>'+
+      '</div>'+
     '</div>'+
-    '<div class="topbar-right">'+
-      lockBtn+
-      '<button class="pill-btn" id="switchRoleBtn">役割を変更</button>'+
-    '</div>'+
+    navHtml+
   '</div>';
 }
 function bindCommon(){
+  document.querySelectorAll('[data-nav-role]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var role = el.getAttribute('data-nav-role');
+      state.role = role || null;
+      state.activeStaffId = null;
+      state.modal = null;
+      render();
+      if(role) startPolling();
+    });
+  });
   var b = document.getElementById('switchRoleBtn');
   if(b) b.addEventListener('click', function(){
     state.role = null; state.activeStaffId = null; state.modal = null;
@@ -8761,11 +8820,20 @@ function renderMonitor(){
     challengeHtml = '<div class="empty-note" style="color:var(--slate-300)">集計中...</div>';
   }
 
+  var monNavItems = COMMON_NAV_ITEMS.filter(function(item){ return item.role!=='monitor'; });
+  if(hasManagerSession()) monNavItems = monNavItems.concat(ADMIN_NAV_ITEMS);
+  var monNavHtml = '<div class="mon-nav">'+
+    '<button type="button" class="mon-nav-item" data-nav-role="" title="ホーム">🏠</button>'+
+    monNavItems.map(function(item){
+      return '<button type="button" class="mon-nav-item" data-nav-role="'+item.role+'" title="'+item.label+'">'+item.icon+'</button>';
+    }).join('')+
+  '</div>';
   return '<div class="monitor"><div class="mon-inner">'+
     '<div class="mon-header">'+
       '<div class="mon-title-block"><span class="mon-title">本日の稼働状況</span><span class="mon-date">'+todayLabel()+'</span></div>'+
       '<div style="display:flex;align-items:center;gap:16px;">'+
         '<span class="mon-clock" id="monClock">'+clock+'</span>'+
+        monNavHtml+
         '<button class="mon-exit" id="switchRoleBtn">役割を変更</button>'+
       '</div>'+
     '</div>'+

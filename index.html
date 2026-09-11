@@ -366,7 +366,9 @@ input,select{font-family:inherit;}
 .task-color-dot{width:12px;height:12px;border-radius:3px;flex:none;}
 .task-col-name{font-family:var(--font-display);font-weight:600;font-size:15px;flex:1;}
 .task-col-unit{font-size:11px;color:var(--slate-500);}
-.task-col-csv-volume{display:flex;gap:0;margin:10px 0;border:1px solid var(--paper-line);border-radius:var(--radius-md);overflow:hidden;}
+.task-col-csv-volume-wrap{margin:10px 0;}
+.csv-imported-label{font-size:11px;font-weight:700;color:var(--teal-500);margin-bottom:5px;}
+.task-col-csv-volume{display:flex;gap:0;border:1px solid var(--paper-line);border-radius:var(--radius-md);overflow:hidden;}
 .csv-volume-stat{flex:1;text-align:center;padding:8px 6px;}
 .csv-volume-stat+.csv-volume-stat{border-left:1px solid var(--paper-line);}
 .csv-volume-num{font-family:var(--font-mono);font-weight:700;font-size:19px;color:var(--ink-900);}
@@ -914,6 +916,19 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-02', items:[
+    '【重要な不具合修正】「個配など毎日発生する作業で、CSV取込の件数・ピース数の表示がずれる/紐付いていないことがある」不具合の根本原因を特定し、修正しました',
+    '原因: 「個配」のような毎日繰り返す作業は、日ごとに新しいIDで自動生成されていましたが、得意先・作業枠マスターに得意先を登録した際は「登録したその日」の固定IDが保存される仕組みになっていました。そのため、登録した翌日以降、CSV取込がその固定ID(もう今日の作業ではない、古いID)に紐付けられてしまい、今日の作業カードには反映されない、という状態が発生していました',
+    '修正: 得意先・作業枠マスターに、繰り返し作業の「共通の識別子」も保存するようにし、CSV取込のたびに、その日の実際の作業インスタンスへ動的に解決する仕組みに変更しました。単発の(繰り返さない)作業への紐付けは、従来通り変更していません',
+    '既存にすでに登録されている得意先マスターのデータも、安全に自動移行されます(過去のデータは削除・変更しません)。ただし、既に「ズレてしまっていた」過去の取込データそのものは、当時の(誤った)紐付け先に記録されたままです。今後の取込から正しく動作します',
+    '発生曜日の対象外などで、その日に該当する作業インスタンスが存在しない場合は、推測せず「未紐付け」として扱われ、誤った日の作業に紐付けられることはありません',
+    '実際にコードを実行するテストで、①ご報告いただいた不具合の状況(古いIDへの誤った固定)を実際に再現し、②修正後は正しく「今日」の作業インスタンスに解決されること、③単発タスクは従来通り動作すること(回帰なし)、④該当日にインスタンスが無い場合は安全に未紐付け扱いになることを確認しました。既存の全回帰テスト(37スイート)にも影響はありません'
+  ]},
+  { date:'2026-10-01', items:[
+    '【調査結果】ご依頼の「本日の作業カードにCSV仕事量(出荷件数・ピース数)を表示する」機能は、前回のセッションで既に実装済みであることを確認しました。CSVと作業の紐付けも、既存の得意先・作業枠マスター経由の仕組み(imports[].taskId)をそのまま利用しており、新しい紐付け処理は作っていません(ご指示のケースAに該当)',
+    '前回実装と比較し、「📄 CSV取込済み」という明示的なラベルだけが未実装だったため、今回この表示のみを追加しました',
+    '実際にコードを実行するテストで、ラベルの表示、正しい出荷件数・ピース数(荷主出荷番号の重複明細を1件として数える)、CSV無し作業にはラベルが出ないこと、内訳作業の表示が壊れていないことを確認しました。既存の全回帰テスト(36スイート)にも影響はありません'
+  ]},
   { date:'2026-09-30', items:[
     '管理者→今日の状況の各作業カードに、CSVから取り込んだ「今日の仕事量」(出荷件数・ピース数)を表示するようにしました。出荷件数は荷主出荷番号のユニーク件数(明細行数ではありません)、ピース数は出荷数量の合計です。既存の集計処理(wvTotalsForTask)をそのまま利用しており、新しい集計ロジックは作っていません',
     'CSVと紐付いていない作業には、0件・0ピースと表示して画面を埋めることはせず、この表示自体を出さないようにしています',
@@ -2158,10 +2173,21 @@ async function saveStaffingSuggestion(dateStr, data){
 
 /* ---------- 得意先・作業枠マスター(取引先名 → 作業枠 の自動紐付け) ---------- */
 async function loadCustomerTaskMapping(){
+  var data;
   try{
     var r = await window.storage.get('customer-task-mapping', true);
-    return r && r.value ? JSON.parse(r.value) : { entries: [] };
-  }catch(e){ return { entries: [] }; }
+    data = r && r.value ? JSON.parse(r.value) : { entries: [] };
+  }catch(e){ data = { entries: [] }; }
+  var changed = false;
+  (data.entries||[]).forEach(function(entry){
+    if(entry.templateId===undefined){
+      var t = state.backlog.find(function(x){ return x.id===entry.taskId; });
+      entry.templateId = (t && t.fromTemplate) ? t.fromTemplate : null;
+      changed = true;
+    }
+  });
+  if(changed && !state.dataLoadUncertain) await saveCustomerTaskMapping(data);
+  return data;
 }
 async function saveCustomerTaskMapping(data){
   try{ await window.storage.set('customer-task-mapping', JSON.stringify(data), true); }catch(e){}
@@ -2177,17 +2203,30 @@ function findMappingForCustomer(mapping, customerName){
   var norm = normalizeCustomerName(customerName);
   return (mapping.entries||[]).find(function(e){ return e.enabled && normalizeCustomerName(e.customerName)===norm; }) || null;
 }
+function resolveMappingEntryTaskId(entry, targetDate){
+  // 繰り返し作業(テンプレート由来)の場合、保存されたtaskIdは「登録した日」のインスタンスIDで
+  // 固定されており、日々再生成される実際の作業IDとはズレてしまう。templateIdがあれば、
+  // 取込対象日の実際のタスクインスタンスへ動的に解決する(無ければ未紐付けとして扱う)。
+  if(entry.templateId){
+    var instance = state.backlog.find(function(t){
+      return t.fromTemplate===entry.templateId && t.workDate===targetDate && !t.archived;
+    });
+    return instance ? instance.id : null;
+  }
+  return entry.taskId || null;
+}
 /* 共通の紐付け解決処理。手動CSV取込・将来の自動取込のどちらからも、この関数を呼び出す想定。
    shipperGroups(荷主出荷NO単位、customerNameを保持)を、作業枠ごとにグループ化する。
    マスターに無い得意先は絶対に推測せず、unmappedとして返す。 */
-function resolveCustomerTaskMapping(shipperGroups, mapping){
+function resolveCustomerTaskMapping(shipperGroups, mapping, targetDate){
   var byTask = {}; // taskId -> shipperGroups[]
   var unmappedByCustomer = {}; // customerName -> shipperGroups[]
   shipperGroups.forEach(function(g){
     var m = findMappingForCustomer(mapping, g.customerName);
-    if(m){
-      if(!byTask[m.taskId]) byTask[m.taskId] = [];
-      byTask[m.taskId].push(g);
+    var resolvedTaskId = m ? resolveMappingEntryTaskId(m, targetDate) : null;
+    if(m && resolvedTaskId){
+      if(!byTask[resolvedTaskId]) byTask[resolvedTaskId] = [];
+      byTask[resolvedTaskId].push(g);
     }else{
       var key = g.customerName || '(不明)';
       if(!unmappedByCustomer[key]) unmappedByCustomer[key] = [];
@@ -2267,8 +2306,8 @@ function summarizeShipperGroups(groupsSubset){
 /* ---------- CSV → 得意先マスター照合 → 作業枠ごとの取込計画、の共通パイプライン ----------
    手動CSV取込・将来の共有フォルダ自動取込のどちらからも、この関数を呼び出す想定。
    DOM操作を一切行わない純粋なデータ処理関数。 */
-function buildAutoMappedImportPlan(parseResult, mapping){
-  var resolved = resolveCustomerTaskMapping(parseResult.shipperGroups, mapping);
+function buildAutoMappedImportPlan(parseResult, mapping, targetDate){
+  var resolved = resolveCustomerTaskMapping(parseResult.shipperGroups, mapping, targetDate || todayStr());
   var taskPlans = Object.keys(resolved.byTask).map(function(taskId){
     var groupsSubset = resolved.byTask[taskId];
     var summary = summarizeShipperGroups(groupsSubset);
@@ -4669,11 +4708,12 @@ function bindCustomerMappingPanel(){
           var before = entry.customerName+' → '+taskById(entry.taskId).name;
           entry.customerName = name;
           entry.taskId = taskId;
+          entry.templateId = taskById(taskId).fromTemplate || null;
           await appendAuditLog({ action:'得意先マスター編集', target: name, before: before, after: name+' → '+taskById(taskId).name });
         }
         state.customerMappingEditingId = null;
       }else{
-        state.customerTaskMapping.entries.push({ id: uid(), customerName: name, taskId: taskId, enabled: true });
+        state.customerTaskMapping.entries.push({ id: uid(), customerName: name, taskId: taskId, templateId: taskById(taskId).fromTemplate || null, enabled: true });
         await appendAuditLog({ action:'得意先マスター追加', target: name, before: null, after: name+' → '+taskById(taskId).name });
       }
       await saveCustomerTaskMapping(state.customerTaskMapping);
@@ -4783,7 +4823,7 @@ function bindCsvImportPanel(){
           shipperGroups: newGroups,
           byProduct: filterByProductForShipperNos(result.byProduct, keepSet)
         };
-        var plan = buildAutoMappedImportPlan(filteredResult, mapping);
+        var plan = buildAutoMappedImportPlan(filteredResult, mapping, targetDate);
         state.autoMapPreviewData = {
           fileName: fileName, targetDate: targetDate, fingerprint: fingerprint, fileSize: fileSize,
           rowCount: result.rowCount, missingColumns: result.missingColumns||[],
@@ -5069,9 +5109,12 @@ function renderManager(){
     }).join('') || '<span class="pool-hint" style="margin:0;">ここにスタッフをドラッグ</span>';
     var wvTotals = wvTotalsForTask(managerActiveWorkVolume(), t.id);
     var csvVolumeHtml = wvTotals.importCount>0 ? (
-      '<div class="task-col-csv-volume">'+
-        '<div class="csv-volume-stat"><div class="csv-volume-num">'+formatNum(wvTotals.primaryCount)+'<span class="csv-volume-unit">件</span></div><div class="csv-volume-label">出荷件数</div></div>'+
-        '<div class="csv-volume-stat"><div class="csv-volume-num">'+formatNum(wvTotals.totalQty)+'<span class="csv-volume-unit">ピース</span></div><div class="csv-volume-label">ピース数</div></div>'+
+      '<div class="task-col-csv-volume-wrap">'+
+        '<div class="csv-imported-label">📄 CSV取込済み</div>'+
+        '<div class="task-col-csv-volume">'+
+          '<div class="csv-volume-stat"><div class="csv-volume-num">'+formatNum(wvTotals.primaryCount)+'<span class="csv-volume-unit">件</span></div><div class="csv-volume-label">出荷件数</div></div>'+
+          '<div class="csv-volume-stat"><div class="csv-volume-num">'+formatNum(wvTotals.totalQty)+'<span class="csv-volume-unit">ピース</span></div><div class="csv-volume-label">ピース数</div></div>'+
+        '</div>'+
       '</div>'
     ) : '';
     var subcatListHtml = (t.subcategories && t.subcategories.length) ?
@@ -8258,12 +8301,12 @@ function bindAutoMapPreviewModal(m){
       var taskId = select ? select.value : '';
       if(!taskId){ showToast('作業枠を選択してください'); return; }
       if(!state.customerTaskMapping) state.customerTaskMapping = { entries: [] };
-      state.customerTaskMapping.entries.push({ id: uid(), customerName: customerName, taskId: taskId, enabled: true });
+      state.customerTaskMapping.entries.push({ id: uid(), customerName: customerName, taskId: taskId, templateId: taskById(taskId).fromTemplate || null, enabled: true });
       await saveCustomerTaskMapping(state.customerTaskMapping);
       await appendAuditLog({ action:'得意先マスター追加(CSVプレビューから)', target: customerName, before:null, after: customerName+' → '+taskById(taskId).name });
       // 取込プレビューを再計算(この得意先が未紐付けから該当作業枠へ移動する)
       var d = state.autoMapPreviewData;
-      var plan = buildAutoMappedImportPlan(d.rawParseResult, state.customerTaskMapping);
+      var plan = buildAutoMappedImportPlan(d.rawParseResult, state.customerTaskMapping, d.targetDate);
       d.taskPlans = plan.taskPlans;
       d.unmapped = plan.unmapped;
       showToast('「'+customerName+'」を「'+taskById(taskId).name+'」に追加しました');

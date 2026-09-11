@@ -798,6 +798,9 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .mon-timer{font-family:var(--font-mono);font-size:20px;font-weight:700;color:var(--teal-500);}
 .mon-timer.idle{color:var(--slate-500);font-size:16px;}
 .mon-start-info{font-size:11px;color:var(--slate-300);font-family:var(--font-mono);}
+.mon-csv-volume{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11px;padding:5px 8px;margin:2px 0;background:rgba(255,255,255,.05);border-radius:6px;}
+.mon-csv-label{color:var(--teal-500);font-weight:700;}
+.mon-csv-stat{color:#cfd5e0;}
 .mon-assign-list{display:flex;flex-wrap:wrap;gap:5px;}
 .mon-assign-chip{
   display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--slate-300);
@@ -916,6 +919,12 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-03', items:[
+    '【調査結果】「作業を指定して取り込む」の廃止・取込履歴の常時表示・荷主出荷番号単位のグローバルな重複防止(削除済みデータも重複扱いになる仕様を含む)・本日の作業へのCSV件数/ピース数表示は、いずれも既に実装済みであることを確認しました。今回は、まだ無かった2点(取込データの編集・モニターへのCSV表示)のみを実装しています',
+    '【新機能】取込履歴の各行に「編集」ボタンを追加しました。CSVを再取込することなく、既存の取込データの「紐付け先の作業枠」だけを変更できます。CSV明細・荷主出荷番号・数量・取込日時・得意先情報などの元データは一切変更されません。変更内容は既存の操作履歴に記録されます(新しいデータ構造は追加していません)',
+    '【新機能】モニター表示の各作業者カードに、現在計測中の親作業に紐付いているCSV情報(出荷件数・ピース数)を表示するようにしました。「本日の状況」と全く同じ集計関数(wvTotalsForTask)を使っているため、画面間で数字が食い違うことはありません。作業者ごとの表示構成(誰が何をしているか)は変更していません。内訳作業ごとに同じ数字が重複表示されることもありません',
+    '実際にコードを実行するテストで、モニターへのCSV表示、編集による作業枠変更(CSV明細・荷主出荷番号・数量・ファイル名・得意先情報が変更されないこと)、削除済みデータが引き続き重複防止の対象になることを確認しました。既存の全回帰テスト(38スイート)にも影響はありません'
+  ]},
   { date:'2026-10-02', items:[
     '【重要な不具合修正】「個配など毎日発生する作業で、CSV取込の件数・ピース数の表示がずれる/紐付いていないことがある」不具合の根本原因を特定し、修正しました',
     '原因: 「個配」のような毎日繰り返す作業は、日ごとに新しいIDで自動生成されていましたが、得意先・作業枠マスターに得意先を登録した際は「登録したその日」の固定IDが保存される仕組みになっていました。そのため、登録した翌日以降、CSV取込がその固定ID(もう今日の作業ではない、古いID)に紐付けられてしまい、今日の作業カードには反映されない、という状態が発生していました',
@@ -4843,6 +4852,14 @@ function bindCsvImportPanel(){
       });
     });
   }
+  document.querySelectorAll('[data-wv-import-edit]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var importId = el.getAttribute('data-wv-import-edit');
+      var viewDate = state.wvTargetDate || todayStr();
+      state.modal = { kind:'wvImportEdit', importId: importId, targetDate: viewDate };
+      render();
+    });
+  });
   document.querySelectorAll('[data-wv-import-delete]').forEach(function(el){
     el.addEventListener('click', async function(){
       var importId = el.getAttribute('data-wv-import-delete');
@@ -5259,7 +5276,7 @@ function renderCsvImportPanel(){
       '<td class="num">'+lbl+' '+formatNum(imp.primaryCount)+'</td>'+
       '<td class="num">明細'+formatNum(imp.lineCount)+'</td>'+
       '<td class="num">ピース'+formatNum(imp.totalQty)+'</td>'+
-      '<td class="num"><button type="button" class="vc-manage-toggle-btn" data-wv-import-move="'+imp.id+'">日付変更</button> <button type="button" class="log-stop-btn" data-wv-import-delete="'+imp.id+'">削除</button></td>'+
+      '<td class="num"><button type="button" class="vc-manage-toggle-btn" data-wv-import-edit="'+imp.id+'">編集</button> <button type="button" class="vc-manage-toggle-btn" data-wv-import-move="'+imp.id+'">日付変更</button> <button type="button" class="log-stop-btn" data-wv-import-delete="'+imp.id+'">削除</button></td>'+
     '</tr>';
   }).join('') || '<tr><td colspan="7" style="color:var(--slate-500);">この日付の取込履歴はまだありません</td></tr>';
   var wvDeletedImports = (wvViewData.imports||[]).filter(function(i){ return i.deletedAt; });
@@ -8043,6 +8060,7 @@ function renderModal(){
   if(m.kind==='qtyBreakdown') return renderQtyBreakdownModal(m);
   if(m.kind==='addLog') return renderAddLogModal(m);
   if(m.kind==='vcPreview') return renderVcPreviewModal(m);
+  if(m.kind==='wvImportEdit') return renderWvImportEditModal(m);
   if(m.kind==='autoMapPreview') return renderAutoMapPreviewModal(m);
   if(m.kind==='pickSubcat') return renderPickSubcatModal(m);
   if(m.kind!=='qty') return '';
@@ -8357,6 +8375,71 @@ function bindAutoMapPreviewModal(m){
     });
   }
 }
+function renderWvImportEditModal(m){
+  var viewDate = m.targetDate;
+  var data = state.wvViewData || (viewDate===todayStr() ? state.workVolume : emptyWorkVolume());
+  var imp = data.imports.find(function(i){ return i.id===m.importId; });
+  if(!imp){
+    return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card"><div class="modal-task-name">この取込データが見つかりません</div><div class="modal-actions"><button class="modal-cancel" id="wvImportEditCancelBtn">閉じる</button></div></div></div>';
+  }
+  var currentTask = taskById(imp.taskId);
+  var customerNames = Object.keys(imp.byCustomer||{});
+  var dateTasks = tasksForDate(viewDate);
+  var taskOptions = dateTasks.map(function(t){
+    return '<option value="'+t.id+'" '+(t.id===imp.taskId?'selected':'')+'>'+esc(t.name)+'</option>';
+  }).join('') || '<option value="">この日付の作業がありません</option>';
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card" style="max-width:440px;text-align:left;">'+
+      '<div class="modal-task-name" style="text-align:center;margin-bottom:14px;">📄 CSV取込の編集</div>'+
+      '<div class="pool-hint" style="margin-bottom:14px;">紐付け先の作業枠だけを変更できます。CSV明細・荷主出荷番号・数量・取込日時などの元データは変更されません。</div>'+
+      '<div style="font-size:12px;color:var(--slate-500);margin-bottom:2px;">ファイル名</div>'+
+      '<div style="font-size:13px;margin-bottom:10px;">'+esc(imp.fileName)+'</div>'+
+      '<div style="font-size:12px;color:var(--slate-500);margin-bottom:2px;">得意先</div>'+
+      '<div style="font-size:13px;margin-bottom:10px;">'+(customerNames.length ? esc(customerNames.join('、')) : '(記録なし)')+'</div>'+
+      '<div style="font-size:12px;color:var(--slate-500);margin-bottom:2px;">現在の作業枠</div>'+
+      '<div style="font-size:13px;font-weight:700;margin-bottom:10px;"><span class="task-color-dot" style="background:'+(currentTask.color||'#999')+'"></span> '+esc(currentTask.name)+'</div>'+
+      '<label style="font-size:12px;color:var(--slate-500);display:block;margin-bottom:4px;">変更後の作業枠</label>'+
+      '<select id="wvImportEditTaskSelect" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;margin-bottom:16px;">'+taskOptions+'</select>'+
+      '<div class="modal-actions">'+
+        '<button class="modal-cancel" id="wvImportEditCancelBtn">キャンセル</button>'+
+        '<button class="modal-confirm" id="wvImportEditSaveBtn">保存</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+function bindWvImportEditModal(m){
+  var cancelBtn = document.getElementById('wvImportEditCancelBtn');
+  if(cancelBtn) cancelBtn.addEventListener('click', function(){
+    state.modal = null;
+    render();
+  });
+  var saveBtn = document.getElementById('wvImportEditSaveBtn');
+  if(saveBtn){
+    saveBtn.addEventListener('click', async function(){
+      var select = document.getElementById('wvImportEditTaskSelect');
+      var newTaskId = select ? select.value : '';
+      if(!newTaskId){ showToast('作業枠を選択してください'); return; }
+      var viewDate = m.targetDate;
+      var data = await getWorkVolumeForDate(viewDate);
+      var imp = data.imports.find(function(i){ return i.id===m.importId; });
+      if(!imp){ showToast('この取込データが見つかりません'); state.modal = null; render(); return; }
+      if(newTaskId===imp.taskId){ state.modal = null; render(); return; }
+      var oldTask = taskById(imp.taskId);
+      var newTask = taskById(newTaskId);
+      // CSV明細・荷主出荷番号・数量・取込日時などは一切変更しない。作業枠(taskId)だけを付け替える。
+      imp.taskId = newTaskId;
+      // taskKind(通常/VC)は作業枠側の設定を優先する
+      imp.taskKind = newTask.taskKind || imp.taskKind || 'normal';
+      var saveOk = await saveWorkVolume(viewDate, data);
+      if(viewDate===todayStr()) state.workVolume = data;
+      if(state.wvTargetDate===viewDate) state.wvViewData = data;
+      await appendAuditLog({ action:'CSV取込の作業枠を変更', target: imp.fileName, before: oldTask.name, after: newTask.name });
+      state.modal = null;
+      showToast(saveOk ? '作業枠を「'+oldTask.name+'」から「'+newTask.name+'」に変更しました' : '保存に失敗した可能性があります。');
+      render();
+    });
+  }
+}
 function renderVcPreviewModal(m){
   var vp = state.vcPreview;
   if(!vp) return '';
@@ -8561,6 +8644,7 @@ function bindModal(){
   if(m.kind==='qtyBreakdown'){ bindQtyBreakdownModal(m); return; }
   if(m.kind==='addLog'){ bindAddLogModal(m); return; }
   if(m.kind==='vcPreview'){ bindVcPreviewModal(m); return; }
+  if(m.kind==='wvImportEdit'){ bindWvImportEditModal(m); return; }
   if(m.kind==='autoMapPreview'){ bindAutoMapPreviewModal(m); return; }
   if(m.kind==='pickSubcat'){ bindPickSubcatModal(m); return; }
   document.querySelectorAll('[data-qty-delta]').forEach(function(el){
@@ -8617,6 +8701,17 @@ function renderMonitor(){
       timerHtml = '<div class="mon-timer idle">-</div>';
       startInfoHtml = '';
     }
+    var csvVolumeMonHtml = '';
+    if(log){
+      var wvTotalsMon = wvTotalsForTask(state.workVolume, log.taskId);
+      if(wvTotalsMon.importCount>0){
+        csvVolumeMonHtml = '<div class="mon-csv-volume">'+
+          '<span class="mon-csv-label">📄 CSV取込済み</span>'+
+          '<span class="mon-csv-stat">出荷件数 '+formatNum(wvTotalsMon.primaryCount)+'件</span>'+
+          '<span class="mon-csv-stat">ピース数 '+formatNum(wvTotalsMon.totalQty)+'ピース</span>'+
+        '</div>';
+      }
+    }
     var assignedIds = (state.day.assignments[s.id] || []).slice().sort(byTaskColor(function(tid){ return taskById(tid).color; }));
     var assignedChips = assignedIds.map(function(tid){
       var at = taskById(tid);
@@ -8630,6 +8725,7 @@ function renderMonitor(){
         timerHtml+
       '</div>'+
       '<div class="mon-status">'+statusText+'</div>'+
+      csvVolumeMonHtml+
       assignedHtml+
       '<div class="mon-bar-wrap"><div class="mon-bar">'+(barSegs||'')+'</div><div class="mon-bar-total">本日計 '+fmtHM(totalMs)+'</div></div>'+
       startInfoHtml+

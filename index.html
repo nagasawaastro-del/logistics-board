@@ -377,7 +377,38 @@ input,select{font-family:inherit;}
   min-width:230px;flex:1 0 230px;background:var(--paper-50);border:1px solid var(--paper-line);border-radius:12px;
   padding:12px;transition:background .12s,border-color .12s;
 }
-.task-col.dragover{background:#FFFAEB;border-color:var(--amber-500);}
+.task-col.dragover{background:#EEF2FF;border-color:var(--amber-500);box-shadow:0 0 0 2px var(--amber-500);}
+.task-col-dropzone{position:relative;min-height:32px;}
+.task-col.dragover .task-col-dropzone::before{
+  content:'ここにスタッフをドロップ';
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:var(--amber-500);color:#fff;font-size:12px;font-weight:700;border-radius:var(--radius-md);
+  z-index:2;pointer-events:none;
+}
+.assign-picker-btn{
+  display:block;width:100%;margin-top:6px;background:var(--paper-50);border:1px dashed var(--slate-300);
+  border-radius:var(--radius-sm);padding:8px;font-size:12.5px;font-weight:600;color:var(--ink-700);
+}
+.assign-picker-btn:hover{border-color:var(--amber-500);color:var(--amber-500);background:#EEF2FF;}
+.assign-picker-list{display:flex;flex-direction:column;gap:2px;max-height:320px;overflow-y:auto;}
+.assign-picker-row{
+  display:flex;align-items:center;gap:12px;padding:12px 10px;border-radius:var(--radius-sm);
+  font-size:14px;cursor:pointer;-webkit-user-select:none;user-select:none;
+}
+.assign-picker-row:hover{background:var(--paper-100);}
+.assign-picker-row input[type="checkbox"]{width:20px;height:20px;flex:none;}
+.mgr-view-tabs{display:flex;gap:6px;margin-bottom:12px;}
+.mgr-view-tab{background:var(--paper-100);border:1px solid var(--paper-line);border-radius:var(--radius-sm);padding:8px 16px;font-size:13px;font-weight:600;color:var(--slate-500);}
+.mgr-view-tab.active{background:var(--amber-500);border-color:var(--amber-500);color:#fff;}
+.mgr-staff-view{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;}
+.mgr-staff-card{border:1px solid var(--paper-line);border-radius:var(--radius-lg);padding:14px;background:var(--paper-50);}
+.mgr-staff-card-name{font-family:var(--font-display);font-weight:700;font-size:15px;margin-bottom:8px;}
+.mgr-staff-task-row{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;border-bottom:1px solid var(--paper-line);}
+.mgr-staff-task-row:last-child{border-bottom:none;}
+.mgr-staff-task-row span:nth-child(2){flex:1;}
+.mgr-staff-task-row button{background:transparent;border:none;color:var(--slate-300);font-size:16px;padding:4px 8px;}
+.mgr-staff-task-row button:hover{color:var(--rust-600);}
+@media (max-width:640px){.mgr-staff-view{grid-template-columns:1fr;}}
 .task-col-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
 .task-color-dot{width:12px;height:12px;border-radius:3px;flex:none;}
 .task-col-name{font-family:var(--font-display);font-weight:600;font-size:15px;flex:1;}
@@ -935,6 +966,13 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-06', items:[
+    '【本日の作業のUI改善】調査の結果、「1作業=1カード」形式・CSV仕事量表示・ドラッグ&ドロップ(作業カード全体がドロップ対象)・個別解除・不整合修復機能は既に実装済みであることを確認しました。今回は、ドラッグ操作なしでも割り当てられる方法が無かった点を中心に、以下を追加しています',
+    '各作業カードに「＋ スタッフを追加」ボタンを追加。押すと、出勤中スタッフのチェックボックス一覧が開き、複数人をまとめて選択して割り当てられます。現在割り当て済みのスタッフは最初からチェックされています。既存の解除処理(data-unassign)や日々の割り当てデータ(day.assignments)はそのまま利用しており、新しい保存形式は作っていません',
+    'ドラッグ中の視覚的フィードバックを強化しました。スタッフを作業カードの上にドラッグすると「ここにスタッフをドロップ」という表示が出ます',
+    '「本日の作業」画面内に「作業別 / スタッフ別」の表示切替を追加しました。「スタッフ別」では、出勤中のスタッフごとに、その日の担当作業が一覧できます(こちらからも×で解除できます)。この切替は本日の作業画面の中だけの表示上の変更で、保存されるデータ構造は変更していません',
+    '実際にコードを実行するテストで、カード表示・複数選択での一括割り当て・×での解除・既存のドラッグ&ドロップが引き続き機能すること・未割当警告・CSV仕事量表示・作業別/スタッフ別の切替・保存データ形式(day.assignments)が変更されていないことを確認しました。既存の全回帰テスト(41スイート)にも影響はありません'
+  ]},
   { date:'2026-10-05', items:[
     '【kintone商品マスタ連携・第1段階】調査の結果、以前から「将来kintoneに接続する際の差し替えポイント」が用意されていたことを確認しました(実際の接続は未実装)。今回、kintoneの商品マスタを取得できる仕組みを追加しました',
     '重要な前提: 私(Claude)にはSupabaseへのデプロイ権限がないため、実際にkintoneへ接続する部分(Edge Function)は、ソースコード・SQL・セットアップ手順書をファイルとしてお渡しし、お客様側でデプロイしていただく方式としました',
@@ -1456,6 +1494,7 @@ var state = {
   logMgmtFilterTaskId: '',
   logMgmtFilterStaffId: '',
   logMgmtGroupOpen: {},
+  managerViewMode: 'byTask',
   kintoneProductSettings: null,
   kintoneSyncStatus: null,
   kintoneSyncing: false,
@@ -5334,11 +5373,37 @@ function renderManager(){
       csvVolumeHtml+
       subcatListHtml+
       '<button class="assign-all-btn" data-assign-all="'+t.id+'">出勤者'+present.length+'人を全員割り当て</button>'+
-      '<div class="task-col-body" style="margin-top:10px;">'+chips+'</div>'+
+      '<button class="assign-picker-btn" data-open-assign-picker="'+t.id+'">＋ スタッフを追加</button>'+
+      '<div class="task-col-body task-col-dropzone" style="margin-top:10px;">'+chips+'</div>'+
     '</div>';
   }).join('');
 
+  var viewModeTabsHtml = '<div class="mgr-view-tabs">'+
+    '<button type="button" class="mgr-view-tab'+(state.managerViewMode!=='byStaff'?' active':'')+'" data-manager-view="byTask">作業別</button>'+
+    '<button type="button" class="mgr-view-tab'+(state.managerViewMode==='byStaff'?' active':'')+'" data-manager-view="byStaff">スタッフ別</button>'+
+  '</div>';
   var newTaskForm = state.newTaskColIndex>=0 ? renderTaskForm() : '<button class="new-task-btn" id="addTaskBtn">+ 作業を追加</button>';
+  var boardBodyHtml;
+  if(state.managerViewMode==='byStaff'){
+    var byStaffHtml = present.map(function(s){
+      var assignedTaskIds = day.assignments[s.id]||[];
+      var taskRows = assignedTaskIds.map(function(tid){
+        var t = taskById(tid==='BREAK'?'BREAK':tid);
+        return '<div class="mgr-staff-task-row">'+
+          '<span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span>'+
+          '<span>'+esc(t.name)+'</span>'+
+          (tid!=='BREAK' ? '<button data-unassign="'+s.id+'|'+tid+'" title="'+esc(t.name)+'の割り当てを解除" aria-label="'+esc(t.name)+'の割り当てを解除">&times;</button>' : '')+
+        '</div>';
+      }).join('') || '<div class="pool-hint" style="margin:0;">本日の割り当てなし</div>';
+      return '<div class="mgr-staff-card">'+
+        '<div class="mgr-staff-card-name">'+esc(s.name)+'</div>'+
+        taskRows+
+      '</div>';
+    }).join('') || '<div class="empty-note">出勤中のスタッフがいません</div>';
+    boardBodyHtml = '<div class="mgr-staff-view">'+byStaffHtml+'</div>';
+  }else{
+    boardBodyHtml = '<div class="task-board">'+colsHtml+newTaskForm+'</div>';
+  }
 
   var logsSorted = (day.logs||[]).slice().sort(function(a,b){
     var ci = colorSortIndex(taskById(a.taskId).color) - colorSortIndex(taskById(b.taskId).color);
@@ -5424,7 +5489,8 @@ function renderManager(){
       '<div class="panel">'+
         '<div class="panel-title">'+esc(dateLabelFromStr(viewDate))+'の作業 <span class="count-badge">'+tasks.length+'件</span></div>'+
         '<div class="pool-hint" style="margin-bottom:8px;">作業登録画面でこの日付の作業として登録されたものが並びます。急ぎの作業はここから直接追加できます。</div>'+
-        '<div class="task-board">'+colsHtml+newTaskForm+'</div>'+
+        viewModeTabsHtml+
+        boardBodyHtml+
         '<div class="staff-pool">'+
           '<div class="pool-hint">出勤中スタッフ(ドラッグして作業に割り当て)</div>'+
           poolHtml+
@@ -5630,6 +5696,12 @@ function renderTaskForm(){
   '</div>';
 }
 function bindManager(){
+  document.querySelectorAll('[data-manager-view]').forEach(function(el){
+    el.addEventListener('click', function(){
+      state.managerViewMode = el.getAttribute('data-manager-view');
+      render();
+    });
+  });
   document.querySelectorAll('[data-checklist-ack]').forEach(function(el){
     el.addEventListener('click', async function(){
       var itemId = el.getAttribute('data-checklist-ack');
@@ -5773,6 +5845,13 @@ function bindManager(){
         day.assignments[s.id] = arr;
       });
       await saveDay(day);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-open-assign-picker]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var taskId = el.getAttribute('data-open-assign-picker');
+      state.modal = { kind:'assignStaffPicker', taskId: taskId };
       render();
     });
   });
@@ -8311,6 +8390,7 @@ function renderModal(){
   if(m.kind==='qtyBreakdown') return renderQtyBreakdownModal(m);
   if(m.kind==='addLog') return renderAddLogModal(m);
   if(m.kind==='vcPreview') return renderVcPreviewModal(m);
+  if(m.kind==='assignStaffPicker') return renderAssignStaffPickerModal(m);
   if(m.kind==='wvImportEdit') return renderWvImportEditModal(m);
   if(m.kind==='autoMapPreview') return renderAutoMapPreviewModal(m);
   if(m.kind==='pickSubcat') return renderPickSubcatModal(m);
@@ -8691,6 +8771,61 @@ function bindWvImportEditModal(m){
     });
   }
 }
+function renderAssignStaffPickerModal(m){
+  var day = managerActiveDay();
+  var present = presentStaffForDay(day);
+  var task = taskById(m.taskId);
+  var rows = present.map(function(s){
+    var isChecked = (day.assignments[s.id]||[]).indexOf(m.taskId)!==-1;
+    return '<label class="assign-picker-row">'+
+      '<input type="checkbox" data-picker-staff="'+s.id+'" '+(isChecked?'checked':'')+'>'+
+      '<span>'+esc(s.name)+'</span>'+
+    '</label>';
+  }).join('') || '<div class="empty-note">出勤中のスタッフがいません</div>';
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card" style="max-width:380px;text-align:left;">'+
+      '<div class="modal-task-name" style="text-align:center;margin-bottom:4px;">'+esc(task.name)+'にスタッフを割り当て</div>'+
+      '<div class="pool-hint" style="text-align:center;margin-bottom:14px;">チェックした人がこの作業の担当になります。チェックを外すと割り当てが解除されます。</div>'+
+      '<div class="assign-picker-list">'+rows+'</div>'+
+      '<div class="modal-actions" style="margin-top:16px;">'+
+        '<button class="modal-cancel" id="assignPickerCancelBtn">キャンセル</button>'+
+        '<button class="modal-confirm" id="assignPickerSaveBtn">割り当てる</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+function bindAssignStaffPickerModal(m){
+  var cancelBtn = document.getElementById('assignPickerCancelBtn');
+  if(cancelBtn) cancelBtn.addEventListener('click', function(){
+    state.modal = null;
+    render();
+  });
+  var saveBtn = document.getElementById('assignPickerSaveBtn');
+  if(saveBtn){
+    saveBtn.addEventListener('click', async function(){
+      var day = managerActiveDay();
+      var taskId = m.taskId;
+      var checkedIds = {};
+      document.querySelectorAll('[data-picker-staff]:checked').forEach(function(el){
+        checkedIds[el.getAttribute('data-picker-staff')] = true;
+      });
+      var present = presentStaffForDay(day);
+      var changedCount = 0;
+      present.forEach(function(s){
+        var arr = day.assignments[s.id] || [];
+        var hasIt = arr.indexOf(taskId)!==-1;
+        var shouldHaveIt = !!checkedIds[s.id];
+        if(shouldHaveIt && !hasIt){ arr.push(taskId); day.assignments[s.id] = arr; changedCount++; }
+        else if(!shouldHaveIt && hasIt){ day.assignments[s.id] = arr.filter(function(x){ return x!==taskId; }); changedCount++; }
+      });
+      await saveDay(day);
+      if(changedCount) await appendAuditLog({ action:'スタッフ割り当て(まとめて選択)', target: taskById(taskId).name, before:null, after: Object.keys(checkedIds).length+'名を割り当て' });
+      state.modal = null;
+      showToast(taskById(taskId).name+'への割り当てを更新しました');
+      render();
+    });
+  }
+}
 function renderVcPreviewModal(m){
   var vp = state.vcPreview;
   if(!vp) return '';
@@ -8895,6 +9030,7 @@ function bindModal(){
   if(m.kind==='qtyBreakdown'){ bindQtyBreakdownModal(m); return; }
   if(m.kind==='addLog'){ bindAddLogModal(m); return; }
   if(m.kind==='vcPreview'){ bindVcPreviewModal(m); return; }
+  if(m.kind==='assignStaffPicker'){ bindAssignStaffPickerModal(m); return; }
   if(m.kind==='wvImportEdit'){ bindWvImportEditModal(m); return; }
   if(m.kind==='autoMapPreview'){ bindAutoMapPreviewModal(m); return; }
   if(m.kind==='pickSubcat'){ bindPickSubcatModal(m); return; }

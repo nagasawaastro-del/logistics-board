@@ -935,6 +935,15 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-05', items:[
+    '【kintone商品マスタ連携・第1段階】調査の結果、以前から「将来kintoneに接続する際の差し替えポイント」が用意されていたことを確認しました(実際の接続は未実装)。今回、kintoneの商品マスタを取得できる仕組みを追加しました',
+    '重要な前提: 私(Claude)にはSupabaseへのデプロイ権限がないため、実際にkintoneへ接続する部分(Edge Function)は、ソースコード・SQL・セットアップ手順書をファイルとしてお渡しし、お客様側でデプロイしていただく方式としました',
+    '設定→「kintone連携設定」に、Edge Function URL・kintoneアプリID・フィールドコードを入力する画面を追加しました。管理者ログインが必須です(画面表示・実際の同期実行の両方で確認しています)',
+    'kintoneのAPIトークンは、ブラウザ側のコードには一切含まれません。Supabase Edge Function側の秘密情報(Secrets)としてのみ保管され、物流ボードからは「アプリID」「フィールドコード」といった秘密ではない設定値だけを送信します',
+    '「🔄 kintoneから商品マスタを取得」ボタンで、取得件数・保存件数・最終取得日時を確認できます。商品コードが空のレコードは対象外とし、kintoneのレコードIDを一意キーとして重複せず保存します(荷主が違えば同じ商品コードでも別レコードとして扱われます)',
+    '実際にコードを実行するテストで、未ログイン状態では画面自体・同期処理のどちらも実行できないこと、Edge Functionへ送信するデータにAPIトークンが含まれないこと、エラー時に分かりやすいメッセージが表示されることを確認しました(Edge Function自体の実際の動作は、私の環境では実行・デプロイできないため未検証です)。既存の全回帰テスト(40スイート)にも影響はありません',
+    '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
+  ]},
   { date:'2026-10-04', items:[
     '【調査結果】このアプリはURLルーティングを一切使用しておらず(単一のstate変数で画面切替)、「URLを直接入力してのアクセス」という概念自体が存在しないことを確認しました。ただし、その等価にあたる「state.roleを不正に管理者画面へ直接切り替える」操作に対する保護は、以前のセッションで実装済みの各画面自身の認証チェック(hasManagerSession())により、既に確保されていることを確認しました(今回変更していません)',
     '全画面共通のトップバー(実績入力・集計・モニター・カレンダーなど、ページ上部に既存で表示されていた共通部分)に、他の主要画面へ直接移動できるナビゲーションを追加しました。現在の画面はハイライト表示されます',
@@ -1447,6 +1456,10 @@ var state = {
   logMgmtFilterTaskId: '',
   logMgmtFilterStaffId: '',
   logMgmtGroupOpen: {},
+  kintoneProductSettings: null,
+  kintoneSyncStatus: null,
+  kintoneSyncing: false,
+  kintoneSyncError: '',
   staffingLoading: false,
   staffingPriorityOpen: false,
   nextTaskSuggestModal: null,
@@ -1859,6 +1872,11 @@ function fmtHM(ms){
 function fmtClock(iso){
   var d = new Date(iso);
   return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+function fmtDateTime(iso){
+  if(!iso) return '';
+  var d = new Date(iso);
+  return d.getFullYear()+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
 }
 
 /* ---------- storage ---------- */
@@ -4706,6 +4724,113 @@ function bindAdminHub(){
   else if(state.adminHubTab==='csvImport') bindCsvImportPanel();
   else bindManager();
 }
+function renderKintoneProductSettingsPanel(){
+  ensureManagerSessionChecked();
+  if(!hasManagerSession()){
+    return renderManagerLoginForm('🔌 kintone連携設定', 'この画面は商品マスタの取得設定を扱います。閲覧・操作には管理者アカウントでのログインが必要です。');
+  }
+  if(state.kintoneProductSettings===null){
+    loadKintoneProductSettings().then(function(s){ state.kintoneProductSettings = s; return loadKintoneSyncStatus(); }).then(function(st){ state.kintoneSyncStatus = st; render(); });
+    return '<div class="empty-note">読み込み中...</div>';
+  }
+  var s = state.kintoneProductSettings;
+  var fc = s.fieldCodes || {};
+  var status = state.kintoneSyncStatus;
+  var syncing = state.kintoneSyncing;
+
+  var statusHtml = '';
+  if(syncing){
+    statusHtml = '<div class="empty-note">kintoneから取得しています。しばらくお待ちください...</div>';
+  }else if(state.kintoneSyncError){
+    statusHtml = '<div class="vc-warning-box">⚠️ '+esc(state.kintoneSyncError)+'</div>';
+  }else if(status){
+    statusHtml = '<div class="vc-import-status">'+
+      'kintone商品マスタ取得完了<br>'+
+      '取得件数: '+formatNum(status.fetchedCount)+'件 ・ 保存件数: '+formatNum(status.savedCount)+'件'+
+      (status.skippedNoProductCode ? ' ・ 商品コード無しのためスキップ: '+formatNum(status.skippedNoProductCode)+'件' : '')+'<br>'+
+      '最終取得日時: '+fmtDateTime(status.fetchedAt)+
+    '</div>';
+  }
+
+  return '<div class="mgr-wrap"><div class="panel">'+
+    '<div class="panel-title">🔌 kintone連携設定(商品マスタ)</div>'+
+    '<div class="pool-hint" style="margin-bottom:14px;">kintoneの商品マスタを取得するための設定です。APIトークンなどの秘密情報はここには入力しません(Supabase側で安全に管理します)。設定方法は「kintone連携_セットアップ手順」をご覧ください。</div>'+
+
+    '<label style="font-size:12px;font-weight:700;display:block;margin-bottom:4px;">Edge Function URL</label>'+
+    '<div class="pool-hint" style="margin-bottom:4px;">Supabaseにデプロイしたsync-product-master関数のURLです。</div>'+
+    '<input type="text" id="kintoneEdgeUrlInput" value="'+esc(s.edgeFunctionUrl||'')+'" placeholder="https://xxxxx.supabase.co/functions/v1/sync-product-master" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;margin-bottom:12px;">'+
+
+    '<label style="font-size:12px;font-weight:700;display:block;margin-bottom:4px;">kintoneアプリID</label>'+
+    '<div class="pool-hint" style="margin-bottom:4px;">商品マスタアプリを開いたときのURLに含まれる数字です(例: https://会社名.cybozu.com/k/123/ なら「123」)。</div>'+
+    '<input type="text" id="kintoneAppIdInput" value="'+esc(s.kintoneAppId||'')+'" placeholder="例: 123" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;margin-bottom:14px;">'+
+
+    '<div class="panel-title" style="font-size:14px;">フィールドコードの対応</div>'+
+    '<div class="pool-hint" style="margin-bottom:8px;">kintoneのアプリ設定画面で、各項目をクリックすると「フィールドコード」が確認できます。見た目の項目名とは異なる場合があるので、必ずご確認ください。</div>'+
+
+    kintoneFieldRow('商品コード(必須)', 'kintoneFieldProductCode', fc.productCode, '例: 商品コード')+
+    kintoneFieldRow('商品名', 'kintoneFieldProductName', fc.productName, '例: 商品名')+
+    kintoneFieldRow('入数', 'kintoneFieldPackQty', fc.packQty, '例: 入数')+
+    kintoneFieldRow('才数', 'kintoneFieldCubicVolume', fc.cubicVolume, '例: 才数')+
+    kintoneFieldRow('荷主', 'kintoneFieldCustomerName', fc.customerName, '例: 荷主')+
+
+    '<button type="button" class="add-btn" id="kintoneSettingsSaveBtn" style="margin-top:6px;">設定を保存</button>'+
+
+    '<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--paper-line);">'+
+      '<button type="button" class="add-btn" id="kintoneSyncBtn" '+(syncing?'disabled':'')+'>🔄 kintoneから商品マスタを取得</button>'+
+      '<div style="margin-top:10px;">'+statusHtml+'</div>'+
+    '</div>'+
+  '</div></div>';
+}
+function kintoneFieldRow(label, id, value, placeholder){
+  return '<div style="margin-bottom:8px;">'+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:2px;">'+esc(label)+'</label>'+
+    '<input type="text" id="'+id+'" value="'+esc(value||'')+'" placeholder="'+esc(placeholder)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:7px;">'+
+  '</div>';
+}
+function bindKintoneProductSettingsPanel(){
+  if(!hasManagerSession()) return;
+  var saveBtn = document.getElementById('kintoneSettingsSaveBtn');
+  if(saveBtn){
+    saveBtn.addEventListener('click', async function(){
+      var settings = {
+        edgeFunctionUrl: document.getElementById('kintoneEdgeUrlInput').value.trim(),
+        kintoneAppId: document.getElementById('kintoneAppIdInput').value.trim(),
+        fieldCodes: {
+          productCode: document.getElementById('kintoneFieldProductCode').value.trim(),
+          productName: document.getElementById('kintoneFieldProductName').value.trim(),
+          packQty: document.getElementById('kintoneFieldPackQty').value.trim(),
+          cubicVolume: document.getElementById('kintoneFieldCubicVolume').value.trim(),
+          customerName: document.getElementById('kintoneFieldCustomerName').value.trim()
+        }
+      };
+      state.kintoneProductSettings = settings;
+      await saveKintoneProductSettings(settings);
+      await appendAuditLog({ action:'kintone連携設定を保存', target:'商品マスタ', before:null, after: 'アプリID:'+settings.kintoneAppId });
+      showToast('設定を保存しました');
+      render();
+    });
+  }
+  var syncBtn = document.getElementById('kintoneSyncBtn');
+  if(syncBtn){
+    syncBtn.addEventListener('click', async function(){
+      state.kintoneSyncing = true;
+      state.kintoneSyncError = '';
+      render();
+      var result = await syncProductMasterFromKintone(state.kintoneProductSettings);
+      state.kintoneSyncing = false;
+      if(result.ok){
+        state.kintoneSyncStatus = result.status;
+        state.kintoneSyncError = '';
+        await appendAuditLog({ action:'kintone商品マスタ同期', target:'product_master', before:null, after: '取得'+result.status.fetchedCount+'件・保存'+result.status.savedCount+'件' });
+        showToast('商品マスタを取得しました('+result.status.savedCount+'件)');
+      }else{
+        state.kintoneSyncError = result.error;
+        showToast('取得に失敗しました');
+      }
+      render();
+    });
+  }
+}
 function renderCustomerMappingPanel(){
   if(state.customerTaskMapping===null){
     loadCustomerTaskMapping().then(function(d){ state.customerTaskMapping = d; render(); });
@@ -5417,6 +5542,7 @@ var SETTINGS_HUB_TABS = [
   { key:'productivity', label:'生産性設定', icon:'📈' },
   { key:'pricing', label:'単価・人件費設定', icon:'💴' },
   { key:'customerMapping', label:'得意先・作業枠マスター', icon:'🔗' },
+  { key:'kintoneProduct', label:'kintone連携設定', icon:'🔌' },
   { key:'history', label:'操作履歴', icon:'📜' },
   { key:'system', label:'システム設定', icon:'🔧' }
 ];
@@ -5440,6 +5566,8 @@ function renderSettingsHub(){
     body = renderHistory();
   }else if(state.settingsHubTab==='pricing'){
     body = renderUnitPricePanel();
+  }else if(state.settingsHubTab==='kintoneProduct'){
+    body = renderKintoneProductSettingsPanel();
   }else{
     var panels = renderSettingsPanels();
     var content;
@@ -5476,6 +5604,7 @@ function bindSettingsHub(){
   else if(state.settingsHubTab==='staff') bindStaffSettingsPanel();
   else if(state.settingsHubTab==='customerMapping') bindCustomerMappingPanel();
   else if(state.settingsHubTab==='pricing') bindUnitPricePanel();
+  else if(state.settingsHubTab==='kintoneProduct') bindKintoneProductSettingsPanel();
   else bindSettings();
 }
 
@@ -7451,6 +7580,69 @@ async function fetchProductMasterFromKintone(productCodes){
   // 例: 「商品コード in (…)」のようなクエリで1回のAPIコールにまとめる想定。
   // 今回はkintone連携を実装しないため、常に空を返す。
   return {}; // { [productCode]: {caseQty, saijou, ...} }
+}
+/* ---------- kintone商品マスタ同期(第1段階: 取得して保存するところまで) ----------
+   設定は管理者がUIから入力(アプリID・フィールドコード・Edge Function URL)。
+   APIトークン等の秘密情報はSupabase Edge Function側(Secrets)にのみ保持し、
+   ブラウザ側のコードには一切含めない。
+   この関数群は、上のfetchProductMasterFromKintone(CSV照合用の将来のスタブ)とは
+   独立している。CSVとの照合処理(第2段階)は今回実装しない。 */
+async function loadKintoneProductSettings(){
+  try{
+    var r = await window.storage.get('kintone-product-settings', true);
+    return r && r.value ? JSON.parse(r.value) : {
+      edgeFunctionUrl:'', kintoneAppId:'',
+      fieldCodes:{ productCode:'', productName:'', packQty:'', cubicVolume:'', customerName:'' }
+    };
+  }catch(e){
+    return { edgeFunctionUrl:'', kintoneAppId:'', fieldCodes:{ productCode:'', productName:'', packQty:'', cubicVolume:'', customerName:'' } };
+  }
+}
+async function saveKintoneProductSettings(settings){
+  try{ await window.storage.set('kintone-product-settings', JSON.stringify(settings), true); }catch(e){}
+}
+async function loadKintoneSyncStatus(){
+  try{
+    var r = await window.storage.get('kintone-product-sync-status', true);
+    return r && r.value ? JSON.parse(r.value) : null;
+  }catch(e){ return null; }
+}
+async function saveKintoneSyncStatus(status){
+  try{ await window.storage.set('kintone-product-sync-status', JSON.stringify(status), true); }catch(e){}
+}
+async function syncProductMasterFromKintone(settings){
+  if(!hasManagerSession()) return { ok:false, error:'管理者としてログインしてください。' };
+  if(!settings.edgeFunctionUrl) return { ok:false, error:'Edge Function URLが設定されていません。' };
+  if(!settings.kintoneAppId) return { ok:false, error:'kintoneアプリIDが設定されていません。' };
+  if(!settings.fieldCodes || !settings.fieldCodes.productCode) return { ok:false, error:'商品コードのフィールドコードが設定されていません。' };
+  var cfg = window.SUPABASE_CONFIG || {};
+  var accessToken = state.managerSession && state.managerSession.access_token;
+  if(!accessToken) return { ok:false, error:'ログイン情報が確認できませんでした。再度ログインしてください。' };
+  try{
+    var res = await fetch(settings.edgeFunctionUrl, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        kintoneAppId: settings.kintoneAppId,
+        fieldCodes: settings.fieldCodes,
+        supabaseUrl: cfg.url,
+        supabaseAnonKey: cfg.anonKey,
+        accessToken: accessToken
+      })
+    });
+    var data = await res.json().catch(function(){ return null; });
+    if(!res.ok || !data || !data.ok){
+      return { ok:false, error: (data && data.error) ? data.error : ('接続エラーが発生しました(status '+res.status+')。') };
+    }
+    var status = {
+      fetchedCount: data.fetchedCount, savedCount: data.savedCount,
+      skippedNoProductCode: data.skippedNoProductCode, fetchedAt: data.fetchedAt
+    };
+    await saveKintoneSyncStatus(status);
+    return { ok:true, status: status };
+  }catch(e){
+    return { ok:false, error:'Edge Functionへの接続に失敗しました。URLの設定をご確認ください。' };
+  }
 }
 async function getProductMasterInfoBatch(productCodes){
   var uncached = productCodes.filter(function(code){ return !(code in productMasterCache); });

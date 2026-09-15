@@ -966,6 +966,16 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-09', items:[
+    '【新機能】管理者→人員配置画面に「次の配置候補(CSV取込起点)」を追加しました。CSVを取り込むたびに、その取込で新しく増えた作業量(重複除外後の新規分)をもとに、「次に誰をこの作業へ配置すべきか」を自動で1件提案します',
+    '完全自動配置ではなく、あくまで「提案 → 管理者が確認して確定」までです。確定するまでスタッフの配置(day.assignments)は変わりません',
+    '既に作業中のスタッフは、より効率が良さそうに見えても提案の対象にしません(勝手に動かさない)。出勤中で現在手待ち・未配置のスタッフだけが候補になります',
+    '生産性は、個人の実績が5日分以上あればその人の実績を、無ければ作業全体の標準生産性を使います(既存のPRODUCTIVITY_MIN_SAMPLES基準をそのまま利用)。同じ人への集中を避けるため、本日既に多く働いている人はわずかに優先度を下げます',
+    '繰り返し作業(日ごとに別IDが振られる作業)についても、前回改修した生産性の統合キー(テンプレートID)の仕組みをそのまま利用しており、正しく過去の実績に基づいた生産性を参照します',
+    '確定した配置は、既存のday.assignments構造にそのまま追加されます。新しいデータ構造・二重管理は一切作っていません。既存の一括配置提案(computeStaffingSuggestion)機能はそのまま残しており、今回の新機能とは独立して動作します',
+    '実際にコードを実行するテストで、CSV確定→提案生成→画面表示→確定→day.assignmentsへの反映という一連の流れ、既に作業中のスタッフが提案対象から除外されること、2回目のCSV取込で別の候補者が提案されること、生産性データ不足時に候補者なしと正しく判定されることを確認しました',
+    '【重要】引き続きテスト環境の制約により、今回変更した機能を中心に新規テストを作成して検証しています。今回変更していない機能(トップ画面・実績入力・モニター・CSV取込処理自体・既存の一括配置提案等)は、コードを変更していませんが、網羅的な回帰テストの再実行はできていません'
+  ]},
   { date:'2026-10-08', items:[
     '【重要な不具合修正】生産性画面で、同じ繰り返し作業(例:「ピッキング」)が何行にも重複表示される不具合を修正しました',
     '原因: 繰り返し作業は毎日新しいID(taskId)でインスタンスが生成される仕組みでしたが、生産性マスタはそのtaskId単位でデータを蓄積していたため、日ごとに別々のエントリになっていました',
@@ -1518,6 +1528,7 @@ var state = {
   kintoneSyncStatus: null,
   kintoneSyncing: false,
   kintoneSyncError: '',
+  pendingAssignmentSuggestions: null,
   staffingLoading: false,
   staffingPriorityOpen: false,
   nextTaskSuggestModal: null,
@@ -2726,6 +2737,84 @@ function suggestNextTaskFor(staffId, day, workVolume, taskPriority, productivity
   });
   return scored[0] || null;
 }
+/* CSV取込で新たに増えた作業量をもとに、「次に誰をこの作業へ配置すべきか」を1件提案する。
+   完全自動配置ではなく、あくまで提案(管理者が確定するまでday.assignmentsは変更しない)。
+   既に作業中のスタッフは対象にしない(勝手に動かさない)。
+   同一人物への集中を避けるため、本日の実績作業時間が少ない人を優先する。 */
+async function loadPendingAssignmentSuggestions(dateStr){
+  try{
+    var r = await window.storage.get('pending-assignment-suggestions:'+dateStr, true);
+    return r && r.value ? JSON.parse(r.value) : {};
+  }catch(e){ return {}; }
+}
+async function savePendingAssignmentSuggestions(dateStr, data){
+  try{ await window.storage.set('pending-assignment-suggestions:'+dateStr, JSON.stringify(data), true); }catch(e){}
+}
+/* CSV取込確定処理から呼ばれる共通フック。取込先が「今日」の場合のみ、
+   新しく増えた作業量をもとに次の配置提案を作り、保存する。
+   過去日への取込は「今から誰を配置するか」の対象外のため提案を作らない。 */
+async function recordNextAssignmentSuggestion(taskId, newQty, targetDate){
+  if(targetDate!==todayStr()) return;
+  if(!state.productivityMaster) state.productivityMaster = await loadProductivityMaster();
+  var suggestion = suggestNextAssignmentForNewVolume(taskId, newQty, state.day, state.productivityMaster, new Date(), state.backlog, state.roster);
+  if(!suggestion) return;
+  suggestion.createdAt = new Date().toISOString();
+  if(!state.pendingAssignmentSuggestions) state.pendingAssignmentSuggestions = await loadPendingAssignmentSuggestions(targetDate);
+  state.pendingAssignmentSuggestions[taskId] = suggestion;
+  await savePendingAssignmentSuggestions(targetDate, state.pendingAssignmentSuggestions);
+}
+function suggestNextAssignmentForNewVolume(taskId, newQty, day, productivityMaster, nowDate, backlog, roster){
+  var task = backlog.find(function(t){ return t.id===taskId; });
+  if(!task || task.archived===true || !newQty || newQty<=0) return null;
+
+  var taskRate = productivityRateFor(productivityMaster, taskId, null);
+  var neededHours = taskRate.rate ? (newQty/taskRate.rate) : null; // 生産性不明なら推測値を作らない(nullのまま)
+
+  // 既に作業中のスタッフは対象外。出勤中で、現在アクティブな作業が無い人だけを候補にする。
+  var candidateIds = roster.filter(function(s){
+    if(s.archived) return false;
+    if(!day.attendance[s.id]) return false;
+    var activeLog = (day.logs||[]).find(function(l){ return l.staffId===s.id && l.end===null; });
+    return !activeLog;
+  }).map(function(s){ return s.id; });
+  if(!candidateIds.length) return { taskId:taskId, newQty:newQty, unit:task.unit, neededHours:neededHours, taskRate:taskRate.rate, best:null, runnerUp:null, noCandidateReason:'現在、配置可能な(手待ち・未配置の)スタッフがいません' };
+
+  var agg = aggregateDays([day]);
+  var workedMinutesToday = {};
+  roster.forEach(function(s){
+    var info = agg.perStaff[s.id];
+    workedMinutesToday[s.id] = info ? Math.max(0, (info.ms - (info.breakMs||0)))/60000 : 0;
+  });
+  var STANDARD_WORKDAY_MIN = 480;
+
+  var scored = candidateIds.map(function(sid){
+    var remainMin = staffRemainingMinutes(sid, day, nowDate, state.shiftSettings);
+    var prod = productivityRateFor(productivityMaster, taskId, sid);
+    var loadPenalty = Math.min(0.5, (workedMinutesToday[sid]||0)/STANDARD_WORKDAY_MIN); // 本日既に多く働いている人ほど少し割り引く(公平性)
+    var score = (prod.rate||0) * (1 - loadPenalty);
+    return { staffId: sid, rate: prod.rate, basis: prod.basis, sampleCount: prod.sampleCount, remainMin: remainMin, workedMinutesToday: workedMinutesToday[sid]||0, score: score };
+  }).filter(function(c){ return c.remainMin>0; })
+    .sort(function(a,b){
+      // 生産性が分かる人を優先。分かる人同士は公平性込みのスコアで比較。両方不明ならより手待ち時間が長い人を優先。
+      var aKnown = a.rate!==null, bKnown = b.rate!==null;
+      if(aKnown && !bKnown) return -1;
+      if(!aKnown && bKnown) return 1;
+      if(aKnown && bKnown) return b.score - a.score;
+      return a.workedMinutesToday - b.workedMinutesToday;
+    });
+
+  var best = scored[0] || null;
+  var runnerUp = scored[1] || null;
+  function toResult(c){
+    if(!c) return null;
+    return {
+      staffId: c.staffId, name: staffById(c.staffId).name, rate: c.rate, basis: c.basis, sampleCount: c.sampleCount,
+      workedMinutesToday: Math.round(c.workedMinutesToday)
+    };
+  }
+  return { taskId:taskId, taskName: task.name, newQty:newQty, unit:task.unit, neededHours:neededHours, taskRate:taskRate.rate,
+    best: toResult(best), runnerUp: toResult(runnerUp), noCandidateReason:null };
+}
 async function loadWorkVolumeConfig(){
   try{
     var r = await window.storage.get('work-volume-config', true);
@@ -3745,10 +3834,47 @@ function renderStaffing(){
     loadStaffingSuggestion(dateStr).then(function(d){ state.staffingSuggestion = d; state.staffingSuggestionLoaded = true; render(); });
     return '<div class="mgr-wrap"><div class="empty-note">読み込み中...</div></div>';
   }
+  if(state.pendingAssignmentSuggestions===null){
+    loadPendingAssignmentSuggestions(dateStr).then(function(d){ state.pendingAssignmentSuggestions = d; render(); });
+    return '<div class="mgr-wrap"><div class="empty-note">読み込み中...</div></div>';
+  }
   var todayTasks = tasksForDate(dateStr).filter(function(t){
     var wvTotals = wvTotalsForTask(state.workVolume||emptyWorkVolume(), t.id);
     return wvTotals && wvTotals.totalQty>0;
   });
+
+  // ---- CSV取込起点の「次の配置候補」。CSVを取り込むたびに1件ずつここに積み上がる。
+  //      既に配置確定した分・作業に紐付かなくなった分は表示しない。 ----
+  var pendingKeys = Object.keys(state.pendingAssignmentSuggestions||{});
+  var pendingRows = pendingKeys.map(function(taskId){
+    var sug = state.pendingAssignmentSuggestions[taskId];
+    var t = taskById(taskId);
+    if(!t || t.archived===true) return ''; // 作業が無効化されていれば表示しない(データは残るが無視)
+    var neededHoursText = sug.neededHours!==null ? sug.neededHours.toFixed(1)+'人時' : '生産性データ不足のため目安を計算できません';
+    var body;
+    if(sug.best){
+      var basisLabel = sug.best.basis==='individual' ? 'この作業での個人生産性' : (sug.best.basis==='taskAverage' ? '作業全体の標準生産性' : '生産性不明');
+      var rateText = sug.best.rate!==null ? sug.best.rate.toFixed(1)+esc(sug.unit)+'/人時' : '不明';
+      body = '<div class="checklist-item-action" style="font-size:15px;font-weight:700;color:var(--amber-500);margin:8px 0 4px;">推奨: '+esc(sug.best.name)+'さん</div>'+
+        '<div class="checklist-item-action">理由: '+basisLabel+' '+rateText+'・現在手待ち・本日の作業時間'+sug.best.workedMinutesToday+'分'+(sug.best.sampleCount?'(サンプル'+sug.best.sampleCount+'日)':'')+'</div>'+
+        (sug.runnerUp ? '<div class="checklist-item-action" style="color:var(--slate-500);">次点: '+esc(sug.runnerUp.name)+'さん</div>' : '')+
+        '<button type="button" class="add-btn" data-confirm-next-assignment="'+esc(taskId)+'|'+esc(sug.best.staffId)+'" style="margin-top:8px;">この配置を確定('+esc(sug.best.name)+'さんを'+esc(t.name)+'へ)</button> '+
+        '<button type="button" class="vc-manage-toggle-btn" data-dismiss-next-assignment="'+esc(taskId)+'">この提案を消す</button>';
+    }else{
+      body = '<div class="checklist-item-action">'+esc(sug.noCandidateReason||'現在、配置できる候補者がいません')+'</div>'+
+        '<button type="button" class="vc-manage-toggle-btn" data-dismiss-next-assignment="'+esc(taskId)+'" style="margin-top:6px;">この提案を消す</button>';
+    }
+    return '<div class="checklist-item">'+
+      '<div class="checklist-item-title"><span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span> '+esc(t.name)+' — 新規作業量 '+formatNum(sug.newQty)+esc(sug.unit)+'</div>'+
+      '<div class="checklist-item-action">必要人時の目安: '+neededHoursText+'</div>'+
+      body+
+    '</div>';
+  }).join('');
+  var pendingPanelHtml = '<div class="panel" style="margin-bottom:14px;">'+
+    '<div class="panel-title">🆕 次の配置候補(CSV取込起点)</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">CSVを取り込むたびに、新しく増えた作業量から「次に誰を配置すべきか」を提案します。既に作業中のスタッフを勝手に動かすことはありません。確定するまで配置は変更されません。</div>'+
+    (pendingRows || '<div class="empty-note">現在、新しい提案はありません(CSVを取り込むと、ここに表示されます)</div>')+
+  '</div>';
 
   var priorityRows = todayTasks.map(function(t){
     var p = taskPriorityFor(t.id);
@@ -3795,6 +3921,7 @@ function renderStaffing(){
   }
 
   return '<div class="mgr-wrap">'+
+    pendingPanelHtml+
     '<div class="panel">'+
       '<div class="panel-title">👥 人員配置</div>'+
       '<div class="pool-hint" style="margin-bottom:10px;">締切・優先順位・作業者ごとの生産性実績から、配置案を自動作成します。作成された案は確認のうえ「確定」してください。</div>'+
@@ -3810,6 +3937,31 @@ function renderStaffing(){
   '</div>';
 }
 function bindStaffing(){
+  document.querySelectorAll('[data-confirm-next-assignment]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var parts = el.getAttribute('data-confirm-next-assignment').split('|');
+      var taskId = parts[0], staffId = parts[1];
+      var day = state.day;
+      var arr = day.assignments[staffId] || [];
+      if(arr.indexOf(taskId)===-1) arr.push(taskId);
+      day.assignments[staffId] = arr;
+      await saveDay(day);
+      var sug = state.pendingAssignmentSuggestions[taskId];
+      delete state.pendingAssignmentSuggestions[taskId];
+      await savePendingAssignmentSuggestions(todayStr(), state.pendingAssignmentSuggestions);
+      await appendAuditLog({ action:'次の配置候補を確定', target: taskById(taskId).name, before:null, after: staffById(staffId).name+'さんを配置(新規作業量'+(sug?formatNum(sug.newQty)+sug.unit:'')+')' });
+      showToast(staffById(staffId).name+'さんを'+taskById(taskId).name+'へ配置しました');
+      render();
+    });
+  });
+  document.querySelectorAll('[data-dismiss-next-assignment]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var taskId = el.getAttribute('data-dismiss-next-assignment');
+      delete state.pendingAssignmentSuggestions[taskId];
+      await savePendingAssignmentSuggestions(todayStr(), state.pendingAssignmentSuggestions);
+      render();
+    });
+  });
   var staffingPriorityDetails = document.getElementById('staffingPriorityDetails');
   if(staffingPriorityDetails){
     staffingPriorityDetails.addEventListener('toggle', function(){ state.staffingPriorityOpen = staffingPriorityDetails.open; });
@@ -8821,6 +8973,11 @@ function bindAutoMapPreviewModal(m){
       }
       var skippedCount = (d.skippedShipperNos||[]).length;
       await appendAuditLog({ action:'CSV自動振り分け取込確定', target: d.fileName, before:null, after: d.taskPlans.length+'作業枠に振り分け、未紐付け'+d.unmapped.length+'件('+d.targetDate+')'+(skippedCount?'、'+skippedCount+'件スキップ(既取込)':'') });
+      if(saveOk){
+        for(var j=0;j<d.taskPlans.length;j++){
+          if(d.taskPlans[j].totalQty>0) await recordNextAssignmentSuggestion(d.taskPlans[j].taskId, d.taskPlans[j].totalQty, d.targetDate);
+        }
+      }
       var msg = saveOk
         ? d.taskPlans.length+'件の作業枠に取り込みました'+(d.unmapped.length?'(未紐付け'+d.unmapped.length+'件は取り込まれていません)':'')+(skippedCount?'。'+skippedCount+'件は既に取込済みのためスキップしました':'')
         : '保存に失敗した可能性があります。本日の確認事項をご確認ください。';
@@ -9072,6 +9229,7 @@ function bindVcPreviewModal(m){
         await registerShipperNos(vp.shipperNos, vp.targetDate, vp.taskId);
       }
       await appendAuditLog({ action:'CSV作業量取込確定', target: taskById(vp.taskId).name+' / '+vp.fileName, before:null, after: vp.primaryCount+primaryLabel+'、'+finalBatches.length+'件のバッチ('+vp.targetDate+')'+(skippedCount?'、'+skippedCount+'件スキップ(既取込)':'') });
+      if(saveOk && vp.totalQty>0) await recordNextAssignmentSuggestion(vp.taskId, vp.totalQty, vp.targetDate);
       var msg = saveOk
         ? '取込を確定しました('+vp.primaryCount+primaryLabel+' / '+vp.lineCount+'明細 / '+formatNum(vp.totalQty)+'ピース)'+(skippedCount?'。'+skippedCount+'件は既に取込済みのためスキップしました':'')+(finalBatches.length?'。'+finalBatches.length+'件のバッチを作成しました':'')
         : '保存に失敗した可能性があります。本日の確認事項をご確認ください。';

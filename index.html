@@ -966,6 +966,16 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-08', items:[
+    '【重要な不具合修正】生産性画面で、同じ繰り返し作業(例:「ピッキング」)が何行にも重複表示される不具合を修正しました',
+    '原因: 繰り返し作業は毎日新しいID(taskId)でインスタンスが生成される仕組みでしたが、生産性マスタはそのtaskId単位でデータを蓄積していたため、日ごとに別々のエントリになっていました',
+    '修正: 繰り返し作業の生産性は、日別のtaskIdではなく、テンプレートID(fromTemplate、毎日変わらない安定した識別子)を基準に集計・表示するようにしました。単発作業(繰り返さない作業)は、従来通り自身のIDのまま扱われ、作業名だけで無関係な作業同士が統合されることはありません',
+    '個人別生産性・内訳別生産性も、日をまたいだ実績が正しく合算されるようになりました(例:田中さんが火曜200個、水曜180個ピッキングした場合、「田中さん:190個/h」のように1つにまとまります)',
+    '既存の生産性データ(過去に日別taskIdで蓄積されていたもの)は、画面を開いた際に安全に自動移行されます。過去の実績データ・実績ログ・CSV取込履歴は一切削除・変更していません',
+    '人員配置は、以前から作業マスタに存在する有効な作業のみを対象にしていたため、変更していません。ただし、生産性の参照先が統合されたことで、今日新しく生成されたtaskIdに対しても、過去の(別taskIdだった)実績を踏まえた生産性が正しく反映されるようになりました',
+    '実際にコードを実行するテストで、指示書のご説明通りの例(3日分のピッキングが1行に統合、個人別・内訳別生産性の正しい合算、単発作業は統合されないこと、既存データの自動移行、人員配置への正しい反映)を確認しました',
+    '【重要】前回に引き続き、テスト環境の制約により、今回変更した生産性関連の機能を中心に新規テストを作成して検証しています。今回変更していない機能(トップ画面・実績入力・モニター・CSV取込等)については、コード自体は変更していませんが、網羅的な回帰テストの再実行はできていません'
+  ]},
   { date:'2026-10-07', items:[
     '生産性の集計・表示対象を「現在の作業マスタに存在する、有効な(アーカイブされていない)作業」だけに限定しました。作業マスタに存在しないtaskId(削除・アーカイブ済みなど)は、生産性データへ新規登録・更新されなくなりました',
     '過去の実績データ(実績入力の記録そのもの)は一切削除・変更していません。あくまで「生産性の集計・表示・人員配置での利用対象から外す」という扱いです',
@@ -2162,11 +2172,73 @@ function taskPriorityFor(taskId){
 async function loadProductivityMaster(){
   try{
     var r = await window.storage.get('productivity-master', true);
-    return r && r.value ? JSON.parse(r.value) : {};
+    var data = r && r.value ? JSON.parse(r.value) : {};
+    var migrated = migrateProductivityMasterToTemplateKeys(data);
+    if(migrated.changed && !state.dataLoadUncertain) await saveProductivityMaster(migrated.master);
+    return migrated.master;
   }catch(e){ return {}; }
 }
 async function saveProductivityMaster(data){
   try{ await window.storage.set('productivity-master', JSON.stringify(data), true); }catch(e){}
+}
+/* 生産性の集計キー。繰り返し作業(テンプレート由来)は、日ごとに異なるtaskIdが
+   振られるため、テンプレートID(fromTemplate)を安定した統合キーとして使う。
+   単発作業(fromTemplateなし)は、自身のtaskIdをそのまま使う(名前だけでは統合しない)。 */
+function productivityKeyForTask(task){
+  if(!task) return null;
+  return task.fromTemplate || task.id;
+}
+/* 既存の生産性マスタは、日別taskIdをキーとして蓄積されている可能性がある
+   (繰り返し作業を導入する前からのデータ、または今回の統合前のデータ)。
+   読み込み時に、繰り返し作業由来のエントリを安定したテンプレートキーへ
+   合算して移行する。過去実績(day.logs)やCSV取込履歴には一切触れない。
+   作業マスタ・テンプレートのどちらにも存在しないtaskId(削除済み等)は、
+   統合先が分からないためそのまま残す(表示側で除外される)。 */
+function migrateProductivityMasterToTemplateKeys(master){
+  var changed = false;
+  var result = {};
+  function mergeInto(targetKey, entry, unitFallback){
+    if(!result[targetKey]) result[targetKey] = { unit: entry.unit||unitFallback||'個', taskAverage:{totalQty:0,totalHours:0,sampleCount:0}, byStaff:{}, bySubcat:{} };
+    var t = result[targetKey];
+    if(entry.taskAverage){
+      t.taskAverage.totalQty += entry.taskAverage.totalQty||0;
+      t.taskAverage.totalHours += entry.taskAverage.totalHours||0;
+      t.taskAverage.sampleCount += entry.taskAverage.sampleCount||0;
+    }
+    Object.keys(entry.byStaff||{}).forEach(function(sid){
+      var s = entry.byStaff[sid];
+      if(!t.byStaff[sid]) t.byStaff[sid] = { totalQty:0, totalHours:0, sampleCount:0 };
+      t.byStaff[sid].totalQty += s.totalQty||0;
+      t.byStaff[sid].totalHours += s.totalHours||0;
+      t.byStaff[sid].sampleCount += s.sampleCount||0;
+    });
+    Object.keys(entry.bySubcat||{}).forEach(function(scName){
+      var sc = entry.bySubcat[scName];
+      if(!t.bySubcat[scName]) t.bySubcat[scName] = { unit: sc.unit||'個', taskAverage:{totalQty:0,totalHours:0,sampleCount:0} };
+      t.bySubcat[scName].unit = sc.unit || t.bySubcat[scName].unit;
+      t.bySubcat[scName].taskAverage.totalQty += (sc.taskAverage&&sc.taskAverage.totalQty)||0;
+      t.bySubcat[scName].taskAverage.totalHours += (sc.taskAverage&&sc.taskAverage.totalHours)||0;
+      t.bySubcat[scName].taskAverage.sampleCount += (sc.taskAverage&&sc.taskAverage.sampleCount)||0;
+    });
+  }
+  Object.keys(master).forEach(function(tid){
+    var entry = master[tid];
+    var task = state.backlog.find(function(bt){ return bt.id===tid; });
+    var key;
+    if(task){
+      key = productivityKeyForTask(task);
+    }else{
+      // backlogに実インスタンスが残っていない場合でも、テンプレート自体が
+      // 現存していれば(過去に削除された日別インスタンス分のデータ)、
+      // テンプレートキーへ合流させる。tidそのものがテンプレートIDの
+      // 可能性(前回のマイグレーション後の状態)も考慮する。
+      var tmplDirect = (state.templates||[]).find(function(t){ return t.id===tid; });
+      key = tmplDirect ? tid : tid; // テンプレート自体 or 由来不明はキー変更なし(そのまま保持、表示側で除外判定)
+    }
+    if(key!==tid) changed = true;
+    mergeInto(key, entry);
+  });
+  return { master: result, changed: changed };
 }
 var PRODUCTIVITY_MIN_SAMPLES = 5; // これ未満は「実績不足」として個人生産性を使わない
 
@@ -2185,12 +2257,18 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume){
     var task = state.backlog.find(function(bt){ return bt.id===tid; });
     if(!task || task.archived===true) return;
 
+    // 繰り返し作業は日ごとに別taskIdが振られるため、テンプレートIDを安定した
+    // 集計キーとして使う(単発作業は自身のtaskIdのまま)。これにより、同じ
+    // 「ピッキング」等の繰り返し作業が生産性マスタ上で日をまたいで1つに
+    // 自然と集約される。
+    var pkey = productivityKeyForTask(task);
+
     // 内訳(内訳作業)ごとの生産性は、CSV連携の有無に関わらず計算する。
     // 親作業(タスク)全体のCSV数量とは独立して、内訳ごとの数量(log.breakdown)・
     // 時間(log.subTimes)から求められるため。
-    if(!master[tid]) master[tid] = { unit:'個', taskAverage:{ totalQty:0, totalHours:0, sampleCount:0 }, byStaff:{}, bySubcat:{} };
-    if(!master[tid].bySubcat) master[tid].bySubcat = {};
-    updateSubcatProductivityFromDayLogs(master[tid].bySubcat, tid, day);
+    if(!master[pkey]) master[pkey] = { unit:'個', taskAverage:{ totalQty:0, totalHours:0, sampleCount:0 }, byStaff:{}, bySubcat:{} };
+    if(!master[pkey].bySubcat) master[pkey].bySubcat = {};
+    updateSubcatProductivityFromDayLogs(master[pkey].bySubcat, tid, day);
 
     // 作業全体(親作業)の生産性は、従来通りCSVの出荷数量を使って計算する(変更なし)。
     var wvTotals = wvTotalsForTask(workVolume||emptyWorkVolume(), tid);
@@ -2200,7 +2278,7 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume){
     var taskMs = agg.perTask[tid].ms || 0;
     if(taskMs<=0) return;
     var taskHours = taskMs/3600000;
-    var m = master[tid];
+    var m = master[pkey];
     m.taskAverage.totalQty += qty;
     m.taskAverage.totalHours += taskHours;
     m.taskAverage.sampleCount += 1;
@@ -2249,8 +2327,13 @@ function updateSubcatProductivityFromDayLogs(bySubcat, tid, day){
     bySubcat[scName].taskAverage.sampleCount += 1;
   });
 }
+function resolveProductivityKey(taskId){
+  var task = state.backlog.find(function(bt){ return bt.id===taskId; });
+  return task ? productivityKeyForTask(task) : taskId;
+}
 function subcatProductivityRateFor(master, taskId, subcatName){
-  var m = master && master[taskId];
+  var key = resolveProductivityKey(taskId);
+  var m = master && master[key];
   var sm = m && m.bySubcat && m.bySubcat[subcatName];
   if(!sm || !sm.taskAverage || sm.taskAverage.sampleCount<1 || sm.taskAverage.totalHours<=0){
     return { rate:null, unit:null, sampleCount:0 };
@@ -2258,7 +2341,8 @@ function subcatProductivityRateFor(master, taskId, subcatName){
   return { rate: sm.taskAverage.totalQty/sm.taskAverage.totalHours, unit: sm.unit, sampleCount: sm.taskAverage.sampleCount };
 }
 function productivityRateFor(master, taskId, staffId){
-  var m = master && master[taskId];
+  var key = resolveProductivityKey(taskId);
+  var m = master && master[key];
   if(!m) return { rate:null, basis:'none', sampleCount:0 };
   if(staffId && m.byStaff && m.byStaff[staffId] && m.byStaff[staffId].sampleCount>=PRODUCTIVITY_MIN_SAMPLES){
     var s = m.byStaff[staffId];
@@ -3559,22 +3643,37 @@ function bindLogManagementTab(){
     });
   }
 }
+/* 生産性マスタのキー(単発作業のtaskId、または繰り返し作業のテンプレートID)から、
+   表示用の情報(有効かどうか・名前・色)を解決する。 */
+function resolveProductivityDisplayInfo(key){
+  var directTask = state.backlog.find(function(bt){ return bt.id===key; });
+  if(directTask){
+    return { valid: directTask.archived!==true, name: directTask.name, color: directTask.color };
+  }
+  var tmpl = (state.templates||[]).find(function(t){ return t.id===key; });
+  if(tmpl){
+    return { valid: tmpl.archived!==true, name: tmpl.name, color: tmpl.color };
+  }
+  return { valid:false, name:'(削除済み)', color:'#999' };
+}
 function renderProductivityTab(){
   if(state.productivityMaster===null){
     loadProductivityMaster().then(function(d){ state.productivityMaster = d; render(); });
     return '<div class="empty-note">読み込み中...</div>';
   }
   var master = state.productivityMaster||{};
-  // 表示対象は「現在の作業マスタに存在し、有効(archivedでない)な作業」だけに限定する。
+  // 表示対象は「現在の作業マスタ(単発作業)またはテンプレート(繰り返し作業)に
+  // 存在し、有効(archivedでない)な作業」だけに限定する。1つの繰り返し作業は
+  // テンプレートIDに統合されているため、1作業=1行で表示される。
   // 過去の実績データ・生産性データそのものは削除せず、ここでは表示から除外するだけ。
-  var allMasterTaskIds = Object.keys(master);
-  var taskIds = allMasterTaskIds.filter(function(tid){
-    var t = taskById(tid);
-    return t && t.archived!==true && state.backlog.some(function(bt){ return bt.id===tid; });
-  });
-  var orphanedCount = allMasterTaskIds.length - taskIds.length;
-  var rows = taskIds.map(function(tid){
-    var m = master[tid];
+  var allKeys = Object.keys(master);
+  var keyInfo = {};
+  allKeys.forEach(function(key){ keyInfo[key] = resolveProductivityDisplayInfo(key); });
+  var taskKeys = allKeys.filter(function(key){ return keyInfo[key].valid; });
+  var orphanedCount = allKeys.length - taskKeys.length;
+  var rows = taskKeys.map(function(key){
+    var m = master[key];
+    var info = keyInfo[key];
     var avgRate = (m.taskAverage && m.taskAverage.totalHours>0) ? (m.taskAverage.totalQty/m.taskAverage.totalHours) : null;
     var staffRows = Object.keys(m.byStaff||{}).map(function(sid){
       var s = m.byStaff[sid];
@@ -3586,12 +3685,12 @@ function renderProductivityTab(){
     var subcatRows = subcatNames.length ? '<div class="task-tile-live-counters" style="margin-top:10px;">'+
       '<div class="task-tile-live-title">内訳ごとの生産性</div>'+
       subcatNames.map(function(scName){
-        var sr = subcatProductivityRateFor(master, tid, scName);
+        var sr = subcatProductivityRateFor(master, key, scName);
         return '<div class="checklist-item-action">'+esc(scName)+': '+(sr.rate?sr.rate.toFixed(1):'-')+esc(sr.unit||'')+'/h(サンプル'+sr.sampleCount+'日)</div>';
       }).join('')+
     '</div>' : '';
     return '<div class="checklist-item">'+
-      '<div class="checklist-item-title">'+esc(taskById(tid).name)+' — 作業全体の標準生産性: '+(avgRate?avgRate.toFixed(1)+'/h':'不明')+'(サンプル'+((m.taskAverage&&m.taskAverage.sampleCount)||0)+'日)</div>'+
+      '<div class="checklist-item-title">'+esc(info.name)+' — 作業全体の標準生産性: '+(avgRate?avgRate.toFixed(1)+'/h':'不明')+'(サンプル'+((m.taskAverage&&m.taskAverage.sampleCount)||0)+'日)</div>'+
       staffRows+
       subcatRows+
     '</div>';
@@ -3599,7 +3698,7 @@ function renderProductivityTab(){
 
   return '<div class="mgr-wrap"><div class="panel">'+
     '<div class="panel-title">📈 生産性</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">作業種別×作業者ごとの生産性実績です。複数人が同時に従事した日は個人の実績には使われません(作業全体の標準値のみ更新されます)。個人の実績が5日未満の場合、人員配置では作業全体の標準値が使われます。表示対象は、現在の作業マスタに存在する有効な作業のみです。</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">作業種別×作業者ごとの生産性実績です。繰り返し作業は日をまたいで1作業として集計されます。複数人が同時に従事した日は個人の実績には使われません(作業全体の標準値のみ更新されます)。個人の実績が5日未満の場合、人員配置では作業全体の標準値が使われます。表示対象は、現在の作業マスタに存在する有効な作業のみです。</div>'+
     (orphanedCount>0 ? '<div class="pool-hint" style="margin-bottom:10px;color:var(--warning-600);">⚠️ 現在の作業マスタに存在しない生産性データが'+orphanedCount+'件あります(削除・アーカイブ済みの作業など)。実績自体は保持されていますが、この画面・人員配置には反映されません。</div>' : '')+
     '<button type="button" class="add-btn" id="staffingRefreshProductivityBtn" style="margin-bottom:14px;">生産性データを最新の実績で更新する</button>'+
     rows+

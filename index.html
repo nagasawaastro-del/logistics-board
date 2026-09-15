@@ -966,6 +966,15 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-10', items:[
+    '【調査結果】過去に取り込んだCSVは、削除されずにきちんとSupabase上に保存されていました。表示されなかった根本原因は、「過去に取り込みがあった日付」を横断的に一覧・検索する手段が一切無かったことでした(単一の日付欄を1日ずつ手探りで入力する必要がありました)',
+    'CSV取込画面に「過去の取込を日付から探す」セクションを追加しました。取込のあった日付が一覧表示され、クリックするとその日の履歴をすぐに確認できます(直近30日分を表示。データの読み込みは日付一覧のみ軽量に行い、選んだ日だけ詳細を取得するため、件数が多くても画面が重くなりません)',
+    '調査の結果、「作業日を今日へ変更する」機能自体は既に実装済みでしたが、操作がブラウザ標準の入力ダイアログ(prompt)という分かりにくい形でした。過去日付を見ている取込行に「今日の作業に変更」ワンクリックボタンを追加しました',
+    '「今日の作業に変更」しても、CSVの元の取込日時(importedAt)・荷主出荷番号・明細・数量・得意先情報などは一切変更されません。変更されるのは「物流ボード上でどの日の作業として扱うか」だけです',
+    '荷主出荷番号による重複防止は、作業日をまたいでも影響を受けない仕組み(グローバルな台帳)のため、今回変更していません。作業日を変更しても、同じ荷主出荷番号を含む別CSVを再度取り込んだ場合、引き続き正しく重複としてスキップされます',
+    '「今日の作業に変更」を行った場合、既存の操作履歴に、変更前の作業日・変更後の作業日・対象の作業名とファイル名が記録されます',
+    '実際にコードを実行するテストで、過去日付の一覧取得・過去CSVの画面表示・「今日の作業に変更」による取込日時の保持・移動後に本日の作業量へ正しく反映されること・重複防止台帳への影響がないこと・操作履歴への記録を確認しました。実装中、既存の人員配置提案のテストが実行時刻に依存してしまっていた問題(18時以降だと候補者なし扱いになる)を発見し、テスト側を修正しています。既存の全テスト(78項目)にも影響はありません'
+  ]},
   { date:'2026-10-09', items:[
     '【新機能】管理者→人員配置画面に「次の配置候補(CSV取込起点)」を追加しました。CSVを取り込むたびに、その取込で新しく増えた作業量(重複除外後の新規分)をもとに、「次に誰をこの作業へ配置すべきか」を自動で1件提案します',
     '完全自動配置ではなく、あくまで「提案 → 管理者が確認して確定」までです。確定するまでスタッフの配置(day.assignments)は変わりません',
@@ -1529,6 +1538,8 @@ var state = {
   kintoneSyncing: false,
   kintoneSyncError: '',
   pendingAssignmentSuggestions: null,
+  wvAvailableDates: null,
+  wvPastDatesOpen: false,
   staffingLoading: false,
   staffingPriorityOpen: false,
   nextTaskSuggestModal: null,
@@ -2830,6 +2841,16 @@ async function loadWorkVolume(dateStr){
     if(r && r.value) return JSON.parse(r.value);
   }catch(e){}
   return null;
+}
+/* 過去にCSV取込データが存在する日付の一覧を、軽量に(データ本体を読み込まず
+   キー名だけで)取得する。取込履歴の横断検索に使う。 */
+async function listWorkVolumeDates(){
+  try{
+    var r = await window.storage.list('work-volume:', true);
+    var dates = (r && r.keys ? r.keys : []).map(function(k){ return k.replace('work-volume:',''); });
+    dates.sort(function(a,b){ return b.localeCompare(a); }); // 新しい日付が先
+    return dates;
+  }catch(e){ return []; }
 }
 async function saveWorkVolume(dateStr, data){
   pendingSaves++;
@@ -5280,6 +5301,31 @@ function bindCsvImportPanel(){
       state.wvDeletedOpen = wvDeletedDetails.open;
     });
   }
+  var wvPastDatesDetails = document.getElementById('wvPastDatesDetails');
+  if(wvPastDatesDetails){
+    wvPastDatesDetails.addEventListener('toggle', function(){
+      state.wvPastDatesOpen = wvPastDatesDetails.open;
+    });
+  }
+  document.querySelectorAll('[data-wv-browse-date]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var d = el.getAttribute('data-wv-browse-date');
+      state.wvTargetDate = d;
+      state.wvViewData = await getWorkVolumeForDate(d);
+      render();
+    });
+  });
+  document.querySelectorAll('[data-wv-import-move-today]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var importId = el.getAttribute('data-wv-import-move-today');
+      var viewDate = state.wvTargetDate || todayStr();
+      var result = await moveWvImportDate(viewDate, todayStr(), importId);
+      if(!result.ok){ showToast(result.msg); return; }
+      await appendAuditLog({ action:'CSV取込を今日の作業に変更', target: taskById(result.imp.taskId).name+' / '+result.imp.fileName, before: viewDate, after: todayStr() });
+      showToast(taskById(result.imp.taskId).name+'のCSVを今日の作業に変更しました');
+      render();
+    });
+  });
   var autoMapTargetDateInput = document.getElementById('autoMapTargetDate');
   if(autoMapTargetDateInput){
     autoMapTargetDateInput.addEventListener('change', async function(){
@@ -5789,6 +5835,25 @@ function renderCsvImportPanel(){
   var workVolumePanel = '';
   if(!state.workVolume) state.workVolume = emptyWorkVolume();
   var wvViewData = state.wvViewData || (wvTargetDate===todayStr() ? state.workVolume : emptyWorkVolume());
+  var isViewingToday = wvTargetDate===todayStr();
+
+  // 過去の取込を横断的に探すためのセクション。日付一覧はキー名だけを軽量に取得する。
+  if(state.wvAvailableDates===null){
+    listWorkVolumeDates().then(function(dates){ state.wvAvailableDates = dates; render(); });
+  }
+  var pastDatesHtml = '';
+  if(state.wvAvailableDates && state.wvAvailableDates.length){
+    var shown = state.wvAvailableDates.slice(0, 30); // 直近30件まで表示(件数が多くても画面が重くならないように)
+    pastDatesHtml = '<details class="vc-manage-details" id="wvPastDatesDetails" '+(state.wvPastDatesOpen?'open':'')+' style="margin-bottom:14px;">'+
+      '<summary>📅 過去の取込を日付から探す('+state.wvAvailableDates.length+'日分)</summary>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">'+
+        shown.map(function(d){
+          return '<button type="button" class="vc-manage-toggle-btn'+(d===wvTargetDate?' active':'')+'" data-wv-browse-date="'+d+'">'+esc(dateLabelFromStr(d))+'</button>';
+        }).join('')+
+      '</div>'+
+      (state.wvAvailableDates.length>30 ? '<div class="pool-hint" style="margin-top:8px;">直近30日分のみ表示しています。さらに古い日付は対象日付欄に直接入力してください。</div>' : '')+
+    '</details>';
+  }
 
   // 取込履歴: 対象日付に取り込まれた全作業枠の履歴を、常時表示(折りたたまない)。
   var wvImportRows = wvActiveImports(wvViewData).slice().sort(function(a,b){
@@ -5796,6 +5861,7 @@ function renderCsvImportPanel(){
   }).map(function(imp){
     var t = taskById(imp.taskId);
     var lbl = imp.taskKind==='vc' ? 'PO数' : '件数';
+    var todayBtn = !isViewingToday ? '<button type="button" class="add-btn" data-wv-import-move-today="'+imp.id+'" style="padding:4px 10px;font-size:12px;">今日の作業に変更</button> ' : '';
     return '<tr>'+
       '<td>'+fmtClock(imp.importedAt)+'</td>'+
       '<td>'+esc(imp.fileName)+'</td>'+
@@ -5803,7 +5869,7 @@ function renderCsvImportPanel(){
       '<td class="num">'+lbl+' '+formatNum(imp.primaryCount)+'</td>'+
       '<td class="num">明細'+formatNum(imp.lineCount)+'</td>'+
       '<td class="num">ピース'+formatNum(imp.totalQty)+'</td>'+
-      '<td class="num"><button type="button" class="vc-manage-toggle-btn" data-wv-import-edit="'+imp.id+'">編集</button> <button type="button" class="vc-manage-toggle-btn" data-wv-import-move="'+imp.id+'">日付変更</button> <button type="button" class="log-stop-btn" data-wv-import-delete="'+imp.id+'">削除</button></td>'+
+      '<td class="num">'+todayBtn+'<button type="button" class="vc-manage-toggle-btn" data-wv-import-edit="'+imp.id+'">編集</button> <button type="button" class="vc-manage-toggle-btn" data-wv-import-move="'+imp.id+'">日付変更</button> <button type="button" class="log-stop-btn" data-wv-import-delete="'+imp.id+'">削除</button></td>'+
     '</tr>';
   }).join('') || '<tr><td colspan="7" style="color:var(--slate-500);">この日付の取込履歴はまだありません</td></tr>';
   var wvDeletedImports = (wvViewData.imports||[]).filter(function(i){ return i.deletedAt; });
@@ -5812,7 +5878,8 @@ function renderCsvImportPanel(){
     return '<div class="vc-slip-row">'+esc(t.name)+' / '+esc(imp.fileName)+'(削除: '+fmtClock(imp.deletedAt)+') <button type="button" class="vc-manage-toggle-btn" data-wv-import-restore="'+imp.id+'">復元</button></div>';
   }).join('') || '<div class="empty-note">削除済みの取込はありません</div>';
 
-  var wvHistoryHtml = '<div class="panel-title" style="font-size:15px;margin-top:18px;">📜 取込履歴('+esc(dateLabelFromStr(wvTargetDate))+')</div>'+
+  var wvHistoryHtml = pastDatesHtml+
+    '<div class="panel-title" style="font-size:15px;margin-top:18px;">📜 取込履歴('+esc(dateLabelFromStr(wvTargetDate))+')</div>'+
     '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>作業</th><th>合計</th><th>明細</th><th>ピース</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
     '<details class="vc-manage-details" id="wvDeletedDetails" '+(state.wvDeletedOpen?'open':'')+' style="margin-top:12px;">'+
       '<summary>🗑 削除済み'+(wvDeletedImports.length?'('+wvDeletedImports.length+'件)':'')+'</summary>'+

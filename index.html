@@ -966,6 +966,15 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-07', items:[
+    '生産性の集計・表示対象を「現在の作業マスタに存在する、有効な(アーカイブされていない)作業」だけに限定しました。作業マスタに存在しないtaskId(削除・アーカイブ済みなど)は、生産性データへ新規登録・更新されなくなりました',
+    '過去の実績データ(実績入力の記録そのもの)は一切削除・変更していません。あくまで「生産性の集計・表示・人員配置での利用対象から外す」という扱いです',
+    '生産性画面に、現在の作業マスタに存在しない生産性データがある場合の件数を、警告として表示するようにしました(実績自体は保持されていることを明記しています)',
+    '調査の結果、人員配置(computeStaffingSuggestion)は、既に作業マスタに存在する有効な作業だけを対象にしていることを確認しました(変更していません)',
+    '実装中に、当初の修正では「作業マスタに存在しないtaskId」を正しく検知できていない不具合(taskById()が削除済み扱いの代替オブジェクトを返すため、単純なnullチェックでは除外できなかった)を発見し、修正しました',
+    '実際にコードを実行するテストで、有効な作業の生産性が従来通り蓄積されること、作業マスタに存在しない/アーカイブ済みの作業が生産性マスタへ新規登録されないこと、既存の不整合データが新しい実績によって更新されないこと、生産性画面の表示フィルタ、人員配置アルゴリズムに影響がないことを確認しました',
+    '【重要】今回、テスト環境がリセットされ、これまで積み重ねてきた回帰テスト一式が失われました。今回は新規に、今回の変更に直接関係するテストのみを作成して検証しています。トップ画面・実績入力・モニター・CSV取込・ログインなど、今回変更していない機能については、今回のテストでは再検証できていません(コード自体も変更していません)'
+  ]},
   { date:'2026-10-06', items:[
     '【本日の作業のUI改善】調査の結果、「1作業=1カード」形式・CSV仕事量表示・ドラッグ&ドロップ(作業カード全体がドロップ対象)・個別解除・不整合修復機能は既に実装済みであることを確認しました。今回は、ドラッグ操作なしでも割り当てられる方法が無かった点を中心に、以下を追加しています',
     '各作業カードに「＋ スタッフを追加」ボタンを追加。押すと、出勤中スタッフのチェックボックス一覧が開き、複数人をまとめて選択して割り当てられます。現在割り当て済みのスタッフは最初からチェックされています。既存の解除処理(data-unassign)や日々の割り当てデータ(day.assignments)はそのまま利用しており、新しい保存形式は作っていません',
@@ -2168,6 +2177,14 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume){
   var agg = aggregateDays([day]);
   Object.keys(agg.perTask).forEach(function(tid){
     if(tid==='BREAK') return;
+    // 生産性の対象は「現在の作業マスタに存在し、かつ有効(archivedでない)な作業」だけに限定する。
+    // 作業マスタに無いtaskId(削除・アーカイブ済み含む)は、生産性マスタへ新規追加・更新しない。
+    // 過去の実績データ(day.logs)自体はここでは一切変更しない(表示・集計対象から外すだけ)。
+    // 注意: taskById()は存在しないIDに対して「(削除済み)」というプレースホルダーオブジェクトを
+    // 返す(truthy)ため、ここでは state.backlog に実際に存在するかを直接確認する。
+    var task = state.backlog.find(function(bt){ return bt.id===tid; });
+    if(!task || task.archived===true) return;
+
     // 内訳(内訳作業)ごとの生産性は、CSV連携の有無に関わらず計算する。
     // 親作業(タスク)全体のCSV数量とは独立して、内訳ごとの数量(log.breakdown)・
     // 時間(log.subTimes)から求められるため。
@@ -2206,7 +2223,8 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume){
   return master;
 }
 function updateSubcatProductivityFromDayLogs(bySubcat, tid, day){
-  var task = taskById(tid);
+  var task = state.backlog.find(function(bt){ return bt.id===tid; });
+  if(!task || task.archived===true) return; // 呼び出し元で既に確認済みだが、単独呼び出しに備えて二重に確認する
   if(!task.subcategories || !task.subcategories.length) return;
   var unitMap = subcatUnitMap(task);
   var perSubcat = {}; // subcatName -> {qty, ms}
@@ -3547,7 +3565,14 @@ function renderProductivityTab(){
     return '<div class="empty-note">読み込み中...</div>';
   }
   var master = state.productivityMaster||{};
-  var taskIds = Object.keys(master);
+  // 表示対象は「現在の作業マスタに存在し、有効(archivedでない)な作業」だけに限定する。
+  // 過去の実績データ・生産性データそのものは削除せず、ここでは表示から除外するだけ。
+  var allMasterTaskIds = Object.keys(master);
+  var taskIds = allMasterTaskIds.filter(function(tid){
+    var t = taskById(tid);
+    return t && t.archived!==true && state.backlog.some(function(bt){ return bt.id===tid; });
+  });
+  var orphanedCount = allMasterTaskIds.length - taskIds.length;
   var rows = taskIds.map(function(tid){
     var m = master[tid];
     var avgRate = (m.taskAverage && m.taskAverage.totalHours>0) ? (m.taskAverage.totalQty/m.taskAverage.totalHours) : null;
@@ -3574,7 +3599,8 @@ function renderProductivityTab(){
 
   return '<div class="mgr-wrap"><div class="panel">'+
     '<div class="panel-title">📈 生産性</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">作業種別×作業者ごとの生産性実績です。複数人が同時に従事した日は個人の実績には使われません(作業全体の標準値のみ更新されます)。個人の実績が5日未満の場合、人員配置では作業全体の標準値が使われます。</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">作業種別×作業者ごとの生産性実績です。複数人が同時に従事した日は個人の実績には使われません(作業全体の標準値のみ更新されます)。個人の実績が5日未満の場合、人員配置では作業全体の標準値が使われます。表示対象は、現在の作業マスタに存在する有効な作業のみです。</div>'+
+    (orphanedCount>0 ? '<div class="pool-hint" style="margin-bottom:10px;color:var(--warning-600);">⚠️ 現在の作業マスタに存在しない生産性データが'+orphanedCount+'件あります(削除・アーカイブ済みの作業など)。実績自体は保持されていますが、この画面・人員配置には反映されません。</div>' : '')+
     '<button type="button" class="add-btn" id="staffingRefreshProductivityBtn" style="margin-bottom:14px;">生産性データを最新の実績で更新する</button>'+
     rows+
   '</div></div>';

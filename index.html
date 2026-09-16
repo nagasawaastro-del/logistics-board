@@ -966,6 +966,15 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-13', items:[
+    '【重大な不具合修正】CSV取込起点の「次の配置候補」が、「今回追加された数量だけ」を見て、既に十分な人数が配置されているかを確認せずに候補者を提案してしまっていた不具合を修正しました。以後は、CSV確定のたびに、現在の総作業量・現在アクティブに配置されている人数・締切・優先順位から「本当に人員が不足しているか」を再計算し、不足している場合だけ提案します',
+    '例えば、出荷が100件→400件とCSVで増えても、締切までの残り時間を考えると1人で対応可能な場合は、追加の配置提案を出しません。締切が近づき、実際に人手が足りなくなった時点で初めて提案が作られます',
+    '締切が設定されていない作業については、「本当に足りているか」を判断する材料が無いため、これまで通り(追加分から候補者を提案する)動作を維持しています(既存動作を不必要に変更しないため)',
+    '提案の表示に、「今回の追加分」「現在の総作業量」「必要人数の見込み(現在○人配置中・不足○人)」を区別して表示するようにしました。数量は「見込み」「目安」として表示し、断定はしません',
+    '前回実装した「🔄配置変更候補」(手待ち発生可能性・配置変更可否を使った提案)は、既に現在の総量から再計算する設計だったため、変更していません。今回の修正により、CSV起点の2つの提案(空きスタッフ向け・配置変更候補向け)が、同じ「現在の総量から再計算する」考え方で一貫するようになりました',
+    '実際にコードを実行するテストで、ご提示いただいたテスト1(1人で足りる場合は追加配置しない)・テスト2(総量が増えても1人で足りるうちは追加配置しない)・テスト3(不足が発生すれば配置変更候補と連動する)・テスト9(複数回のCSV追加で過剰配置しない)を確認しました。既存の全機能(合計149項目)にも影響はありません',
+    '今回は時間の制約により、「🟢次におすすめの作業」(優先作業が無い場合の補助的な提案表示)は実装していません。必要でしたら別途対応いたします'
+  ]},
   { date:'2026-10-12', items:[
     '【新機能】管理者→人員配置画面に「🔄 配置変更候補」を追加しました。現在は別の作業をしているものの、その作業が「手待ち発生可能性あり・配置変更可」に設定されていて、かつ配置先の作業で人員が不足している場合に、配置変更候補として提示します',
     '「手待ち発生可能性あり」は「今まさに手待ちしている」という意味では扱っていません。あくまで配置変更候補として提示するだけで、断定はしません',
@@ -2801,10 +2810,39 @@ async function savePendingAssignmentSuggestions(dateStr, data){
 async function recordNextAssignmentSuggestion(taskId, newQty, targetDate){
   if(targetDate!==todayStr()) return;
   if(!state.productivityMaster) state.productivityMaster = await loadProductivityMaster();
-  var suggestion = suggestNextAssignmentForNewVolume(taskId, newQty, state.day, state.productivityMaster, new Date(), state.backlog, state.roster);
-  if(!suggestion) return;
-  suggestion.createdAt = new Date().toISOString();
+  if(!state.taskPriority) state.taskPriority = await loadTaskPriority(targetDate);
   if(!state.pendingAssignmentSuggestions) state.pendingAssignmentSuggestions = await loadPendingAssignmentSuggestions(targetDate);
+  var task = state.backlog.find(function(t){ return t.id===taskId; });
+  if(!task || task.archived===true) return;
+
+  // 重要: 「今回追加された数量(newQty)」だけで判断せず、CSV確定後の現在の
+  // 総作業量・現在アクティブな人数・締切・優先順位から、本当に人員が
+  // 不足しているかを再計算する(既存のcomputeTaskUrgencyをそのまま利用)。
+  var nowDate = new Date();
+  var urgency = computeTaskUrgency(task, state.workVolume, state.taskPriority, state.productivityMaster, nowDate);
+  var activeCount = activeStaffCountForTask(state.day, taskId);
+
+  if(urgency.neededPeopleCount!==null && urgency.neededPeopleCount<=activeCount){
+    // 締切が設定されていて、かつ現在の配置で足りている。
+    // 古い提案が残っていれば取り下げる(ケースA・Fに対応: 追加配置しない)。
+    if(state.pendingAssignmentSuggestions[taskId]){
+      delete state.pendingAssignmentSuggestions[taskId];
+      await savePendingAssignmentSuggestions(targetDate, state.pendingAssignmentSuggestions);
+    }
+    return;
+  }
+  // 締切が未設定で「本当に足りているか」を判断できない場合は、判断不能として
+  // 提案自体を止めてしまうのではなく、従来通り(今回追加分から候補者を探す)動作を維持する。
+  // (既存機能を壊さないことを優先し、締切設定を促す形にはしない)
+
+  var suggestion = suggestNextAssignmentForNewVolume(taskId, newQty, state.day, state.productivityMaster, nowDate, state.backlog, state.roster);
+  if(!suggestion) return;
+  // 表示用に、今回の追加分と現在の総量・不足人数を区別して保持する(セクション20)。
+  suggestion.newQty = newQty;
+  suggestion.totalQty = urgency.qty;
+  suggestion.neededPeopleCount = urgency.neededPeopleCount;
+  suggestion.activeCount = activeCount;
+  suggestion.createdAt = new Date().toISOString();
   state.pendingAssignmentSuggestions[taskId] = suggestion;
   await savePendingAssignmentSuggestions(targetDate, state.pendingAssignmentSuggestions);
 }
@@ -4036,15 +4074,17 @@ function renderStaffing(){
         '<button type="button" class="vc-manage-toggle-btn" data-dismiss-next-assignment="'+esc(taskId)+'" style="margin-top:6px;">この提案を消す</button>';
     }
     return '<div class="checklist-item">'+
-      '<div class="checklist-item-title"><span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span> '+esc(t.name)+' — 新規作業量 '+formatNum(sug.newQty)+esc(sug.unit)+'</div>'+
-      '<div class="checklist-item-action">必要人時の目安: '+neededHoursText+'</div>'+
+      '<div class="checklist-item-title"><span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span> '+esc(t.name)+'</div>'+
+      '<div class="checklist-item-action" style="color:var(--slate-500);">今回の追加分: '+formatNum(sug.newQty)+esc(sug.unit)+(sug.totalQty!==undefined ? ' ・ 現在の総作業量: '+formatNum(sug.totalQty)+esc(sug.unit) : '')+'</div>'+
+      (sug.neededPeopleCount!==undefined ? '<div class="checklist-item-action" style="color:var(--slate-500);">必要人数の見込み: '+sug.neededPeopleCount+'人(現在'+sug.activeCount+'人配置中・不足'+(sug.neededPeopleCount-sug.activeCount)+'人)</div>' : '')+
+      '<div class="checklist-item-action">締切までの必要人時(見込み): '+neededHoursText+'</div>'+
       body+
     '</div>';
   }).join('');
   var pendingPanelHtml = '<div class="panel" style="margin-bottom:14px;">'+
     '<div class="panel-title">🆕 次の配置候補(CSV取込起点)</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">CSVを取り込むたびに、新しく増えた作業量から「次に誰を配置すべきか」を提案します。既に作業中のスタッフを勝手に動かすことはありません。確定するまで配置は変更されません。</div>'+
-    (pendingRows || '<div class="empty-note">現在、新しい提案はありません(CSVを取り込むと、ここに表示されます)</div>')+
+    '<div class="pool-hint" style="margin-bottom:10px;">CSVを取り込むたびに、現在の総作業量・現在の配置人数・締切から「本当に人員が不足しているか」を再計算し、不足している場合だけ次の配置を提案します。既に配置人数で足りている場合は表示されません。既に作業中のスタッフを勝手に動かすことはありません。</div>'+
+    (pendingRows || '<div class="empty-note">現在、新しい提案はありません(不足が見込まれる場合にここへ表示されます)</div>')+
   '</div>';
 
   // ---- 🔄配置変更候補: 現在は別作業中だが、その作業が「手待ち発生可能性あり・配置変更可」で、

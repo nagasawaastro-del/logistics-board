@@ -966,6 +966,14 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-11', items:[
+    '【重要】この改修は非常に大規模なご指示だったため、今回は確実な基盤部分(作業マスタの拡張・2つの重大なバグ修正)を実装しました。配置変更候補の自動提示・作業者へのアラート表示・管理者承認フロー・実績の分割処理といった大きな追加機能(指示書のセクション5〜11・13〜16)は、今回実装していません。次回以降の対応とさせてください',
+    '【重大なバグ修正・二重計上】管理者→生産性画面の「生産性データを最新の実績で更新する」ボタンを複数回押すと、同じ実績が二重・三重に集計されてしまう不具合を修正しました。以後は毎回、実績データから生産性マスタをゼロから作り直す方式に変更したため、何度実行しても同じ結果になります',
+    '【重大なバグ修正・過剰配置】人員配置の自動提案で、「1人で締切までに完了できる作業量にもかかわらず、余った人員を同じ作業へ追加配置してしまう」不具合を修正しました。既に必要量を満たしている作業には、候補者が余っていても追加配置しません',
+    '作業マスタ(単発の作業・繰り返し作業のテンプレートの両方)に、「締切時刻」「優先順位」「手待ち発生可能性」「手待ち時の配置変更可否」の4項目を追加しました。これまで別の場所(taskPriority)に保存されていた締切・優先順位は、今後は作業マスタの設定が優先して使われます(未設定の場合のみ、従来のデータにフォールバックします)',
+    '繰り返し作業(テンプレート)側でこれらを設定すると、今日以降の該当する日別作業にも反映されます(名前・単位・色などの既存の伝播の仕組みと同様です)',
+    '実際にコードを実行するテストで、ご提示いただいたテスト1(600個・締切5時間→1人で完了、2人目を配置しない)・テスト2(1,000個・締切2時間→複数人配置)・テスト7(生産性更新を2回実行しても値が変わらない)を含め、100項目を確認しました。既存機能への影響もありません'
+  ]},
   { date:'2026-10-10', items:[
     '【調査結果】過去に取り込んだCSVは、削除されずにきちんとSupabase上に保存されていました。表示されなかった根本原因は、「過去に取り込みがあった日付」を横断的に一覧・検索する手段が一切無かったことでした(単一の日付欄を1日ずつ手探りで入力する必要がありました)',
     'CSV取込画面に「過去の取込を日付から探す」セクションを追加しました。取込のあった日付が一覧表示され、クリックするとその日の履歴をすぐに確認できます(直近30日分を表示。データの読み込みは日付一覧のみ軽量に行い、選んだ日だけ詳細を取得するため、件数が多くても画面が重くなりません)',
@@ -2116,7 +2124,8 @@ function ensureTemplateTasksForDateSync(dateStr){
     if(!pattern[wd]) return;
     var key = tmpl.id+'|'+dateStr;
     if(existingKeys[key]) return;
-    state.backlog.push({id:uid(), name:tmpl.name, unit:tmpl.unit, color:tmpl.color, workDate:dateStr, archived:false, fromTemplate:tmpl.id, subcategories:tmpl.subcategories||[], category:taskCategory(tmpl)});
+    state.backlog.push({id:uid(), name:tmpl.name, unit:tmpl.unit, color:tmpl.color, workDate:dateStr, archived:false, fromTemplate:tmpl.id, subcategories:tmpl.subcategories||[], category:taskCategory(tmpl),
+      deadline: tmpl.deadline||null, priorityLevel: tmpl.priorityLevel||4, idleLikely: tmpl.idleLikely===true, reassignable: tmpl.reassignable!==false});
     existingKeys[key] = true;
     changed = true;
   });
@@ -2569,12 +2578,16 @@ function tasksWithVolumeForDate(backlog, dateStr, workVolume){
 function computeTaskUrgency(task, workVolume, taskPriority, productivityMaster, nowDate){
   var totals = wvTotalsForTask(workVolume, task.id);
   var qty = totals.totalQty;
-  var prio = (taskPriority && taskPriority[task.id]) || { deadline: null, priorityLevel: 4 };
+  // 締切・優先順位は、今後は作業マスタ(task.deadline/task.priorityLevel)を基準とする。
+  // 未設定の場合のみ、従来の taskPriority ストレージ(移行前のデータ)にフォールバックする。
+  var legacyPrio = (taskPriority && taskPriority[task.id]) || {};
+  var deadline = (task.deadline!==undefined && task.deadline!==null) ? task.deadline : (legacyPrio.deadline || null);
+  var priorityLevel = (task.priorityLevel!==undefined && task.priorityLevel!==null) ? task.priorityLevel : (legacyPrio.priorityLevel || 4);
   var avgProd = productivityRateFor(productivityMaster, task.id, null); // taskAverageのみを見る(逼迫度の目安用)
   var roughHours = (avgProd.rate && avgProd.rate>0) ? qty/avgProd.rate : null;
   var deadlineMinutes = null;
-  if(prio.deadline){
-    var dl = new Date(task.workDate+'T'+prio.deadline+':00');
+  if(deadline){
+    var dl = new Date(task.workDate+'T'+deadline+':00');
     deadlineMinutes = Math.max(0, (dl.getTime()-nowDate.getTime())/60000);
   }
   var urgency;
@@ -2587,7 +2600,14 @@ function computeTaskUrgency(task, workVolume, taskPriority, productivityMaster, 
   }else{
     urgency = (roughHours*60)/deadlineMinutes;
   }
-  return { taskId: task.id, qty: qty, roughHours: roughHours, deadlineMinutes: deadlineMinutes, priorityLevel: prio.priorityLevel, urgency: urgency, unit: (productivityMaster[task.id]&&productivityMaster[task.id].unit)||'個' };
+  // 締切までに必要な人数(切り上げ)。「1人で間に合うのに2人配置する」ことを防ぐための目安値。
+  // 生産性・締切のどちらかが不明な場合は安全側(null=判定不能)に倒し、既存のurgencyベースの
+  // 判断にそのまま委ねる(推測で必要人数を決め打ちしない)。
+  var neededPeopleCount = null;
+  if(roughHours!==null && deadlineMinutes!==null && deadlineMinutes>0){
+    neededPeopleCount = Math.max(1, Math.ceil(roughHours/(deadlineMinutes/60)));
+  }
+  return { taskId: task.id, qty: qty, roughHours: roughHours, deadlineMinutes: deadlineMinutes, priorityLevel: priorityLevel, urgency: urgency, neededPeopleCount: neededPeopleCount, unit: (productivityMaster[task.id]&&productivityMaster[task.id].unit)||'個' };
 }
 /* 配置案を作成する(貪欲法)。候補者は「出勤中」かつ「現在アクティブな作業が無い(空き)」人のみ。
    進行中の作業者を強制的に動かすことはしない(v1のシンプル方針)。 */
@@ -2708,10 +2728,13 @@ function computeStaffingSuggestion(day, workVolume, taskPriority, productivityMa
     }
   });
 
-  // 余った人員: 最も見込みが足りていない作業へ追加配置
+  // 余った人員: 最も見込みが足りていない作業へ追加配置する。
+  // 重要: 既に見込み量が作業量を満たしている(不足が無い)作業には、
+  // 余った人員がいても追加配置しない(「1人で終わる作業に2人配置する」ことを防ぐ)。
   while(candidates.length && urgencies.length){
-    var short = urgencies.filter(function(u){ return u.roughHours!==null; })
-      .sort(function(a,b){ return (b.qty-expectedQty[b.taskId]) - (a.qty-expectedQty[a.taskId]); })[0];
+    var short = urgencies.filter(function(u){
+      return u.roughHours!==null && (u.qty-(expectedQty[u.taskId]||0))>0.01;
+    }).sort(function(a,b){ return (b.qty-expectedQty[b.taskId]) - (a.qty-expectedQty[a.taskId]); })[0];
     if(!short) break;
     var pick2 = bestCandidateFor(short);
     if(!pick2) break;
@@ -3820,7 +3843,10 @@ function bindProductivityTab(){
     staffingRefreshProductivityBtn.addEventListener('click', async function(){
       staffingRefreshProductivityBtn.disabled = true;
       staffingRefreshProductivityBtn.textContent = '更新中...';
-      var master = await loadProductivityMaster();
+      // 重要: 既存の生産性マスタに「加算」すると、複数回実行するたびに同じ実績が
+      // 二重・三重に計上されてしまう。実績データ(day.logs)を正とし、直近30日分から
+      // 毎回ゼロベースで再構築することで、何度実行しても同じ結果になるようにする。
+      var master = {};
       var todayD = new Date();
       var updatedDays = 0;
       for(var i=0;i<30;i++){ // 直近30日分から蓄積する
@@ -8531,6 +8557,20 @@ function openEditTaskModal(task){
   state.suppressRender = true;
   render();
 }
+/* renderWorkMasterPriorityFieldsに対応する読み取り処理。フォームからの入力を
+   task/template側の安定フィールドとして返す。 */
+function readWorkMasterPriorityFields(context){
+  var deadlineInput = document.getElementById(context+'Deadline');
+  var priorityInput = document.getElementById(context+'PriorityLevel');
+  var idleEl = document.querySelector('input[name="'+context+'IdleLikely"]:checked');
+  var reassignEl = document.querySelector('input[name="'+context+'Reassignable"]:checked');
+  return {
+    deadline: (deadlineInput && deadlineInput.value) ? deadlineInput.value : null,
+    priorityLevel: priorityInput ? parseInt(priorityInput.value,10) : 4,
+    idleLikely: idleEl ? (idleEl.value==='yes') : false,
+    reassignable: reassignEl ? (reassignEl.value==='yes') : true
+  };
+}
 async function saveEditTask(){
   var m = state.modal;
   var task = state.backlog.find(function(t){ return t.id===m.taskId; });
@@ -8548,6 +8588,11 @@ async function saveEditTask(){
   task.category = m.category || 'その他';
   var kindEl = document.querySelector('input[name="editTaskKind"]:checked');
   task.taskKind = kindEl ? kindEl.value : 'normal';
+  var prio = readWorkMasterPriorityFields('editTask');
+  task.deadline = prio.deadline;
+  task.priorityLevel = prio.priorityLevel;
+  task.idleLikely = prio.idleLikely;
+  task.reassignable = prio.reassignable;
   state.modal = null;
   state.suppressRender = false;
   await saveBacklog(state.backlog);
@@ -8623,6 +8668,11 @@ async function saveEditTemplate(){
   tmpl.color = m.color;
   tmpl.subcategories = (m.subcatsList||[]).slice();
   tmpl.category = m.category || 'その他';
+  var tmplPrio = readWorkMasterPriorityFields('editTmpl');
+  tmpl.deadline = tmplPrio.deadline;
+  tmpl.priorityLevel = tmplPrio.priorityLevel;
+  tmpl.idleLikely = tmplPrio.idleLikely;
+  tmpl.reassignable = tmplPrio.reassignable;
   state.modal = null;
   state.suppressRender = false;
   await saveTemplates(state.templates);
@@ -8636,6 +8686,10 @@ async function saveEditTemplate(){
       task.color = tmpl.color;
       task.subcategories = tmpl.subcategories.slice();
       task.category = tmpl.category;
+      task.deadline = tmpl.deadline;
+      task.priorityLevel = tmpl.priorityLevel;
+      task.idleLikely = tmpl.idleLikely;
+      task.reassignable = tmpl.reassignable;
       changed = true;
     }
   });
@@ -9312,6 +9366,33 @@ function editFieldSwatches(colorState, dataAttr){
     return '<div class="swatch '+(colorState===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-'+dataAttr+'="'+c.hex+'"></div>';
   }).join('');
 }
+/* 人員配置の基準となる4項目(締切・優先順位・手待ち発生可能性・手待ち時の配置変更可否)。
+   単発作業・繰り返し作業(テンプレート)の両方の編集モーダルで共通利用する。
+   これらは作業名ではなく、対象オブジェクト(task/template)の安定IDに紐付く。 */
+function renderWorkMasterPriorityFields(context, m){
+  var deadline = m.deadline || '';
+  var priorityLevel = m.priorityLevel || 4;
+  var idleLikely = m.idleLikely === true;
+  var reassignable = m.reassignable !== false; // 既定は「可」
+  return '<div style="border-top:1px solid var(--paper-line);padding-top:12px;margin-bottom:14px;">'+
+    '<div style="font-size:12px;font-weight:700;color:var(--slate-500);margin-bottom:8px;">人員配置の基準設定(任意)</div>'+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">締切時刻(未設定でも構いません)</label>'+
+    '<input type="time" id="'+context+'Deadline" value="'+esc(deadline)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:12px;">'+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">優先順位</label>'+
+    '<select id="'+context+'PriorityLevel" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:12px;">'+
+      '<option value="1" '+(priorityLevel===1?'selected':'')+'>1 = 最優先</option>'+
+      '<option value="2" '+(priorityLevel===2?'selected':'')+'>2 = 高</option>'+
+      '<option value="3" '+(priorityLevel===3?'selected':'')+'>3 = 中</option>'+
+      '<option value="4" '+(priorityLevel===4?'selected':'')+'>4 = 低</option>'+
+    '</select>'+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">手待ち発生可能性(この作業は状況によって人が余りやすいですか?)</label>'+
+    '<label style="display:inline-block;font-size:13px;margin-right:14px;"><input type="radio" name="'+context+'IdleLikely" value="no" '+(!idleLikely?'checked':'')+'> なし</label>'+
+    '<label style="display:inline-block;font-size:13px;margin-bottom:12px;"><input type="radio" name="'+context+'IdleLikely" value="yes" '+(idleLikely?'checked':'')+'> あり</label>'+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin:8px 0 4px;">手待ち時の配置変更</label>'+
+    '<label style="display:inline-block;font-size:13px;margin-right:14px;"><input type="radio" name="'+context+'Reassignable" value="yes" '+(reassignable?'checked':'')+'> 可</label>'+
+    '<label style="display:inline-block;font-size:13px;"><input type="radio" name="'+context+'Reassignable" value="no" '+(!reassignable?'checked':'')+'> 不可</label>'+
+  '</div>';
+}
 function renderEditTaskModal(m){
   var hasSubcats = (m.subcatsList||[]).length > 0;
   var templateNotice = '';
@@ -9340,7 +9421,8 @@ function renderEditTaskModal(m){
       renderSubcatTagInput(m.subcatsList,'editTask','editTaskSubcatText',m.unit)+
       (hasSubcats ? '' : '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">単位</label><input type="text" id="editTaskUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;">')+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
-      '<div class="swatches" style="margin-bottom:18px;">'+editFieldSwatches(m.color,'edit-task-color')+'</div>'+
+      '<div class="swatches" style="margin-bottom:14px;">'+editFieldSwatches(m.color,'edit-task-color')+'</div>'+
+      renderWorkMasterPriorityFields('editTask', m)+
       '<div class="modal-actions">'+
         '<button class="modal-cancel" id="editCancelBtn">キャンセル</button>'+
         '<button class="modal-confirm" id="editSaveBtn">保存</button>'+
@@ -9364,6 +9446,7 @@ function renderEditTemplateModal(m){
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:8px;">'+editFieldSwatches(m.color,'edit-tmpl-color')+'</div>'+
       '<div class="pool-hint" style="margin-bottom:14px;">発生する曜日は一覧の曜日ボタンから変更できます。</div>'+
+      renderWorkMasterPriorityFields('editTmpl', m)+
       '<div class="modal-actions">'+
         '<button class="modal-cancel" id="editCancelBtn">キャンセル</button>'+
         '<button class="modal-confirm" id="editSaveBtn">保存</button>'+

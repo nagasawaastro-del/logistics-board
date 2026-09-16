@@ -966,6 +966,16 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-12', items:[
+    '【新機能】管理者→人員配置画面に「🔄 配置変更候補」を追加しました。現在は別の作業をしているものの、その作業が「手待ち発生可能性あり・配置変更可」に設定されていて、かつ配置先の作業で人員が不足している場合に、配置変更候補として提示します',
+    '「手待ち発生可能性あり」は「今まさに手待ちしている」という意味では扱っていません。あくまで配置変更候補として提示するだけで、断定はしません',
+    '不足人数の計算では、まず出勤中で未配置の(空いている)スタッフがいればそちらで埋まるかを考慮し、それでも足りない分だけを配置変更候補として提示します。1人で足りる作業に、手待ち中の人をわざわざ動かすことはありません',
+    '候補には理由(現在作業の手待ち可能性・配置変更可否・配置先の不足状況・締切・優先順位・生産性見込み)を表示し、最終的な判断は必ず管理者が行います。「配置変更」ボタンを押しても即座には変更されず、確認画面を経てから確定します',
+    '配置変更を確定すると、現在の実績は終了扱いとして保存され(過去の実績は書き換えません)、新しい作業の実績が新規に開始されます。既存の「休憩開始」と同じ、実績を分割する仕組みをそのまま利用しています',
+    '配置変更が確定すると、作業者の画面に「🔔 配置変更指示」が表示されます。作業者が「確認」を押すと、管理者側にも確認済みであることが分かるようになります',
+    'CSVを複数回取り込んだ場合も、その都度、現在の配置状況・生産性・締切から自動的に再計算されます(明示的な追加操作は不要です)。既に配置済みのスタッフを自動的に動かすことはありません',
+    '実際にコードを実行するテストで、ご提示いただいたケース1〜9(手待ち可能性・配置変更可否による候補判定、1人で足りる場合は候補を出さないこと、実績が正しく分割されること、作業者アラートと確認フロー、CSV複数回取込での再計算)を確認しました。既存の生産性・人員配置・実績入力・モニター・CSV取込などの機能には影響していません'
+  ]},
   { date:'2026-10-11', items:[
     '【重要】この改修は非常に大規模なご指示だったため、今回は確実な基盤部分(作業マスタの拡張・2つの重大なバグ修正)を実装しました。配置変更候補の自動提示・作業者へのアラート表示・管理者承認フロー・実績の分割処理といった大きな追加機能(指示書のセクション5〜11・13〜16)は、今回実装していません。次回以降の対応とさせてください',
     '【重大なバグ修正・二重計上】管理者→生産性画面の「生産性データを最新の実績で更新する」ボタンを複数回押すと、同じ実績が二重・三重に集計されてしまう不具合を修正しました。以後は毎回、実績データから生産性マスタをゼロから作り直す方式に変更したため、何度実行しても同じ結果になります',
@@ -1546,6 +1556,7 @@ var state = {
   kintoneSyncing: false,
   kintoneSyncError: '',
   pendingAssignmentSuggestions: null,
+  reassignmentAlerts: null,
   wvAvailableDates: null,
   wvPastDatesOpen: false,
   staffingLoading: false,
@@ -2797,6 +2808,114 @@ async function recordNextAssignmentSuggestion(taskId, newQty, targetDate){
   state.pendingAssignmentSuggestions[taskId] = suggestion;
   await savePendingAssignmentSuggestions(targetDate, state.pendingAssignmentSuggestions);
 }
+/* ---------- 配置変更候補・配置変更アラート ---------- */
+async function loadReassignmentAlerts(dateStr){
+  try{
+    var r = await window.storage.get('reassignment-alerts:'+dateStr, true);
+    return r && r.value ? JSON.parse(r.value) : [];
+  }catch(e){ return []; }
+}
+async function saveReassignmentAlerts(dateStr, alerts){
+  try{ await window.storage.set('reassignment-alerts:'+dateStr, JSON.stringify(alerts), true); }catch(e){}
+}
+/* 現在ある作業にアクティブに従事している人数(休憩中は含まない)を数える。 */
+function activeStaffCountForTask(day, taskId){
+  return (day.logs||[]).filter(function(l){ return l.taskId===taskId && l.end===null; }).length;
+}
+/* 「空きスタッフだけでは不足している作業」について、手待ち可能性のある
+   作業に従事中のスタッフを「配置変更候補」として探索する。
+   あくまで候補の提示のみで、実際の配置変更は管理者の確定操作を経て行う。 */
+function computeReassignmentCandidates(day, workVolume, productivityMaster, nowDate, backlog, roster, taskPriority){
+  var tasks = tasksWithVolumeForDate(backlog, day.date, workVolume);
+  // 出勤中で、現在アクティブな作業が無い(空き)スタッフの人数。
+  // 「1人で足りるなら手待ち中の人を動かさない」ためには、まず空きスタッフで
+  // 埋まるかどうかを考慮してから、それでも足りない分だけを配置変更候補にする。
+  var idleStaffCount = roster.filter(function(s){
+    if(s.archived || !day.attendance[s.id]) return false;
+    var activeLog = (day.logs||[]).find(function(l){ return l.staffId===s.id && l.end===null; });
+    return !activeLog;
+  }).length;
+  var results = [];
+  tasks.forEach(function(task){
+    var urgency = computeTaskUrgency(task, workVolume, taskPriority, productivityMaster, nowDate);
+    if(urgency.neededPeopleCount===null) return; // 生産性・締切のどちらかが不明な場合は判定しない(推測しない)
+    var activeCount = activeStaffCountForTask(day, task.id);
+    var shortage = urgency.neededPeopleCount - activeCount - idleStaffCount;
+    if(shortage<=0) return; // 現在の配置+空きスタッフで足りている(ケース4・6の「移動不要」に対応)
+
+    // 出勤中・現在アクティブな作業があり、かつその作業が「手待ち発生可能性あり・配置変更可」の人を探す
+    var candidates = [];
+    roster.forEach(function(s){
+      if(s.archived || !day.attendance[s.id]) return;
+      var activeLog = (day.logs||[]).find(function(l){ return l.staffId===s.id && l.end===null; });
+      if(!activeLog || activeLog.taskId===task.id || activeLog.taskId==='BREAK') return;
+      var currentTask = backlog.find(function(t){ return t.id===activeLog.taskId; });
+      if(!currentTask) return;
+      if(currentTask.idleLikely!==true) return;       // 手待ち発生可能性が「あり」でなければ対象外(ケース2)
+      if(currentTask.reassignable===false) return;     // 配置変更「不可」なら対象外(ケース3)
+
+      var prod = productivityRateFor(productivityMaster, task.id, s.id);
+      var currentUrgency = computeTaskUrgency(currentTask, workVolume, taskPriority, productivityMaster, nowDate);
+      var reasons = [
+        esc(currentTask.name)+': 手待ち発生可能性あり',
+        esc(currentTask.name)+': 配置変更可',
+        esc(task.name)+': 現在の配置では人員が不足しています'
+      ];
+      if(urgency.deadlineMinutes!==null) reasons.push(esc(task.name)+': 締切まで残り'+Math.round(urgency.deadlineMinutes)+'分');
+      if(urgency.priorityLevel) reasons.push(esc(task.name)+': 優先順位 '+urgency.priorityLevel);
+      if(currentUrgency.neededPeopleCount!==null && currentUrgency.neededPeopleCount<=activeStaffCountForTask(day, currentTask.id)){
+        reasons.push(esc(currentTask.name)+': こちらは現在の人数で足りる見込みです');
+      }
+      candidates.push({
+        staffId: s.id, name: staffById(s.id).name,
+        fromTaskId: currentTask.id, fromTaskName: currentTask.name,
+        rate: prod.rate, basis: prod.basis,
+        reasons: reasons
+      });
+    });
+    if(!candidates.length) return;
+    // 配置先の生産性が高い人を上位に(理由表示はそのまま、最終判断は管理者)
+    candidates.sort(function(a,b){ return (b.rate||0)-(a.rate||0); });
+    results.push({
+      taskId: task.id, taskName: task.name, unit: urgency.unit,
+      shortage: shortage, neededPeopleCount: urgency.neededPeopleCount, activeCount: activeCount,
+      deadlineMinutes: urgency.deadlineMinutes, priorityLevel: urgency.priorityLevel,
+      candidates: candidates
+    });
+  });
+  // 締切が近い(緊急度が高い)ものを上に
+  results.sort(function(a,b){
+    if(a.deadlineMinutes===null && b.deadlineMinutes===null) return a.priorityLevel-b.priorityLevel;
+    if(a.deadlineMinutes===null) return 1;
+    if(b.deadlineMinutes===null) return -1;
+    return a.deadlineMinutes-b.deadlineMinutes;
+  });
+  return results;
+}
+/* 配置変更を実際に確定する。現在の実績ログを終了し、新しい作業のログを開始する
+   (履歴を書き換えない。中断・新規開始として記録が残る)。 */
+async function confirmReassignment(staffId, fromTaskId, toTaskId){
+  var day = state.day;
+  var log = (day.logs||[]).find(function(l){ return l.staffId===staffId && l.taskId===fromTaskId && l.end===null; });
+  if(!log) return { ok:false, msg:'対象の実績が見つかりません(既に終了している可能性があります)' };
+  finalizeActiveSubTimer(log);
+  log.end = new Date().toISOString();
+  if(log.quantity==null && !log.breakdown) log.quantity = 0;
+  day.logs.push({ id: uid(), staffId: staffId, taskId: toTaskId, start: new Date().toISOString(), end: null, quantity: null });
+  var arr = day.assignments[staffId] || [];
+  if(arr.indexOf(toTaskId)===-1) arr.push(toTaskId);
+  day.assignments[staffId] = arr;
+  await saveDay(day);
+
+  var alerts = await loadReassignmentAlerts(day.date);
+  var alert = { id: uid(), date: day.date, staffId: staffId, fromTaskId: fromTaskId, toTaskId: toTaskId,
+    createdAt: new Date().toISOString(), createdBy: state.managerSession ? (state.managerSession.user.email||'管理者') : '管理者',
+    status: 'pending', acknowledgedAt: null };
+  alerts.push(alert);
+  await saveReassignmentAlerts(day.date, alerts);
+  if(day.date===todayStr()) state.reassignmentAlerts = alerts;
+  return { ok:true, alert: alert };
+}
 function suggestNextAssignmentForNewVolume(taskId, newQty, day, productivityMaster, nowDate, backlog, roster){
   var task = backlog.find(function(t){ return t.id===taskId; });
   if(!task || task.archived===true || !newQty || newQty<=0) return null;
@@ -3885,6 +4004,11 @@ function renderStaffing(){
     loadPendingAssignmentSuggestions(dateStr).then(function(d){ state.pendingAssignmentSuggestions = d; render(); });
     return '<div class="mgr-wrap"><div class="empty-note">読み込み中...</div></div>';
   }
+  if(state.reassignmentAlerts===null){
+    loadReassignmentAlerts(dateStr).then(function(d){ state.reassignmentAlerts = d; render(); });
+    return '<div class="mgr-wrap"><div class="empty-note">読み込み中...</div></div>';
+  }
+  var reassignmentCandidateGroups = computeReassignmentCandidates(state.day, state.workVolume||emptyWorkVolume(), state.productivityMaster, new Date(), state.backlog, state.roster, state.taskPriority);
   var todayTasks = tasksForDate(dateStr).filter(function(t){
     var wvTotals = wvTotalsForTask(state.workVolume||emptyWorkVolume(), t.id);
     return wvTotals && wvTotals.totalQty>0;
@@ -3921,6 +4045,39 @@ function renderStaffing(){
     '<div class="panel-title">🆕 次の配置候補(CSV取込起点)</div>'+
     '<div class="pool-hint" style="margin-bottom:10px;">CSVを取り込むたびに、新しく増えた作業量から「次に誰を配置すべきか」を提案します。既に作業中のスタッフを勝手に動かすことはありません。確定するまで配置は変更されません。</div>'+
     (pendingRows || '<div class="empty-note">現在、新しい提案はありません(CSVを取り込むと、ここに表示されます)</div>')+
+  '</div>';
+
+  // ---- 🔄配置変更候補: 現在は別作業中だが、その作業が「手待ち発生可能性あり・配置変更可」で、
+  //      かつ配置先の作業が人員不足の場合に、配置変更候補として提示する。
+  //      「手待ち可能性あり」は「今まさに手待ちしている」という意味ではないため、断定的な表現は避ける。 ----
+  var reassignRows = reassignmentCandidateGroups.map(function(g){
+    var candRows = g.candidates.map(function(c){
+      return '<div class="checklist-item" style="margin-top:8px;background:var(--paper-50);">'+
+        '<div class="checklist-item-title">'+esc(c.name)+'さん <span class="pool-hint" style="margin:0;">(現在: '+esc(c.fromTaskName)+')</span></div>'+
+        '<div class="checklist-item-action" style="color:var(--slate-500);">候補理由: '+c.reasons.map(esc).join('・')+'</div>'+
+        (c.rate!==null ? '<div class="checklist-item-action">'+esc(g.taskName)+'での生産性見込み: '+c.rate.toFixed(1)+esc(g.unit)+'/人時('+(c.basis==='individual'?'個人実績':'作業全体の標準')+')</div>' : '')+
+        '<button type="button" class="add-btn" data-open-reassign-confirm="'+esc(c.staffId)+'|'+esc(c.fromTaskId)+'|'+esc(g.taskId)+'" style="margin-top:6px;padding:6px 14px;font-size:13px;">'+esc(g.taskName)+'へ配置変更</button>'+
+      '</div>';
+    }).join('');
+    return '<div class="checklist-item" style="margin-top:10px;">'+
+      '<div class="checklist-item-title">'+esc(g.taskName)+
+        (g.deadlineMinutes!==null ? ' — 締切まで残り'+Math.round(g.deadlineMinutes)+'分' : '')+
+        ' — 不足'+g.shortage+'人(必要'+g.neededPeopleCount+'人・現在'+g.activeCount+'人)'+
+      '</div>'+
+      candRows+
+    '</div>';
+  }).join('');
+  var reassignPanelHtml = '<div class="panel" style="margin-bottom:14px;">'+
+    '<div class="panel-title">🔄 配置変更候補</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">現在は別の作業をしているものの、その作業で手待ちが発生する可能性があり、人員が不足している作業への配置変更候補として提示します。「手待ち可能性あり」は今まさに手待ちしているという意味ではありません。実際に配置を変更するかは、必ず管理者が確認・確定してください。</div>'+
+    (reassignRows || '<div class="empty-note">現在、配置変更が必要な状況はありません</div>')+
+    (state.reassignmentAlerts && state.reassignmentAlerts.length ? (
+      '<div class="pool-hint" style="margin-top:14px;font-weight:700;">本日の配置変更指示</div>'+
+      state.reassignmentAlerts.slice().reverse().map(function(a){
+        return '<div class="checklist-item-action">'+esc(staffById(a.staffId).name)+'さん: '+esc(taskById(a.fromTaskId).name)+'→'+esc(taskById(a.toTaskId).name)+
+          '('+(a.status==='acknowledged'?'✓ 確認済み '+fmtClock(a.acknowledgedAt):'未確認')+')</div>';
+      }).join('')
+    ) : '')+
   '</div>';
 
   var priorityRows = todayTasks.map(function(t){
@@ -3969,6 +4126,7 @@ function renderStaffing(){
 
   return '<div class="mgr-wrap">'+
     pendingPanelHtml+
+    reassignPanelHtml+
     '<div class="panel">'+
       '<div class="panel-title">👥 人員配置</div>'+
       '<div class="pool-hint" style="margin-bottom:10px;">締切・優先順位・作業者ごとの生産性実績から、配置案を自動作成します。作成された案は確認のうえ「確定」してください。</div>'+
@@ -3984,6 +4142,13 @@ function renderStaffing(){
   '</div>';
 }
 function bindStaffing(){
+  document.querySelectorAll('[data-open-reassign-confirm]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var parts = el.getAttribute('data-open-reassign-confirm').split('|');
+      state.modal = { kind:'reassignConfirm', staffId: parts[0], fromTaskId: parts[1], toTaskId: parts[2] };
+      render();
+    });
+  });
   document.querySelectorAll('[data-confirm-next-assignment]').forEach(function(el){
     el.addEventListener('click', async function(){
       var parts = el.getAttribute('data-confirm-next-assignment').split('|');
@@ -7595,6 +7760,20 @@ function renderInput(){
   if(state.day.summaryFor === state.activeStaffId){
     return renderSummary(staff);
   }
+  if(state.reassignmentAlerts===null){
+    loadReassignmentAlerts(todayStr()).then(function(d){ state.reassignmentAlerts = d; render(); });
+  }
+  var myPendingAlert = (state.reassignmentAlerts||[]).find(function(a){ return a.staffId===state.activeStaffId && a.status==='pending'; });
+  var reassignAlertBanner = '';
+  if(myPendingAlert){
+    var fromT = taskById(myPendingAlert.fromTaskId), toT = taskById(myPendingAlert.toTaskId);
+    reassignAlertBanner = '<div class="next-suggest-banner" style="border-color:var(--amber-500);">'+
+      '<div class="next-suggest-title">🔔 配置変更指示</div>'+
+      '<div class="next-suggest-task">現在の作業: '+esc(fromT.name)+' → 次の作業: '+esc(toT.name)+'</div>'+
+      '<div class="next-suggest-meta">管理者から配置変更の指示があります。</div>'+
+      '<button type="button" class="add-btn" data-ack-reassign-alert="'+myPendingAlert.id+'" style="margin-top:8px;">確認</button>'+
+    '</div>';
+  }
   var assignedIds = (state.day.assignments[state.activeStaffId] || []).slice().sort(byTaskColor(function(tid){ return taskById(tid).color; }));
   var log = currentLog(state.activeStaffId);
   var onBreak = log && log.taskId==='BREAK';
@@ -7714,7 +7893,7 @@ function renderInput(){
       '<div><div class="staff-header-name">'+esc(staff.name)+'</div><div class="staff-header-sub">作業をタップすると開始/切替します</div></div>'+
       '<button class="back-link" id="backToNames">戻る</button>'+
     '</div>'+
-    '<div class="task-tile-wrap">'+breakBanner+suggestBanner+body+otherTasksHtml+'</div>'+
+    '<div class="task-tile-wrap">'+reassignAlertBanner+breakBanner+suggestBanner+body+otherTasksHtml+'</div>'+
     '<div class="end-day-bar"><button class="end-day-btn" id="endDayBtn">本日の作業を終了する</button></div>'+
   '</div>';
 }
@@ -7746,6 +7925,19 @@ function renderSummary(staff){
   '</div></div>';
 }
 function bindInput(){
+  document.querySelectorAll('[data-ack-reassign-alert]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var alertId = el.getAttribute('data-ack-reassign-alert');
+      var alerts = state.reassignmentAlerts || [];
+      var a = alerts.find(function(x){ return x.id===alertId; });
+      if(a){
+        a.status = 'acknowledged';
+        a.acknowledgedAt = new Date().toISOString();
+        await saveReassignmentAlerts(todayStr(), alerts);
+      }
+      render();
+    });
+  });
   document.querySelectorAll('[data-pick-staff]').forEach(function(el){
     el.addEventListener('click', function(){
       state.activeStaffId = el.getAttribute('data-pick-staff');
@@ -8789,6 +8981,7 @@ function renderModal(){
   if(m.kind==='addLog') return renderAddLogModal(m);
   if(m.kind==='vcPreview') return renderVcPreviewModal(m);
   if(m.kind==='assignStaffPicker') return renderAssignStaffPickerModal(m);
+  if(m.kind==='reassignConfirm') return renderReassignConfirmModal(m);
   if(m.kind==='wvImportEdit') return renderWvImportEditModal(m);
   if(m.kind==='autoMapPreview') return renderAutoMapPreviewModal(m);
   if(m.kind==='pickSubcat') return renderPickSubcatModal(m);
@@ -9174,6 +9367,42 @@ function bindWvImportEditModal(m){
     });
   }
 }
+function renderReassignConfirmModal(m){
+  var s = staffById(m.staffId);
+  var fromTask = taskById(m.fromTaskId);
+  var toTask = taskById(m.toTaskId);
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card" style="max-width:380px;text-align:left;">'+
+      '<div class="modal-task-name" style="text-align:center;margin-bottom:14px;">配置変更の確認</div>'+
+      '<div class="pool-hint" style="margin-bottom:14px;">'+
+        esc(s.name)+'さんを「<b>'+esc(fromTask.name)+'</b>」から「<b>'+esc(toTask.name)+'</b>」へ配置変更しますか?<br><br>'+
+        '現在の「'+esc(fromTask.name)+'」は、配置変更可能な作業として登録されています。'+esc(s.name)+'さんの現在の実績はここで終了扱いとなり、「'+esc(toTask.name)+'」の実績が新しく開始されます(過去の実績は変更されません)。'+
+      '</div>'+
+      '<div class="modal-actions">'+
+        '<button class="modal-cancel" id="reassignCancelBtn">キャンセル</button>'+
+        '<button class="modal-confirm" id="reassignConfirmBtn">配置変更を確定</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+function bindReassignConfirmModal(m){
+  var cancelBtn = document.getElementById('reassignCancelBtn');
+  if(cancelBtn) cancelBtn.addEventListener('click', function(){
+    state.modal = null;
+    render();
+  });
+  var confirmBtn = document.getElementById('reassignConfirmBtn');
+  if(confirmBtn){
+    confirmBtn.addEventListener('click', async function(){
+      var result = await confirmReassignment(m.staffId, m.fromTaskId, m.toTaskId);
+      state.modal = null;
+      if(!result.ok){ showToast(result.msg); render(); return; }
+      await appendAuditLog({ action:'配置変更を確定', target: staffById(m.staffId).name, before: taskById(m.fromTaskId).name, after: taskById(m.toTaskId).name });
+      showToast(staffById(m.staffId).name+'さんを「'+taskById(m.toTaskId).name+'」へ配置変更しました');
+      render();
+    });
+  }
+}
 function renderAssignStaffPickerModal(m){
   var day = managerActiveDay();
   var present = presentStaffForDay(day);
@@ -9464,6 +9693,7 @@ function bindModal(){
   if(m.kind==='addLog'){ bindAddLogModal(m); return; }
   if(m.kind==='vcPreview'){ bindVcPreviewModal(m); return; }
   if(m.kind==='assignStaffPicker'){ bindAssignStaffPickerModal(m); return; }
+  if(m.kind==='reassignConfirm'){ bindReassignConfirmModal(m); return; }
   if(m.kind==='wvImportEdit'){ bindWvImportEditModal(m); return; }
   if(m.kind==='autoMapPreview'){ bindAutoMapPreviewModal(m); return; }
   if(m.kind==='pickSubcat'){ bindPickSubcatModal(m); return; }

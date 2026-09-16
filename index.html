@@ -966,6 +966,14 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-14', items:[
+    '【新機能】管理者→人員配置画面に「🟢 次におすすめの作業」を追加しました。優先して人員を動かす必要がある作業が無い場合に、セット・たたみなど、現在登録されている作業の中から継続・着手候補を提案します',
+    'これは自動配置ではありません。既存の「次の配置候補」「配置変更候補」パネルとは別枠の、あくまで補助的な表示です。既に他のパネルで人員不足として扱われている作業は、こちらには重複して表示しません(競合しません)',
+    '「手待ち発生可能性あり」という設定は、「今まさに暇」という意味では扱っていません。優先作業が無い間は、そのまま通常作業として継続する扱いにしています',
+    '作業量が登録されていない(CSV等から確認できない)作業は、候補から除外しています',
+    '判定は、既存の関数(tasksWithVolumeForDate・wvTotalsForTask・activeStaffCountForTask)をそのまま再利用し、優先順位→締切の順で並べる、分かりやすいルールにとどめています。新しい複雑な採点方式は作っていません',
+    '実際にコードを実行するテストで、ご提示いただいたテスト1(優先作業が無い場合の表示)・テスト2(人員不足作業との非競合)・テスト3(充足時の通常表示)・テスト4(手待ち可能性を「暇」と誤判定しないこと)・テスト6(CSV複数回追加での重複なし・最新反映)・テスト7(作業量0の除外)を確認しました。既存の149項目の回帰テストも全て成功しており、影響はありません'
+  ]},
   { date:'2026-10-13', items:[
     '【重大な不具合修正】CSV取込起点の「次の配置候補」が、「今回追加された数量だけ」を見て、既に十分な人数が配置されているかを確認せずに候補者を提案してしまっていた不具合を修正しました。以後は、CSV確定のたびに、現在の総作業量・現在アクティブに配置されている人数・締切・優先順位から「本当に人員が不足しているか」を再計算し、不足している場合だけ提案します',
     '例えば、出荷が100件→400件とCSVで増えても、締切までの残り時間を考えると1人で対応可能な場合は、追加の配置提案を出しません。締切が近づき、実際に人手が足りなくなった時点で初めて提案が作られます',
@@ -2863,6 +2871,36 @@ function activeStaffCountForTask(day, taskId){
 /* 「空きスタッフだけでは不足している作業」について、手待ち可能性のある
    作業に従事中のスタッフを「配置変更候補」として探索する。
    あくまで候補の提示のみで、実際の配置変更は管理者の確定操作を経て行う。 */
+/* 「次におすすめの作業」: 優先して人員を動かす必要が無い場合に、通常作業として
+   継続・着手するとよい作業を、分かりやすいルールで提案する(自動配置ではない)。
+   既に他のパネル(次の配置候補・配置変更候補)で扱われている、人員不足が
+   見込まれる作業は、ここでは重複して出さない(競合させない)。 */
+function computeNextRecommendedTasks(day, workVolume, backlog, pendingSuggestions, reassignGroups){
+  var urgentTaskIds = {};
+  Object.keys(pendingSuggestions||{}).forEach(function(tid){
+    if(pendingSuggestions[tid] && pendingSuggestions[tid].best) urgentTaskIds[tid] = true;
+  });
+  (reassignGroups||[]).forEach(function(g){ urgentTaskIds[g.taskId] = true; });
+
+  var tasks = tasksWithVolumeForDate(backlog, day.date, workVolume); // 既存: 作業量>0のものだけに既に絞られている
+  return tasks.filter(function(t){ return !urgentTaskIds[t.id]; })
+    .map(function(t){
+      var totals = wvTotalsForTask(workVolume, t.id);
+      var activeCount = activeStaffCountForTask(day, t.id);
+      return {
+        taskId: t.id, name: t.name, unit: t.unit, qty: totals.totalQty,
+        priorityLevel: t.priorityLevel || 4, deadline: t.deadline || null,
+        activeCount: activeCount, status: activeCount>0 ? '作業中' : '未着手'
+      };
+    })
+    .sort(function(a,b){
+      if(a.priorityLevel!==b.priorityLevel) return a.priorityLevel-b.priorityLevel; // 優先順位(数字が小さいほど優先)
+      if(a.deadline && b.deadline) return a.deadline.localeCompare(b.deadline); // 締切が近い順
+      if(a.deadline) return -1;
+      if(b.deadline) return 1;
+      return 0;
+    });
+}
 function computeReassignmentCandidates(day, workVolume, productivityMaster, nowDate, backlog, roster, taskPriority){
   var tasks = tasksWithVolumeForDate(backlog, day.date, workVolume);
   // 出勤中で、現在アクティブな作業が無い(空き)スタッフの人数。
@@ -4047,6 +4085,7 @@ function renderStaffing(){
     return '<div class="mgr-wrap"><div class="empty-note">読み込み中...</div></div>';
   }
   var reassignmentCandidateGroups = computeReassignmentCandidates(state.day, state.workVolume||emptyWorkVolume(), state.productivityMaster, new Date(), state.backlog, state.roster, state.taskPriority);
+  var nextRecommendedTasks = computeNextRecommendedTasks(state.day, state.workVolume||emptyWorkVolume(), state.backlog, state.pendingAssignmentSuggestions, reassignmentCandidateGroups);
   var todayTasks = tasksForDate(dateStr).filter(function(t){
     var wvTotals = wvTotalsForTask(state.workVolume||emptyWorkVolume(), t.id);
     return wvTotals && wvTotals.totalQty>0;
@@ -4120,6 +4159,21 @@ function renderStaffing(){
     ) : '')+
   '</div>';
 
+  // ---- 🟢次におすすめの作業: 優先して人員を動かす必要が無い場合の、補助的な提案。
+  //      自動配置ではなく、既存の配置候補・配置変更候補とは別枠で表示する(競合させない)。 ----
+  var recommendRows = nextRecommendedTasks.map(function(t){
+    return '<div class="checklist-item" style="margin-top:8px;">'+
+      '<div class="checklist-item-title">'+esc(t.name)+'</div>'+
+      '<div class="checklist-item-action">作業量(見込み): '+formatNum(t.qty)+esc(t.unit)+' ・ 優先順位: '+t.priorityLevel+(t.deadline?' ・ 締切: '+esc(t.deadline):'')+'</div>'+
+      '<div class="checklist-item-action">現在配置: '+t.activeCount+'人 ・ 状況: '+esc(t.status)+'</div>'+
+    '</div>';
+  }).join('');
+  var recommendPanelHtml = '<div class="panel" style="margin-bottom:14px;">'+
+    '<div class="panel-title">🟢 次におすすめの作業</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">現在、優先して人員を移動させる必要がある作業がない場合の、継続・着手候補です。自動で配置されるものではありません。人員不足が見込まれる作業は、上の「配置変更候補」をご確認ください。</div>'+
+    (recommendRows || '<div class="empty-note">現在、おすすめできる作業はありません</div>')+
+  '</div>';
+
   var priorityRows = todayTasks.map(function(t){
     var p = taskPriorityFor(t.id);
     return '<div class="fin-price-row">'+
@@ -4167,6 +4221,7 @@ function renderStaffing(){
   return '<div class="mgr-wrap">'+
     pendingPanelHtml+
     reassignPanelHtml+
+    recommendPanelHtml+
     '<div class="panel">'+
       '<div class="panel-title">👥 人員配置</div>'+
       '<div class="pool-hint" style="margin-bottom:10px;">締切・優先順位・作業者ごとの生産性実績から、配置案を自動作成します。作成された案は確認のうえ「確定」してください。</div>'+

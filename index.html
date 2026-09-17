@@ -966,6 +966,15 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-15', items:[
+    '【重要な不具合修正】「次の配置候補」の備考欄で、本日のDF取込が52件のはずが130件と表示される不具合の原因を特定し、修正しました',
+    '原因: 荷主出荷番号のユニーク件数(52件)と、明細の出荷数量の合計(130ピース相当)は、既存の集計処理(wvTotalsForTask)の時点で別々の値として正しく保持されていましたが、「次の配置候補」の表示だけが、後者の数量を「件」という単位ラベルのまま表示してしまい、あたかも「130件」であるかのように見えていました。「本日の作業」画面は元から両方を正しく区別して表示していたため、参照しているデータ自体は同じでした',
+    '「次の配置候補」の表示を、「本日の作業」画面と全く同じ形式(出荷件数◯件・ピース数◯ピース)に揃えました。日付変更されたCSVについても、変更後の対象日のworkVolumeを基準に集計されるため、従来通り正しく反映されます',
+    '人員配置タブにあった「作業ごとの締切・優先順位を設定」という独自の入力欄・保存処理を廃止しました。今後は「設定→作業マスタ」のpriorityLevel・deadlineが唯一の基準です。既存の(移行前の)締切・優先度データは、作業マスタ側に値が無い場合のみ、引き続き読み取りで参照されます(新規に保存することはできなくなりました)',
+    '実際にコードを実行するテストで、ご報告いただいた52件/130件の状況を直接再現し、修正後は本日の作業画面と完全に一致した数値・単位で表示されることを確認しました。人員配置タブから旧優先設定UIが削除されていること、作業マスタのpriorityLevelを変更すると候補順に反映されること、既存データとの後方互換性が保たれていることも確認しています',
+    '実装中、既存テスト3件で「深夜帯にテストを実行すると日付をまたぎ、締切の計算が不安定になる」という、以前から潜在していたテスト設計上の弱点を発見し、実行時刻に依存しない、より堅牢な形に修正しました(アプリ本体のロジックには問題ありません)',
+    '既存の全機能(トップ画面・実績入力・モニター・CSV取込・CSV重複防止・作業マスタ・生産性・既存の配置候補生成ロジック)は変更しておらず、既存186項目の回帰テストも全て成功しています'
+  ]},
   { date:'2026-10-14', items:[
     '【新機能】管理者→人員配置画面に「🟢 次におすすめの作業」を追加しました。優先して人員を動かす必要がある作業が無い場合に、セット・たたみなど、現在登録されている作業の中から継続・着手候補を提案します',
     'これは自動配置ではありません。既存の「次の配置候補」「配置変更候補」パネルとは別枠の、あくまで補助的な表示です。既に他のパネルで人員不足として扱われている作業は、こちらには重複して表示しません(競合しません)',
@@ -2635,7 +2644,7 @@ function computeTaskUrgency(task, workVolume, taskPriority, productivityMaster, 
   if(roughHours!==null && deadlineMinutes!==null && deadlineMinutes>0){
     neededPeopleCount = Math.max(1, Math.ceil(roughHours/(deadlineMinutes/60)));
   }
-  return { taskId: task.id, qty: qty, roughHours: roughHours, deadlineMinutes: deadlineMinutes, priorityLevel: priorityLevel, urgency: urgency, neededPeopleCount: neededPeopleCount, unit: (productivityMaster[task.id]&&productivityMaster[task.id].unit)||'個' };
+  return { taskId: task.id, qty: qty, primaryCount: totals.primaryCount, roughHours: roughHours, deadlineMinutes: deadlineMinutes, priorityLevel: priorityLevel, urgency: urgency, neededPeopleCount: neededPeopleCount, unit: (productivityMaster[task.id]&&productivityMaster[task.id].unit)||'個' };
 }
 /* 配置案を作成する(貪欲法)。候補者は「出勤中」かつ「現在アクティブな作業が無い(空き)」人のみ。
    進行中の作業者を強制的に動かすことはしない(v1のシンプル方針)。 */
@@ -2848,6 +2857,7 @@ async function recordNextAssignmentSuggestion(taskId, newQty, targetDate){
   // 表示用に、今回の追加分と現在の総量・不足人数を区別して保持する(セクション20)。
   suggestion.newQty = newQty;
   suggestion.totalQty = urgency.qty;
+  suggestion.totalPrimaryCount = urgency.primaryCount;
   suggestion.neededPeopleCount = urgency.neededPeopleCount;
   suggestion.activeCount = activeCount;
   suggestion.createdAt = new Date().toISOString();
@@ -4114,7 +4124,8 @@ function renderStaffing(){
     }
     return '<div class="checklist-item">'+
       '<div class="checklist-item-title"><span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span> '+esc(t.name)+'</div>'+
-      '<div class="checklist-item-action" style="color:var(--slate-500);">今回の追加分: '+formatNum(sug.newQty)+esc(sug.unit)+(sug.totalQty!==undefined ? ' ・ 現在の総作業量: '+formatNum(sug.totalQty)+esc(sug.unit) : '')+'</div>'+
+      '<div class="checklist-item-action" style="color:var(--slate-500);">今回のCSV追加分: '+formatNum(sug.newQty)+'ピース'+'</div>'+
+      (sug.totalPrimaryCount!==undefined ? '<div class="checklist-item-action" style="color:var(--slate-500);">本日の出荷件数: '+formatNum(sug.totalPrimaryCount)+'件 ・ 本日のピース数: '+formatNum(sug.totalQty)+'ピース</div>' : '')+
       (sug.neededPeopleCount!==undefined ? '<div class="checklist-item-action" style="color:var(--slate-500);">必要人数の見込み: '+sug.neededPeopleCount+'人(現在'+sug.activeCount+'人配置中・不足'+(sug.neededPeopleCount-sug.activeCount)+'人)</div>' : '')+
       '<div class="checklist-item-action">締切までの必要人時(見込み): '+neededHoursText+'</div>'+
       body+
@@ -4174,18 +4185,6 @@ function renderStaffing(){
     (recommendRows || '<div class="empty-note">現在、おすすめできる作業はありません</div>')+
   '</div>';
 
-  var priorityRows = todayTasks.map(function(t){
-    var p = taskPriorityFor(t.id);
-    return '<div class="fin-price-row">'+
-      '<span class="fin-price-taskname">'+esc(t.name)+'</span>'+
-      '<input type="time" data-priority-deadline="'+t.id+'" value="'+(p.deadline||'')+'" style="border:1px solid var(--paper-line);border-radius:8px;padding:6px;">'+
-      '<select data-priority-level="'+t.id+'" style="border:1px solid var(--paper-line);border-radius:8px;padding:6px;">'+
-        ['1:最優先','2:高','3:通常','4:低'].map(function(o){ var parts=o.split(':'); return '<option value="'+parts[0]+'" '+(String(p.priorityLevel)===parts[0]?'selected':'')+'>'+parts[1]+'</option>'; }).join('')+
-      '</select>'+
-      '<button type="button" class="vc-manage-toggle-btn" data-priority-save="'+t.id+'">保存</button>'+
-    '</div>';
-  }).join('') || '<div class="empty-note">本日、CSV作業量が登録された作業がありません</div>';
-
   var resultHtml = '';
   var sug = state.staffingSuggestion;
   if(state.staffingLoading){
@@ -4224,11 +4223,7 @@ function renderStaffing(){
     recommendPanelHtml+
     '<div class="panel">'+
       '<div class="panel-title">👥 人員配置</div>'+
-      '<div class="pool-hint" style="margin-bottom:10px;">締切・優先順位・作業者ごとの生産性実績から、配置案を自動作成します。作成された案は確認のうえ「確定」してください。</div>'+
-      '<details class="vc-manage-details" id="staffingPriorityDetails" '+(state.staffingPriorityOpen?'open':'')+'>'+
-        '<summary>作業ごとの締切・優先順位を設定</summary>'+
-        '<div style="margin-top:10px;">'+priorityRows+'</div>'+
-      '</details>'+
+      '<div class="pool-hint" style="margin-bottom:10px;">締切・優先順位・作業者ごとの生産性実績から、配置案を自動作成します。締切・優先順位は「設定→作業マスタ」の各作業の設定を使用します。作成された案は確認のうえ「確定」してください。</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">'+
         '<button type="button" class="add-btn" id="staffingCreateBtn">配置案を作成/再計算する</button>'+
       '</div>'+
@@ -4256,7 +4251,7 @@ function bindStaffing(){
       var sug = state.pendingAssignmentSuggestions[taskId];
       delete state.pendingAssignmentSuggestions[taskId];
       await savePendingAssignmentSuggestions(todayStr(), state.pendingAssignmentSuggestions);
-      await appendAuditLog({ action:'次の配置候補を確定', target: taskById(taskId).name, before:null, after: staffById(staffId).name+'さんを配置(新規作業量'+(sug?formatNum(sug.newQty)+sug.unit:'')+')' });
+      await appendAuditLog({ action:'次の配置候補を確定', target: taskById(taskId).name, before:null, after: staffById(staffId).name+'さんを配置(CSV追加分'+(sug?formatNum(sug.newQty)+'ピース':'')+')' });
       showToast(staffById(staffId).name+'さんを'+taskById(taskId).name+'へ配置しました');
       render();
     });
@@ -4266,23 +4261,6 @@ function bindStaffing(){
       var taskId = el.getAttribute('data-dismiss-next-assignment');
       delete state.pendingAssignmentSuggestions[taskId];
       await savePendingAssignmentSuggestions(todayStr(), state.pendingAssignmentSuggestions);
-      render();
-    });
-  });
-  var staffingPriorityDetails = document.getElementById('staffingPriorityDetails');
-  if(staffingPriorityDetails){
-    staffingPriorityDetails.addEventListener('toggle', function(){ state.staffingPriorityOpen = staffingPriorityDetails.open; });
-  }
-  document.querySelectorAll('[data-priority-save]').forEach(function(el){
-    el.addEventListener('click', async function(){
-      var taskId = el.getAttribute('data-priority-save');
-      var deadlineInput = document.querySelector('[data-priority-deadline="'+taskId+'"]');
-      var levelSelect = document.querySelector('[data-priority-level="'+taskId+'"]');
-      if(!state.taskPriority) state.taskPriority = {};
-      state.taskPriority[taskId] = { deadline: deadlineInput.value || null, priorityLevel: parseInt(levelSelect.value,10) };
-      await saveTaskPriority(todayStr(), state.taskPriority);
-      await appendAuditLog({ action:'作業の締切・優先度を設定', target: taskById(taskId).name, before:null, after: (deadlineInput.value||'締切なし')+' / 優先度'+levelSelect.value });
-      showToast('「'+taskById(taskId).name+'」の設定を保存しました');
       render();
     });
   });

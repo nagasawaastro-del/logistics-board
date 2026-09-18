@@ -966,6 +966,12 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-16', items:[
+    '【重要な不具合修正】CSV取込の「作業枠を編集」(例: 個配→ゆうパックへ再紐付け)を行っても、管理者→人員配置画面の「次の配置候補」には反映されない不具合を修正しました',
+    '原因: 「作業枠の編集」処理は、CSVデータ自体(state.workVolume)は正しく更新していましたが、「次の配置候補」の提案データは、CSV確定時にしか再計算されない仕組みだったため、後から作業枠を編集しても、その提案データだけが古いまま取り残されていました。「本日の作業」画面やモニターなど、その都度最新のCSVデータを直接参照している画面には、元々正しく反映されていました',
+    '修正: 作業枠の編集を保存した際に、変更前の作業枠(個配)・変更後の作業枠(ゆうパック)の両方について、次の配置候補を再評価するようにしました。変更前の作業枠はCSVデータが無くなるため古い提案を取り下げ、変更後の作業枠は必要に応じて新しい提案が作られます',
+    '実際にコードを実行するテストで、ご報告いただいたシナリオ(個配で提案が出ている状態から、ゆうパックへ作業枠を編集)を再現し、修正後は個配の古い提案が消え、ゆうパックに正しい数量で新しい提案が作られることを確認しました。既存の全機能(合計197項目)にも影響はありません'
+  ]},
   { date:'2026-10-15', items:[
     '【重要な不具合修正】「次の配置候補」の備考欄で、本日のDF取込が52件のはずが130件と表示される不具合の原因を特定し、修正しました',
     '原因: 荷主出荷番号のユニーク件数(52件)と、明細の出荷数量の合計(130ピース相当)は、既存の集計処理(wvTotalsForTask)の時点で別々の値として正しく保持されていましたが、「次の配置候補」の表示だけが、後者の数量を「件」という単位ラベルのまま表示してしまい、あたかも「130件」であるかのように見えていました。「本日の作業」画面は元から両方を正しく区別して表示していたため、参照しているデータ自体は同じでした',
@@ -2824,6 +2830,26 @@ async function savePendingAssignmentSuggestions(dateStr, data){
 /* CSV取込確定処理から呼ばれる共通フック。取込先が「今日」の場合のみ、
    新しく増えた作業量をもとに次の配置提案を作り、保存する。
    過去日への取込は「今から誰を配置するか」の対象外のため提案を作らない。 */
+/* CSV取込の作業枠を編集(再紐付け)した場合など、「新規追加」ではなく既存データの
+   状態が変わった際に、次の配置候補を最新の状態へ再評価する。
+   recordNextAssignmentSuggestion()と判定ロジックを共有しつつ、「今回の追加量」では
+   なく「現在の総量」を使って再評価する点が異なる。 */
+async function refreshAssignmentSuggestionForTask(taskId, targetDate){
+  if(targetDate!==todayStr()) return;
+  if(!state.pendingAssignmentSuggestions) state.pendingAssignmentSuggestions = await loadPendingAssignmentSuggestions(targetDate);
+  var task = state.backlog.find(function(t){ return t.id===taskId; });
+  var totals = wvTotalsForTask(state.workVolume, taskId);
+  if(!task || task.archived===true || !totals.totalQty){
+    // 作業が存在しない、またはこの作業枠にはもうCSV作業量が無い(=紐付けが外れた)。
+    // 古い提案が残っていれば取り下げる。
+    if(state.pendingAssignmentSuggestions[taskId]){
+      delete state.pendingAssignmentSuggestions[taskId];
+      await savePendingAssignmentSuggestions(targetDate, state.pendingAssignmentSuggestions);
+    }
+    return;
+  }
+  await recordNextAssignmentSuggestion(taskId, totals.totalQty, targetDate);
+}
 async function recordNextAssignmentSuggestion(taskId, newQty, targetDate){
   if(targetDate!==todayStr()) return;
   if(!state.productivityMaster) state.productivityMaster = await loadProductivityMaster();
@@ -9433,6 +9459,12 @@ function bindWvImportEditModal(m){
       var saveOk = await saveWorkVolume(viewDate, data);
       if(viewDate===todayStr()) state.workVolume = data;
       if(state.wvTargetDate===viewDate) state.wvViewData = data;
+      // 重要: 作業枠の紐付けを変更した際、「次の配置候補」が古いデータのまま
+      // 取り残されないよう、旧・新の両方の作業枠について再評価する。
+      if(saveOk){
+        await refreshAssignmentSuggestionForTask(oldTask.id, viewDate);
+        await refreshAssignmentSuggestionForTask(newTaskId, viewDate);
+      }
       await appendAuditLog({ action:'CSV取込の作業枠を変更', target: imp.fileName, before: oldTask.name, after: newTask.name });
       state.modal = null;
       showToast(saveOk ? '作業枠を「'+oldTask.name+'」から「'+newTask.name+'」に変更しました' : '保存に失敗した可能性があります。');

@@ -966,6 +966,11 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-17', items:[
+    'CSV取込で数量の参照元としていたCSV列を、「出荷指示数」から「出荷引当数」に変更しました。今後は「出荷引当数」列の値を、出荷件数・ピース数などの集計に使用します',
+    'ご提供いただいた実際のCSVファイルで確認したところ、「出荷指示数」では101、「出荷引当数」では51となり、ご要望通りの値になることを確認しました',
+    'CSV取込・重複防止・作業枠の紐付けなど、その他の処理は一切変更していません。既存の全回帰テスト(197項目)にも影響はありません'
+  ]},
   { date:'2026-10-16', items:[
     '【重要な不具合修正】CSV取込の「作業枠を編集」(例: 個配→ゆうパックへ再紐付け)を行っても、管理者→人員配置画面の「次の配置候補」には反映されない不具合を修正しました',
     '原因: 「作業枠の編集」処理は、CSVデータ自体(state.workVolume)は正しく更新していましたが、「次の配置候補」の提案データは、CSV確定時にしか再計算されない仕組みだったため、後から作業枠を編集しても、その提案データだけが古いまま取り残されていました。「本日の作業」画面やモニターなど、その都度最新のCSVデータを直接参照している画面には、元々正しく反映されていました',
@@ -3243,7 +3248,7 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
           order.push(shipperNo);
         }
         groups[shipperNo].lineCount++;
-        var qty = parseInt(r['出荷指示数'],10);
+        var qty = parseInt(r['出荷引当数'],10);
         if(isNaN(qty)) qty = 0;
         groups[shipperNo].totalQty += qty;
 
@@ -3273,7 +3278,7 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
       var totalQty = shipperGroups.reduce(function(a,g){ return a+g.totalQty; }, 0);
       var missingColumns = [];
       if(headers.indexOf('荷主出荷NO')===-1) missingColumns.push('荷主出荷NO');
-      if(headers.indexOf('出荷指示数')===-1) missingColumns.push('出荷指示数');
+      if(headers.indexOf('出荷引当数')===-1) missingColumns.push('出荷引当数');
       if(locCol && headers.indexOf(locCol)===-1) missingColumns.push(locCol+'(引当ロケーション列)');
       if(invCol && headers.indexOf(invCol)===-1) missingColumns.push(invCol+'(送り状区分列)');
       if(headers.indexOf('取引先名')===-1) missingColumns.push('取引先名(荷主別分析が空になります)');

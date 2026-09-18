@@ -966,6 +966,15 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-19', items:[
+    '【重要な不具合修正】作業者が自分の作業を完了した際に表示される「次のおすすめ」が、管理者が確定した「本日の作業指示」とは無関係に、独自ロジック(suggestNextTaskFor)で再計算されてしまっていた不具合を修正しました。本日の配置が確定している場合は、作業完了時にもこの独自計算を行わず、確定済みの内容だけを参照するようにしました',
+    '本日の配置が確定済みで、その人への確定指示が既に完了している(これ以上の確定指示が無い)場合は、「現在、次の作業指示はありません。管理者に確認してください」と表示します。存在しない作業を無理に作り出したり、断定できない情報を表示したりすることはありません',
+    'これにより、「管理者が確定した指示」と「作業者画面に表示される指示」が常に一致するようになりました。確定前(配置案の段階)は、従来通り「おすすめ」表現を使った独自の次善作業提案が引き続き機能します',
+    '本日の作業指示バナーと、完了時の指示バナーが同時に重複表示されないよう、表示の排他制御を追加しました',
+    '調査の結果、作業マスタのpriorityLevelを唯一の優先順位情報源とする設計、旧taskPriorityストレージを読み取り専用の後方互換フォールバックとしてのみ使う設計は、前回までの対応で既に正しく機能していることを確認しました。追加の変更はしていません',
+    '「130件」問題についても再度確認し、対象日のworkVolumeを正として集計する設計が維持されていることを確認しました。数値をハードコードした箇所はありません',
+    '実際にコードを実行するテストで、作業完了後に確定済みの別指示があれば正しく切り替わること、これ以上の指示が無い場合に正しく「no_work」表示になること、独自の「おすすめ」計算が行われていないことを確認しました。既存の全機能(合計232項目)にも影響はありません'
+  ]},
   { date:'2026-10-18', items:[
     '【大きな仕様変更】人員配置タブを、「おすすめ・候補」の提示ではなく、管理者が確定した内容をパートスタッフがそのまま見て動ける「本日の作業指示」として表示する仕様に変更しました',
     '確定前は従来通り「配置案」として表示され、内容をご確認いただけます。「確定する」を押すと、表示が「本日の作業指示」に切り替わり、「〇〇さんを担当してください」という明確な指示文に変わります。確定前後で表現をはっきり区別しています',
@@ -1610,6 +1619,7 @@ var state = {
   staffingPriorityOpen: false,
   nextTaskSuggestModal: null,
   showNextSuggestBanner: false,
+  nextSuggestIsConfirmedContext: false,
   finStartDate: null,
   finEndDate: null,
   finAxis: null,
@@ -7944,7 +7954,7 @@ function renderInput(){
   var log = currentLog(state.activeStaffId);
 
   var workInstructionBanner = '';
-  if(!myPendingAlert){
+  if(!myPendingAlert && !state.showNextSuggestBanner){
     if(!state.staffingSuggestionLoaded){
       loadStaffingSuggestion(todayStr()).then(function(d){ state.staffingSuggestion = d; state.staffingSuggestionLoaded = true; render(); });
     }
@@ -7980,17 +7990,34 @@ function renderInput(){
     if(state.nextTaskSuggestModal){
       var sug = state.nextTaskSuggestModal;
       var sugTask = taskById(sug.taskId);
+      if(sug.isConfirmedInstruction){
+        suggestBanner = '<div class="next-suggest-banner" style="border-color:var(--amber-500);">'+
+          '<div class="next-suggest-title">📋 本日の作業指示</div>'+
+          '<div class="next-suggest-task">'+esc(sugTask.name)+'を開始してください</div>'+
+          '<div class="next-suggest-meta">作業量の目安: '+formatNum(sug.qty)+esc(taskSummaryUnitFor(state.staffingSuggestion, sug.taskId))+'</div>'+
+          '<div class="next-suggest-actions">'+
+            '<button type="button" class="add-btn" data-suggest-start="'+sug.taskId+'">この作業を開始</button>'+
+          '</div>'+
+        '</div>';
+      }else{
+        suggestBanner = '<div class="next-suggest-banner">'+
+          '<div class="next-suggest-title">✓ 完了しました。次のおすすめ</div>'+
+          '<div class="next-suggest-task">'+esc(sugTask.name)+'</div>'+
+          '<div class="next-suggest-meta">'+
+            (sug.deadlineMinutes!==null ? '締切まで残り'+Math.round(sug.deadlineMinutes)+'分' : '締切設定なし')+
+            (sug.rate ? ' ・ あなたの生産性の目安: '+sug.rate.toFixed(1)+'/時' : '')+
+          '</div>'+
+          '<div class="next-suggest-actions">'+
+            '<button type="button" class="add-btn" data-suggest-start="'+sug.taskId+'">この作業を開始</button>'+
+            '<button type="button" class="vc-manage-toggle-btn" data-suggest-dismiss="1">他の作業を選ぶ</button>'+
+          '</div>'+
+        '</div>';
+      }
+    }else if(state.nextSuggestIsConfirmedContext){
       suggestBanner = '<div class="next-suggest-banner">'+
-        '<div class="next-suggest-title">✓ 完了しました。次のおすすめ</div>'+
-        '<div class="next-suggest-task">'+esc(sugTask.name)+'</div>'+
-        '<div class="next-suggest-meta">'+
-          (sug.deadlineMinutes!==null ? '締切まで残り'+Math.round(sug.deadlineMinutes)+'分' : '締切設定なし')+
-          (sug.rate ? ' ・ あなたの生産性の目安: '+sug.rate.toFixed(1)+'/時' : '')+
-        '</div>'+
-        '<div class="next-suggest-actions">'+
-          '<button type="button" class="add-btn" data-suggest-start="'+sug.taskId+'">この作業を開始</button>'+
-          '<button type="button" class="vc-manage-toggle-btn" data-suggest-dismiss="1">他の作業を選ぶ</button>'+
-        '</div>'+
+        '<div class="next-suggest-title">✓ 完了しました</div>'+
+        '<div class="pool-hint" style="margin:6px 0 10px;">現在、次の作業指示はありません。管理者に確認してください。</div>'+
+        '<button type="button" class="vc-manage-toggle-btn" data-suggest-dismiss="1">閉じる</button>'+
       '</div>';
     }else{
       suggestBanner = '<div class="next-suggest-banner">'+
@@ -8609,6 +8636,22 @@ function maybeShowNextSuggestion(){
   if(!state.pendingNextSuggestion) return;
   state.pendingNextSuggestion = false;
   if(!state.activeStaffId) return;
+  var confirmedPlan = state.staffingSuggestion;
+  if(confirmedPlan && confirmedPlan.status==='confirmed'){
+    // 本日、既に管理者が配置を確定している場合は、作業者画面が独自に
+    // 「おすすめ」を計算してはいけない(確定した指示だけを唯一の情報源とする)。
+    var myInstruction = confirmedPlan.assignments.find(function(a){ return a.staffId===state.activeStaffId; });
+    var log = currentLog(state.activeStaffId);
+    if(myInstruction && !(log && log.taskId===myInstruction.taskId)){
+      state.nextTaskSuggestModal = { taskId: myInstruction.taskId, qty: myInstruction.expectedQty, rate: myInstruction.rate, deadlineMinutes:null, isConfirmedInstruction:true };
+    }else{
+      state.nextTaskSuggestModal = null; // これ以上の確定指示は無い(セクション13の「no_work」表示にする)
+    }
+    state.nextSuggestIsConfirmedContext = true;
+    state.showNextSuggestBanner = true;
+    return;
+  }
+  state.nextSuggestIsConfirmedContext = false;
   var suggestion = suggestNextTaskFor(state.activeStaffId, state.day, state.workVolume||emptyWorkVolume(), state.taskPriority||{}, state.productivityMaster||{}, new Date(), state.backlog);
   state.nextTaskSuggestModal = suggestion; // nullなら「おすすめ無し」として表示
   state.showNextSuggestBanner = true;

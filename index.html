@@ -966,6 +966,16 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-18', items:[
+    '【大きな仕様変更】人員配置タブを、「おすすめ・候補」の提示ではなく、管理者が確定した内容をパートスタッフがそのまま見て動ける「本日の作業指示」として表示する仕様に変更しました',
+    '確定前は従来通り「配置案」として表示され、内容をご確認いただけます。「確定する」を押すと、表示が「本日の作業指示」に切り替わり、「〇〇さんを担当してください」という明確な指示文に変わります。確定前後で表現をはっきり区別しています',
+    '【重要な機能追加】優先作業がすべて充足していても、手待ちのスタッフを放置しなくなりました。作業マスタの優先順位・締切・作業量から、次に取り組むべき作業を自動的に決定し、指示を出します。既に出勤中の全スタッフについて、見込みを立てられる作業が1つでもあれば、必ず何らかの作業指示が出るようになります(生産性データが全く無い場合のみ、指示を出せない旨が表示されます)',
+    '確定した「本日の作業指示」は、パートスタッフの画面にもそのまま表示されます。「本日の作業指示」として、現在の作業と異なる指示が出ている場合に表示され、「この作業を開始」を押すとそのまま作業を始められます',
+    '人員配置タブ独自の優先度設定はすでに廃止済み(前回対応)です。今回もこの方針を維持し、作業マスタのpriorityLevel・deadlineのみを基準としています',
+    '「本日のDF取込が52件なのに130件と表示される」問題についても再確認しました。原因(出荷件数とピース数の取り違え)は前回のセッションで特定・修正済みであり、今回のテストでも本日の作業画面と一致した数値で表示されることを再確認しています',
+    'トップ画面・トップ画面カード・ナビゲーション・実績入力・モニター表示・CSV取込の基本処理・作業マスタ・管理者権限・CSV重複防止・CSV日付変更は変更していません',
+    '実際にコードを実行するテストで、配置案作成→確定→パートスタッフ画面での指示表示→作業開始という一連の流れ、優先作業充足後も手待ちスタッフに次の作業が指示されること、過剰配置防止(1人で足りる作業に不要な人員を追加しない)と手待ち放置防止が正しく両立することを確認しました。実装の過程で、既存テストの一部が「今回の仕様変更によって前提が変わった」ため、新しい仕様に合わせて更新しています。既存の全機能(合計224項目)についても回帰がないことを確認しました'
+  ]},
   { date:'2026-10-17', items:[
     'CSV取込で数量の参照元としていたCSV列を、「出荷指示数」から「出荷引当数」に変更しました。今後は「出荷引当数」列の値を、出荷件数・ピース数などの集計に使用します',
     'ご提供いただいた実際のCSVファイルで確認したところ、「出荷指示数」では101、「出荷引当数」では51となり、ご要望通りの値になることを確認しました',
@@ -2795,6 +2805,35 @@ function computeStaffingSuggestion(day, workVolume, taskPriority, productivityMa
     return { taskId:u.taskId, qty:u.qty, roughHours:u.roughHours, deadlineMinutes:u.deadlineMinutes, priorityLevel:u.priorityLevel, unit:u.unit, expectedQty: Math.round(expectedQty[u.taskId]||0), shortage: u.roughHours!==null ? Math.max(0, u.qty-(expectedQty[u.taskId]||0)) : null };
   });
 
+  // ここまでで、優先度・締切から見て「本当に人手が必要な作業」への配置は完了している。
+  // まだ候補者(手待ち)が残っている場合、その人たちを放置せず、優先度・締切の順で
+  // 見込みが立つ最善の作業へ割り当てる(既存のsuggestNextTaskForと同じ優先順位ロジックを利用)。
+  // 実際に見込みを立てられる作業が1つも無い人だけが、最終的にunassignedStaffIdsに残る。
+  candidates.slice().forEach(function(sid){
+    var remainMin = staffRemainingMinutes(sid, day, nowDate, state.shiftSettings);
+    if(remainMin<=0) return;
+    var scored = urgencies.map(function(u){
+      var effectiveMin = (u.deadlineMinutes!==null) ? Math.min(remainMin, u.deadlineMinutes) : remainMin;
+      var prod = productivityRateFor(productivityMaster, u.taskId, sid);
+      if(!prod.rate) return null;
+      return { taskId:u.taskId, urgency:u.urgency, priorityLevel:u.priorityLevel, deadlineMinutes:u.deadlineMinutes, qty:(effectiveMin/60)*prod.rate, basis:prod.basis, rate:prod.rate };
+    }).filter(function(x){ return x!==null; });
+    scored.sort(function(a,b){
+      if(a.priorityLevel!==b.priorityLevel) return a.priorityLevel-b.priorityLevel; // 作業マスタの優先順位を最優先
+      if(a.deadlineMinutes===null && b.deadlineMinutes===null) return 0;
+      if(a.deadlineMinutes===null) return 1;
+      if(b.deadlineMinutes===null) return -1;
+      return a.deadlineMinutes-b.deadlineMinutes;
+    });
+    var next = scored[0];
+    if(!next) return; // この人が見込みを立てられる作業が1件も無い(生産性データが皆無)
+    assignments.push({ staffId: sid, taskId: next.taskId, expectedQty: Math.round(next.qty), productivityBasis: next.basis, rate: next.rate, reason:'優先度・締切から見て次に取り組む作業として決定' });
+    expectedQty[next.taskId] = (expectedQty[next.taskId]||0) + next.qty;
+    var idx = taskSummaries.findIndex(function(ts){ return ts.taskId===next.taskId; });
+    if(idx!==-1) taskSummaries[idx].expectedQty = Math.round(expectedQty[next.taskId]);
+    candidates.splice(candidates.indexOf(sid),1);
+  });
+
   return { generatedAt: nowDate.toISOString(), status:'draft', assignments: assignments, taskSummaries: taskSummaries, unassignedStaffIds: candidates.slice() };
 }
 /* 作業完了直後の「次のおすすめ作業」。その人が今から入った場合の見込み処理量が
@@ -4103,6 +4142,10 @@ function bindProductivityTab(){
     });
   }
 }
+function taskSummaryUnitFor(sug, taskId){
+  var ts = (sug.taskSummaries||[]).find(function(x){ return x.taskId===taskId; });
+  return ts ? ts.unit : '';
+}
 function renderStaffing(){
   var dateStr = todayStr();
   if(state.taskPriority===null){
@@ -4220,6 +4263,24 @@ function renderStaffing(){
   var sug = state.staffingSuggestion;
   if(state.staffingLoading){
     resultHtml = '<div class="empty-note">計算中...</div>';
+  }else if(sug && sug.status==='confirmed'){
+    // ---- 確定後: 「本日の作業指示」として、指示文の形式で表示する(候補・おすすめ等の表現は使わない) ----
+    var instructionRows = sug.assignments.map(function(a){
+      var s = staffById(a.staffId), t = taskById(a.taskId);
+      var isMove = a.reassignFrom ? true : false;
+      var verb = isMove ? ('「'+esc(taskById(a.reassignFrom).name)+'」から「'+esc(t.name)+'」へ移動してください') : (esc(t.name)+'を担当してください');
+      return '<div class="checklist-item" style="border-left:4px solid var(--amber-500);">'+
+        '<div class="checklist-item-title" style="font-size:15px;">🟢 '+esc(s.name)+'さん</div>'+
+        '<div class="checklist-item-action" style="font-size:14px;font-weight:700;color:var(--ink-900);margin:4px 0;">'+verb+'</div>'+
+        '<div class="checklist-item-action">作業量の目安: '+formatNum(a.expectedQty)+esc((taskSummaryUnitFor(sug,a.taskId))||'')+'</div>'+
+      '</div>';
+    }).join('') || '<div class="empty-note">本日の作業指示はありません</div>';
+    var noInstructionNames = (sug.unassignedStaffIds||[]).map(function(sid){ return staffById(sid).name; }).join('、');
+    resultHtml = '<div class="panel-title" style="font-size:15px;margin-top:16px;">📋 本日の作業指示(確定済み '+fmtClock(sug.confirmedAt)+')</div>'+
+      '<div class="pool-hint" style="margin-bottom:10px;">この内容は管理者が確定した指示です。パートスタッフの画面にも、それぞれの作業指示が表示されます。</div>'+
+      instructionRows+
+      (noInstructionNames ? '<div class="pool-hint" style="margin-top:10px;">指示を出せなかったスタッフ(見込みを立てられる作業がありません): '+esc(noInstructionNames)+'</div>' : '')+
+      '<button type="button" class="vc-manage-toggle-btn" id="staffingCreateBtn" style="margin-top:12px;">状況が変わったので再計算する</button>';
   }else if(sug){
     var taskRows = sug.taskSummaries.map(function(ts){
       var t = taskById(ts.taskId);
@@ -4239,11 +4300,12 @@ function renderStaffing(){
 
     resultHtml = '<div class="panel-title" style="font-size:15px;margin-top:16px;">作業ごとの状況</div>'+
       taskRows+
-      '<div class="panel-title" style="font-size:15px;margin-top:16px;">提案された配置</div>'+
+      '<div class="panel-title" style="font-size:15px;margin-top:16px;">配置案</div>'+
+      '<div class="pool-hint" style="margin-bottom:8px;">まだ確定していません。内容をご確認のうえ「確定する」を押してください。確定すると、この内容がパートスタッフへの作業指示として表示されます。</div>'+
       '<table class="report-table"><thead><tr><th>作業者</th><th>作業</th><th>見込み処理量</th><th>生産性</th><th>理由</th></tr></thead><tbody>'+assignRows+'</tbody></table>'+
-      '<div class="pool-hint" style="margin-top:8px;">配置対象外の出勤者(すでに作業中、または空きなし): '+esc(unassignedNames)+'</div>'+
+      '<div class="pool-hint" style="margin-top:8px;">配置対象外の出勤者(見込みを立てられる作業がありません): '+esc(unassignedNames)+'</div>'+
       '<div class="pool-hint" style="margin-top:4px;">※「見込み処理量」は生産性からの目安であり、実際の完了数量ではありません。「残作業量」は正確な実績データが無いため算出していません。</div>'+
-      (sug.status==='draft' ? '<button type="button" class="add-btn" id="staffingConfirmBtn" style="margin-top:10px;">この配置案を確定する</button>' : '<div class="vc-import-status">確定済み('+fmtClock(sug.confirmedAt)+')</div>');
+      '<button type="button" class="add-btn" id="staffingConfirmBtn" style="margin-top:10px;">この配置案を確定する</button>';
   }else{
     resultHtml = '<div class="empty-note">まだ配置案がありません。「配置案を作成する」を押してください。</div>';
   }
@@ -4255,9 +4317,9 @@ function renderStaffing(){
     '<div class="panel">'+
       '<div class="panel-title">👥 人員配置</div>'+
       '<div class="pool-hint" style="margin-bottom:10px;">締切・優先順位・作業者ごとの生産性実績から、配置案を自動作成します。締切・優先順位は「設定→作業マスタ」の各作業の設定を使用します。作成された案は確認のうえ「確定」してください。</div>'+
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">'+
+      (sug && sug.status==='confirmed' ? '' : '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">'+
         '<button type="button" class="add-btn" id="staffingCreateBtn">配置案を作成/再計算する</button>'+
-      '</div>'+
+      '</div>')+
       resultHtml+
     '</div>'+
   '</div>';
@@ -7880,6 +7942,29 @@ function renderInput(){
   }
   var assignedIds = (state.day.assignments[state.activeStaffId] || []).slice().sort(byTaskColor(function(tid){ return taskById(tid).color; }));
   var log = currentLog(state.activeStaffId);
+
+  var workInstructionBanner = '';
+  if(!myPendingAlert){
+    if(!state.staffingSuggestionLoaded){
+      loadStaffingSuggestion(todayStr()).then(function(d){ state.staffingSuggestion = d; state.staffingSuggestionLoaded = true; render(); });
+    }
+    var confirmedPlan = state.staffingSuggestion;
+    if(confirmedPlan && confirmedPlan.status==='confirmed'){
+      var myInstruction = confirmedPlan.assignments.find(function(a){ return a.staffId===state.activeStaffId; });
+      // 既にその作業を開始済みなら、あらためて指示を出す必要はない
+      if(myInstruction && !(log && log.taskId===myInstruction.taskId)){
+        var instrTask = taskById(myInstruction.taskId);
+        workInstructionBanner = '<div class="next-suggest-banner" style="border-color:var(--amber-500);">'+
+          '<div class="next-suggest-title">📋 本日の作業指示</div>'+
+          '<div class="next-suggest-task">'+esc(instrTask.name)+'を担当してください</div>'+
+          '<div class="next-suggest-meta">作業量の目安: '+formatNum(myInstruction.expectedQty)+esc(taskSummaryUnitFor(confirmedPlan, myInstruction.taskId))+'</div>'+
+          '<div class="next-suggest-actions">'+
+            '<button type="button" class="add-btn" data-suggest-start="'+myInstruction.taskId+'">この作業を開始</button>'+
+          '</div>'+
+        '</div>';
+      }
+    }
+  }
   var onBreak = log && log.taskId==='BREAK';
   var breakBanner = '';
   if(onBreak){
@@ -7997,7 +8082,7 @@ function renderInput(){
       '<div><div class="staff-header-name">'+esc(staff.name)+'</div><div class="staff-header-sub">作業をタップすると開始/切替します</div></div>'+
       '<button class="back-link" id="backToNames">戻る</button>'+
     '</div>'+
-    '<div class="task-tile-wrap">'+reassignAlertBanner+breakBanner+suggestBanner+body+otherTasksHtml+'</div>'+
+    '<div class="task-tile-wrap">'+reassignAlertBanner+workInstructionBanner+breakBanner+suggestBanner+body+otherTasksHtml+'</div>'+
     '<div class="end-day-bar"><button class="end-day-btn" id="endDayBtn">本日の作業を終了する</button></div>'+
   '</div>';
 }

@@ -966,6 +966,15 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-20', items:[
+    '【重要な不具合修正】人員配置の必要人数計算・締切までの残り時間の計算が、休憩時間を一切考慮せず、暦上の時間差だけで計算されていた不具合を修正しました。休憩時間中は実際には作業できないため、以後は「休憩を除いた実働可能時間」を基準に必要人数・不足人数を計算します',
+    '【新機能】作業者画面に、現在指示されている作業の「完了予定時刻」を表示するようにしました。作業量・生産性・休憩時間を使い、休憩をまたぐ場合はその時間を飛ばして計算します。あくまで現在の作業量と生産性から算出した目安であり、実績の遅延を検知するような新しい進捗管理機能ではありません',
+    '「手待ち作業」(通常作業が無くなったときに次に行う予備作業)の考え方を整理しました。既存の作業マスタのidleLikely項目をそのまま「手待ち作業」の判定に利用し(新しい項目は追加していません)、優先順位(priorityLevel)の数値に関わらず、通常作業を必ず手待ち作業より先に配置するようにしました',
+    '「130件問題」を再度確認し、対象日のworkVolumeを正として計算する設計が引き続き維持されていることをテストで確認しました。数値をハードコードした箇所はありません',
+    'idleLikely・reassignable(配置変更候補の判定用)は、今回の「手待ち作業」の判定と役割が重なる部分がありましたが、既存の使われ方(作業中の人を引き抜けるかどうかの判定)を壊さないよう、削除せずそのまま維持し、同じ項目を新しい用途にも再利用する形にしています',
+    '実際にコードを実行するテストで、休憩をまたぐ完了予定時刻の計算例(指示書の例1〜3)、休憩を除いた必要人数計算、通常作業と手待ち作業の優先順位、全ての作業が無い場合に架空の作業を作らないことを確認しました。既存の全機能(合計242項目)にも影響はありません',
+    '今回はSQL・Supabaseのテーブル変更は行っていません。既存の休憩設定(単一の開始・終了時刻)をそのまま利用しており、複数休憩帯への対応は今回のスコープに含めていません'
+  ]},
   { date:'2026-10-19', items:[
     '【重要な不具合修正】作業者が自分の作業を完了した際に表示される「次のおすすめ」が、管理者が確定した「本日の作業指示」とは無関係に、独自ロジック(suggestNextTaskFor)で再計算されてしまっていた不具合を修正しました。本日の配置が確定している場合は、作業完了時にもこの独自計算を行わず、確定済みの内容だけを参照するようにしました',
     '本日の配置が確定済みで、その人への確定指示が既に完了している(これ以上の確定指示が無い)場合は、「現在、次の作業指示はありません。管理者に確認してください」と表示します。存在しない作業を無理に作り出したり、断定できない情報を表示したりすることはありません',
@@ -2625,14 +2634,70 @@ function buildAutoMappedImportPlan(parseResult, mapping, targetDate){
 }
 
 /* ---------- 配置アルゴリズム ---------- */
+/* 指定した期間(fromMs〜toMs)のうち、休憩時間帯と重なる分を除いた「実働可能な分数」を返す。
+   既存の休憩設定(state.breakSettings、単一の開始・終了時刻)をそのまま利用する。
+   新しい休憩マスタは作らない。 */
+function workingMinutesExcludingBreaks(fromMs, toMs, breakSettings, dateStr){
+  if(toMs<=fromMs) return 0;
+  var totalMin = (toMs-fromMs)/60000;
+  if(!breakSettings || !breakSettings.enabled || !breakSettings.start || !breakSettings.end) return totalMin;
+  var brStart = new Date(dateStr+'T'+breakSettings.start+':00').getTime();
+  var brEnd = new Date(dateStr+'T'+breakSettings.end+':00').getTime();
+  if(brEnd<=brStart) return totalMin; // 不正な設定は無視する(安全側)
+  var overlapStart = Math.max(fromMs, brStart);
+  var overlapEnd = Math.min(toMs, brEnd);
+  var overlapMin = overlapEnd>overlapStart ? (overlapEnd-overlapStart)/60000 : 0;
+  return Math.max(0, totalMin-overlapMin);
+}
+/* fromMsから、休憩を飛ばしながらneededWorkingMinutes分だけ実働を積み上げた時刻(ms)を返す。
+   hardLimitMs(終業時刻など)を超えて進めることはしない。到達できなければhardLimitMsを返す。 */
+/* 作業者向けの「完了予定時刻」を計算する。人員配置計算(必要工数・休憩除外)と
+   同じ考え方(作業量÷生産性→休憩を除いた実働時間の積み上げ)を使う。
+   これは進捗管理ではなく、現在の作業量と生産性から算出した予定時刻の目安。 */
+function estimateCompletionTimeText(taskId, staffId, nowDate, day){
+  var totals = wvTotalsForTask(state.workVolume||emptyWorkVolume(), taskId);
+  if(!totals || !totals.totalQty) return null;
+  var prod = productivityRateFor(state.productivityMaster||{}, taskId, staffId);
+  if(!prod.rate || prod.rate<=0) return null;
+  var neededMinutes = (totals.totalQty/prod.rate)*60;
+  var endStr = (day.shiftEndOverrides && day.shiftEndOverrides[staffId]) || (state.shiftSettings && state.shiftSettings.enabled ? state.shiftSettings.end : null) || '18:00';
+  var hardLimitMs = new Date(day.date+'T'+endStr+':00').getTime();
+  var completionMs = addWorkingMinutesSkippingBreaks(nowDate.getTime(), neededMinutes, state.breakSettings, day.date, hardLimitMs);
+  var completionDate = new Date(completionMs);
+  var hh = String(completionDate.getHours()).padStart(2,'0');
+  var mm = String(completionDate.getMinutes()).padStart(2,'0');
+  return hh+':'+mm;
+}
+function addWorkingMinutesSkippingBreaks(fromMs, neededWorkingMinutes, breakSettings, dateStr, hardLimitMs){
+  if(neededWorkingMinutes<=0) return fromMs;
+  var brStart = null, brEnd = null;
+  if(breakSettings && breakSettings.enabled && breakSettings.start && breakSettings.end){
+    brStart = new Date(dateStr+'T'+breakSettings.start+':00').getTime();
+    brEnd = new Date(dateStr+'T'+breakSettings.end+':00').getTime();
+    if(brEnd<=brStart){ brStart = null; brEnd = null; }
+  }
+  var cursor = fromMs;
+  var remainingMs = neededWorkingMinutes*60000;
+  while(remainingMs>0){
+    if(hardLimitMs!==undefined && hardLimitMs!==null && cursor>=hardLimitMs) return hardLimitMs;
+    var segmentEnd = (hardLimitMs!==undefined && hardLimitMs!==null) ? hardLimitMs : (cursor+remainingMs);
+    if(brStart!==null && cursor<brStart && brStart<segmentEnd) segmentEnd = brStart; // 休憩開始で一旦区切る
+    if(brStart!==null && cursor>=brStart && cursor<brEnd){ cursor = brEnd; continue; } // 休憩中ならスキップ
+    var available = segmentEnd-cursor;
+    if(available>=remainingMs){ return cursor+remainingMs; }
+    remainingMs -= available;
+    cursor = segmentEnd;
+  }
+  return cursor;
+}
 function staffRemainingMinutes(staffId, day, nowDate, shiftSettings){
   var endStr = (day.shiftEndOverrides && day.shiftEndOverrides[staffId]) || (shiftSettings && shiftSettings.enabled ? shiftSettings.end : null) || '18:00';
   var startStr = (day.shiftStartOverrides && day.shiftStartOverrides[staffId]) || (shiftSettings && shiftSettings.enabled ? shiftSettings.start : null) || '09:00';
   var dateStr = day.date;
   var endDate = new Date(dateStr+'T'+endStr+':00');
   var nowD = nowDate || new Date();
-  var remainMs = endDate.getTime() - nowD.getTime();
-  return Math.max(0, remainMs/60000);
+  // 休憩時間は実働できないため、必要人数の計算などで使う「残り実働時間」からは除外する。
+  return workingMinutesExcludingBreaks(nowD.getTime(), endDate.getTime(), state.breakSettings, dateStr);
 }
 function tasksWithVolumeForDate(backlog, dateStr, workVolume){
   return backlog.filter(function(t){ return t.workDate===dateStr && !t.archived; }).filter(function(t){
@@ -2656,7 +2721,8 @@ function computeTaskUrgency(task, workVolume, taskPriority, productivityMaster, 
   var deadlineMinutes = null;
   if(deadline){
     var dl = new Date(task.workDate+'T'+deadline+':00');
-    deadlineMinutes = Math.max(0, (dl.getTime()-nowDate.getTime())/60000);
+    // 締切までの「残り時間」も、休憩を除いた実際に作業できる時間で計算する。
+    deadlineMinutes = workingMinutesExcludingBreaks(nowDate.getTime(), dl.getTime(), state.breakSettings, task.workDate);
   }
   var urgency;
   if(roughHours===null){
@@ -2682,9 +2748,15 @@ function computeTaskUrgency(task, workVolume, taskPriority, productivityMaster, 
 function computeStaffingSuggestion(day, workVolume, taskPriority, productivityMaster, nowDate, backlog, roster){
   var dateStr = day.date;
   var tasks = tasksWithVolumeForDate(backlog, dateStr, workVolume);
-  var urgencies = tasks.map(function(t){ return computeTaskUrgency(t, workVolume, taskPriority, productivityMaster, nowDate); });
+  var urgencies = tasks.map(function(t){
+    var u = computeTaskUrgency(t, workVolume, taskPriority, productivityMaster, nowDate);
+    u.isIdleWork = (t.idleLikely===true); // 「手待ち作業」= 通常作業が無くなったときの予備作業(既存フィールドをそのまま利用)
+    return u;
+  });
+  // 通常作業(手待ち作業でないもの)を必ず先に処理する。同じ区分の中では、
   // 逼迫度が高い順(不明[-1]は最後)、同点は優先順位(数値が小さいほど優先) ※納期・優先度を最優先する順序は維持
   urgencies.sort(function(a,b){
+    if(a.isIdleWork!==b.isIdleWork) return a.isIdleWork ? 1 : -1;
     if(a.urgency===-1 && b.urgency!==-1) return 1;
     if(b.urgency===-1 && a.urgency!==-1) return -1;
     if(Math.abs(a.urgency-b.urgency)>0.001) return b.urgency-a.urgency;
@@ -2826,10 +2898,14 @@ function computeStaffingSuggestion(day, workVolume, taskPriority, productivityMa
       var effectiveMin = (u.deadlineMinutes!==null) ? Math.min(remainMin, u.deadlineMinutes) : remainMin;
       var prod = productivityRateFor(productivityMaster, u.taskId, sid);
       if(!prod.rate) return null;
-      return { taskId:u.taskId, urgency:u.urgency, priorityLevel:u.priorityLevel, deadlineMinutes:u.deadlineMinutes, qty:(effectiveMin/60)*prod.rate, basis:prod.basis, rate:prod.rate };
+      var uTask = backlog.find(function(t){ return t.id===u.taskId; });
+      return { taskId:u.taskId, urgency:u.urgency, priorityLevel:u.priorityLevel, deadlineMinutes:u.deadlineMinutes, qty:(effectiveMin/60)*prod.rate, basis:prod.basis, rate:prod.rate, isIdleWork: !!(uTask && uTask.idleLikely===true) };
     }).filter(function(x){ return x!==null; });
+    // 手待ち作業(idleLikely=true)は「通常作業が無くなったときの予備作業」であり、
+    // 優先順位(priorityLevel)の数値に関わらず、通常作業より後に回す。
     scored.sort(function(a,b){
-      if(a.priorityLevel!==b.priorityLevel) return a.priorityLevel-b.priorityLevel; // 作業マスタの優先順位を最優先
+      if(a.isIdleWork!==b.isIdleWork) return a.isIdleWork ? 1 : -1; // 通常作業を必ず先に
+      if(a.priorityLevel!==b.priorityLevel) return a.priorityLevel-b.priorityLevel; // 作業マスタの優先順位
       if(a.deadlineMinutes===null && b.deadlineMinutes===null) return 0;
       if(a.deadlineMinutes===null) return 1;
       if(b.deadlineMinutes===null) return -1;
@@ -7964,10 +8040,11 @@ function renderInput(){
       // 既にその作業を開始済みなら、あらためて指示を出す必要はない
       if(myInstruction && !(log && log.taskId===myInstruction.taskId)){
         var instrTask = taskById(myInstruction.taskId);
+        var estCompletion1 = estimateCompletionTimeText(myInstruction.taskId, state.activeStaffId, new Date(), state.day);
         workInstructionBanner = '<div class="next-suggest-banner" style="border-color:var(--amber-500);">'+
           '<div class="next-suggest-title">📋 本日の作業指示</div>'+
           '<div class="next-suggest-task">'+esc(instrTask.name)+'を担当してください</div>'+
-          '<div class="next-suggest-meta">作業量の目安: '+formatNum(myInstruction.expectedQty)+esc(taskSummaryUnitFor(confirmedPlan, myInstruction.taskId))+'</div>'+
+          '<div class="next-suggest-meta">作業量の目安: '+formatNum(myInstruction.expectedQty)+esc(taskSummaryUnitFor(confirmedPlan, myInstruction.taskId))+(estCompletion1?' ・ 完了予定 '+estCompletion1:'')+'</div>'+
           '<div class="next-suggest-actions">'+
             '<button type="button" class="add-btn" data-suggest-start="'+myInstruction.taskId+'">この作業を開始</button>'+
           '</div>'+
@@ -7991,10 +8068,11 @@ function renderInput(){
       var sug = state.nextTaskSuggestModal;
       var sugTask = taskById(sug.taskId);
       if(sug.isConfirmedInstruction){
+        var estCompletion2 = estimateCompletionTimeText(sug.taskId, state.activeStaffId, new Date(), state.day);
         suggestBanner = '<div class="next-suggest-banner" style="border-color:var(--amber-500);">'+
           '<div class="next-suggest-title">📋 本日の作業指示</div>'+
           '<div class="next-suggest-task">'+esc(sugTask.name)+'を開始してください</div>'+
-          '<div class="next-suggest-meta">作業量の目安: '+formatNum(sug.qty)+esc(taskSummaryUnitFor(state.staffingSuggestion, sug.taskId))+'</div>'+
+          '<div class="next-suggest-meta">作業量の目安: '+formatNum(sug.qty)+esc(taskSummaryUnitFor(state.staffingSuggestion, sug.taskId))+(estCompletion2?' ・ 完了予定 '+estCompletion2:'')+'</div>'+
           '<div class="next-suggest-actions">'+
             '<button type="button" class="add-btn" data-suggest-start="'+sug.taskId+'">この作業を開始</button>'+
           '</div>'+
@@ -8073,8 +8151,13 @@ function renderInput(){
         liveCountersHtml += renderVcCaseCountWidget(tid);
       }
       var completeBtnHtml = isActive ? '<button type="button" class="log-stop-btn" data-complete-and-suggest="'+tid+'" style="margin-top:10px;">✓ 完了して次を確認する</button>' : '';
+      var completionTimeHtml = '';
+      if(isActive){
+        var estCompletion3 = estimateCompletionTimeText(tid, state.activeStaffId, new Date(), state.day);
+        if(estCompletion3) completionTimeHtml = '<div class="task-tile-unit">完了予定: '+esc(estCompletion3)+'</div>';
+      }
       return '<div class="task-tile '+(isActive?'active-task':'')+'" data-tap-task="'+tid+'" style="border-left:6px solid '+t.color+'">'+
-        '<div><div class="task-tile-name">'+esc(t.name)+' '+csvLinkBadge(tid)+'</div><div class="task-tile-unit">単位: '+esc(t.unit)+'</div></div>'+
+        '<div><div class="task-tile-name">'+esc(t.name)+' '+csvLinkBadge(tid)+'</div><div class="task-tile-unit">単位: '+esc(t.unit)+'</div>'+completionTimeHtml+'</div>'+
         '<div>'+
           '<div class="task-tile-status"><span class="status-dot '+(isActive?'working':'idle')+'"></span>'+(isActive?'作業中':'タップして開始')+'</div>'+
           (isActive && !(t.subcategories && t.subcategories.length) ? '<div class="task-tile-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsed)+'</div>' : '')+

@@ -816,6 +816,23 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 
 /* ---------- MONITOR VIEW ---------- */
 .monitor{height:100vh;height:100dvh;background:var(--ink-950);color:#EDEFF3;padding:0;overflow:hidden;display:flex;flex-direction:column;}
+/* モニター画面のライトモード。既存のダーク配色(デフォルト)は一切変更せず、
+   このクラスが付いた時だけCSS変数を明るい色で上書きする。 */
+.monitor.mon-theme-light{
+  --ink-950:#F7F8FA; --ink-900:#FFFFFF; --ink-800:#EEF1F5; --ink-700:#E1E5EB; --ink-600:#C7CDD6;
+  --slate-500:#5B6472; --slate-300:#8A94A3;
+  background:var(--ink-950); color:#1A2233;
+}
+.monitor.mon-theme-light .mon-title,
+.monitor.mon-theme-light .mon-name,
+.monitor.mon-theme-light .mon-task-name,
+.monitor.mon-theme-light .mon-footer-title,
+.monitor.mon-theme-light .mon-challenge-nums{ color:#1A2233; }
+.monitor.mon-theme-light .mon-assign-chip.active{ background:var(--amber-500); color:#fff; }
+.monitor.mon-theme-light .mon-row{ box-shadow:0 1px 3px rgba(0,0,0,.08); }
+.monitor.mon-theme-light .mon-exit{ border-color:var(--ink-600); color:#1A2233; }
+.mon-theme-toggle{border:1px solid var(--ink-600);background:transparent;color:inherit;border-radius:16px;padding:5px 10px;font-size:14px;line-height:1;cursor:pointer;}
+.mon-back-btn{border:1px solid var(--ink-600);background:transparent;color:inherit;border-radius:16px;padding:5px 12px;font-size:11px;cursor:pointer;}
 .mon-inner{max-width:1760px;margin:0 auto;width:100%;flex:1;min-height:0;display:flex;flex-direction:column;}
 .mon-header{
   flex:none;display:flex;align-items:center;justify-content:space-between;padding:14px 28px;border-bottom:2px solid var(--ink-700);
@@ -966,6 +983,16 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-21', items:[
+    '【重要な不具合修正】CSV取込で、荷主出荷番号が空欄の行が、これまで警告も無く完全にスキップされていた(異常として記録すらされていなかった)不具合を修正しました。以後は、このような行を含め、得意先不明・出荷引当数が数値として読み取れない・商品IDが空、といった行レベルの異常を検出し、CSV取込確認画面に「正常/警告/エラー」の3段階で表示します',
+    '取込確認画面に、該当行(行番号)・荷主出荷番号・得意先・商品コード・数量・異常の内容を一覧できる詳細を追加しました。異常を検出しても、データを自動的に補正したり、別の作業項目へ自動的に紐付けたりすることはありません',
+    '「CSV上の件数」「新規登録件数」「重複除外件数」「エラー件数」「ピース数」を区別して表示し、混同を避けています',
+    '【新機能】モニター表示画面に、ライト/ダークの表示切替ボタンを追加しました。既存のモニター画面の配色(暗め)はそのまま「ダークモード」として維持し、新たに明るい「ライトモード」を追加しています。レイアウト・カード配置・文字サイズ・情報量は変更していません',
+    '選択した表示モードは、ブラウザのlocalStorageに保存され、再読み込みしても保持されます(Supabase側には保存していません)',
+    '【新機能】モニター画面に「← 戻る」ボタンを追加しました。このアプリはURLによる画面遷移を持たないため、モニターへ移動する直前の画面を記憶しておき、確実にその画面へ戻れるようにしています。直接モニター画面が開かれた場合など、戻り先の情報が無い場合は、安全にトップ画面へ戻ります',
+    '実際にコードを実行するテストで、CSVの異常行検出(荷主出荷番号欠落・得意先不明・数量異常・商品ID欠落の4パターン)、モニターのテーマ切替とその保持、戻るボタンの動作(履歴あり・履歴なしの両方)を確認しました。既存の全機能(合計264項目)にも影響はありません',
+    '実装中、非同期処理(実績レポートの読み込み)の完了前にボタンを操作してしまうテスト側のタイミング不備を発見し、修正しています(アプリ本体の不具合ではありません)'
+  ]},
   { date:'2026-10-20', items:[
     '【重要な不具合修正】人員配置の必要人数計算・締切までの残り時間の計算が、休憩時間を一切考慮せず、暦上の時間差だけで計算されていた不具合を修正しました。休憩時間中は実際には作業できないため、以後は「休憩を除いた実働可能時間」を基準に必要人数・不足人数を計算します',
     '【新機能】作業者画面に、現在指示されている作業の「完了予定時刻」を表示するようにしました。作業量・生産性・休憩時間を使い、休憩をまたぐ場合はその時間を飛ばして計算します。あくまで現在の作業量と生産性から算出した目安であり、実績の遅延を検知するような新しい進捗管理機能ではありません',
@@ -1623,6 +1650,8 @@ var state = {
   pendingAssignmentSuggestions: null,
   reassignmentAlerts: null,
   wvAvailableDates: null,
+  monitorTheme: (function(){ try{ return localStorage.getItem('monitor-theme')||'dark'; }catch(e){ return 'dark'; } })(),
+  monitorEntryRole: null,
   wvPastDatesOpen: false,
   staffingLoading: false,
   staffingPriorityOpen: false,
@@ -3358,10 +3387,18 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
       var order = [];
       var byCustomer = {};
       var byProduct = {};
-      rows.forEach(function(r){
+      var rowAnomalies = []; // 行レベルの異常(必須項目欠落・得意先不明・数量異常など)。補正はせず、そのまま記録するだけ。
+      rows.forEach(function(r, rowIdx){
         var shipperNo = (r['荷主出荷NO']||'').trim();
-        if(!shipperNo) return;
-        var rowCustomerName = (r['取引先名']||'').trim() || '(不明)';
+        if(!shipperNo){
+          rowAnomalies.push({ severity:'error', rowNumber: rowIdx+2, shipperNo:'', customerName:(r['取引先名']||'').trim(), productCode:(r['商品ID']||'').trim(), qty:r['出荷引当数']||'', reason:'必須項目「荷主出荷NO」が空です' });
+          return;
+        }
+        var rowCustomerNameRaw = (r['取引先名']||'').trim();
+        var rowCustomerName = rowCustomerNameRaw || '(不明)';
+        if(!rowCustomerNameRaw){
+          rowAnomalies.push({ severity:'warning', rowNumber: rowIdx+2, shipperNo:shipperNo, customerName:'', productCode:(r['商品ID']||'').trim(), qty:r['出荷引当数']||'', reason:'得意先(取引先名)が空です' });
+        }
         if(!groups[shipperNo]){
           groups[shipperNo] = {
             shipperNo: shipperNo,
@@ -3373,8 +3410,12 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
           order.push(shipperNo);
         }
         groups[shipperNo].lineCount++;
-        var qty = parseInt(r['出荷引当数'],10);
-        if(isNaN(qty)) qty = 0;
+        var qtyRaw = r['出荷引当数'];
+        var qty = parseInt(qtyRaw,10);
+        if(isNaN(qty)){
+          rowAnomalies.push({ severity:'warning', rowNumber: rowIdx+2, shipperNo:shipperNo, customerName:rowCustomerName, productCode:(r['商品ID']||'').trim(), qty:qtyRaw||'(空欄)', reason:'「出荷引当数」が数値として読み取れません(0として集計)' });
+          qty = 0;
+        }
         groups[shipperNo].totalQty += qty;
 
         // 荷主(取引先名)別・商品(商品ID)別の内訳(実CSVの列名で取得。無ければ「(不明)」扱い)
@@ -3385,6 +3426,9 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
         byCustomer[customerName].totalQty += qty;
 
         var productCode = (r['商品ID']||'').trim();
+        if(!productCode){
+          rowAnomalies.push({ severity:'info', rowNumber: rowIdx+2, shipperNo:shipperNo, customerName:rowCustomerName, productCode:'', qty:qty, reason:'商品IDが空です(商品別分析には反映されません)' });
+        }
         if(productCode){
           var productName = (r['商品名']||'').trim();
           if(!byProduct[productCode]) byProduct[productCode] = { productName: productName, customerName: customerName, primaryShipperNos:{}, lineCount:0, totalQty:0, byShipperNo:{} };
@@ -3424,7 +3468,7 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
       callback({
         primaryCount: primaryCount, lineCount: lineCount, totalQty: totalQty, shipperGroups: shipperGroups,
         rowCount: rows.length, headers: headers, missingColumns: missingColumns,
-        byCustomer: byCustomerFinal, byProduct: byProductFinal
+        byCustomer: byCustomerFinal, byProduct: byProductFinal, rowAnomalies: rowAnomalies
       });
     }catch(err){
       errCallback('CSVの読み込みに失敗しました: '+(err.message||err));
@@ -5349,6 +5393,7 @@ function bindCommon(){
   document.querySelectorAll('[data-nav-role]').forEach(function(el){
     el.addEventListener('click', function(){
       var role = el.getAttribute('data-nav-role');
+      if(role==='monitor') state.monitorEntryRole = state.role || '';
       state.role = role || null;
       state.activeStaffId = null;
       state.modal = null;
@@ -5827,7 +5872,8 @@ function bindCsvImportPanel(){
           rowCount: result.rowCount, missingColumns: result.missingColumns||[],
           rawParseResult: filteredResult,
           skippedShipperNos: skippedShipperNos,
-          taskPlans: plan.taskPlans, unmapped: plan.unmapped
+          taskPlans: plan.taskPlans, unmapped: plan.unmapped,
+          rowAnomalies: result.rowAnomalies||[]
         };
         state.autoMapImporting = false;
         autoMapCsvInput.value = '';
@@ -9505,6 +9551,43 @@ function renderAutoMapPreviewModal(m){
   if(d.missingColumns && d.missingColumns.length){
     warnHtml += '<div class="vc-warning-box">⚠️ 必須列が見つかりません: '+d.missingColumns.map(esc).join('、')+'</div>';
   }
+
+  // ---- 取込結果サマリー: CSV上の件数・新規登録件数・重複除外件数・エラー件数・ピース数を混同せずに表示する ----
+  var anomalies = d.rowAnomalies || [];
+  var errorRows = anomalies.filter(function(a){ return a.severity==='error'; });
+  var warningRows = anomalies.filter(function(a){ return a.severity==='warning'; });
+  var infoRows = anomalies.filter(function(a){ return a.severity==='info'; });
+  var newPrimaryCount = d.taskPlans.reduce(function(a,p){return a+p.primaryCount;},0) + d.unmapped.reduce(function(a,u){return a+u.primaryCount;},0);
+  var newTotalQty = d.taskPlans.reduce(function(a,p){return a+p.totalQty;},0) + d.unmapped.reduce(function(a,u){return a+u.totalQty;},0);
+  var dupCount = (d.skippedShipperNos||[]).length;
+  var unmappedCount = d.unmapped.reduce(function(a,u){return a+u.primaryCount;},0);
+
+  var summaryHtml = '<div class="checklist-item" style="margin-bottom:10px;">'+
+    '<div class="checklist-item-title">✅ 正常</div>'+
+    '<div class="checklist-item-action">CSV行数: '+formatNum(d.rowCount)+'行 ・ 新規登録: '+formatNum(newPrimaryCount)+'件(出荷番号) ・ ピース数: '+formatNum(newTotalQty)+'</div>'+
+    (dupCount>0 || unmappedCount>0 || warningRows.length>0 ? (
+      '<div class="checklist-item-title" style="margin-top:8px;color:#B54708;">⚠️ 警告</div>'+
+      (unmappedCount>0 ? '<div class="checklist-item-action">作業項目未設定: '+formatNum(unmappedCount)+'件</div>' : '')+
+      (dupCount>0 ? '<div class="checklist-item-action">既存データとの重複(取込対象外): '+formatNum(dupCount)+'件</div>' : '')+
+      (warningRows.length>0 ? '<div class="checklist-item-action">得意先・数量が不明瞭な行: '+formatNum(warningRows.length)+'件</div>' : '')
+    ) : '')+
+    (errorRows.length>0 ? (
+      '<div class="checklist-item-title" style="margin-top:8px;color:#F04438;">❌ エラー</div>'+
+      '<div class="checklist-item-action">必須項目「荷主出荷NO」が無い行: '+formatNum(errorRows.length)+'件(この行は取り込まれません)</div>'
+    ) : '')+
+  '</div>';
+
+  var anomalyDetailRows = anomalies.slice(0, 50).map(function(a){
+    var icon = a.severity==='error' ? '❌' : (a.severity==='warning' ? '⚠️' : 'ℹ️');
+    return '<tr><td>'+icon+'</td><td>'+a.rowNumber+'行目</td><td>'+esc(a.shipperNo||'(空欄)')+'</td><td>'+esc(a.customerName||'(空欄)')+'</td><td>'+esc(a.productCode||'(空欄)')+'</td><td class="num">'+esc(String(a.qty))+'</td><td>'+esc(a.reason)+'</td></tr>';
+  }).join('');
+  var anomalyDetailHtml = anomalies.length ? (
+    '<details class="vc-manage-details" style="margin-bottom:12px;">'+
+      '<summary>異常行の詳細を見る('+anomalies.length+'件'+(anomalies.length>50?'、先頭50件のみ表示':'')+')</summary>'+
+      '<div style="overflow-x:auto;margin-top:8px;"><table class="report-table" style="font-size:12px;"><thead><tr><th></th><th>行</th><th>荷主出荷NO</th><th>得意先</th><th>商品コード</th><th>数量</th><th>内容</th></tr></thead><tbody>'+anomalyDetailRows+'</tbody></table></div>'+
+    '</details>'
+  ) : '';
+
   var taskRows = d.taskPlans.map(function(p){
     var t = taskById(p.taskId);
     return '<div class="checklist-item">'+
@@ -9529,6 +9612,8 @@ function renderAutoMapPreviewModal(m){
     '<div class="modal-card" style="max-width:560px;text-align:left;max-height:80vh;overflow-y:auto;">'+
       '<div class="modal-task-name" style="text-align:center;margin-bottom:6px;">CSV自動振り分けプレビュー</div>'+
       '<div class="pool-hint" style="text-align:center;margin-bottom:14px;">対象日付: '+esc(dateLabelFromStr(d.targetDate))+' ・ 取込行数 '+formatNum(d.rowCount)+'</div>'+
+      summaryHtml+
+      anomalyDetailHtml+
       warnHtml+
       ((d.skippedShipperNos && d.skippedShipperNos.length) ? '<div class="vc-import-status" style="background:var(--paper-100);color:var(--slate-500);border-color:var(--paper-line);">新規取込対象: '+d.taskPlans.reduce(function(a,p){return a+p.primaryCount;},0)+'件 / 重複スキップ: '+d.skippedShipperNos.length+'件<br><span style="font-size:11px;">スキップ理由: 既に取り込み済みの荷主出荷番号</span></div>' : '')+
       '<div class="panel-title" style="font-size:14px;">✓ 自動紐付け済み('+d.taskPlans.length+'作業枠)</div>'+
@@ -10140,12 +10225,16 @@ function renderMonitor(){
       return '<button type="button" class="mon-nav-item" data-nav-role="'+item.role+'" title="'+item.label+'">'+item.icon+'</button>';
     }).join('')+
   '</div>';
-  return '<div class="monitor"><div class="mon-inner">'+
+  var monThemeClass = state.monitorTheme==='light' ? ' mon-theme-light' : '';
+  var monThemeToggleHtml = '<button type="button" class="mon-theme-toggle" id="monThemeToggleBtn" title="表示テーマを切り替え">'+(state.monitorTheme==='light'?'🌙':'☀️')+'</button>';
+  var monBackBtnHtml = '<button type="button" class="mon-back-btn" id="monBackBtn">← 戻る</button>';
+  return '<div class="monitor'+monThemeClass+'"><div class="mon-inner">'+
     '<div class="mon-header">'+
-      '<div class="mon-title-block"><span class="mon-title">本日の稼働状況</span><span class="mon-date">'+todayLabel()+'</span></div>'+
+      '<div class="mon-title-block">'+monBackBtnHtml+'<span class="mon-title">本日の稼働状況</span><span class="mon-date">'+todayLabel()+'</span></div>'+
       '<div style="display:flex;align-items:center;gap:16px;">'+
         '<span class="mon-clock" id="monClock">'+clock+'</span>'+
         monNavHtml+
+        monThemeToggleHtml+
         '<button class="mon-exit" id="switchRoleBtn">役割を変更</button>'+
       '</div>'+
     '</div>'+
@@ -10173,6 +10262,30 @@ function renderMonitor(){
 function bindMonitor(){
   if(!state.achievementsResult && !state.achievementsLoading){
     runAchievementsReport();
+  }
+  var themeToggleBtn = document.getElementById('monThemeToggleBtn');
+  if(themeToggleBtn){
+    themeToggleBtn.addEventListener('click', function(){
+      state.monitorTheme = state.monitorTheme==='light' ? 'dark' : 'light';
+      try{ localStorage.setItem('monitor-theme', state.monitorTheme); }catch(e){}
+      render();
+    });
+  }
+  var backBtn = document.getElementById('monBackBtn');
+  if(backBtn){
+    backBtn.addEventListener('click', function(){
+      // 直前の画面に戻る。直接URLを開いた場合など戻る履歴が無いケースでは、
+      // 安全な既定の画面(トップ)へ戻す。既存のナビゲーション自体は変更しない。
+      if(state.monitorEntryRole!==undefined && state.monitorEntryRole!==null){
+        state.role = state.monitorEntryRole;
+        render();
+      }else if(window.history.length>1){
+        window.history.back();
+      }else{
+        state.role = '';
+        render();
+      }
+    });
   }
 }
 

@@ -983,6 +983,13 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-22', items:[
+    '【重大な不具合修正】CSV自動振り分けプレビューで、「マスターに追加」を押しても未紐付けの状態が解消されず、CSVの取込ができなくなる不具合を修正しました',
+    '原因: 「個配」のような繰り返し作業(曜日パターンで日々自動生成される作業)の日別インスタンスは、通常「今日から数日先まで」しか事前に生成されていません。取込対象日として過去日・別日(今回の例では9/22)を指定した場合、その日の「個配」のインスタンスがまだ存在せず、得意先と作業項目の紐付けを正しく解決できなかったことが原因でした',
+    '修正: CSVプレビューを開く時点、および「マスターに追加」を実行する時点の両方で、対象日の繰り返し作業インスタンスの存在を保証するようにしました。これにより、対象日が「今日」以外であっても、作業マスタに登録済みの得意先は正しく紐付けられます',
+    '既存の重複防止ルール(荷主出荷番号ベース)・workVolumeのデータ構造・作業マスタの登録内容は一切変更していません。データを自動補正したり、作業項目を推測で決めたりする処理は追加していません',
+    '実際にコードを実行するテストで、ご報告いただいたケース(15行・コープＣＳネット・明細15・ピース191)を直接再現し、修正前は未紐付けのまま残ってしまうこと、修正後は「マスターに追加」により正しく解消され、件数(2件)・明細数(15)・ピース数(191)が変わらないまま取込対象になることを確認しました。既存の全機能(合計285項目)にも影響はありません'
+  ]},
   { date:'2026-10-21', items:[
     '【重要な不具合修正】CSV取込で、荷主出荷番号が空欄の行が、これまで警告も無く完全にスキップされていた(異常として記録すらされていなかった)不具合を修正しました。以後は、このような行を含め、得意先不明・出荷引当数が数値として読み取れない・商品IDが空、といった行レベルの異常を検出し、CSV取込確認画面に「正常/警告/エラー」の3段階で表示します',
     '取込確認画面に、該当行(行番号)・荷主出荷番号・得意先・商品コード・数量・異常の内容を一覧できる詳細を追加しました。異常を検出しても、データを自動的に補正したり、別の作業項目へ自動的に紐付けたりすることはありません',
@@ -5832,6 +5839,12 @@ function bindCsvImportPanel(){
       state.autoMapImporting = true;
       render();
 
+      // 対象日は「今日」とは限らない(過去日・未来日を指定して取り込む仕様があるため)。
+      // 繰り返し作業の日別インスタンスは通常「今日以降、数日先まで」しか事前生成されないため、
+      // 対象日のインスタンスが無いまま紐付け判定を行うと、実際には作業マスタに登録されている
+      // 得意先でも「未紐付け」と誤判定されてしまう。プレビュー生成前に必ず保証しておく。
+      await ensureTemplateTasksForDate(targetDate);
+
       var fingerprint, fileSize = file.size, fileName = file.name;
       try{
         fingerprint = await computeFileFingerprint(file);
@@ -9644,8 +9657,13 @@ function bindAutoMapPreviewModal(m){
       state.customerTaskMapping.entries.push({ id: uid(), customerName: customerName, taskId: taskId, templateId: taskById(taskId).fromTemplate || null, enabled: true });
       await saveCustomerTaskMapping(state.customerTaskMapping);
       await appendAuditLog({ action:'得意先マスター追加(CSVプレビューから)', target: customerName, before:null, after: customerName+' → '+taskById(taskId).name });
-      // 取込プレビューを再計算(この得意先が未紐付けから該当作業枠へ移動する)
       var d = state.autoMapPreviewData;
+      // 重要: 選んだ作業が繰り返し作業(テンプレート由来)の場合、対象日の日別インスタンスが
+      // まだ生成されていないと、紐付け解決(resolveMappingEntryTaskId)がnullを返し、
+      // 「マスターに追加」しても未紐付けのまま残ってしまう。対象日のインスタンス生成を
+      // ここで保証してから再計算する(取込対象日は「今日」とは限らないため)。
+      await ensureTemplateTasksForDate(d.targetDate);
+      // 取込プレビューを再計算(この得意先が未紐付けから該当作業枠へ移動する)
       var plan = buildAutoMappedImportPlan(d.rawParseResult, state.customerTaskMapping, d.targetDate);
       d.taskPlans = plan.taskPlans;
       d.unmapped = plan.unmapped;

@@ -992,6 +992,16 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-27', items:[
+    '【設定の整理】作業マスタの手待ち関連設定を、分かりにくかった3項目(手待ち発生可能性・手待ち時の配置変更・配置変更可能)から、意味の分かりやすい2項目(手待ち作業 ON/OFF・手待ち作業での優先度)に整理しました',
+    '「配置変更可能」という個別設定は廃止し、「手待ち作業(ON)であれば、通常作業への人員不足時に常に配置変更候補になる」というシステムルールに統一しました。通常作業をしているスタッフは、従来通り原則として途中で移動させません',
+    '新しく「手待ち作業での優先度」を追加しました。手待ち作業が複数ある場合、この数字が小さい作業から人員を割り当てます。これは通常作業の優先順位とは別の、独立した数字として扱います(混同しません)',
+    '調査の結果、「手待ち作業をしているスタッフが複数いる場合、対象の通常作業でより実績の高いスタッフを優先して配置変更候補にする」機能は、既に実装済みであることを確認しました(今回の変更はしていません)',
+    '完了予定時刻の計算・休憩時間の除外は、既存のロジック(workingMinutesExcludingBreaks・estimateCompletionTimeText等)をそのまま利用しており、新しい計算方式は追加していません',
+    '実際にコードを実行するテストで、手待ち優先度順の配置・個人実績による候補選定・旧設定(配置変更可能)が残っていても新しいシステムルールが優先されることを確認しました。既存の作業マスタ設定保存(前回修正した「リセットされない」仕組み)にも、今回追加した項目が正しく統合されていることを確認しています',
+    '既存の全機能(合計381項目)にも影響はありません',
+    '【今回未実装の項目】管理者画面での「作業別の必要人数・配置人数・完了予定」一覧表示、「スタッフ別の現在の作業・次の作業・完了予定」一覧表示は、今回のスコープには含めていません。個々の完了予定時刻の計算・表示自体は既存の仕組みで可能ですが、それらをまとめた新しい一覧画面の追加は行っておらず、別途対応が必要です'
+  ]},
   { date:'2026-10-26', items:[
     '【重大な不具合修正・原因特定】「作業マスタの設定が毎回リセットされる」問題の原因を特定し、修正しました',
     '原因: 「設定→作業マスタ」画面に表示される一覧は、繰り返し作業(毎日・毎週発生する作業)の「日別インスタンス」を日付ごとに表示しているものでした。この一覧から個別の日付の「編集」を選んで優先度・締切・手待ち作業・配置変更可能を設定すると、その日限りのデータとしてのみ保存され、繰り返し作業の恒久的な設定(テンプレート)には反映されていませんでした。そのため、翌日に新しく生成される作業には設定が引き継がれず、「リセットされた」ように見えていました',
@@ -2287,7 +2297,7 @@ function ensureTemplateTasksForDateSync(dateStr){
     var key = tmpl.id+'|'+dateStr;
     if(existingKeys[key]) return;
     state.backlog.push({id:uid(), name:tmpl.name, unit:tmpl.unit, color:tmpl.color, workDate:dateStr, archived:false, fromTemplate:tmpl.id, subcategories:tmpl.subcategories||[], category:taskCategory(tmpl),
-      deadline: tmpl.deadline||null, priorityLevel: tmpl.priorityLevel||4, idleLikely: tmpl.idleLikely===true, reassignable: tmpl.reassignable!==false});
+      deadline: tmpl.deadline||null, priorityLevel: tmpl.priorityLevel||4, idleLikely: tmpl.idleLikely===true, idlePriorityLevel: tmpl.idlePriorityLevel||3});
     existingKeys[key] = true;
     changed = true;
   });
@@ -2846,15 +2856,18 @@ function computeTaskUrgency(task, workVolume, taskPriority, productivityMaster, 
 function computeStaffingSuggestion(day, workVolume, taskPriority, productivityMaster, nowDate, backlog, roster){
   var dateStr = day.date;
   var tasks = tasksWithVolumeForDate(backlog, dateStr, workVolume);
-  var urgencies = tasks.map(function(t){
-    var u = computeTaskUrgency(t, workVolume, taskPriority, productivityMaster, nowDate);
-    u.isIdleWork = (t.idleLikely===true); // 「手待ち作業」= 通常作業が無くなったときの予備作業(既存フィールドをそのまま利用)
+  var urgencies = tasks.map(function(u_t){
+    var u = computeTaskUrgency(u_t, workVolume, taskPriority, productivityMaster, nowDate);
+    u.isIdleWork = (u_t.idleLikely===true); // 「手待ち作業」= 通常作業が無くなったときの予備作業
+    u.idlePriorityLevel = u_t.idlePriorityLevel || 3; // 手待ち作業同士の順序付け専用(通常作業のpriorityLevelとは混ぜない)
     return u;
   });
   // 通常作業(手待ち作業でないもの)を必ず先に処理する。同じ区分の中では、
   // 逼迫度が高い順(不明[-1]は最後)、同点は優先順位(数値が小さいほど優先) ※納期・優先度を最優先する順序は維持
+  // 手待ち作業同士の順序は、通常作業のpriorityLevelではなくidlePriorityLevelで決める。
   urgencies.sort(function(a,b){
     if(a.isIdleWork!==b.isIdleWork) return a.isIdleWork ? 1 : -1;
+    if(a.isIdleWork && b.isIdleWork) return a.idlePriorityLevel-b.idlePriorityLevel;
     if(a.urgency===-1 && b.urgency!==-1) return 1;
     if(b.urgency===-1 && a.urgency!==-1) return -1;
     if(Math.abs(a.urgency-b.urgency)>0.001) return b.urgency-a.urgency;
@@ -2996,14 +3009,15 @@ function computeStaffingSuggestion(day, workVolume, taskPriority, productivityMa
       var effectiveMin = (u.deadlineMinutes!==null) ? Math.min(remainMin, u.deadlineMinutes) : remainMin;
       var prod = productivityRateFor(productivityMaster, u.taskId, sid);
       if(!prod.rate) return null;
-      var uTask = backlog.find(function(t){ return t.id===u.taskId; });
-      return { taskId:u.taskId, urgency:u.urgency, priorityLevel:u.priorityLevel, deadlineMinutes:u.deadlineMinutes, qty:(effectiveMin/60)*prod.rate, basis:prod.basis, rate:prod.rate, isIdleWork: !!(uTask && uTask.idleLikely===true) };
+      return { taskId:u.taskId, urgency:u.urgency, priorityLevel:u.priorityLevel, idlePriorityLevel:u.idlePriorityLevel, deadlineMinutes:u.deadlineMinutes, qty:(effectiveMin/60)*prod.rate, basis:prod.basis, rate:prod.rate, isIdleWork: u.isIdleWork };
     }).filter(function(x){ return x!==null; });
     // 手待ち作業(idleLikely=true)は「通常作業が無くなったときの予備作業」であり、
-    // 優先順位(priorityLevel)の数値に関わらず、通常作業より後に回す。
+    // 通常作業より後に回す。手待ち作業同士の順序は、通常作業のpriorityLevelではなく
+    // 手待ち作業専用のidlePriorityLevelで決める(セクション21: 2つの優先度を混ぜない)。
     scored.sort(function(a,b){
       if(a.isIdleWork!==b.isIdleWork) return a.isIdleWork ? 1 : -1; // 通常作業を必ず先に
-      if(a.priorityLevel!==b.priorityLevel) return a.priorityLevel-b.priorityLevel; // 作業マスタの優先順位
+      if(a.isIdleWork && b.isIdleWork) return a.idlePriorityLevel-b.idlePriorityLevel; // 手待ち作業同士は手待ち優先度で
+      if(a.priorityLevel!==b.priorityLevel) return a.priorityLevel-b.priorityLevel; // 通常作業同士は作業マスタの優先順位
       if(a.deadlineMinutes===null && b.deadlineMinutes===null) return 0;
       if(a.deadlineMinutes===null) return 1;
       if(b.deadlineMinutes===null) return -1;
@@ -3191,14 +3205,12 @@ function computeReassignmentCandidates(day, workVolume, productivityMaster, nowD
       if(!activeLog || activeLog.taskId===task.id || activeLog.taskId==='BREAK') return;
       var currentTask = backlog.find(function(t){ return t.id===activeLog.taskId; });
       if(!currentTask) return;
-      if(currentTask.idleLikely!==true) return;       // 手待ち発生可能性が「あり」でなければ対象外(ケース2)
-      if(currentTask.reassignable===false) return;     // 配置変更「不可」なら対象外(ケース3)
+      if(currentTask.idleLikely!==true) return;       // 手待ち作業でなければ対象外(通常作業者は移動させない)
 
       var prod = productivityRateFor(productivityMaster, task.id, s.id);
       var currentUrgency = computeTaskUrgency(currentTask, workVolume, taskPriority, productivityMaster, nowDate);
       var reasons = [
-        esc(currentTask.name)+': 手待ち発生可能性あり',
-        esc(currentTask.name)+': 配置変更可',
+        esc(currentTask.name)+': 手待ち作業です',
         esc(task.name)+': 現在の配置では人員が不足しています'
       ];
       if(urgency.deadlineMinutes!==null) reasons.push(esc(task.name)+': 締切まで残り'+Math.round(urgency.deadlineMinutes)+'分');
@@ -9320,12 +9332,12 @@ function readWorkMasterPriorityFields(context){
   var deadlineInput = document.getElementById(context+'Deadline');
   var priorityInput = document.getElementById(context+'PriorityLevel');
   var idleEl = document.querySelector('input[name="'+context+'IdleLikely"]:checked');
-  var reassignEl = document.querySelector('input[name="'+context+'Reassignable"]:checked');
+  var idlePriorityInput = document.getElementById(context+'IdlePriorityLevel');
   return {
     deadline: (deadlineInput && deadlineInput.value) ? deadlineInput.value : null,
     priorityLevel: priorityInput ? parseInt(priorityInput.value,10) : 4,
     idleLikely: idleEl ? (idleEl.value==='yes') : false,
-    reassignable: reassignEl ? (reassignEl.value==='yes') : true
+    idlePriorityLevel: idlePriorityInput ? parseInt(idlePriorityInput.value,10) : 3
   };
 }
 async function saveEditTask(){
@@ -9349,9 +9361,9 @@ async function saveEditTask(){
   task.deadline = prio.deadline;
   task.priorityLevel = prio.priorityLevel;
   task.idleLikely = prio.idleLikely;
-  task.reassignable = prio.reassignable;
-  // 重要: この作業が繰り返し作業(テンプレート由来)の場合、自動人員配置に使う4項目
-  // (締切・優先度・手待ち作業・配置変更可能)は、日別インスタンスだけでなく
+  task.idlePriorityLevel = prio.idlePriorityLevel;
+  // 重要: この作業が繰り返し作業(テンプレート由来)の場合、自動人員配置に使う項目
+  // (締切・優先度・手待ち作業・手待ち作業での優先度)は、日別インスタンスだけでなく
   // テンプレート自体にも反映する。これをしないと、この日だけの設定になってしまい、
   // 翌日以降に新しく生成されるインスタンスには引き継がれず、「設定がリセットされた」
   // ように見えてしまう(既存のsaveEditTemplate()の伝播と同じ考え方)。
@@ -9361,7 +9373,7 @@ async function saveEditTask(){
       tmpl.deadline = task.deadline;
       tmpl.priorityLevel = task.priorityLevel;
       tmpl.idleLikely = task.idleLikely;
-      tmpl.reassignable = task.reassignable;
+      tmpl.idlePriorityLevel = task.idlePriorityLevel;
       await saveTemplates(state.templates);
       // 既に生成済みの、今日以降の同じテンプレート由来の他インスタンスにも合わせておく
       state.backlog.forEach(function(other){
@@ -9369,7 +9381,7 @@ async function saveEditTask(){
           other.deadline = task.deadline;
           other.priorityLevel = task.priorityLevel;
           other.idleLikely = task.idleLikely;
-          other.reassignable = task.reassignable;
+          other.idlePriorityLevel = task.idlePriorityLevel;
         }
       });
     }
@@ -9453,7 +9465,7 @@ async function saveEditTemplate(){
   tmpl.deadline = tmplPrio.deadline;
   tmpl.priorityLevel = tmplPrio.priorityLevel;
   tmpl.idleLikely = tmplPrio.idleLikely;
-  tmpl.reassignable = tmplPrio.reassignable;
+  tmpl.idlePriorityLevel = tmplPrio.idlePriorityLevel;
   state.modal = null;
   state.suppressRender = false;
   await saveTemplates(state.templates);
@@ -9470,7 +9482,7 @@ async function saveEditTemplate(){
       task.deadline = tmpl.deadline;
       task.priorityLevel = tmpl.priorityLevel;
       task.idleLikely = tmpl.idleLikely;
-      task.reassignable = tmpl.reassignable;
+      task.idlePriorityLevel = tmpl.idlePriorityLevel;
       changed = true;
     }
   });
@@ -10275,7 +10287,7 @@ function renderWorkMasterPriorityFields(context, m){
   var deadline = m.deadline || '';
   var priorityLevel = m.priorityLevel || 4;
   var idleLikely = m.idleLikely === true;
-  var reassignable = m.reassignable !== false; // 既定は「可」
+  var idlePriorityLevel = m.idlePriorityLevel || 3;
   return '<div style="border-top:1px solid var(--paper-line);padding-top:12px;margin-bottom:14px;">'+
     '<div style="font-size:12px;font-weight:700;color:var(--slate-500);margin-bottom:8px;">人員配置の基準設定(任意)</div>'+
     '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">締切時刻(未設定でも構いません)</label>'+
@@ -10287,12 +10299,19 @@ function renderWorkMasterPriorityFields(context, m){
       '<option value="3" '+(priorityLevel===3?'selected':'')+'>3 = 中</option>'+
       '<option value="4" '+(priorityLevel===4?'selected':'')+'>4 = 低</option>'+
     '</select>'+
-    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">手待ち発生可能性(この作業は状況によって人が余りやすいですか?)</label>'+
-    '<label style="display:inline-block;font-size:13px;margin-right:14px;"><input type="radio" name="'+context+'IdleLikely" value="no" '+(!idleLikely?'checked':'')+'> なし</label>'+
-    '<label style="display:inline-block;font-size:13px;margin-bottom:12px;"><input type="radio" name="'+context+'IdleLikely" value="yes" '+(idleLikely?'checked':'')+'> あり</label>'+
-    '<label style="font-size:11px;color:var(--slate-500);display:block;margin:8px 0 4px;">手待ち時の配置変更</label>'+
-    '<label style="display:inline-block;font-size:13px;margin-right:14px;"><input type="radio" name="'+context+'Reassignable" value="yes" '+(reassignable?'checked':'')+'> 可</label>'+
-    '<label style="display:inline-block;font-size:13px;"><input type="radio" name="'+context+'Reassignable" value="no" '+(!reassignable?'checked':'')+'> 不可</label>'+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">手待ち作業</label>'+
+    '<div class="pool-hint" style="margin:0 0 6px;">通常作業がないときに、余っているスタッフへ割り当てる作業です。</div>'+
+    '<label style="display:inline-block;font-size:13px;margin-right:14px;"><input type="radio" name="'+context+'IdleLikely" value="no" '+(!idleLikely?'checked':'')+'> OFF(通常作業)</label>'+
+    '<label style="display:inline-block;font-size:13px;margin-bottom:12px;"><input type="radio" name="'+context+'IdleLikely" value="yes" '+(idleLikely?'checked':'')+'> ON(手待ち作業)</label>'+
+    (idleLikely ? (
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:8px 0 4px;">手待ち作業での優先度</label>'+
+      '<div class="pool-hint" style="margin:0 0 6px;">手待ち作業が複数ある場合、数字が小さい作業から割り当てます。</div>'+
+      '<select id="'+context+'IdlePriorityLevel" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:12px;">'+
+        '<option value="1" '+(idlePriorityLevel===1?'selected':'')+'>1</option>'+
+        '<option value="2" '+(idlePriorityLevel===2?'selected':'')+'>2</option>'+
+        '<option value="3" '+(idlePriorityLevel===3?'selected':'')+'>3</option>'+
+      '</select>'
+    ) : '')+
   '</div>';
 }
 function renderEditTaskModal(m){

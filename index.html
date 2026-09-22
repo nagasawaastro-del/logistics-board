@@ -983,6 +983,14 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-24', items:[
+    '【重大な不具合修正】「🎌 祝日も休みにする」をONにしているスタッフが、祝日なのに「出勤中」になってしまう不具合を修正しました',
+    '原因: 1日の始まりに新しく作成される日別データ(freshDay)自体は、以前から正しく祝日休みを考慮していました。しかし、自動出退勤処理(勤務時間になったら自動的に出勤中にする機能)には、祝日の判定が一切組み込まれておらず、曜日パターンだけを見て、祝日休み設定を無視して出勤中に変更してしまっていました',
+    '修正: 自動出退勤処理で、「祝日も休みにする」がONのスタッフは、自動的に出勤中へ変更しないようにしました。既に出勤中になっている場合の自動退勤処理(終業時刻での対応)には影響しないよう、出勤時の処理だけを対象にしています',
+    '既にこの不具合により誤って「出勤中」のまま保存されてしまっていたデータについても、読み込み時に自動的に補正されるようにしました。ただし、これは「自動出退勤処理によって出勤中にされたことが分かる場合」に限定しており、管理者が手動で祝日出勤に切り替えた場合は、そのまま尊重され、書き換えません。過去の実績ログ(作業記録)は一切変更していません',
+    '祝日休みの判定を1つの共通関数にまとめ、本日の出勤人数・人員配置・自動出勤の全てが、同じ基準で一貫して判定されるようにしました',
+    '実際にコードを実行するテストで、ご提示いただいた仕様(平日の通常日は出勤・土日は休み・平日の祝日は休み・祝日休み設定OFFなら通常通り出勤)、自動出退勤処理での不具合の再現と修正確認、既存データの補正、手動変更の尊重を確認しました。既存の全機能(合計309項目)にも影響はありません'
+  ]},
   { date:'2026-10-23', items:[
     '【重大な不具合修正・追加調査】前回の修正だけでは解決していなかった「マスターに追加しても未紐付けが解消されない」問題について、実際の処理を追跡し、2つの根本原因を特定・修正しました',
     '原因①: 得意先マスターの検索(findMappingForCustomer)は、同じ得意先に複数のマッピングが登録されている場合、最初に見つかったものを使う仕様でした。これまでの「マスターに追加」処理は、既存のマッピングを確認せず常に新規追加(push)していたため、過去に誤った・古い作業へのマッピングが残っていると、新しく追加した正しいマッピングが無視され続けていました',
@@ -2307,6 +2315,13 @@ async function loadJpHolidays(){
 }
 function holidayName(dateStr){
   return (state.jpHolidays && state.jpHolidays.data && state.jpHolidays.data[dateStr]) || null;
+}
+/* 「祝日も休みにする」設定と実際の祝日データから、そのスタッフがその日「祝日休み」に
+   該当するかどうかを判定する共通ヘルパー。既存のholidayName()/offOnHolidaysをそのまま利用し、
+   新しい祝日データは導入しない。曜日パターン・自動出勤・表示など、祝日休みを考慮すべき
+   全ての箇所からこれを呼ぶことで、判定がバラバラにならないようにする。 */
+function isHolidayOffForStaff(staff, dateStr){
+  return !!(staff && staff.offOnHolidays && holidayName(dateStr));
 }
 /* ---------- 作業量(CSV取込)・ケース数台帳 ---------- */
 /* ---------- 人員配置・次作業自動指示 ---------- */
@@ -3639,12 +3654,11 @@ async function reverseVcCaseEntry(dateStr, taskId, entryId, reason){
 function freshDay(dateStr){
   var attendance = {};
   var weekday = new Date(dateStr+'T00:00:00').getDay();
-  var holiday = holidayName(dateStr);
   state.roster.forEach(function(s){
     if(s.archived) return;
     var pattern = s.pattern || defaultPattern();
     var on = !!pattern[weekday];
-    if(on && s.offOnHolidays && holiday) on = false;
+    if(on && isHolidayOffForStaff(s, dateStr)) on = false;
     attendance[s.id] = on;
   });
   return { date: dateStr, attendance: attendance, assignments:{}, logs:[] };
@@ -3684,8 +3698,28 @@ async function loadAllDaysForLifetime(){
 }
 async function loadDay(){
   var d = await loadDayByDate(todayStr());
-  if(d && d.date===todayStr()) return d;
+  if(d && d.date===todayStr()){
+    if(correctHolidayOffAttendance(d)) await saveDay(d);
+    return d;
+  }
   return freshDay(todayStr());
+}
+/* 既に保存済みのday(祝日休み設定が入る前に自動出退勤処理で出勤中になってしまった等)を、
+   現在の「祝日も休みにする」設定に照らして補正する。
+   あくまで「自動出退勤処理によってtrueになった」ことがautoShiftStartedで確認できる場合のみ
+   falseへ補正し、管理者が手動で出勤へ切り替えた場合(autoShiftStartedが立たない)は尊重して
+   変更しない。過去の実績ログ(day.logs)は一切変更しない。 */
+function correctHolidayOffAttendance(day){
+  var changed = false;
+  activeRoster().forEach(function(s){
+    if(!day.attendance[s.id]) return;
+    if(!isHolidayOffForStaff(s, day.date)) return;
+    if(!(day.autoShiftStarted && day.autoShiftStarted[s.id])) return; // 手動操作の可能性があるため触らない
+    day.attendance[s.id] = false;
+    delete day.autoShiftStarted[s.id];
+    changed = true;
+  });
+  return changed;
 }
 async function saveDay(day){
   if(day.date===todayStr()){
@@ -3840,11 +3874,10 @@ function monthKeyLabel(monthKey){
 }
 function predictedAttendanceCount(dateStr){
   var wd = new Date(dateStr+'T00:00:00').getDay();
-  var holiday = holidayName(dateStr);
   return activeRoster().filter(function(s){
     var pattern = s.pattern || defaultPattern();
     if(!pattern[wd]) return false;
-    if(s.offOnHolidays && holiday) return false;
+    if(isHolidayOffForStaff(s, dateStr)) return false;
     return true;
   }).length;
 }
@@ -8890,8 +8923,12 @@ async function checkAutoShift(){
     if(!pattern[wd]) return;
     var endTime = day.shiftEndOverrides[s.id] || state.shiftSettings.end;
     var isOn = !!day.attendance[s.id];
+    // 「祝日も休みにする」がONのスタッフは、曜日パターン上は出勤日でも、
+    // 自動出退勤処理によって勝手に出勤中(true)へ変更しない。ただし、
+    // 管理者が手動で祝日出勤にした場合の自動退勤処理までは妨げない。
+    var holidayOff = isHolidayOffForStaff(s, day.date);
 
-    if(!isOn && !day.autoShiftStarted[s.id] && nowStr >= state.shiftSettings.start && nowStr < endTime){
+    if(!isOn && !holidayOff && !day.autoShiftStarted[s.id] && nowStr >= state.shiftSettings.start && nowStr < endTime){
       day.attendance[s.id] = true;
       day.autoShiftStarted[s.id] = true;
       changed = true;

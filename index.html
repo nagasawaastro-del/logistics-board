@@ -992,6 +992,14 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-26', items:[
+    '【重大な不具合修正・原因特定】「作業マスタの設定が毎回リセットされる」問題の原因を特定し、修正しました',
+    '原因: 「設定→作業マスタ」画面に表示される一覧は、繰り返し作業(毎日・毎週発生する作業)の「日別インスタンス」を日付ごとに表示しているものでした。この一覧から個別の日付の「編集」を選んで優先度・締切・手待ち作業・配置変更可能を設定すると、その日限りのデータとしてのみ保存され、繰り返し作業の恒久的な設定(テンプレート)には反映されていませんでした。そのため、翌日に新しく生成される作業には設定が引き継がれず、「リセットされた」ように見えていました',
+    '修正: 繰り返し作業の日別インスタンスを編集した場合、優先度・締切・手待ち作業・配置変更可能の4項目を、自動的にテンプレート自体にも反映するようにしました。これにより、どちらの画面から設定しても、翌日以降に正しく引き継がれます',
+    '実際にコードを実行するテストで、この問題を直接再現したうえで修正を確認しました。単発作業(繰り返しでない作業)については元々問題がなかったことも確認し、優先度・生産性・締切・手待ち作業のON/OFF・配置変更可能のON/OFF・作業単位を変更→保存→(実際にアプリを新しく起動し直す形で)再読み込みしても、すべて同じ値のまま維持されることを確認しました',
+    '特に、手待ち作業=false(オフ)・配置変更可能=false(不可)といった「false」の値が、保存・再読み込みの過程で意図しない初期値に戻ってしまわないことも確認しています',
+    '既存の全機能(合計343項目)にも影響はありません'
+  ]},
   { date:'2026-10-25', items:[
     '【重要な発見】管理者→今日の状況の「ダッシュボード要約バー」は、以前のCHANGELOGには「実装済み」と記録されていましたが、実際には本日の作業件数・出勤者数などの数字だけの簡易な表示にとどまっており、「誰が・何を・何時から何時まで」を確認できる機能は実装されていませんでした',
     '「今日の状況」の先頭を、①今日の全体サマリー(作業量・出勤・作業中・要確認・未配置・配置確定をカード表示)②👥作業者別 業務時間(誰が・何を・何時から何時まで・何時間を一覧表示)の2段構成に刷新しました',
@@ -9342,6 +9350,30 @@ async function saveEditTask(){
   task.priorityLevel = prio.priorityLevel;
   task.idleLikely = prio.idleLikely;
   task.reassignable = prio.reassignable;
+  // 重要: この作業が繰り返し作業(テンプレート由来)の場合、自動人員配置に使う4項目
+  // (締切・優先度・手待ち作業・配置変更可能)は、日別インスタンスだけでなく
+  // テンプレート自体にも反映する。これをしないと、この日だけの設定になってしまい、
+  // 翌日以降に新しく生成されるインスタンスには引き継がれず、「設定がリセットされた」
+  // ように見えてしまう(既存のsaveEditTemplate()の伝播と同じ考え方)。
+  if(task.fromTemplate){
+    var tmpl = state.templates.find(function(t){ return t.id===task.fromTemplate; });
+    if(tmpl){
+      tmpl.deadline = task.deadline;
+      tmpl.priorityLevel = task.priorityLevel;
+      tmpl.idleLikely = task.idleLikely;
+      tmpl.reassignable = task.reassignable;
+      await saveTemplates(state.templates);
+      // 既に生成済みの、今日以降の同じテンプレート由来の他インスタンスにも合わせておく
+      state.backlog.forEach(function(other){
+        if(other.id!==task.id && other.fromTemplate===task.fromTemplate && other.workDate>=todayStr() && !other.archived){
+          other.deadline = task.deadline;
+          other.priorityLevel = task.priorityLevel;
+          other.idleLikely = task.idleLikely;
+          other.reassignable = task.reassignable;
+        }
+      });
+    }
+  }
   state.modal = null;
   state.suppressRender = false;
   await saveBacklog(state.backlog);

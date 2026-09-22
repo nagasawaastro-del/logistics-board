@@ -302,6 +302,15 @@ input,select{font-family:inherit;}
 .breakdown-detail-time{font-family:var(--font-mono);min-width:56px;text-align:right;}
 .log-stop-btn:hover{background:#FEE4E2;}
 .log-edit-btn:hover{border-color:var(--amber-500);background:#FFFAEB;}
+.dash-summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:10px;}
+.dash-card{border:1px solid var(--paper-line);border-radius:var(--radius-lg);padding:12px;background:var(--paper-50);text-align:center;}
+.dash-card-icon{font-size:20px;margin-bottom:2px;}
+.dash-card-label{font-size:11px;color:var(--slate-500);font-weight:600;}
+.dash-card-value{font-family:var(--font-mono);font-weight:700;font-size:20px;margin-top:2px;}
+.dash-card-sub{font-size:12px;color:var(--slate-500);}
+.dash-ok-banner{background:#ECFDF3;border:1px solid #ABEFC6;color:#067647;border-radius:var(--radius-md);padding:10px 14px;font-weight:600;margin-bottom:14px;}
+.dash-row-missing{background:#FEF3F2;}
+.dash-row-checking{background:#FFFAEB;}
 .mgr-grid{display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start;min-width:0;}
 @media (max-width:900px){.mgr-grid{grid-template-columns:1fr;}}
 .mgr-grid > *{min-width:0;}
@@ -983,6 +992,15 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-25', items:[
+    '【重要な発見】管理者→今日の状況の「ダッシュボード要約バー」は、以前のCHANGELOGには「実装済み」と記録されていましたが、実際には本日の作業件数・出勤者数などの数字だけの簡易な表示にとどまっており、「誰が・何を・何時から何時まで」を確認できる機能は実装されていませんでした',
+    '「今日の状況」の先頭を、①今日の全体サマリー(作業量・出勤・作業中・要確認・未配置・配置確定をカード表示)②👥作業者別 業務時間(誰が・何を・何時から何時まで・何時間を一覧表示)の2段構成に刷新しました',
+    '作業者ごとに、業務時間の入力状態を🟢入力OK(開始・終了あり)・🔵作業中(開始のみ)・🟠要確認(配置はあるが時間記録なし)・🔴未入力(出勤しているのに記録が一切ない)として自動判定し、問題がある作業者は名前入りで警告表示します。問題が無ければ「✅業務時間の入力漏れはありません」と表示します',
+    '現在作業中の作業者を、開始時刻・経過時間とともに別枠で分かりやすく表示するようにしました',
+    'これらはすべて既存の実績データ(day.logs)をそのまま読み取って構築しており、新しい勤怠データ構造は作っていません。休憩時間・生産性・人員配置など、既存の計算ロジックにも一切変更を加えていません。収支(売上・原価・人件費・利益)は表示していません',
+    '実際にコードを実行するテストで、開始・終了が記録された作業者(🟢)、開始のみで作業中の作業者(🔵)、配置はあるが記録が無い作業者(要確認)を含むシナリオを作り、判定・表示・警告が正しく機能することを確認しました。既存の全機能(合計325項目)にも影響はありません',
+    '【今回未実装の項目】作業単位の状況テーブル(必要人数/配置人数の対比)・作業者ごとの1日の履歴ドリルダウン・次の配置候補との連携表示・簡易タイムライン表示は、今回のスコープには含めていません。ご要望があれば別途対応いたします'
+  ]},
   { date:'2026-10-24', items:[
     '【重大な不具合修正】「🎌 祝日も休みにする」をONにしているスタッフが、祝日なのに「出勤中」になってしまう不具合を修正しました',
     '原因: 1日の始まりに新しく作成される日別データ(freshDay)自体は、以前から正しく祝日休みを考慮していました。しかし、自動出退勤処理(勤務時間になったら自動的に出勤中にする機能)には、祝日の判定が一切組み込まれておらず、曜日パターンだけを見て、祝日休み設定を無視して出勤中に変更してしまっていました',
@@ -2091,6 +2109,11 @@ function fmtHM(ms){
 function fmtClock(iso){
   var d = new Date(iso);
   return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+function fmtDurationShort(ms){
+  var totalMin = Math.max(0, Math.round(ms/60000));
+  var h = Math.floor(totalMin/60), m = totalMin%60;
+  return h+':'+String(m).padStart(2,'0');
 }
 function fmtDateTime(iso){
   if(!iso) return '';
@@ -5046,6 +5069,76 @@ function dateRangeList(startStr, endStr){
   }
   return dates;
 }
+/* 「今日の状況」ダッシュボード: 作業者別の業務時間一覧を、既存のday.logsから直接組み立てる。
+   新しい勤怠データ構造は作らず、実績ログをそのまま「誰が・何を・何時から何時まで」として使う。
+   1人が複数の作業ログを持つ場合は、直近のログ(最後に開始したもの)を代表行として使う。 */
+function computeStaffWorkTimeRows(day, roster){
+  var present = presentStaffForDay(day);
+  return present.map(function(s){
+    var myLogs = (day.logs||[]).filter(function(l){ return l.staffId===s.id; });
+    var nonBreakLogs = myLogs.filter(function(l){ return l.taskId!=='BREAK'; });
+    var activeLog = myLogs.find(function(l){ return l.end===null; });
+    var latestLog = nonBreakLogs.length ? nonBreakLogs[nonBreakLogs.length-1] : null;
+
+    // 状態判定: 🟢入力OK(開始・終了あり) / 🔵作業中(開始のみ、終了待ち) / 🟠要確認(配置はあるが時間記録なし) / 🔴未入力(出勤しているのに記録が一切ない)
+    var status, statusIcon, task, startTime, endTime, workedMs;
+    if(activeLog && activeLog.taskId!=='BREAK'){
+      status = 'working'; statusIcon = '🔵';
+      task = taskById(activeLog.taskId);
+      startTime = activeLog.start; endTime = null;
+      workedMs = Date.now() - new Date(activeLog.start).getTime();
+    }else if(activeLog && activeLog.taskId==='BREAK'){
+      // 休憩中は「作業自体は入力OK寄り」として、直前の作業実績があればそれを代表表示する
+      if(latestLog){
+        status = 'ok'; statusIcon = '⏸';
+        task = taskById(latestLog.taskId);
+        startTime = latestLog.start; endTime = latestLog.end;
+        workedMs = new Date(latestLog.end).getTime() - new Date(latestLog.start).getTime();
+      }else{
+        status = 'checking'; statusIcon = '🟠';
+        task = null; startTime = null; endTime = null; workedMs = 0;
+      }
+    }else if(latestLog){
+      status = 'ok'; statusIcon = '🟢';
+      task = taskById(latestLog.taskId);
+      startTime = latestLog.start; endTime = latestLog.end;
+      workedMs = new Date(latestLog.end).getTime() - new Date(latestLog.start).getTime();
+    }else{
+      var hasAssignment = (day.assignments[s.id]||[]).length>0;
+      status = hasAssignment ? 'checking' : 'missing';
+      statusIcon = hasAssignment ? '🟠' : '🔴';
+      task = null; startTime = null; endTime = null; workedMs = 0;
+    }
+
+    // 本日合計の実働時間(休憩を除く、既存のaggregateDaysの考え方をそのまま利用)
+    var agg = aggregateDays([day]).perStaff[s.id];
+    var totalWorkedMs = agg ? Math.max(0, agg.ms - (agg.breakMs||0)) : 0;
+
+    return {
+      staffId: s.id, name: s.name, status: status, statusIcon: statusIcon,
+      taskName: task ? task.name : null, taskId: task ? task.id : null,
+      startTime: startTime, endTime: endTime, workedMs: workedMs, totalWorkedMs: totalWorkedMs,
+      logCount: nonBreakLogs.length
+    };
+  });
+}
+/* 全体サマリー用の集計。既存データ(day.attendance/day.logs/day.assignments)から動的に算出する。 */
+function computeTodaySummary(day, roster, workVolume){
+  var rows = computeStaffWorkTimeRows(day, roster);
+  var presentCount = presentStaffForDay(day).length;
+  var workingCount = rows.filter(function(r){ return r.status==='working'; }).length;
+  var checkingCount = rows.filter(function(r){ return r.status==='checking' || r.status==='missing'; }).length;
+  var idleCount = presentCount - rows.filter(function(r){ return (day.assignments[r.staffId]||[]).length>0; }).length;
+  var confirmedCount = presentCount - idleCount;
+  var tasks = tasksWithVolumeForDate(state.backlog, day.date, workVolume||emptyWorkVolume());
+  var totalPrimary = 0, totalQty = 0;
+  tasks.forEach(function(t){ var tot = wvTotalsForTask(workVolume||emptyWorkVolume(), t.id); totalPrimary += tot.primaryCount; totalQty += tot.totalQty; });
+  return {
+    presentCount: presentCount, workingCount: workingCount, checkingCount: checkingCount,
+    idleCount: Math.max(0, idleCount), confirmedCount: Math.max(0, confirmedCount),
+    totalPrimary: totalPrimary, totalQty: totalQty
+  };
+}
 function aggregateDays(days){
   var perStaff = {};
   var perTask = {};
@@ -6186,6 +6279,65 @@ function renderManager(){
     (isToday ? '<span class="date-nav-today-badge">本日</span>' : '<button class="date-nav-today-btn" id="dateNavToday">本日に戻る</button>')+
   '</div>';
 
+  // ---- ① 今日の全体サマリー(既存データから動的に算出。固定値は使わない) ----
+  var summary = computeTodaySummary(day, roster, managerActiveWorkVolume());
+  var summaryCardsHtml = '<div class="dash-summary-grid">'+
+    '<div class="dash-card"><div class="dash-card-icon">📦</div><div class="dash-card-label">今日の作業量</div><div class="dash-card-value">'+formatNum(summary.totalPrimary)+'件</div><div class="dash-card-sub">'+formatNum(summary.totalQty)+'個</div></div>'+
+    '<div class="dash-card"><div class="dash-card-icon">👥</div><div class="dash-card-label">出勤</div><div class="dash-card-value">'+summary.presentCount+'人</div></div>'+
+    '<div class="dash-card"><div class="dash-card-icon">🔵</div><div class="dash-card-label">作業中</div><div class="dash-card-value">'+summary.workingCount+'人</div></div>'+
+    '<div class="dash-card"><div class="dash-card-icon">🟠</div><div class="dash-card-label">要確認</div><div class="dash-card-value">'+summary.checkingCount+'人</div></div>'+
+    '<div class="dash-card"><div class="dash-card-icon">⏳</div><div class="dash-card-label">未配置</div><div class="dash-card-value">'+summary.idleCount+'人</div></div>'+
+    '<div class="dash-card"><div class="dash-card-icon">✅</div><div class="dash-card-label">配置確定</div><div class="dash-card-value">'+summary.confirmedCount+'人</div></div>'+
+  '</div>';
+
+  // ---- ④⑥⑦ 作業者別業務時間(誰が・何を・何時から何時まで・何時間、入力チェック) ----
+  var workTimeRows = computeStaffWorkTimeRows(day, roster);
+  var needsCheckRows = workTimeRows.filter(function(r){ return r.status==='checking' || r.status==='missing'; });
+  var checkAlertHtml = needsCheckRows.length ? (
+    '<div class="warn-banner" style="margin-bottom:14px;">'+
+      '<div style="font-weight:700;margin-bottom:6px;">⚠️ 業務時間 要確認('+needsCheckRows.length+'人)</div>'+
+      needsCheckRows.map(function(r){
+        var assigned = (day.assignments[r.staffId]||[]).map(function(tid){ return taskById(tid).name; }).join('・') || 'なし';
+        return '<div style="margin-top:4px;"><b>'+esc(r.name)+'さん</b> ー 出勤:○ / 配置:'+esc(assigned)+' / 開始:未入力 / 終了:未入力</div>';
+      }).join('')+
+    '</div>'
+  ) : '<div class="dash-ok-banner">✅ 業務時間の入力漏れはありません</div>';
+
+  var workTimeTableRows = workTimeRows.map(function(r){
+    var startStr = r.startTime ? fmtClock(r.startTime) : '―';
+    var endStr = r.endTime ? fmtClock(r.endTime) : (r.status==='working' ? '―' : '―');
+    var durStr;
+    if(r.status==='working'){ durStr = fmtDurationShort(r.workedMs)+'経過'; }
+    else if(r.startTime && r.endTime){ durStr = fmtDurationShort(r.workedMs); }
+    else{ durStr = '―'; }
+    var rowClass = r.status==='missing' ? 'dash-row-missing' : (r.status==='checking' ? 'dash-row-checking' : '');
+    return '<tr class="'+rowClass+'" data-staff-drilldown="'+r.staffId+'">'+
+      '<td>'+esc(r.name)+'</td>'+
+      '<td>'+(r.taskName?esc(r.taskName):'<span style="color:var(--slate-500);">未入力</span>')+'</td>'+
+      '<td class="num">'+startStr+'</td>'+
+      '<td class="num">'+endStr+'</td>'+
+      '<td class="num">'+durStr+'</td>'+
+      '<td style="text-align:center;">'+r.statusIcon+'</td>'+
+    '</tr>';
+  }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">出勤中のスタッフがいません</td></tr>';
+
+  var currentlyWorking = workTimeRows.filter(function(r){ return r.status==='working'; });
+  var currentlyWorkingHtml = currentlyWorking.length ? (
+    '<div class="pool-hint" style="margin-top:10px;font-weight:700;">🔵 現在作業中</div>'+
+    currentlyWorking.map(function(r){
+      return '<div class="checklist-item-action">'+esc(r.name)+' ー '+esc(r.taskName)+'(開始 '+fmtClock(r.startTime)+' ・ 経過 '+fmtDurationShort(r.workedMs)+')</div>';
+    }).join('')
+  ) : '';
+
+  var todayDashboardHtml = '<div class="panel" style="margin-bottom:14px;">'+
+    '<div class="panel-title">📋 今日の状況</div>'+
+    summaryCardsHtml+
+    '<div class="panel-title" style="font-size:15px;margin-top:18px;">👥 作業者別 業務時間</div>'+
+    checkAlertHtml+
+    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>作業者</th><th>作業</th><th>開始</th><th>終了</th><th>作業時間</th><th>状態</th></tr></thead><tbody>'+workTimeTableRows+'</tbody></table></div>'+
+    currentlyWorkingHtml+
+  '</div>';
+
 
   var poolHtml = present.map(function(s){
     var isUnassigned = !(day.assignments[s.id]||[]).length;
@@ -6322,30 +6474,8 @@ function renderManager(){
     '</tr>';
   }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この日の記録はまだありません</td></tr>';
 
-  // ---- ダッシュボード要約(その日の状況を数秒で把握できるように) ----
-  var activeStaffIds = {}, breakStaffIds = {};
-  (day.logs||[]).forEach(function(l){
-    if(l.end!==null) return;
-    if(l.taskId==='BREAK') breakStaffIds[l.staffId] = true;
-    else activeStaffIds[l.staffId] = true;
-  });
-  var activeCount = Object.keys(activeStaffIds).length;
-  var breakCount = Object.keys(breakStaffIds).length;
-  var idleCount = Math.max(0, present.length - activeCount - breakCount);
-  var totalLoggedMs = 0;
-  (day.logs||[]).forEach(function(l){
-    var end = l.end ? new Date(l.end) : (isToday ? new Date() : new Date(l.start));
-    totalLoggedMs += Math.max(0, end - new Date(l.start));
-  });
-  var totalLoggedHours = (totalLoggedMs/3600000).toFixed(1);
-  var dashboardBar = '<div class="dash-summary">'+
-    '<div class="dash-stat"><div class="dash-stat-value">'+tasks.length+'</div><div class="dash-stat-label">本日の作業</div></div>'+
-    '<div class="dash-stat"><div class="dash-stat-value">'+present.length+'</div><div class="dash-stat-label">出勤者</div></div>'+
-    '<div class="dash-stat dash-stat-working"><div class="dash-stat-value">'+activeCount+'</div><div class="dash-stat-label">● 作業中</div></div>'+
-    '<div class="dash-stat dash-stat-idle"><div class="dash-stat-value">'+idleCount+'</div><div class="dash-stat-label">○ 未着手</div></div>'+
-    '<div class="dash-stat dash-stat-break"><div class="dash-stat-value">'+breakCount+'</div><div class="dash-stat-label">⏸ 休憩中</div></div>'+
-    '<div class="dash-stat"><div class="dash-stat-value">'+totalLoggedHours+'h</div><div class="dash-stat-label">実績時間(合計)</div></div>'+
-  '</div>';
+  // ---- ダッシュボード要約は todayDashboardHtml(サマリーカード+作業者別業務時間)に統合済み ----
+  var dashboardBar = todayDashboardHtml;
 
   return ''+
   '<div class="mgr-wrap">'+

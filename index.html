@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>物流センター 作業割り当てボード</title>
+<title>LOGI LINK - 物流現場管理</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -1150,7 +1150,7 @@ var CHANGELOG = [
     '【kintone商品マスタ連携・第1段階】調査の結果、以前から「将来kintoneに接続する際の差し替えポイント」が用意されていたことを確認しました(実際の接続は未実装)。今回、kintoneの商品マスタを取得できる仕組みを追加しました',
     '重要な前提: 私(Claude)にはSupabaseへのデプロイ権限がないため、実際にkintoneへ接続する部分(Edge Function)は、ソースコード・SQL・セットアップ手順書をファイルとしてお渡しし、お客様側でデプロイしていただく方式としました',
     '設定→「kintone連携設定」に、Edge Function URL・kintoneアプリID・フィールドコードを入力する画面を追加しました。管理者ログインが必須です(画面表示・実際の同期実行の両方で確認しています)',
-    'kintoneのAPIトークンは、ブラウザ側のコードには一切含まれません。Supabase Edge Function側の秘密情報(Secrets)としてのみ保管され、物流ボードからは「アプリID」「フィールドコード」といった秘密ではない設定値だけを送信します',
+    'kintoneのAPIトークンは、ブラウザ側のコードには一切含まれません。Supabase Edge Function側の秘密情報(Secrets)としてのみ保管され、LOGI LINKからは「アプリID」「フィールドコード」といった秘密ではない設定値だけを送信します',
     '「🔄 kintoneから商品マスタを取得」ボタンで、取得件数・保存件数・最終取得日時を確認できます。商品コードが空のレコードは対象外とし、kintoneのレコードIDを一意キーとして重複せず保存します(荷主が違えば同じ商品コードでも別レコードとして扱われます)',
     '実際にコードを実行するテストで、未ログイン状態では画面自体・同期処理のどちらも実行できないこと、Edge Functionへ送信するデータにAPIトークンが含まれないこと、エラー時に分かりやすいメッセージが表示されることを確認しました(Edge Function自体の実際の動作は、私の環境では実行・デプロイできないため未検証です)。既存の全回帰テスト(40スイート)にも影響はありません',
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
@@ -4642,7 +4642,7 @@ function renderUnitPricePanel(){
       '<button type="button" class="vc-manage-toggle-btn" data-fin-price-save="'+t.id+'">保存</button>'+
     '</div>';
   }).join('') || '<div class="empty-note">本日の作業がありません</div>';
-  var priceSourceNote = isPriceEditable ? '' : '<div class="vc-warning-box">単価はkintoneのマスタで管理されています。物流ボードからは変更できません。単価の変更はkintone側で行ってください。</div>';
+  var priceSourceNote = isPriceEditable ? '' : '<div class="vc-warning-box">単価はkintoneのマスタで管理されています。LOGI LINKからは変更できません。単価の変更はkintone側で行ってください。</div>';
 
   return '<div class="mgr-wrap"><div class="panel">'+
     '<div class="panel-title">💴 単価マスタ・人件費設定</div>'+
@@ -5320,7 +5320,7 @@ function renderGate(){
   return ''+
   '<div class="gate">'+
     '<div class="gate-eyebrow">Warehouse Dispatch Board</div>'+
-    '<h1 class="gate-title">物流センター 作業割り当てボード</h1>'+
+    '<h1 class="gate-title">LOGI LINK</h1>'+
     '<p class="gate-sub">このアプリのデータは全員で共有されます。使う画面の役割を選んでください。</p>'+
     '<div class="gate-grid">'+
       '<button class="gate-card" data-role="input">'+
@@ -5434,7 +5434,7 @@ function renderTopbar(){
   '<div class="topbar">'+
     '<div class="topbar-main-row">'+
       '<div class="topbar-left">'+
-        '<span class="topbar-title">物流センター 作業割り当てボード</span>'+
+        '<span class="topbar-title">LOGI LINK</span>'+
         '<span class="topbar-date">'+todayLabel()+' / '+roleLabel+'</span>'+
       '</div>'+
       '<div class="topbar-right">'+
@@ -6482,7 +6482,7 @@ function renderSettingsPanels(){
   var accountInfoHtml = '<div class="panel" style="margin-top:14px;">'+
     '<div class="panel-title">👤 管理者アカウント</div>'+
     '<div class="pool-hint" style="margin-bottom:10px;">'+(hasManagerSession() && state.managerSession.user ? 'ログイン中: '+esc(state.managerSession.user.email) : 'ログインしていません')+'</div>'+
-    '<div class="pool-hint">管理者を追加したい場合は、Supabaseダッシュボードの Authentication → Users からアカウントを作成し、user_roles テーブルに役割(manager/admin)を登録してください。物流ボード側での追加操作は不要です。</div>'+
+    '<div class="pool-hint">管理者を追加したい場合は、Supabaseダッシュボードの Authentication → Users からアカウントを作成し、user_roles テーブルに役割(manager/admin)を登録してください。LOGI LINK側での追加操作は不要です。</div>'+
   '</div>';
 
   var backupPanel = '<div class="panel" style="margin-top:14px;">'+
@@ -7746,7 +7746,7 @@ function renderAchievements(){
   }
 
   return '<div class="mgr-wrap"><div class="ach-wrap">'+
-    '<div class="ach-header">🏆 物流センター実績</div>'+
+    '<div class="ach-header">🏆 LOGI LINK 実績</div>'+
     todaySection+
     bodyRest+
   '</div></div>';

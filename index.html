@@ -82,6 +82,9 @@ input,select{font-family:inherit;}
   box-shadow:var(--shadow-sm);
 }
 .gate-card:hover{transform:translateY(-2px);border-color:var(--amber-500);box-shadow:var(--shadow-md);}
+/* 閲覧専用アカウント(monitor)で使えない画面の入口 */
+.gate-card:disabled,.gate-card:disabled:hover{opacity:.45;cursor:not-allowed;transform:none;border-color:var(--paper-line);box-shadow:var(--shadow-sm);}
+.topbar-nav-item:disabled,.topbar-nav-item:disabled:hover,.mon-nav-item:disabled,.mon-nav-item:disabled:hover{opacity:.35;cursor:not-allowed;background:transparent;}
 .gate-card:active{transform:translateY(0) scale(.98);}
 .gate-lock-badge{position:absolute;top:10px;right:12px;font-size:13px;opacity:.45;}
 .gate-icon{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;}
@@ -178,6 +181,7 @@ input,select{font-family:inherit;}
   cursor:pointer;display:flex;flex-direction:column;gap:2px;
 }
 .cal-cell:hover{border-color:var(--amber-500);background:#EEF2FF;}
+.cal-cell.cal-cell-readonly{cursor:default;}
 .cal-cell-empty{border:none;background:transparent;cursor:default;}
 .cal-cell-empty:hover{border:none;background:transparent;}
 .cal-cell-today{border-color:var(--ink-900);border-width:2px;}
@@ -927,33 +931,142 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
   }
   window.__supabaseClient = client;
 
+  /* ---------- エラーの分類 ----------
+     Supabase(PostgREST)のエラーや通信エラーを、画面に出す理由ごとに分類する。
+       permission : RLS・GRANTによる拒否(42501 / 401 / 403 / row-level security)
+       auth       : ログインの有効期限切れ・トークン不正(JWT)
+       network    : 通信エラー(fetch失敗・オフライン)
+       readonly   : 閲覧専用アカウント(monitor)による書き込み(ブラウザ側で拒否)
+       other      : 上記以外 */
+  function classifyError(err){
+    if(!err) return 'other';
+    if(err.kind) return err.kind;
+    var code = String(err.code||'');
+    var status = Number(err.status||0);
+    var msg = String(err.message||err.msg||'').toLowerCase();
+    if(code==='42501' || status===403 || msg.indexOf('row-level security')!==-1 || msg.indexOf('permission denied')!==-1) return 'permission';
+    if(code==='PGRST301' || code==='PGRST302' || status===401 || msg.indexOf('jwt')!==-1) return 'auth';
+    if(msg.indexOf('failed to fetch')!==-1 || msg.indexOf('networkerror')!==-1 || msg.indexOf('network request failed')!==-1 || msg.indexOf('load failed')!==-1) return 'network';
+    return 'other';
+  }
+  function makeStorageError(op, key, cause, kind){
+    var e = new Error('LOGI LINK storage '+op+' failed: '+key+' ('+((cause&&cause.message)||kind||'error')+')');
+    e.name = 'StorageError';
+    e.op = op; e.key = key; e.cause = cause || null;
+    e.kind = kind || classifyError(cause);
+    return e;
+  }
+  /* キーが本当に存在しない場合の例外。既存コードは message の 'not found' で
+     判定している箇所があるため、メッセージは従来と同じ 'key not found' を保つ。 */
+  function makeNotFoundError(key){
+    var e = new Error('key not found');
+    e.name = 'StorageNotFound';
+    e.notFound = true; e.key = key;
+    return e;
+  }
+  /* 書き込み失敗を必ずアプリ本体へ通知する(本体側で画面表示・console記録・再同期を行う)。
+     呼び出し元が例外を握りつぶしていても、利用者に「保存できなかった」ことが伝わるようにする。 */
+  function reportWriteFailure(err){
+    try{
+      if(typeof window.__onStorageWriteFailure==='function') window.__onStorageWriteFailure(err);
+      else console.error('[LOGI LINK] 保存に失敗しました', err);
+    }catch(e){ console.error('[LOGI LINK] 保存失敗の通知処理でエラー', e); }
+  }
+  function guardWrite(op, key){
+    if(!client){
+      var e0 = makeStorageError(op, key, new Error('Supabase未設定です(config.jsを確認してください)'), 'other');
+      reportWriteFailure(e0);
+      throw e0;
+    }
+    if(window.storage.readOnly){
+      var e1 = makeStorageError(op, key, new Error('閲覧専用アカウントのため保存できません'), 'readonly');
+      reportWriteFailure(e1);
+      throw e1;
+    }
+  }
+  async function runQuery(op, key, fn){
+    var res;
+    try{ res = await fn(); }
+    catch(netErr){ return { error: makeStorageError(op, key, netErr, classifyError(netErr) || 'network') }; }
+    if(res && res.error) return { error: makeStorageError(op, key, res.error), data: res.data };
+    return { data: res ? res.data : null };
+  }
+
   window.storage = {
+    /* 書き込み操作の通し番号。4秒更新(pollTick)が「自分の取得中に書き込みが
+       あったか」を判定し、保存前に取得した古いデータで画面の状態を上書きしない
+       ために使う。 */
+    writeSeq: 0,
+    /* 閲覧専用アカウント(monitor)でログイン中は true。ブラウザ側でも書き込みを止める。 */
+    readOnly: false,
+    classifyError: classifyError,
+    isNotFound: function(e){ return !!(e && e.notFound); },
+    /* キーが無い場合は notFound:true の例外、読み込み失敗(権限・通信)は StorageError を投げる。
+       呼び出し元はこの2つを区別し、読み込み失敗を「空データ」として扱わないこと。 */
     get: async function(key, shared){
-      if(!client) throw new Error('Supabase未設定です(config.jsを確認してください)');
-      var res = await client.from('kv_store').select('value').eq('key', key).maybeSingle();
-      if(res.error) throw res.error;
-      if(!res.data) throw new Error('key not found');
-      return { key: key, value: res.data.value };
+      if(!client) throw makeStorageError('read', key, new Error('Supabase未設定です(config.jsを確認してください)'), 'other');
+      var r = await runQuery('read', key, function(){ return client.from('kv_store').select('value').eq('key', key).maybeSingle(); });
+      if(r.error){ console.error('[LOGI LINK] 読み込みに失敗しました', key, r.error.kind, r.error.cause||r.error); throw r.error; }
+      if(!r.data) throw makeNotFoundError(key);
+      return { key: key, value: r.data.value };
     },
+    /* 成功時は { key, value }。失敗時は例外(StorageError)を投げる。
+       失敗は reportWriteFailure でアプリ本体にも必ず通知される。 */
     set: async function(key, value, shared){
-      if(!client) return null;
-      var res = await client.from('kv_store').upsert({ key: key, value: value }, { onConflict: 'key' }).select('value').maybeSingle();
-      if(res.error) return null;
+      guardWrite('write', key);
+      window.storage.writeSeq++;
+      var r = await runQuery('write', key, function(){ return client.from('kv_store').upsert({ key: key, value: value }, { onConflict: 'key' }).select('value').maybeSingle(); });
+      if(r.error){ reportWriteFailure(r.error); throw r.error; }
       return { key: key, value: value };
     },
+    /* 値と、その値の版(updated_at)を一緒に取得する。キーが無い場合は例外にせず
+       missing:true を返す(通信エラー時のみ例外)。 */
+    getVersioned: async function(key){
+      if(!client) throw makeStorageError('read', key, new Error('Supabase未設定です(config.jsを確認してください)'), 'other');
+      var r = await runQuery('read', key, function(){ return client.from('kv_store').select('value,updated_at').eq('key', key).maybeSingle(); });
+      if(r.error){ console.error('[LOGI LINK] 読み込みに失敗しました', key, r.error.kind, r.error.cause||r.error); throw r.error; }
+      if(!r.data) return { key: key, value: null, version: null, missing: true };
+      return { key: key, value: r.data.value, version: r.data.updated_at, missing: false };
+    },
+    /* 取得時と同じ版(updated_at)のままの場合だけ書き込む(楽観ロック)。
+       他の端末が先に書き込んでいた場合は conflict:true を返し、上書きしない。
+       version が null の場合は「まだキーが無い」前提で新規作成のみ行う。
+       競合以外の失敗は { ok:false, error } を返し、アプリ本体にも通知する。 */
+    setIfVersion: async function(key, value, version){
+      try{ guardWrite('write', key); }catch(ge){ return { ok:false, error: ge }; }
+      window.storage.writeSeq++;
+      if(version===null || version===undefined){
+        var ins = await runQuery('write', key, function(){ return client.from('kv_store').insert({ key: key, value: value }).select('updated_at'); });
+        if(ins.error){
+          if(ins.error.cause && ins.error.cause.code==='23505') return { ok:false, conflict:true };
+          reportWriteFailure(ins.error);
+          return { ok:false, error: ins.error };
+        }
+        return { ok:true, version: (ins.data && ins.data[0]) ? ins.data[0].updated_at : null };
+      }
+      var up = await runQuery('write', key, function(){ return client.from('kv_store').update({ value: value }).eq('key', key).eq('updated_at', version).select('updated_at'); });
+      if(up.error){ reportWriteFailure(up.error); return { ok:false, error: up.error }; }
+      /* 0件更新は「他端末が先に更新した(版が変わった)」か「RLSで対象行が見えない/更新できない」のどちらか。
+         呼び出し元(saveMergedList)は読み直して再試行するため、ここでは従来どおり競合として返す。 */
+      if(!up.data || !up.data.length) return { ok:false, conflict:true };
+      return { ok:true, version: up.data[0].updated_at };
+    },
     delete: async function(key, shared){
-      if(!client) return null;
-      var res = await client.from('kv_store').delete().eq('key', key);
-      if(res.error) return null;
+      guardWrite('delete', key);
+      window.storage.writeSeq++;
+      var r = await runQuery('delete', key, function(){ return client.from('kv_store').delete().eq('key', key); });
+      if(r.error){ reportWriteFailure(r.error); throw r.error; }
       return { key: key, deleted: true };
     },
     list: async function(prefix, shared){
-      if(!client) throw new Error('Supabase未設定です(config.jsを確認してください)');
-      var query = client.from('kv_store').select('key');
-      if(prefix) query = query.like('key', prefix+'%');
-      var res = await query;
-      if(res.error) throw res.error;
-      return { keys: (res.data||[]).map(function(r){ return r.key; }), prefix: prefix };
+      if(!client) throw makeStorageError('read', prefix||'', new Error('Supabase未設定です(config.jsを確認してください)'), 'other');
+      var r = await runQuery('read', prefix||'', function(){
+        var query = client.from('kv_store').select('key');
+        if(prefix) query = query.like('key', prefix+'%');
+        return query;
+      });
+      if(r.error){ console.error('[LOGI LINK] 一覧の読み込みに失敗しました', prefix, r.error.kind, r.error.cause||r.error); throw r.error; }
+      return { keys: (r.data||[]).map(function(row){ return row.key; }), prefix: prefix };
     }
   };
 })();
@@ -992,6 +1105,13 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-28', items:[
+    '【セキュリティ】管理者機能(管理者・設定・収支・単価・人件費・kintone同期)は、ログインしているだけでなく、アカウントの役割が管理者(manager/admin)の場合のみ使えるようにしました。現場の画面(本日の作業・実績入力・集計・モニター・カレンダー)は、これまでどおりログインなしで使えます',
+    '管理者ログインの画面で「メールアドレスを記憶する」を選べるようにしました(この端末のブラウザにメールアドレスだけを保存し、パスワードは保存しません)。ブラウザのパスワード保存機能にも対応しました',
+    '保存に失敗した場合(権限がない・ログイン切れ・通信エラーなど)は、画面上部に「保存できませんでした」と表示し、画面の内容を保存済みの状態に戻すようにしました。これまでは失敗しても保存できたように見える場合がありました',
+    'データの読み込みに失敗した場合に、「データが無い」と誤って判断して空の内容で上書きしないようにしました(実績・CSV取込データ・ケース数・操作履歴・各種マスターなど)',
+    'kintone商品マスタ同期の呼び出し先を、このLOGI LINKが接続しているSupabaseプロジェクトの関数に固定しました。ログイン情報は安全な方法(Authorizationヘッダー)で送信し、送信内容にログイン情報を含めないようにしました'
+  ]},
   { date:'2026-10-27', items:[
     '【設定の整理】作業マスタの手待ち関連設定を、分かりにくかった3項目(手待ち発生可能性・手待ち時の配置変更・配置変更可能)から、意味の分かりやすい2項目(手待ち作業 ON/OFF・手待ち作業での優先度)に整理しました',
     '「配置変更可能」という個別設定は廃止し、「手待ち作業(ON)であれば、通常作業への人員不足時に常に配置変更候補になる」というシステムルールに統一しました。通常作業をしているスタッフは、従来通り原則として途中で移動させません',
@@ -1676,8 +1796,16 @@ var CHANGELOG = [
 var state = {
   role: null,
   showChangelog: false,
-  managerSession: null,
+  managerSession: null,        // 現在のSupabase Authセッション(ロールは authRole で判定)
   managerSessionChecked: false,
+  authRole: null,              // 'admin' | 'manager' | 'staff' | 'monitor' | null
+  authChecked: false,          // ログイン状態の確認が済んだか
+  authRoleError: '',           // ロールを確認できなかった場合のメッセージ
+  appDataLoaded: false,        // ログイン確認後にアプリのデータを読み込んだか
+  appDataLoading: false,
+  deviceLoginError: '',
+  deviceLoginBusy: false,
+  forceRenderAfterResync: false,
   managerLoginError: '',
   managerLoginBusy: false,
   financialUnitPrices: null,
@@ -1728,6 +1856,10 @@ var state = {
   pendingCalendarDate: null,
   subcatDetailOpen: {},
   dataLoadUncertain: false,
+  loadUncertain: { roster:false, backlog:false, templates:false },
+  loadFailed: { roster:false, backlog:false, templates:false }, // 「無い」ではなく読み込み自体に失敗した
+  dailyInstructionsDate: null,
+  taskActionBusy: false,
   auditLogDate: null,
   focusBusy: false,
   isDragging: false,
@@ -2141,6 +2273,338 @@ function fmtDateTime(iso){
 
 /* ---------- storage ---------- */
 var pendingSaves = 0;
+
+/* ---------- 保存失敗の検知・表示・画面の巻き戻し ----------
+   window.storage の書き込みが失敗すると(RLSによる拒否・ログイン切れ・通信エラー・
+   閲覧専用アカウント等)、必ず window.__onStorageWriteFailure が呼ばれる。
+   ここで ①consoleへ原因を記録 ②画面上部に「保存できませんでした」を表示
+   ③Supabase上の保存済みの内容で画面を再同期(楽観的に更新した画面を元に戻す) を行う。
+   呼び出し元が例外を握りつぶしていても、利用者に失敗が伝わるようにするための仕組み。 */
+var storageFailSeq = 0;          // 書き込み失敗の通し番号
+var storageFailSeqAtAction = 0;  // 利用者が最後に操作(タップ・キー入力)した時点の通し番号
+var saveErrorBannerItems = {};   // 表示中の失敗内容(分類ごと)
+var resyncTimer = null;
+function storageKeyLabel(key){
+  var k = String(key||'');
+  var map = [
+    ['day:', '実績・出勤データ'], ['roster', 'スタッフ一覧'], ['task-backlog', '作業一覧'],
+    ['task-templates', '繰り返し作業'], ['work-volume-config', '作業量設定'], ['work-volume:', 'CSV取込データ'],
+    ['vc-case-ledger:', 'ケース数'], ['audit-log:', '操作履歴'], ['break-settings', '休憩設定'],
+    ['shift-settings', '勤務時間設定'], ['achievement-settings', '目標設定'], ['jp-holidays', '祝日データ'],
+    ['task-priority:', '作業の優先度'], ['productivity-master', '生産性データ'], ['staffing-suggestion:', '配置案'],
+    ['customer-task-mapping', '得意先・作業枠マスター'], ['shipper-no-registry', '荷主出荷番号の取込記録'],
+    ['pending-assignment-suggestions:', '次の配置候補'], ['reassignment-alerts:', '配置変更指示'],
+    ['csv-import-fingerprints', 'CSV重複チェック記録'], ['vc-import-attempts:', 'CSV取込の試行記録'],
+    ['daily-checklist-ack:', '締めチェック'], ['kintone-product-settings', 'kintone連携設定'],
+    ['kintone-product-sync-status', 'kintone同期状況']
+  ];
+  for(var i=0;i<map.length;i++){ if(k.indexOf(map[i][0])===0) return map[i][1]; }
+  return 'データ('+k+')';
+}
+function storageFailureReason(kind){
+  return {
+    permission: 'このアカウントには保存する権限がありません',
+    auth: 'ログインの有効期限が切れています。再度ログインしてください',
+    network: '通信エラーです。通信状態を確認してください',
+    readonly: 'モニター用(閲覧専用)アカウントのため保存できません',
+    unverified: '保存済みのデータを読み込めなかったため、上書きを防ぐために保存を中止しました'
+  }[kind] || '保存処理でエラーが発生しました';
+}
+function renderSaveErrorBanner(){
+  var el = document.getElementById('saveErrorBanner');
+  var keys = Object.keys(saveErrorBannerItems);
+  if(!keys.length){ if(el && el.parentNode) el.parentNode.removeChild(el); return; }
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'saveErrorBanner';
+    el.setAttribute('role', 'alert');
+    el.style.cssText = 'position:fixed;left:12px;right:12px;top:12px;z-index:10000;background:#FEF3F2;color:#912018;border:2px solid #D92D20;border-radius:12px;padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,.18);font-size:14px;line-height:1.5;max-width:720px;margin:0 auto;';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = '<div style="display:flex;gap:10px;align-items:flex-start;">'+
+    '<div style="flex:1;"><div style="font-weight:700;margin-bottom:4px;">⚠️ 保存できませんでした</div>'+
+    keys.map(function(k){ var it = saveErrorBannerItems[k]; return '<div>・'+esc(it.label)+':'+esc(it.reason)+(it.count>1?'('+it.count+'回)':'')+'</div>'; }).join('')+
+    '<div style="margin-top:4px;font-size:12px;">この変更はSupabaseに保存されていません。画面は保存済みの内容に戻します。</div></div>'+
+    '<button type="button" id="saveErrorBannerClose" style="border:1px solid #D92D20;background:#fff;color:#912018;border-radius:8px;padding:6px 10px;font-weight:700;">閉じる</button>'+
+  '</div>';
+  var closeBtn = document.getElementById('saveErrorBannerClose');
+  if(closeBtn) closeBtn.addEventListener('click', function(){ saveErrorBannerItems = {}; renderSaveErrorBanner(); });
+}
+window.__onStorageWriteFailure = function(err){
+  storageFailSeq++;
+  var kind = (err && err.kind) || 'other';
+  var key = (err && err.key) || '';
+  console.error('[LOGI LINK] 保存に失敗しました: '+storageKeyLabel(key)+' / 分類='+kind, err && (err.cause || err));
+  var label = storageKeyLabel(key);
+  var bannerKey = label+'|'+kind;
+  var item = saveErrorBannerItems[bannerKey] || { label: label, reason: storageFailureReason(kind), count: 0 };
+  item.count++;
+  saveErrorBannerItems[bannerKey] = item;
+  try{ renderSaveErrorBanner(); }catch(e){ console.error(e); }
+  if(kind==='auth') setTimeout(function(){ refreshAuthState().then(function(){ if(!hasDataAccess()) render(); }); }, 0);
+  scheduleResyncAfterSaveFailure();
+};
+/* 保存を伴う操作の直後に出す「〜しました」の完了メッセージは、その操作中に保存が
+   失敗していた場合は表示しない(失敗の表示と矛盾しないように)。 */
+['pointerdown','keydown'].forEach(function(ev){
+  document.addEventListener(ev, function(){ storageFailSeqAtAction = storageFailSeq; }, true);
+});
+function saveFailedDuringCurrentAction(){ return storageFailSeq!==storageFailSeqAtAction; }
+function isSuccessToastMessage(msg){
+  var s = String(msg||'');
+  if(s.indexOf('⚠')===0) return false;
+  if(/失敗|できません|できませんでした|エラー/.test(s)) return false;
+  return /しました|完了/.test(s);
+}
+/* 保存に失敗したら、Supabase上の保存済みの内容を読み直して画面を戻す。
+   (4秒更新と同じ処理を、再描画を強制する指定付きで早めに実行する) */
+function scheduleResyncAfterSaveFailure(attempt){
+  attempt = attempt || 0;
+  state.forceRenderAfterResync = true;
+  if(resyncTimer) return;
+  resyncTimer = setTimeout(async function(){
+    resyncTimer = null;
+    if(!hasDataAccess() || !state.appDataLoaded) return;
+    // 4秒更新の実行中・保存中などで今回の再同期が行われなかった場合は、少し待って再試行する
+    var retryIfPending = function(){
+      if(state.forceRenderAfterResync && attempt<5) scheduleResyncAfterSaveFailure(attempt+1);
+    };
+    try{
+      if(state.managerDate && state.managerDate!==todayStr()){
+        var md = state.managerDate;
+        var reloaded = await fetchDayRaw(md);
+        if(state.managerDate===md) state.managerDay = reloaded || freshDay(md);
+      }
+    }catch(e){ console.error('[LOGI LINK] 再同期(表示中の日付)に失敗しました', e); }
+    try{
+      var tp = await loadTaskPriority(todayStr());
+      if(!isUnverified(tp)) state.taskPriority = tp;
+    }catch(e){}
+    state.customerTaskMapping = null;
+    state.kintoneProductSettings = null;
+    try{ await pollTick(); }catch(e){ console.error('[LOGI LINK] 再同期に失敗しました', e); }
+    retryIfPending();
+  }, attempt ? 800 : 600);
+}
+
+/* ---------- 読み込み失敗と「データが無い」の区別 ----------
+   読み込みに失敗した(権限エラー・通信エラー等)ときに、画面を動かすために使う
+   初期値(空データ)には印を付ける。印の付いたデータは保存しない(保存済みの
+   本物のデータを空で上書きしてしまう事故を防ぐ)。本当にキーが無い場合は印を付けない。 */
+var unverifiedLoads = new WeakSet();
+function markUnverified(obj){
+  if(obj && typeof obj==='object') unverifiedLoads.add(obj);
+  return obj;
+}
+function isUnverified(obj){
+  return !!(obj && typeof obj==='object' && unverifiedLoads.has(obj));
+}
+function reportUnverifiedSave(key){
+  var e = new Error('読み込みに失敗したデータのため保存を中止しました: '+key);
+  e.kind = 'unverified'; e.key = key; e.op = 'write';
+  window.__onStorageWriteFailure(e);
+}
+/* キーのJSONを読み込む。キーが無い → makeDefault()(印なし)。
+   読み込み失敗 → makeDefault() に「未確認」の印を付けて返す(保存されない)。 */
+async function loadKeyJson(key, makeDefault){
+  try{
+    var r = await window.storage.get(key, true);
+    return (r && r.value) ? JSON.parse(r.value) : makeDefault();
+  }catch(e){
+    if(window.storage.isNotFound(e)) return makeDefault();
+    console.error('[LOGI LINK] 読み込みに失敗したため、このデータは保存しません: '+storageKeyLabel(key), e);
+    return markUnverified(makeDefault());
+  }
+}
+/* 設定値の読み込み。失敗時は画面が持っている現在の値を維持する(4秒更新で初期値に戻さない)。 */
+async function loadSettingsKey(key, current, makeDefault){
+  try{
+    var r = await window.storage.get(key, true);
+    return r ? JSON.parse(r.value) : makeDefault();
+  }catch(e){
+    if(window.storage.isNotFound(e)) return makeDefault();
+    console.error('[LOGI LINK] 設定の読み込みに失敗しました: '+storageKeyLabel(key), e);
+    return current || markUnverified(makeDefault());
+  }
+}
+/* JSONを保存する。成功で true、失敗で false(失敗内容は storage 層から画面に通知済み)。
+   読み込みに失敗した「未確認」のデータは保存せず false を返す。 */
+async function persistKey(key, obj){
+  if(isUnverified(obj)){ reportUnverifiedSave(key); return false; }
+  try{
+    await window.storage.set(key, JSON.stringify(obj), true);
+    return true;
+  }catch(e){
+    return false;
+  }
+}
+
+/* ---------- 認証・ロール(Supabase Auth + user_roles) ----------
+   ロールは Supabase 側の user_roles(将来は app_role()/is_manager() 関数)で判定する。
+     manager / admin : 管理者(管理画面・設定・収支・単価・人件費・kintone同期)
+     staff           : 現場端末(実績入力・集計・カレンダー・モニター)
+     monitor         : 閲覧専用(モニター表示など。保存・自動補正は行わない)
+   ログインしていても、ロールが manager/admin でなければ管理者として扱わない。 */
+var KNOWN_APP_ROLES = ['admin','manager','staff','monitor'];
+var ROLE_RANK = { admin:4, manager:3, staff:2, monitor:1 };
+var deviceSessionBackup = null; // 現場端末で管理者が一時ログインする前の端末セッション
+var roleRpcMissing = { app_role:false, is_manager:false }; // Supabase側に関数が未作成と分かったら、以降は呼ばない
+var authSwitching = false;      // この端末自身のログイン切替中(認証イベントの二重処理を防ぐ)
+function normalizeAppRole(r){
+  if(Array.isArray(r)) r = r.length ? r[0] : null;
+  if(r && typeof r==='object') r = r.role || r.app_role || null;
+  r = r==null ? '' : String(r).trim().toLowerCase();
+  return KNOWN_APP_ROLES.indexOf(r)!==-1 ? r : null;
+}
+function isMissingDbFunctionError(err){
+  if(!err) return false;
+  var code = String(err.code||'');
+  var msg = String(err.message||'').toLowerCase();
+  return code==='PGRST202' || code==='42883' || Number(err.status)===404 || msg.indexOf('could not find the function')!==-1;
+}
+/* 自分のロールを取得する。①app_role() ②is_manager() ③user_roles の自分の行 の順に試す。
+   戻り値: { ok:true, role:'staff'|...|null } / { ok:false, error } */
+async function fetchAppRole(session){
+  var c = window.__supabaseClient;
+  if(!c || !session || !session.user) return { ok:true, role:null };
+  var lastErr = null;
+  var managerByFn = null;
+  if(!roleRpcMissing.app_role){
+    try{
+      var r1 = await c.rpc('app_role');
+      if(!r1.error) return { ok:true, role: normalizeAppRole(r1.data) };
+      if(isMissingDbFunctionError(r1.error)) roleRpcMissing.app_role = true;
+      else lastErr = r1.error;
+    }catch(e){ lastErr = e; }
+  }
+  if(!roleRpcMissing.is_manager){
+    try{
+      var r2 = await c.rpc('is_manager');
+      if(!r2.error){
+        managerByFn = (r2.data===true || (Array.isArray(r2.data) && r2.data[0]===true));
+        if(managerByFn) return { ok:true, role:'manager' };
+      }else if(isMissingDbFunctionError(r2.error)) roleRpcMissing.is_manager = true;
+      else lastErr = r2.error;
+    }catch(e){ lastErr = e; }
+  }
+  try{
+    var r3 = await c.from('user_roles').select('role').eq('user_id', session.user.id);
+    if(!r3.error){
+      var best = null;
+      (r3.data||[]).forEach(function(row){
+        var role = normalizeAppRole(row && row.role);
+        if(role && (!best || ROLE_RANK[role]>ROLE_RANK[best])) best = role;
+      });
+      if(best==='admin' || best==='manager'){
+        // is_manager() が「管理者ではない」と答えている場合はそちらを優先する
+        if(managerByFn===false) best = null;
+      }
+      return { ok:true, role: best };
+    }
+    lastErr = r3.error;
+  }catch(e){ lastErr = e; }
+  if(managerByFn===false) return { ok:true, role:null };
+  return { ok:false, error: lastErr };
+}
+function applyAuthRole(role){
+  state.authRole = role || null;
+  window.storage.readOnly = (state.authRole==='monitor');
+}
+/* 現在のセッションとロールを確認し、state に反映する。 */
+async function refreshAuthState(){
+  var c = window.__supabaseClient;
+  state.authChecked = true;
+  state.authRoleError = '';
+  if(!c){ state.managerSession = null; applyAuthRole(null); return; }
+  var session = null;
+  try{
+    var res = await c.auth.getSession();
+    session = (res.data && res.data.session) ? res.data.session : null;
+  }catch(e){ session = null; console.error('[LOGI LINK] ログイン状態の確認に失敗しました', e); }
+  state.managerSession = session;
+  if(!session){ applyAuthRole(null); return; }
+  var rr = await fetchAppRole(session);
+  if(rr.ok){
+    applyAuthRole(rr.role);
+  }else{
+    console.error('[LOGI LINK] アカウントの権限(ロール)を確認できませんでした', rr.error);
+    applyAuthRole(null);
+    state.authRoleError = 'アカウントの権限を確認できませんでした。通信状態を確認して、もう一度お試しください。';
+  }
+}
+function isManagerRole(role){ return role==='manager' || role==='admin'; }
+/* 現場の画面(本日の作業・実績入力・集計・モニター・カレンダー)にもログインを求めるか。
+   現在の運用は「管理者のみログイン必須」のため false(現場はログインなしで利用する)。
+   true にすると、全画面でログイン(staff/monitor/manager/admin のいずれかの役割)が必要になる。
+   管理者機能は、この設定に関係なく hasManagerSession() で常に保護する。 */
+var FIELD_LOGIN_REQUIRED = false;
+/* アプリのデータ(現場のデータ)を読み書きできる状態か。
+   FIELD_LOGIN_REQUIRED が false の間は、未ログインでも常に利用できる。 */
+function hasDataAccess(){
+  if(!FIELD_LOGIN_REQUIRED) return true;
+  return !!(state.managerSession && state.managerSession.user && KNOWN_APP_ROLES.indexOf(state.authRole)!==-1);
+}
+function isReadOnlyAccount(){ return state.authRole==='monitor'; }
+/* 閲覧専用アカウント(monitor)では開けない画面(編集・保存が中心の画面)。
+   入口のボタンは位置を変えずに押せない状態(disabled)で表示する。 */
+var READONLY_BLOCKED_ROLES = ['input'];
+function isRoleBlockedForAccount(role){
+  return isReadOnlyAccount() && READONLY_BLOCKED_ROLES.indexOf(role)!==-1;
+}
+function readOnlyBlockedAttrs(role){
+  return isRoleBlockedForAccount(role) ? ' disabled aria-disabled="true"' : '';
+}
+var READONLY_BLOCKED_TITLE = 'モニター用(閲覧専用)アカウントでは使用できません';
+/* monitor が編集用の画面を開こうとした場合に、画面の代わりに表示する案内 */
+function renderReadOnlyBlockedScreen(label){
+  return '<div class="mgr-wrap"><div style="max-width:560px;margin:40px auto;">'+
+    '<div class="panel" id="readOnlyBlockedPanel" style="text-align:center;">'+
+      '<div class="panel-title" style="margin-bottom:8px;">🔒 '+esc(label)+'は使用できません</div>'+
+      '<div class="pool-hint">このアカウントはモニター用(閲覧専用)です。実績の入力・編集・削除・保存はできません。<br>'+
+      'モニター表示・集計・カレンダーは閲覧できます。</div>'+
+    '</div>'+
+  '</div></div>';
+}
+/* 自動補正・自動移行・自動保存を行ってよいか(monitorは閲覧専用のため行わない) */
+function canAutoWrite(){ return hasDataAccess() && !isReadOnlyAccount(); }
+function stopPolling(){
+  if(pollHandle){ clearInterval(pollHandle); pollHandle = null; }
+}
+function clearFinancialState(){
+  state.financialUnitPrices = null;
+  state.financialLaborCost = null;
+  state.kintoneProductSettings = null;
+  state.kintoneSyncStatus = null;
+}
+/* Supabase Auth のイベント。トークン更新・他のタブでのログアウト・セッション失効に追従する。
+   (このコールバック内で Supabase の他の処理を await すると固まるため setTimeout で逃がす) */
+function setupAuthListener(){
+  var c = window.__supabaseClient;
+  if(!c || !c.auth || typeof c.auth.onAuthStateChange!=='function') return;
+  c.auth.onAuthStateChange(function(event, session){
+    if(authSwitching) return;
+    if(event==='TOKEN_REFRESHED' || event==='USER_UPDATED'){
+      if(session) state.managerSession = session;
+      return;
+    }
+    if(event==='SIGNED_OUT' || event==='SIGNED_IN'){
+      setTimeout(async function(){
+        if(authSwitching) return;
+        var wasManager = hasManagerSession();
+        await refreshAuthState();
+        if(!hasManagerSession() && wasManager) clearFinancialState();
+        if(!hasDataAccess()){
+          stopPolling();
+          state.role = null; state.activeStaffId = null; state.modal = null;
+          render();
+          return;
+        }
+        if(!state.appDataLoaded) await loadAppData();
+        render();
+      }, 0);
+    }
+  });
+}
 function storageAvailable(){
   return !!(window.storage && typeof window.storage.get==='function' && typeof window.storage.set==='function');
 }
@@ -2170,13 +2634,31 @@ async function fetchRosterRaw(){
   if(!res.ok){ if(res.error) throw res.error; return []; }
   return JSON.parse(res.value);
 }
+/* 読み込みの不確実さはデータ種別ごとに保持する。以前は1つのフラグを3種類の
+   読み込みで上書きしていたため、作業一覧の読み込みに失敗しても、直後の繰り返し
+   作業の読み込みが成功すると「確実」に戻ってしまい、空の作業一覧を保存し得た。
+   state.dataLoadUncertain は既存の参照箇所向けに「いずれかが不確実」を表す。 */
+function setLoadUncertain(kind, uncertain, err){
+  state.loadUncertain[kind] = !!uncertain;
+  // 「キーが無い」ではなく読み込み自体が失敗した(権限・通信エラー)かどうか
+  if(!state.loadFailed) state.loadFailed = {};
+  state.loadFailed[kind] = !!(uncertain && err && !window.storage.isNotFound(err));
+  state.dataLoadUncertain = !!(state.loadUncertain.roster || state.loadUncertain.backlog || state.loadUncertain.templates);
+}
 async function loadRoster(){
-  try{ var r = await fetchRosterRaw(); state.dataLoadUncertain = false; return r; }catch(e){ state.dataLoadUncertain = true; return []; }
+  try{ var r = await fetchRosterRaw(); setLoadUncertain('roster', false); return r; }
+  catch(e){
+    setLoadUncertain('roster', true, e);
+    if(state.loadFailed.roster) console.error('[LOGI LINK] スタッフ一覧を読み込めませんでした(空として扱いません)', e);
+    return [];
+  }
 }
 async function saveRoster(list){
+  // 読み込みに失敗した状態の一覧(空)で、保存済みのスタッフ一覧を上書きしない
+  if(state.loadFailed && state.loadFailed.roster){ reportUnverifiedSave('roster'); return false; }
   state.roster = list;
   pendingSaves++;
-  try{ await window.storage.set('roster', JSON.stringify(list), true); }catch(e){}
+  try{ return await persistKey('roster', list); }
   finally{ pendingSaves--; }
 }
 async function fetchBacklogRaw(){
@@ -2185,7 +2667,123 @@ async function fetchBacklogRaw(){
   return JSON.parse(res.value);
 }
 async function loadBacklog(){
-  try{ var r = await fetchBacklogRaw(); state.dataLoadUncertain = false; return r; }catch(e){ state.dataLoadUncertain = true; return []; }
+  try{
+    var r = await fetchBacklogRaw();
+    setLoadUncertain('backlog', false);
+    setListSyncBase('task-backlog', r);
+    rememberTasks(r);
+    return r;
+  }catch(e){
+    setLoadUncertain('backlog', true, e);
+    if(state.loadFailed.backlog) console.error('[LOGI LINK] 作業一覧を読み込めませんでした(空として扱いません)', e);
+    return [];
+  }
+}
+
+/* ---------- task-backlog / task-templates の安全な保存 ----------
+   以前は端末が持っている配列をそのまま丸ごと上書き保存していたため、
+   「端末Aが追加・生成した作業を、古い一覧を持った端末Bが上書きして消す」
+   競合が起きていた(実績ログや割り当てのtaskIdが一覧に存在しなくなり、
+   「(削除済み)」と表示される原因)。
+   ここでは保存の直前にSupabase上の最新の一覧を読み直し、作業ID単位でマージしてから、
+   kv_store.updated_at を使った楽観ロックで書き込む(他の端末が先に書き込んでいたら
+   読み直してやり直す)。このアプリは作業を物理削除しない(削除=archived:true)ため、
+   マージでは「どちらかにある作業は必ず残す」。読み込みに失敗した場合は書き込まない。 */
+var listSyncBase = { 'task-backlog': null, 'task-templates': null }; // 最後にSupabaseと一致を確認した各作業のJSON(id -> 文字列)
+var listSaveDirty = { 'task-backlog': false, 'task-templates': false }; // 保存に失敗し、再試行が必要な状態
+function setListSyncBase(key, list){
+  var base = {};
+  (list||[]).forEach(function(t){ if(t && t.id) base[t.id] = JSON.stringify(t); });
+  listSyncBase[key] = base;
+}
+/* 繰り返し作業の日別インスタンスは「テンプレート×作業日」で1つだけ存在すべきもの。 */
+function templateInstanceKey(t){
+  return (t && t.fromTemplate && t.workDate) ? (t.fromTemplate+'|'+t.workDate) : null;
+}
+function mergeTaskLists(remoteList, localList, base, dedupeKeyFn){
+  var merged = (remoteList||[]).slice();
+  var indexById = {};
+  var remoteKeys = {};
+  merged.forEach(function(t, i){
+    if(!t || !t.id) return;
+    indexById[t.id] = i;
+    if(dedupeKeyFn){ var k = dedupeKeyFn(t); if(k && !remoteKeys[k]) remoteKeys[k] = t.id; }
+  });
+  (localList||[]).forEach(function(t){
+    if(!t || !t.id) return;
+    var inRemote = indexById[t.id]!==undefined;
+    var inBase = !!(base && Object.prototype.hasOwnProperty.call(base, t.id));
+    var changedLocally = !inBase || base[t.id]!==JSON.stringify(t);
+    if(inRemote){
+      // この端末で変更した作業だけ、この端末の内容を採用する(他端末の変更は上書きしない)
+      if(changedLocally) merged[indexById[t.id]] = t;
+      return;
+    }
+    // Supabase側に無い作業。この端末で新しく作ったもの、または他端末の古い一覧での
+    // 上書きにより消えてしまったもの。どちらの場合も削除はしない(残す)。
+    if(!inBase && dedupeKeyFn){
+      var key = dedupeKeyFn(t);
+      if(key && remoteKeys[key]) return; // 他の端末が同じ繰り返し作業を既に生成済み -> 重複させない
+    }
+    indexById[t.id] = merged.length;
+    merged.push(t);
+    if(dedupeKeyFn){ var k2 = dedupeKeyFn(t); if(k2 && !remoteKeys[k2]) remoteKeys[k2] = t.id; }
+  });
+  return merged;
+}
+async function saveMergedList(key, localList, dedupeKeyFn){
+  var conflictVersion = undefined; // 直前に「競合」となった時の版
+  for(var attempt=0; attempt<5; attempt++){
+    var remoteList, version = null, versioned = true;
+    try{
+      var r = await window.storage.getVersioned(key);
+      version = r.version;
+      remoteList = r.missing ? [] : JSON.parse(r.value);
+    }catch(e){
+      // updated_at列が使えない等で版付きの取得ができない場合に備え、通常の取得で再試行する。
+      // それも失敗した場合(通信エラー等)は、既存データを上書きしないよう書き込みを中止する。
+      versioned = false;
+      try{
+        var res = await fetchWithRetry(key);
+        if(!res.ok) return { ok:false, error: res.error || e };
+        remoteList = JSON.parse(res.value);
+      }catch(e2){ return { ok:false, error: e2 }; }
+    }
+    if(!Array.isArray(remoteList)) return { ok:false };
+    /* 版が変わっていないのに更新が0件だった = 他端末との競合ではなく、
+       RLSにより更新が拒否された(対象行を更新する権限が無い)と判断する。 */
+    if(versioned && conflictVersion!==undefined && conflictVersion===version && version!==null){
+      var permErr = new Error('更新が0件でした(権限により拒否された可能性があります)');
+      permErr.kind = 'permission'; permErr.key = key; permErr.op = 'write';
+      window.__onStorageWriteFailure(permErr);
+      return { ok:false, error: permErr };
+    }
+    var merged = mergeTaskLists(remoteList, localList, listSyncBase[key], dedupeKeyFn);
+    var json = JSON.stringify(merged);
+    if(versioned){
+      var w = await window.storage.setIfVersion(key, json, version);
+      if(w.ok){ setListSyncBase(key, merged); return { ok:true, list: merged }; }
+      if(w.conflict){ conflictVersion = version; await new Promise(function(res){ setTimeout(res, 80*(attempt+1)); }); continue; }
+      return { ok:false, error: w.error };
+    }
+    try{
+      await window.storage.set(key, json, true);
+      setListSyncBase(key, merged);
+      return { ok:true, list: merged };
+    }catch(e3){ return { ok:false, error: e3 }; }
+  }
+  return { ok:false };
+}
+/* 再試行しても成功しない失敗(権限・閲覧専用・ログイン切れ)か */
+function isPermanentSaveError(err){
+  var k = err && err.kind;
+  return k==='permission' || k==='readonly' || k==='auth' || k==='unverified';
+}
+function markListSaveFailed(key){
+  if(!listSaveDirty[key]){
+    showToast('⚠️ 作業データの保存に失敗しました。通信状態を確認してください(自動で再試行します)。');
+  }
+  listSaveDirty[key] = true;
 }
 async function saveBacklog(list){
   if(state.day && state.day.date===todayStr()){
@@ -2209,7 +2807,29 @@ async function saveBacklog(list){
   }
   state.backlog = list;
   pendingSaves++;
-  try{ await window.storage.set('task-backlog', JSON.stringify(list), true); }catch(e){}
+  try{
+    var result = await saveMergedList('task-backlog', list, templateInstanceKey);
+    if(result.ok){
+      listSaveDirty['task-backlog'] = false;
+      // マージ結果(他端末が追加した作業を含む)を反映する。保存中にこの端末で
+      // 一覧自体が差し替えられていた場合は、次回の保存・更新に任せる。
+      if(state.backlog===list) state.backlog = result.list;
+      rememberTasks(result.list);
+      return true;
+    }
+    if(isPermanentSaveError(result.error)){
+      // 権限などで拒否された変更は再試行しても保存できない。再試行待ちにせず、
+      // 再同期(保存済みの一覧で画面を戻す)に任せる。
+      listSaveDirty['task-backlog'] = false;
+    }else{
+      markListSaveFailed('task-backlog');
+    }
+    return false;
+  }catch(e){
+    if(isPermanentSaveError(e)) listSaveDirty['task-backlog'] = false;
+    else markListSaveFailed('task-backlog');
+    return false;
+  }
   finally{ pendingSaves--; }
 }
 async function fetchTemplatesRaw(){
@@ -2218,62 +2838,78 @@ async function fetchTemplatesRaw(){
   return JSON.parse(res.value);
 }
 async function loadTemplates(){
-  try{ var r = await fetchTemplatesRaw(); state.dataLoadUncertain = false; return r; }catch(e){ state.dataLoadUncertain = true; return []; }
+  try{
+    var r = await fetchTemplatesRaw();
+    setLoadUncertain('templates', false);
+    setListSyncBase('task-templates', r);
+    return r;
+  }catch(e){
+    setLoadUncertain('templates', true, e);
+    if(state.loadFailed.templates) console.error('[LOGI LINK] 繰り返し作業を読み込めませんでした(空として扱いません)', e);
+    return [];
+  }
 }
 async function saveTemplates(list){
   state.templates = list;
   pendingSaves++;
-  try{ await window.storage.set('task-templates', JSON.stringify(list), true); }catch(e){}
+  try{
+    var result = await saveMergedList('task-templates', list, null);
+    if(result.ok){
+      listSaveDirty['task-templates'] = false;
+      if(state.templates===list) state.templates = result.list;
+      return true;
+    }
+    if(isPermanentSaveError(result.error)) listSaveDirty['task-templates'] = false;
+    else markListSaveFailed('task-templates');
+    return false;
+  }catch(e){
+    if(isPermanentSaveError(e)) listSaveDirty['task-templates'] = false;
+    else markListSaveFailed('task-templates');
+    return false;
+  }
   finally{ pendingSaves--; }
 }
 async function loadBreakSettings(){
-  try{
-    var r = await window.storage.get('break-settings', true);
-    return r ? JSON.parse(r.value) : { enabled:false, start:'12:00', end:'13:00' };
-  }catch(e){ return { enabled:false, start:'12:00', end:'13:00' }; }
+  return loadSettingsKey('break-settings', state.breakSettings, function(){ return { enabled:false, start:'12:00', end:'13:00' }; });
 }
 async function saveBreakSettings(settings){
   state.breakSettings = settings;
   pendingSaves++;
-  try{ await window.storage.set('break-settings', JSON.stringify(settings), true); }catch(e){}
+  try{ return await persistKey('break-settings', settings); }
   finally{ pendingSaves--; }
 }
 async function loadShiftSettings(){
-  try{
-    var r = await window.storage.get('shift-settings', true);
-    return r ? JSON.parse(r.value) : { enabled:false, start:'09:00', end:'18:00' };
-  }catch(e){ return { enabled:false, start:'09:00', end:'18:00' }; }
+  return loadSettingsKey('shift-settings', state.shiftSettings, function(){ return { enabled:false, start:'09:00', end:'18:00' }; });
 }
 async function saveShiftSettings(settings){
   state.shiftSettings = settings;
   pendingSaves++;
-  try{ await window.storage.set('shift-settings', JSON.stringify(settings), true); }catch(e){}
+  try{ return await persistKey('shift-settings', settings); }
   finally{ pendingSaves--; }
 }
 async function loadAchievementSettings(){
-  try{
-    var r = await window.storage.get('achievement-settings', true);
-    return r ? JSON.parse(r.value) : { monthlyTargetPieces: 25000 };
-  }catch(e){ return { monthlyTargetPieces: 25000 }; }
+  return loadSettingsKey('achievement-settings', state.achievementSettings, function(){ return { monthlyTargetPieces: 25000 }; });
 }
 async function saveAchievementSettings(settings){
   state.achievementSettings = settings;
   pendingSaves++;
-  try{ await window.storage.set('achievement-settings', JSON.stringify(settings), true); }catch(e){}
+  try{ return await persistKey('achievement-settings', settings); }
   finally{ pendingSaves--; }
 }
 /* ---------- admin PIN lock ---------- */
 function ADMIN_GATED_ROLES(){ return ['adminHub','settingsHub']; }
 /* ---------- audit log ---------- */
 async function loadAuditLog(dateStr){
-  try{
-    var r = await window.storage.get('audit-log:'+dateStr, true);
-    return r && r.value ? JSON.parse(r.value) : [];
-  }catch(e){ return []; }
+  // 表示用。読み込み失敗時は空一覧を返す(印付き。保存には使われない)
+  return loadKeyJson('audit-log:'+dateStr, function(){ return []; });
 }
+/* 操作履歴への追記。成功で true、失敗で false。
+   その日の履歴を読み込めなかった場合は、既存の履歴を空で上書きしないよう追記を中止し、
+   失敗として画面に表示する(操作そのものは取り消さない)。 */
 async function appendAuditLog(entry){
   var dateStr = todayStr();
   var list = await loadAuditLog(dateStr);
+  if(isUnverified(list)){ reportUnverifiedSave('audit-log:'+dateStr); return false; }
   list.push({
     id: uid(),
     at: new Date().toISOString(),
@@ -2283,7 +2919,7 @@ async function appendAuditLog(entry){
     before: entry.before===undefined ? null : entry.before,
     after: entry.after===undefined ? null : entry.after
   });
-  try{ await window.storage.set('audit-log:'+dateStr, JSON.stringify(list), true); }catch(e){}
+  return persistKey('audit-log:'+dateStr, list);
 }
 function ensureTemplateTasksForDateSync(dateStr){
   var wd = new Date(dateStr+'T00:00:00').getDay();
@@ -2296,27 +2932,37 @@ function ensureTemplateTasksForDateSync(dateStr){
     if(!pattern[wd]) return;
     var key = tmpl.id+'|'+dateStr;
     if(existingKeys[key]) return;
-    state.backlog.push({id:uid(), name:tmpl.name, unit:tmpl.unit, color:tmpl.color, workDate:dateStr, archived:false, fromTemplate:tmpl.id, subcategories:tmpl.subcategories||[], category:taskCategory(tmpl),
+    // IDは「テンプレートID_作業日」で決定的に作る。複数の端末がほぼ同時に同じ日の
+    // 作業を生成しても同じIDになり、保存時のマージで1件にまとまる(重複・ID消失を防ぐ)。
+    state.backlog.push({id:tmpl.id+'_'+dateStr, name:tmpl.name, unit:tmpl.unit, color:tmpl.color, workDate:dateStr, archived:false, fromTemplate:tmpl.id, subcategories:tmpl.subcategories||[], category:taskCategory(tmpl),
       deadline: tmpl.deadline||null, priorityLevel: tmpl.priorityLevel||4, idleLikely: tmpl.idleLikely===true, idlePriorityLevel: tmpl.idlePriorityLevel||3});
     existingKeys[key] = true;
     changed = true;
   });
   return changed;
 }
-async function ensureTemplateTasksForDate(dateStr){
-  var changed = ensureTemplateTasksForDateSync(dateStr);
-  if(changed){
-    if(state.dataLoadUncertain){
-      console.warn('作業一覧の読み込みが不確実なため、繰り返し作業の自動作成をスキップしました(データ保護のため)。');
-      return;
-    }
-    await saveBacklog(state.backlog);
+/* 作業一覧・繰り返し作業のどちらかの読み込みが不確実な間は、当日分の自動生成を
+   一切行わない(以前は画面上の一覧にだけ追加して保存をスキップしていたため、
+   保存されていない作業に割り当て・実績が付く恐れがあった)。 */
+function templateGenerationBlocked(){
+  if(state.loadUncertain.backlog || state.loadUncertain.templates){
+    console.warn('作業一覧の読み込みが不確実なため、繰り返し作業の自動作成をスキップしました(データ保護のため)。');
+    return true;
   }
+  return false;
+}
+async function ensureTemplateTasksForDate(dateStr){
+  if(!canAutoWrite()) return; // monitor(閲覧専用)では自動作成・保存しない
+  if(templateGenerationBlocked()) return;
+  var changed = ensureTemplateTasksForDateSync(dateStr);
+  if(changed) await saveBacklog(state.backlog);
 }
 async function ensureTemplateTasksForToday(){
   return ensureTemplateTasksForDate(todayStr());
 }
 async function ensureTemplateTasksForUpcoming(numDays){
+  if(!canAutoWrite()) return;
+  if(templateGenerationBlocked()) return;
   var base = new Date();
   var anyChanged = false;
   for(var i=0;i<numDays;i++){
@@ -2324,13 +2970,7 @@ async function ensureTemplateTasksForUpcoming(numDays){
     var dateStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
     if(ensureTemplateTasksForDateSync(dateStr)) anyChanged = true;
   }
-  if(anyChanged){
-    if(state.dataLoadUncertain){
-      console.warn('作業一覧の読み込みが不確実なため、繰り返し作業の自動作成をスキップしました(データ保護のため)。');
-      return;
-    }
-    await saveBacklog(state.backlog);
-  }
+  if(anyChanged) await saveBacklog(state.backlog);
 }
 function defaultPattern(){
   return [false,true,true,true,true,true,false];
@@ -2348,7 +2988,8 @@ async function loadJpHolidays(){
     if(res.ok){
       var data = await res.json();
       var fresh = { fetchedAt: Date.now(), data: data };
-      try{ await window.storage.set('jp-holidays', JSON.stringify(fresh), true); }catch(e){}
+      // 共有キャッシュへの保存は、書き込みできるアカウントのみ(monitorは保存しない)
+      if(canAutoWrite()) await persistKey('jp-holidays', fresh);
       return fresh;
     }
   }catch(e){}
@@ -2367,29 +3008,30 @@ function isHolidayOffForStaff(staff, dateStr){
 /* ---------- 作業量(CSV取込)・ケース数台帳 ---------- */
 /* ---------- 人員配置・次作業自動指示 ---------- */
 async function loadTaskPriority(dateStr){
-  try{
-    var r = await window.storage.get('task-priority:'+dateStr, true);
-    return r && r.value ? JSON.parse(r.value) : {};
-  }catch(e){ return {}; }
+  return loadKeyJson('task-priority:'+dateStr, function(){ return {}; });
 }
 async function saveTaskPriority(dateStr, data){
-  try{ await window.storage.set('task-priority:'+dateStr, JSON.stringify(data), true); }catch(e){}
+  return persistKey('task-priority:'+dateStr, data);
 }
 function taskPriorityFor(taskId){
   var p = state.taskPriority && state.taskPriority[taskId];
   return p || { deadline: null, priorityLevel: 4 };
 }
 async function loadProductivityMaster(){
+  var data = await loadKeyJson('productivity-master', function(){ return {}; });
+  if(isUnverified(data)) return data; // 読み込み失敗: 移行も保存もしない
   try{
-    var r = await window.storage.get('productivity-master', true);
-    var data = r && r.value ? JSON.parse(r.value) : {};
     var migrated = migrateProductivityMasterToTemplateKeys(data);
-    if(migrated.changed && !state.dataLoadUncertain) await saveProductivityMaster(migrated.master);
+    // 自動移行の保存は、書き込みできるアカウントで、読み込みが確実な場合のみ
+    if(migrated.changed && !state.dataLoadUncertain && canAutoWrite()) await saveProductivityMaster(migrated.master);
     return migrated.master;
-  }catch(e){ return {}; }
+  }catch(e){
+    console.error('[LOGI LINK] 生産性データの移行処理に失敗しました', e);
+    return data;
+  }
 }
 async function saveProductivityMaster(data){
-  try{ await window.storage.set('productivity-master', JSON.stringify(data), true); }catch(e){}
+  return persistKey('productivity-master', data);
 }
 /* 生産性の集計キー。繰り返し作業(テンプレート由来)は、日ごとに異なるtaskIdが
    振られるため、テンプレートID(fromTemplate)を安定した統合キーとして使う。
@@ -2570,16 +3212,60 @@ async function loadStaffingSuggestion(dateStr){
   }catch(e){ return null; }
 }
 async function saveStaffingSuggestion(dateStr, data){
-  try{ await window.storage.set('staffing-suggestion:'+dateStr, JSON.stringify(data), true); }catch(e){}
+  return persistKey('staffing-suggestion:'+dateStr, data);
+}
+/* ---------- 本日の作業指示(配置案)・配置変更指示の最新化 ----------
+   以前は画面を開いたときに1回読み込むだけだったため、管理者が配置を確定しても、
+   開きっぱなしのスタッフ画面には再読み込みするまで表示されなかった。 */
+/* 日付が変わったら、前日の指示を表示しないよう破棄する。 */
+function resetDailyInstructionsIfDateChanged(){
+  var today = todayStr();
+  if(state.dailyInstructionsDate===today) return;
+  state.dailyInstructionsDate = today;
+  state.staffingSuggestion = null;
+  state.staffingSuggestionLoaded = false;
+  state.reassignmentAlerts = null;
+}
+/* キーが無い場合は value:null、通信エラーの場合は ok:false を返す。 */
+async function fetchOptionalJson(key){
+  try{
+    var r = await window.storage.get(key, true);
+    return { ok:true, value: (r && r.value) ? JSON.parse(r.value) : null };
+  }catch(e){
+    var msg = (e && e.message) ? String(e.message).toLowerCase() : '';
+    if(msg.indexOf('not found')!==-1) return { ok:true, value:null };
+    return { ok:false };
+  }
+}
+/* 4秒ごとの更新で呼ぶ。通信量を抑えるため、指示を実際に表示する画面
+   (実績入力でスタッフを選択中/管理者の人員配置タブ)を開いている間だけ取得する。 */
+async function refreshDailyInstructionsForPoll(){
+  resetDailyInstructionsIfDateChanged();
+  var needed = (state.role==='input' && !!state.activeStaffId) ||
+    (state.role==='adminHub' && state.adminHubTab==='staffing');
+  if(!needed) return;
+  var dateStr = todayStr();
+  var seqAtStart = window.storage.writeSeq;
+  var sug = await fetchOptionalJson('staffing-suggestion:'+dateStr);
+  var alerts = await fetchOptionalJson('reassignment-alerts:'+dateStr);
+  // 取得中に日付が変わった・この端末が書き込んだ場合は、古い内容で上書きしない
+  if(dateStr!==todayStr() || state.dailyInstructionsDate!==dateStr) return;
+  if(pendingSaves>0 || window.storage.writeSeq!==seqAtStart) return;
+  // 取得できなかった(通信エラー)・まだ存在しない場合は、表示中の内容を保持する
+  if(sug.ok && sug.value){
+    state.staffingSuggestion = sug.value;
+    state.staffingSuggestionLoaded = true;
+  }else if(sug.ok && !state.staffingSuggestion){
+    state.staffingSuggestionLoaded = true;
+  }
+  if(alerts.ok && Array.isArray(alerts.value)) state.reassignmentAlerts = alerts.value;
+  else if(alerts.ok && state.reassignmentAlerts===null) state.reassignmentAlerts = [];
 }
 
 /* ---------- 得意先・作業枠マスター(取引先名 → 作業枠 の自動紐付け) ---------- */
 async function loadCustomerTaskMapping(){
-  var data;
-  try{
-    var r = await window.storage.get('customer-task-mapping', true);
-    data = r && r.value ? JSON.parse(r.value) : { entries: [] };
-  }catch(e){ data = { entries: [] }; }
+  var data = await loadKeyJson('customer-task-mapping', function(){ return { entries: [] }; });
+  if(isUnverified(data)) return data; // 読み込み失敗: 移行も保存もしない
   var changed = false;
   (data.entries||[]).forEach(function(entry){
     if(entry.templateId===undefined){
@@ -2588,11 +3274,11 @@ async function loadCustomerTaskMapping(){
       changed = true;
     }
   });
-  if(changed && !state.dataLoadUncertain) await saveCustomerTaskMapping(data);
+  if(changed && !state.dataLoadUncertain && canAutoWrite()) await saveCustomerTaskMapping(data);
   return data;
 }
 async function saveCustomerTaskMapping(data){
-  try{ await window.storage.set('customer-task-mapping', JSON.stringify(data), true); }catch(e){}
+  return persistKey('customer-task-mapping', data);
 }
 /* 全角/半角・前後の空白程度の単純なゆらぎのみ吸収する。曖昧な部分一致は行わない(完全一致優先の方針)。 */
 function normalizeCustomerName(name){
@@ -2651,13 +3337,10 @@ function resolveCustomerTaskMapping(shipperGroups, mapping, targetDate){
    1つの荷主出荷番号=1出荷として扱い、その出荷に属する複数の商品明細行は
    まとめて1単位として取込/スキップを判定する(明細を個別に間引かない)。 */
 async function loadShipperNoRegistry(){
-  try{
-    var r = await window.storage.get('shipper-no-registry', true);
-    return r && r.value ? JSON.parse(r.value) : {};
-  }catch(e){ return {}; }
+  return loadKeyJson('shipper-no-registry', function(){ return {}; });
 }
 async function saveShipperNoRegistry(registry){
-  try{ await window.storage.set('shipper-no-registry', JSON.stringify(registry), true); }catch(e){}
+  return persistKey('shipper-no-registry', registry);
 }
 /* shipperGroups(荷主出荷NO単位、明細行はlineCount/totalQtyに集約済み)を、
    レジストリと照合して「新規」と「既に取込済み(スキップ対象)」に分割する。
@@ -3061,13 +3744,10 @@ function suggestNextTaskFor(staffId, day, workVolume, taskPriority, productivity
    既に作業中のスタッフは対象にしない(勝手に動かさない)。
    同一人物への集中を避けるため、本日の実績作業時間が少ない人を優先する。 */
 async function loadPendingAssignmentSuggestions(dateStr){
-  try{
-    var r = await window.storage.get('pending-assignment-suggestions:'+dateStr, true);
-    return r && r.value ? JSON.parse(r.value) : {};
-  }catch(e){ return {}; }
+  return loadKeyJson('pending-assignment-suggestions:'+dateStr, function(){ return {}; });
 }
 async function savePendingAssignmentSuggestions(dateStr, data){
-  try{ await window.storage.set('pending-assignment-suggestions:'+dateStr, JSON.stringify(data), true); }catch(e){}
+  return persistKey('pending-assignment-suggestions:'+dateStr, data);
 }
 /* CSV取込確定処理から呼ばれる共通フック。取込先が「今日」の場合のみ、
    新しく増えた作業量をもとに次の配置提案を作り、保存する。
@@ -3134,13 +3814,10 @@ async function recordNextAssignmentSuggestion(taskId, newQty, targetDate){
 }
 /* ---------- 配置変更候補・配置変更アラート ---------- */
 async function loadReassignmentAlerts(dateStr){
-  try{
-    var r = await window.storage.get('reassignment-alerts:'+dateStr, true);
-    return r && r.value ? JSON.parse(r.value) : [];
-  }catch(e){ return []; }
+  return loadKeyJson('reassignment-alerts:'+dateStr, function(){ return []; });
 }
 async function saveReassignmentAlerts(dateStr, alerts){
-  try{ await window.storage.set('reassignment-alerts:'+dateStr, JSON.stringify(alerts), true); }catch(e){}
+  return persistKey('reassignment-alerts:'+dateStr, alerts);
 }
 /* 現在ある作業にアクティブに従事している人数(休憩中は含まない)を数える。 */
 function activeStaffCountForTask(day, taskId){
@@ -3253,7 +3930,10 @@ async function confirmReassignment(staffId, fromTaskId, toTaskId){
   finalizeActiveSubTimer(log);
   log.end = new Date().toISOString();
   if(log.quantity==null && !log.breakdown) log.quantity = 0;
-  day.logs.push({ id: uid(), staffId: staffId, taskId: toTaskId, start: new Date().toISOString(), end: null, quantity: null });
+  var reassignEntry = { id: uid(), staffId: staffId, taskId: toTaskId, start: new Date().toISOString(), end: null, quantity: null };
+  var reassignName = taskNameSnapshot(toTaskId);
+  if(reassignName) reassignEntry.taskName = reassignName;
+  day.logs.push(reassignEntry);
   var arr = day.assignments[staffId] || [];
   if(arr.indexOf(toTaskId)===-1) arr.push(toTaskId);
   day.assignments[staffId] = arr;
@@ -3321,20 +4001,36 @@ function suggestNextAssignmentForNewVolume(taskId, newQty, day, productivityMast
     best: toResult(best), runnerUp: toResult(runnerUp), noCandidateReason:null };
 }
 async function loadWorkVolumeConfig(){
-  try{
-    var r = await window.storage.get('work-volume-config', true);
-    return r && r.value ? JSON.parse(r.value) : {};
-  }catch(e){ return {}; }
+  return loadKeyJson('work-volume-config', function(){ return {}; });
 }
 async function saveWorkVolumeConfig(cfg){
-  try{ await window.storage.set('work-volume-config', JSON.stringify(cfg), true); }catch(e){}
+  return persistKey('work-volume-config', cfg);
 }
-async function loadWorkVolume(dateStr){
+/* キーが無い → null、読み込み失敗(権限・通信) → 例外。 */
+async function fetchWorkVolumeRaw(dateStr){
   try{
     var r = await window.storage.get('work-volume:'+dateStr, true);
-    if(r && r.value) return JSON.parse(r.value);
-  }catch(e){}
-  return null;
+    return (r && r.value) ? JSON.parse(r.value) : null;
+  }catch(e){
+    if(window.storage.isNotFound(e)) return null;
+    throw e;
+  }
+}
+/* 従来どおり「無い・取得できない」ときは null を返す(4秒更新では null なら表示中の内容を保持する)。 */
+async function loadWorkVolume(dateStr){
+  try{ return await fetchWorkVolumeRaw(dateStr); }
+  catch(e){ console.error('[LOGI LINK] CSV取込データの読み込みに失敗しました: '+dateStr, e); return null; }
+}
+/* 無い → 空の作業量データ。読み込み失敗 → 空の作業量データに「未確認」の印を付ける
+   (その日の取込データを空で上書きしないよう、印付きのデータは保存されない)。 */
+async function loadWorkVolumeOrEmpty(dateStr){
+  try{
+    var d = await fetchWorkVolumeRaw(dateStr);
+    return d || emptyWorkVolume();
+  }catch(e){
+    console.error('[LOGI LINK] CSV取込データの読み込みに失敗しました(空として扱いません): '+dateStr, e);
+    return markUnverified(emptyWorkVolume());
+  }
 }
 /* 過去にCSV取込データが存在する日付の一覧を、軽量に(データ本体を読み込まず
    キー名だけで)取得する。取込履歴の横断検索に使う。 */
@@ -3348,11 +4044,8 @@ async function listWorkVolumeDates(){
 }
 async function saveWorkVolume(dateStr, data){
   pendingSaves++;
-  var ok = true;
-  try{ await window.storage.set('work-volume:'+dateStr, JSON.stringify(data), true); }
-  catch(e){ ok = false; }
+  try{ return await persistKey('work-volume:'+dateStr, data); }
   finally{ pendingSaves--; }
-  return ok;
 }
 function emptyWorkVolume(){ return { imports:[], batches:[] }; }
 function wvActiveImports(data){ return (data.imports||[]).filter(function(i){ return !i.deletedAt; }); }
@@ -3365,13 +4058,10 @@ async function computeFileFingerprint(file){
   return Array.from(new Uint8Array(hashBuffer)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
 }
 async function loadCsvFingerprintIndex(){
-  try{
-    var r = await window.storage.get('csv-import-fingerprints', true);
-    return r && r.value ? JSON.parse(r.value) : { entries: [] };
-  }catch(e){ return { entries: [] }; }
+  return loadKeyJson('csv-import-fingerprints', function(){ return { entries: [] }; });
 }
 async function saveCsvFingerprintIndex(idx){
-  try{ await window.storage.set('csv-import-fingerprints', JSON.stringify(idx), true); }catch(e){}
+  return persistKey('csv-import-fingerprints', idx);
 }
 function findDuplicateFingerprint(idx, fingerprint, fileSize, fileName){
   return (idx.entries||[]).find(function(e){
@@ -3386,13 +4076,10 @@ async function registerFileFingerprint(fingerprint, fileSize, fileName, dateStr,
 
 /* ---------- 取込の試行状況(確認未完了・失敗の検知用) ---------- */
 async function loadVcImportAttempts(dateStr){
-  try{
-    var r = await window.storage.get('vc-import-attempts:'+dateStr, true);
-    return r && r.value ? JSON.parse(r.value) : { attempts: [] };
-  }catch(e){ return { attempts: [] }; }
+  return loadKeyJson('vc-import-attempts:'+dateStr, function(){ return { attempts: [] }; });
 }
 async function saveVcImportAttempts(dateStr, data){
-  try{ await window.storage.set('vc-import-attempts:'+dateStr, JSON.stringify(data), true); }catch(e){}
+  return persistKey('vc-import-attempts:'+dateStr, data);
 }
 async function markImportAttemptStatus(dateStr, attemptId, status){
   var data = await loadVcImportAttempts(dateStr);
@@ -3404,13 +4091,10 @@ async function markImportAttemptStatus(dateStr, attemptId, status){
 
 /* ---------- 日次締めチェックの確認済み状態 ---------- */
 async function loadChecklistAck(dateStr){
-  try{
-    var r = await window.storage.get('daily-checklist-ack:'+dateStr, true);
-    return r && r.value ? JSON.parse(r.value) : { ack: {} };
-  }catch(e){ return { ack: {} }; }
+  return loadKeyJson('daily-checklist-ack:'+dateStr, function(){ return { ack: {} }; });
 }
 async function saveChecklistAck(dateStr, data){
-  try{ await window.storage.set('daily-checklist-ack:'+dateStr, JSON.stringify(data), true); }catch(e){}
+  return persistKey('daily-checklist-ack:'+dateStr, data);
 }
 
 function findPreviousImportForTaskDate(workVolume, taskId, excludeImportId){
@@ -3606,8 +4290,7 @@ function generateWorkVolumeBatches(shipperGroups, config, taskId, taskName, impo
 }
 async function getWorkVolumeForDate(dateStr){
   if(dateStr===todayStr()) return state.workVolume;
-  var data = await loadWorkVolume(dateStr);
-  return data || emptyWorkVolume();
+  return loadWorkVolumeOrEmpty(dateStr);
 }
 async function deleteWvImport(dateStr, importId, reason){
   var data = await getWorkVolumeForDate(dateStr);
@@ -3663,14 +4346,11 @@ async function moveWvImportDate(fromDateStr, toDateStr, importId){
 
 /* ---------- VCケース数台帳(日付×作業枠、加算/取消の履歴) ---------- */
 async function loadVcCaseLedger(dateStr){
-  try{
-    var r = await window.storage.get('vc-case-ledger:'+dateStr, true);
-    return r && r.value ? JSON.parse(r.value) : {};
-  }catch(e){ return {}; }
+  return loadKeyJson('vc-case-ledger:'+dateStr, function(){ return {}; });
 }
 async function saveVcCaseLedger(dateStr, data){
   pendingSaves++;
-  try{ await window.storage.set('vc-case-ledger:'+dateStr, JSON.stringify(data), true); }catch(e){}
+  try{ return await persistKey('vc-case-ledger:'+dateStr, data); }
   finally{ pendingSaves--; }
 }
 function vcCaseCurrentValue(entries){
@@ -3716,10 +4396,14 @@ async function fetchDayRaw(dateStr){
     throw e;
   }
 }
+/* 表示・集計用。読み込み失敗時も null を返す(呼び出し元では「その日のデータ無し」扱い)。
+   保存を伴う処理では、失敗と「無い」を区別できる fetchDayRaw を使うこと。 */
 async function loadDayByDate(dateStr){
   try{
     return await fetchDayRaw(dateStr);
-  }catch(e){}
+  }catch(e){
+    console.error('[LOGI LINK] 実績データの読み込みに失敗しました: '+dateStr, e);
+  }
   return null;
 }
 async function loadAllDayKeys(){
@@ -3740,9 +4424,18 @@ async function loadAllDaysForLifetime(){
   return days;
 }
 async function loadDay(){
-  var d = await loadDayByDate(todayStr());
+  var d;
+  try{
+    d = await fetchDayRaw(todayStr());
+  }catch(e){
+    /* 読み込み失敗(権限・通信エラー)を「今日のデータがまだ無い」と扱うと、
+       空の1日分で保存済みの実績を上書きしてしまう。画面用の空データには
+       「未確認」の印を付け、保存・自動出退勤の対象にしない(次回の更新で読み直す)。 */
+    console.error('[LOGI LINK] 本日の実績データを読み込めませんでした(空として扱いません)', e);
+    return markUnverified(freshDay(todayStr()));
+  }
   if(d && d.date===todayStr()){
-    if(correctHolidayOffAttendance(d)) await saveDay(d);
+    if(canAutoWrite() && correctHolidayOffAttendance(d)) await saveDay(d);
     return d;
   }
   return freshDay(todayStr());
@@ -3764,7 +4457,9 @@ function correctHolidayOffAttendance(day){
   });
   return changed;
 }
+/* 成功で true、失敗で false。失敗時は画面に表示され、保存済みの内容で再同期される。 */
 async function saveDay(day){
+  if(isUnverified(day)){ reportUnverifiedSave('day:'+day.date); return false; }
   if(day.date===todayStr()){
     state.day = day;
   }
@@ -3772,7 +4467,7 @@ async function saveDay(day){
     state.managerDay = day;
   }
   pendingSaves++;
-  try{ await window.storage.set('day:'+day.date, JSON.stringify(day), true); }catch(e){}
+  try{ return await persistKey('day:'+day.date, day); }
   finally{ pendingSaves--; }
 }
 
@@ -3815,6 +4510,22 @@ async function bulkDeleteLogs(startDate, endDate, selectedIds){
 async function bulkMoveLogs(startDate, endDate, selectedIds, targetDate){
   var dates = dateRangeList(startDate, endDate);
   var allMoved = [];
+  /* 移動先の日を先に読み込む。読み込みに失敗した場合は、移動元から削除する前に中止する
+     (以前は失敗時に空の1日分として扱い、移動先の既存の実績を上書きする恐れがあった)。 */
+  var targetDay;
+  if(targetDate===todayStr()){
+    targetDay = state.day;
+    if(isUnverified(targetDay)){ reportUnverifiedSave('day:'+targetDate); return 0; }
+  }else{
+    try{ targetDay = (await fetchDayRaw(targetDate)) || freshDay(targetDate); }
+    catch(e){
+      console.error('[LOGI LINK] 移動先の実績データを読み込めなかったため、移動を中止しました', e);
+      reportUnverifiedSave('day:'+targetDate);
+      return 0;
+    }
+  }
+  /* 移動元ごとに対象を集める(まだ保存しない) */
+  var sources = [];
   for(var i=0;i<dates.length;i++){
     var dateStr = dates[i];
     if(dateStr===targetDate) continue;
@@ -3826,16 +4537,26 @@ async function bulkMoveLogs(startDate, endDate, selectedIds, targetDate){
       if(selectedIds[l.id] && l.end!==null) movedThisDay.push(l);
       else remaining.push(l);
     });
-    if(movedThisDay.length){
-      day.logs = remaining;
-      await saveDay(day);
-      allMoved = allMoved.concat(movedThisDay);
-    }
+    if(movedThisDay.length) sources.push({ day: day, remaining: remaining, moved: movedThisDay });
   }
-  if(allMoved.length){
-    var targetDay = (targetDate===todayStr()) ? state.day : ((await loadDayByDate(targetDate)) || freshDay(targetDate));
-    targetDay.logs = (targetDay.logs||[]).concat(allMoved);
-    await saveDay(targetDay);
+  if(!sources.length) return 0;
+  /* 先に移動先へ保存し、成功した場合だけ移動元から削除する。
+     途中で失敗しても実績が消えることはない(最悪でも両方に残る)。 */
+  var originalTargetLogs = targetDay.logs || [];
+  sources.forEach(function(src){ allMoved = allMoved.concat(src.moved); });
+  targetDay.logs = originalTargetLogs.concat(allMoved);
+  if(!(await saveDay(targetDay))){
+    targetDay.logs = originalTargetLogs;
+    return 0;
+  }
+  for(var j=0;j<sources.length;j++){
+    var src = sources[j];
+    var originalLogs = src.day.logs;
+    src.day.logs = src.remaining;
+    if(!(await saveDay(src.day))){
+      src.day.logs = originalLogs;
+      console.error('[LOGI LINK] 移動元('+src.day.date+')からの削除を保存できませんでした。移動先と移動元の両方に実績が残っています。', src.moved);
+    }
   }
   return allMoved.length;
 }
@@ -3889,7 +4610,7 @@ async function switchManagerDate(dateStr){
   }
   if(!day) day = freshDay(dateStr);
   state.managerDay = day;
-  state.managerWorkVolume = await loadWorkVolume(dateStr) || emptyWorkVolume();
+  state.managerWorkVolume = await loadWorkVolumeOrEmpty(dateStr);
   render();
   await ensureTemplateTasksForDate(dateStr);
   var refreshed = await loadDayByDate(dateStr);
@@ -3978,6 +4699,7 @@ function renderCalendar(){
       var wd = (firstWd + d - 1) % 7;
       var holiday = holidayName(dateStr);
       var cellClass = 'cal-cell';
+      if(isReadOnlyAccount()) cellClass += ' cal-cell-readonly'; // 閲覧専用: 日付から編集画面へ移動しない
       if(isToday) cellClass += ' cal-cell-today';
       if(holiday) cellClass += ' cal-cell-holiday';
       else if(wd===0) cellClass += ' cal-cell-sun';
@@ -3995,7 +4717,11 @@ function renderCalendar(){
     }).join('');
     body = '<div class="cal-grid-header">'+headerRow+'</div>'+
       '<div class="cal-grid">'+cells+'</div>'+
-      '<div class="pool-hint" style="margin-top:12px;">日付をタップすると、その日の管理者画面(出勤・作業割り当て)に移動して編集・追加できます。「👤予定」は曜日パターンからの見込み人数、「👤」は実際に出勤登録された人数です。</div>';
+      '<div class="pool-hint" style="margin-top:12px;">'+
+        (isReadOnlyAccount()
+          ? 'モニター用(閲覧専用)アカウントのため、日付からの編集・追加はできません。'
+          : '日付をタップすると、その日の管理者画面(出勤・作業割り当て)に移動して編集・追加できます。')+
+        '「👤予定」は曜日パターンからの見込み人数、「👤」は実際に出勤登録された人数です。</div>';
   }
 
   return '<div class="mgr-wrap"><div style="max-width:900px;margin:0 auto;">'+
@@ -4029,6 +4755,7 @@ function bindCalendar(){
   });
   document.querySelectorAll('[data-cal-date]').forEach(function(el){
     el.addEventListener('click', function(){
+      if(isReadOnlyAccount()) return; // 閲覧専用アカウントは管理者画面(編集)へ移動しない
       var dateStr = el.getAttribute('data-cal-date');
       state.role = 'adminHub';
       state.adminHubTab = 'today';
@@ -4377,6 +5104,7 @@ function taskSummaryUnitFor(sug, taskId){
 }
 function renderStaffing(){
   var dateStr = todayStr();
+  resetDailyInstructionsIfDateChanged();
   if(state.taskPriority===null){
     loadTaskPriority(dateStr).then(function(d){ state.taskPriority = d; render(); });
     return '<div class="mgr-wrap"><div class="empty-note">読み込み中...</div></div>';
@@ -4614,36 +5342,50 @@ function bindStaffing(){
   }
 }
 function renderManagerLoginForm(title, description){
+  var lf = loginFormDefaults(state.managerLoginDraft);
   return '<div class="mgr-wrap" style="max-width:420px;">'+
     '<div class="panel">'+
       '<div class="panel-title">'+title+'</div>'+
       '<div class="pool-hint" style="margin-bottom:14px;">'+description+'</div>'+
-      (state.managerLoginError ? '<div style="color:var(--rust-600);font-size:12px;margin-bottom:10px;">'+esc(state.managerLoginError)+'</div>' : '')+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">メールアドレス</label>'+
-      '<input type="email" id="mgrLoginEmail" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:10px;margin-bottom:10px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">パスワード</label>'+
-      '<input type="password" id="mgrLoginPassword" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:10px;margin-bottom:14px;">'+
-      '<button type="button" class="add-btn" id="mgrLoginBtn" style="width:100%;" '+(state.managerLoginBusy?'disabled':'')+'>'+(state.managerLoginBusy?'ログイン中...':'ログイン')+'</button>'+
+      '<form id="mgrLoginForm" autocomplete="on" novalidate style="margin:0;">'+
+      (state.managerLoginError ? '<div id="mgrLoginError" style="color:var(--rust-600);font-size:12px;margin-bottom:10px;">'+esc(state.managerLoginError)+'</div>' : '')+
+      '<label for="mgrLoginEmail" style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">メールアドレス</label>'+
+      '<input type="email" id="mgrLoginEmail" name="email" autocomplete="username" value="'+esc(lf.email)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:10px;margin-bottom:10px;">'+
+      '<label for="mgrLoginPassword" style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">パスワード</label>'+
+      '<input type="password" id="mgrLoginPassword" name="password" autocomplete="current-password" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:10px;margin-bottom:14px;">'+
+      renderRememberEmailCheckbox('mgrLoginRemember', lf.remember)+
+      '<button type="submit" class="add-btn" id="mgrLoginBtn" style="width:100%;" '+(state.managerLoginBusy?'disabled':'')+'>'+(state.managerLoginBusy?'ログイン中...':'ログイン')+'</button>'+
+      '</form>'+
     '</div>'+
   '</div>';
 }
 function bindManagerLoginForm(onSuccess){
-  var loginBtn = document.getElementById('mgrLoginBtn');
-  if(loginBtn){
-    loginBtn.addEventListener('click', async function(){
+  var loginForm = document.getElementById('mgrLoginForm');
+  if(loginForm){
+    // ボタンのクリックとEnterキーは、どちらもフォームの送信としてここに来る
+    loginForm.addEventListener('submit', async function(ev){
+      ev.preventDefault();
+      if(state.managerLoginBusy) return;
       var email = document.getElementById('mgrLoginEmail').value.trim();
       var password = document.getElementById('mgrLoginPassword').value;
+      var remember = document.getElementById('mgrLoginRemember').checked;
+      // ログインに失敗して画面を描き直しても、メールアドレスとチェックは残す(パスワードは残さない)
+      state.managerLoginDraft = { email: email, remember: remember };
       if(!email || !password){ state.managerLoginError = 'メールアドレスとパスワードを入力してください'; render(); return; }
       state.managerLoginBusy = true;
       state.managerLoginError = '';
-      render();
+      setLoginFormBusyInPlace('mgrLoginBtn', 'mgrLoginError', true);
       var result = await managerSignIn(email, password);
+      password = null;
       state.managerLoginBusy = false;
       if(!result.ok){
         state.managerLoginError = result.error || 'ログインに失敗しました';
-        render();
+        setLoginFormBusyInPlace('mgrLoginBtn', 'mgrLoginError', false);
+        showLoginErrorInPlace('mgrLoginForm', 'mgrLoginError', '12px', state.managerLoginError, 'mgrLoginPassword');
         return;
       }
+      applyRememberEmailChoice(email, remember);
+      state.managerLoginDraft = null;
       state.managerLoginError = '';
       await appendAuditLog({ action:'管理者ログイン', target: email, before:null, after:'ログイン成功' });
       if(onSuccess) await onSuccess();
@@ -5021,7 +5763,58 @@ function tasksForToday(){
 function taskById(id){
   if(id==='BREAK') return {id:'BREAK', name:'休憩', color:'#667085', unit:'', archived:false, isBreak:true};
   var t = state.backlog.find(function(t){ return t.id===id; });
-  return t || {name:'(削除済み)', color:'#999', unit:''};
+  return t || taskFromOtherSources(id) || {name:'(削除済み)', color:'#999', unit:''};
+}
+/* ---------- 作業一覧(task-backlog)に見当たらない作業の名前を保持する ----------
+   作業の削除はarchived:trueで行うため通常は一覧に残るが、過去の保存競合などで
+   一覧からIDが消えてしまった場合でも、実際に存在した作業の情報が残っていれば
+   それを表示する。作業を新規作成したり、名前を推測したりはしない。
+   参照元: ①この端末がこれまでにSupabaseから読み込んだ作業(端末内に保存)
+          ②実績ログに記録された作業名(新しく開始する実績から記録)
+          ③配置提案に保存された作業名 */
+var KNOWN_TASKS_STORAGE_KEY = 'known-task-registry';
+var knownTaskRegistry = (function(){
+  try{ var raw = localStorage.getItem(KNOWN_TASKS_STORAGE_KEY); return raw ? (JSON.parse(raw)||{}) : {}; }catch(e){ return {}; }
+})();
+var knownTaskRegistryPersistTimer = null;
+function rememberTasks(list){
+  var changed = false;
+  (list||[]).forEach(function(t){
+    if(!t || !t.id || !t.name) return;
+    var entry = { name:t.name, color:t.color, unit:t.unit, category:t.category, taskKind:t.taskKind, subcategories:t.subcategories||[] };
+    var cur = knownTaskRegistry[t.id];
+    if(cur && JSON.stringify(cur)===JSON.stringify(entry)) return;
+    knownTaskRegistry[t.id] = entry;
+    changed = true;
+  });
+  if(!changed || knownTaskRegistryPersistTimer) return;
+  knownTaskRegistryPersistTimer = setTimeout(function(){
+    knownTaskRegistryPersistTimer = null;
+    try{ localStorage.setItem(KNOWN_TASKS_STORAGE_KEY, JSON.stringify(knownTaskRegistry)); }catch(e){}
+  }, 1000);
+}
+/* 実績ログに記録する作業名。作業一覧に実在する作業の場合だけ記録する。 */
+function taskNameSnapshot(taskId){
+  var t = state.backlog.find(function(x){ return x.id===taskId; });
+  return t ? t.name : undefined;
+}
+function taskFromOtherSources(id){
+  if(!id) return null;
+  var info = knownTaskRegistry[id];
+  if(!info){
+    var days = [state.day, state.managerDay, state.reportSingleDay];
+    for(var i=0;i<days.length && !info;i++){
+      var d = days[i];
+      var hit = d && d.logs ? d.logs.find(function(l){ return l.taskId===id && l.taskName; }) : null;
+      if(hit) info = { name: hit.taskName };
+    }
+  }
+  if(!info && state.pendingAssignmentSuggestions && state.pendingAssignmentSuggestions[id] && state.pendingAssignmentSuggestions[id].taskName){
+    info = { name: state.pendingAssignmentSuggestions[id].taskName };
+  }
+  if(!info) return null;
+  return { id:id, name:info.name, color:info.color||'#999', unit:info.unit||'', category:info.category, taskKind:info.taskKind,
+    subcategories:info.subcategories||[], archived:true, missingFromBacklog:true };
 }
 function staffById(id){
   var s = state.roster.find(function(s){ return s.id===id; });
@@ -5373,6 +6166,7 @@ function computeFinancialSummary(dateStr, day, workVolume){
 /* ---------- render root ---------- */
 function isUserBusy(){
   if(state.suppressRender) return true;
+  if(state.taskActionBusy) return true;
   if(state.focusBusy) return true;
   if(state.isDragging) return true;
   if(state.modal) return true;
@@ -5382,6 +6176,12 @@ function isUserBusy(){
 }
 function render(){
   var root = document.getElementById('app');
+  // ログイン(と利用権限)を確認し、データを読み込むまでは、アプリの画面を出さない
+  if(!state.authChecked || !hasDataAccess() || !state.appDataLoaded){
+    root.innerHTML = renderAuthScreen();
+    bindAuthScreen();
+    return;
+  }
   var savedScrollY = window.scrollY;
   var vcListElBefore = document.querySelector('.vc-slip-list');
   var savedVcScrollTop = vcListElBefore ? vcListElBefore.scrollTop : null;
@@ -5406,7 +6206,7 @@ function render(){
     html += renderTopbar();
   }
   if(state.role==='report') html += renderReport();
-  else if(state.role==='input') html += renderInput();
+  else if(state.role==='input') html += isRoleBlockedForAccount('input') ? renderReadOnlyBlockedScreen('実績入力') : renderInput();
   else if(state.role==='monitor') html += renderMonitor();
   else if(state.role==='achievements') html += renderAchievements();
   else if(state.role==='calendar') html += renderCalendar();
@@ -5417,7 +6217,7 @@ function render(){
   root.innerHTML = html;
   bindCommon();
   if(state.role==='report') bindReport();
-  if(state.role==='input') bindInput();
+  if(state.role==='input' && !isRoleBlockedForAccount('input')) bindInput();
   if(state.role==='monitor') bindMonitor();
   if(state.role==='achievements') bindAchievements();
   if(state.role==='calendar') bindCalendar();
@@ -5436,10 +6236,10 @@ function renderGate(){
     '<h1 class="gate-title">LOGI LINK</h1>'+
     '<p class="gate-sub">このアプリのデータは全員で共有されます。使う画面の役割を選んでください。</p>'+
     '<div class="gate-grid">'+
-      '<button class="gate-card" data-role="input">'+
+      '<button class="gate-card" data-role="input"'+readOnlyBlockedAttrs('input')+(isRoleBlockedForAccount('input')?' title="'+READONLY_BLOCKED_TITLE+'"':'')+'>'+
         '<div class="gate-icon" style="background:#FFFAEB;color:#4338CA;">&#9997;</div>'+
         '<div class="gate-card-title">実績入力</div>'+
-        '<div class="gate-card-desc">タップだけで作業の開始・切り替え・件数入力</div>'+
+        '<div class="gate-card-desc">'+(isRoleBlockedForAccount('input') ? '閲覧専用アカウントでは使用できません' : 'タップだけで作業の開始・切り替え・件数入力')+'</div>'+
       '</button>'+
       '<button class="gate-card" data-role="report">'+
         '<div class="gate-icon" style="background:#EEF0FB;color:#4C5FD5;">&#128202;</div>'+
@@ -5454,7 +6254,7 @@ function renderGate(){
       '<button class="gate-card" data-role="calendar">'+
         '<div class="gate-icon" style="background:#EFF8FF;color:#175CD3;">&#128197;</div>'+
         '<div class="gate-card-title">カレンダー</div>'+
-        '<div class="gate-card-desc">登録済みの作業・出勤予定を月ごとに確認して編集</div>'+
+        '<div class="gate-card-desc">'+(isReadOnlyAccount() ? '登録済みの作業・出勤予定を月ごとに確認(閲覧のみ)' : '登録済みの作業・出勤予定を月ごとに確認して編集')+'</div>'+
       '</button>'+
       '<button class="gate-card" data-role="adminHub">'+
         '<div class="gate-lock-badge" title="管理者ログインが必要です">&#128274;</div>'+
@@ -5470,6 +6270,25 @@ function renderGate(){
       '</button>'+
     '</div>'+
     '<button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
+    renderGateAccountLine()+
+  '</div>';
+}
+/* トップ画面の最下部: この端末でログイン中のアカウントと、端末からのログアウト */
+function renderGateAccountLine(){
+  var email = (state.managerSession && state.managerSession.user && state.managerSession.user.email) || '';
+  if(!FIELD_LOGIN_REQUIRED){
+    // 現場はログイン不要の運用: 未ログインでは何も出さない(従来のトップ画面のまま)。
+    // ログイン中だけ表示し、ログアウトしても現場の画面はそのまま使える。
+    if(!state.managerSession) return '';
+    return '<div class="gate-account-line" style="margin-top:10px;font-size:12px;color:var(--slate-500);text-align:center;">'+
+      (hasManagerSession() ? '管理者ログイン中: ' : 'ログイン中: ')+esc(email)+
+      (hasManagerSession() ? '' : '(管理者権限なし)')+' '+
+      '<button type="button" class="changelog-link" id="gateSignOutBtn" style="display:inline;margin:0 0 0 6px;">ログアウト</button>'+
+    '</div>';
+  }
+  return '<div class="gate-account-line" style="margin-top:10px;font-size:12px;color:var(--slate-500);text-align:center;">'+
+    'ログイン中: '+esc(email)+'('+esc(appRoleLabel(state.authRole))+') '+
+    '<button type="button" class="changelog-link" id="gateSignOutBtn" style="display:inline;margin:0 0 0 6px;">この端末からログアウト</button>'+
   '</div>';
 }
 function renderChangelogModal(){
@@ -5492,6 +6311,7 @@ function bindGate(){
   document.querySelectorAll('.gate-card').forEach(function(btn){
     btn.addEventListener('click', function(){
       var role = btn.getAttribute('data-role');
+      if(isRoleBlockedForAccount(role)) return; // 閲覧専用アカウントでは開かない
       state.role = role;
       render();
       startPolling();
@@ -5501,6 +6321,19 @@ function bindGate(){
   if(openBtn) openBtn.addEventListener('click', function(){
     state.showChangelog = true;
     render();
+  });
+  var signOutBtn = document.getElementById('gateSignOutBtn');
+  if(signOutBtn) signOutBtn.addEventListener('click', async function(){
+    if(!FIELD_LOGIN_REQUIRED){
+      // 管理者のログアウト: 現場の画面・データはそのまま使い続ける
+      await managerSignOut();
+      state.role = null; state.activeStaffId = null; state.modal = null;
+      render();
+      showToast('ログアウトしました');
+      return;
+    }
+    if(!confirm('この端末からログアウトします。再度使うにはログインが必要です。よろしいですか?')) return;
+    await deviceSignOut();
   });
 }
 function bindChangelogModal(){
@@ -5540,7 +6373,8 @@ function renderTopbar(){
   var navHtml = '<div class="topbar-nav">'+
     '<button type="button" class="topbar-nav-item'+(!state.role?' active':'')+'" data-nav-role="">🏠 ホーム</button>'+
     navItems.map(function(item){
-      return '<button type="button" class="topbar-nav-item'+(state.role===item.role?' active':'')+'" data-nav-role="'+item.role+'">'+item.icon+' '+item.label+'</button>';
+      return '<button type="button" class="topbar-nav-item'+(state.role===item.role?' active':'')+'" data-nav-role="'+item.role+'"'+
+        (isRoleBlockedForAccount(item.role) ? readOnlyBlockedAttrs(item.role)+' title="'+READONLY_BLOCKED_TITLE+'"' : '')+'>'+item.icon+' '+item.label+'</button>';
     }).join('')+
   '</div>';
   return ''+
@@ -5548,7 +6382,7 @@ function renderTopbar(){
     '<div class="topbar-main-row">'+
       '<div class="topbar-left">'+
         '<span class="topbar-title">LOGI LINK</span>'+
-        '<span class="topbar-date">'+todayLabel()+' / '+roleLabel+'</span>'+
+        '<span class="topbar-date">'+todayLabel()+' / '+roleLabel+(isReadOnlyAccount() ? '(閲覧専用)' : '')+'</span>'+
       '</div>'+
       '<div class="topbar-right">'+
         lockBtn+
@@ -5562,6 +6396,7 @@ function bindCommon(){
   document.querySelectorAll('[data-nav-role]').forEach(function(el){
     el.addEventListener('click', function(){
       var role = el.getAttribute('data-nav-role');
+      if(isRoleBlockedForAccount(role)) return; // 閲覧専用アカウントでは開かない
       if(role==='monitor') state.monitorEntryRole = state.role || '';
       state.role = role || null;
       state.activeStaffId = null;
@@ -5751,8 +6586,8 @@ function renderKintoneProductSettingsPanel(){
     '<div class="pool-hint" style="margin-bottom:14px;">kintoneの商品マスタを取得するための設定です。APIトークンなどの秘密情報はここには入力しません(Supabase側で安全に管理します)。設定方法は「kintone連携_セットアップ手順」をご覧ください。</div>'+
 
     '<label style="font-size:12px;font-weight:700;display:block;margin-bottom:4px;">Edge Function URL</label>'+
-    '<div class="pool-hint" style="margin-bottom:4px;">Supabaseにデプロイしたsync-product-master関数のURLです。</div>'+
-    '<input type="text" id="kintoneEdgeUrlInput" value="'+esc(s.edgeFunctionUrl||'')+'" placeholder="https://xxxxx.supabase.co/functions/v1/sync-product-master" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;margin-bottom:12px;">'+
+    '<div class="pool-hint" style="margin-bottom:4px;">安全のため、このLOGI LINKが接続しているSupabaseプロジェクトのsync-product-master関数に固定されています(変更できません)。</div>'+
+    '<div id="kintoneEdgeUrlDisplay" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;margin-bottom:12px;background:var(--paper-2, #f6f4ef);font-size:12px;word-break:break-all;">'+esc(kintoneSyncFunctionUrl())+'</div>'+
 
     '<label style="font-size:12px;font-weight:700;display:block;margin-bottom:4px;">kintoneアプリID</label>'+
     '<div class="pool-hint" style="margin-bottom:4px;">商品マスタアプリを開いたときのURLに含まれる数字です(例: https://会社名.cybozu.com/k/123/ なら「123」)。</div>'+
@@ -5787,7 +6622,6 @@ function bindKintoneProductSettingsPanel(){
   if(saveBtn){
     saveBtn.addEventListener('click', async function(){
       var settings = {
-        edgeFunctionUrl: document.getElementById('kintoneEdgeUrlInput').value.trim(),
         kintoneAppId: document.getElementById('kintoneAppIdInput').value.trim(),
         fieldCodes: {
           productCode: document.getElementById('kintoneFieldProductCode').value.trim(),
@@ -5797,8 +6631,11 @@ function bindKintoneProductSettingsPanel(){
           customerName: document.getElementById('kintoneFieldCustomerName').value.trim()
         }
       };
+      if(!(await saveKintoneProductSettings(settings))){
+        render();
+        return; // 失敗内容は画面上部に表示済み
+      }
       state.kintoneProductSettings = settings;
-      await saveKintoneProductSettings(settings);
       await appendAuditLog({ action:'kintone連携設定を保存', target:'商品マスタ', before:null, after: 'アプリID:'+settings.kintoneAppId });
       showToast('設定を保存しました');
       render();
@@ -6018,6 +6855,14 @@ function bindCsvImportPanel(){
         return;
       }
       var fpIndex = await loadCsvFingerprintIndex();
+      if(isUnverified(fpIndex)){
+        // 重複チェック用の記録を読み込めない状態で取り込むと、二重取込を防げないため中止する
+        state.autoMapImporting = false;
+        autoMapCsvInput.value = '';
+        alert('CSVの重複チェック用データを読み込めなかったため、取込を中止しました。通信状態・ログイン状態を確認して、もう一度お試しください。');
+        render();
+        return;
+      }
       var dup = findDuplicateFingerprint(fpIndex, fingerprint, fileSize, fileName);
       if(dup){
         state.autoMapImporting = false;
@@ -6032,6 +6877,14 @@ function bindCsvImportPanel(){
 
       parseCsvForWorkVolume(file, {}, async function(result){
         var registry = await loadShipperNoRegistry();
+        if(isUnverified(registry)){
+          // 荷主出荷番号の取込記録を読み込めない状態では、重複防止ができないため中止する
+          state.autoMapImporting = false;
+          autoMapCsvInput.value = '';
+          alert('荷主出荷番号の取込記録を読み込めなかったため、取込を中止しました(二重取込を防ぐため)。通信状態・ログイン状態を確認して、もう一度お試しください。');
+          render();
+          return;
+        }
         var split = splitShipperGroupsByRegistry(result.shipperGroups, registry);
         var newGroups = split.newGroups, skippedShipperNos = split.skippedShipperNos;
         var keepSet = {};
@@ -8270,6 +9123,7 @@ function renderInput(){
   if(state.day.summaryFor === state.activeStaffId){
     return renderSummary(staff);
   }
+  resetDailyInstructionsIfDateChanged();
   if(state.reassignmentAlerts===null){
     loadReassignmentAlerts(todayStr()).then(function(d){ state.reassignmentAlerts = d; render(); });
   }
@@ -8524,11 +9378,7 @@ function bindInput(){
       var tid = el.getAttribute('data-tap-task');
       var log = currentLog(state.activeStaffId);
       if(log && log.taskId===tid) return;
-      if(log && log.taskId==='BREAK'){
-        endBreakAndStart(tid);
-        return;
-      }
-      openQuantityModal(tid, false);
+      requestTaskSwitch(tid);
     });
   });
   document.querySelectorAll('[data-complete-and-suggest]').forEach(function(el){
@@ -8540,10 +9390,14 @@ function bindInput(){
   });
   document.querySelectorAll('[data-suggest-start]').forEach(function(el){
     el.addEventListener('click', function(){
+      // 連打・処理中の再押下では何もしない(実績の二重登録防止)
+      if(el.disabled || state.taskActionBusy) return;
+      el.disabled = true;
       var tid = el.getAttribute('data-suggest-start');
       state.showNextSuggestBanner = false;
       state.nextTaskSuggestModal = null;
-      startTaskWithSubcatCheck(tid);
+      // 通常の作業切替と同じルールで開始する(進行中の作業があれば終了→数量入力→開始)
+      requestTaskSwitch(tid);
     });
   });
   document.querySelectorAll('[data-suggest-dismiss]').forEach(function(el){
@@ -8570,16 +9424,17 @@ function bindInput(){
       if(arr.indexOf(tid)===-1){
         arr = arr.concat([tid]);
         state.day.assignments[state.activeStaffId] = arr;
-        await saveDay(state.day);
+        if(!(await saveDay(state.day))){
+          // 割り当てを保存できなかった場合は作業を開始しない(失敗は画面上部に表示済み)
+          state.showOtherTasks = false;
+          render();
+          return;
+        }
       }
       state.showOtherTasks = false;
       var log = currentLog(state.activeStaffId);
       if(log && log.taskId===tid) { render(); return; }
-      if(log && log.taskId==='BREAK'){
-        endBreakAndStart(tid);
-        return;
-      }
-      openQuantityModal(tid, false);
+      requestTaskSwitch(tid);
     });
   });
   document.querySelectorAll('[data-live-count]').forEach(function(el){
@@ -8650,13 +9505,38 @@ function bindInput(){
     }
   });
 }
-async function endBreakAndStart(taskId){
+/* 作業を切り替える唯一の入口(作業タイルのタップ・担当外作業の追加・作業指示の
+   「この作業を開始」で共通)。1スタッフにつき進行中の実績は必ず1件だけにする。
+   ・休憩中なら休憩を終えてから開始
+   ・別の作業が進行中なら、その作業を終了(数量入力が必要なら入力画面)してから開始
+   ・進行中の作業が無ければそのまま開始 */
+function requestTaskSwitch(taskId){
+  if(state.taskActionBusy) return;
   var log = currentLog(state.activeStaffId);
-  if(log){
-    log.end = new Date().toISOString();
-    log.quantity = null;
+  if(log && log.taskId===taskId){ render(); return; }
+  if(log && log.taskId==='BREAK'){
+    endBreakAndStart(taskId);
+    return;
   }
-  await saveDay(state.day);
+  openQuantityModal(taskId, false);
+}
+function openLogsForStaff(day, staffId){
+  return ((day && day.logs)||[]).filter(function(l){ return l.staffId===staffId && l.end===null; });
+}
+async function endBreakAndStart(taskId){
+  if(state.taskActionBusy) return;
+  state.taskActionBusy = true;
+  try{
+    // 休憩の進行中ログは(万一複数あっても)すべて終了する
+    openLogsForStaff(state.day, state.activeStaffId).forEach(function(l){
+      if(l.taskId!=='BREAK') return;
+      l.end = new Date().toISOString();
+      l.quantity = null;
+    });
+    await saveDay(state.day);
+  }finally{
+    state.taskActionBusy = false;
+  }
   startTaskWithSubcatCheck(taskId);
 }
 async function liveCountAdjust(taskId, subcatName, delta){
@@ -8696,23 +9576,25 @@ function csvLinkBadge(taskId, wvDataOverride){
   return '<span class="csv-link-badge csv-link-badge-off" title="現場で数量入力が必要です">✍️ 通常入力</span>';
 }
 /* ---------- 管理者(manager/admin)認証と収支データ ----------
-   重要: 以下の関数は、必ず「本物のSupabase Authセッションがあるか」を
-   確認してからデータ取得を行う。作業者(未ログイン=anon)のコード経路
-   からはこれらの関数が呼ばれることは一切ない(gate_financial系の
-   画面からのみ呼び出される)。データ取得自体をしないことで、
-   Networkタブにも収支データが一切現れないようにする。 */
+   重要: 以下の関数は、必ず「本物のSupabase Authセッションがあり、かつロールが
+   manager/admin であるか」を確認してからデータ取得を行う。staff/monitor の
+   アカウントでログインしていても管理者としては扱わない。データ取得自体を
+   しないことで、Networkタブにも収支データが一切現れないようにする。 */
 async function refreshManagerSession(){
-  if(!window.__supabaseClient) { state.managerSession = null; return null; }
-  try{
-    var res = await window.__supabaseClient.auth.getSession();
-    state.managerSession = (res.data && res.data.session) ? res.data.session : null;
-  }catch(e){ state.managerSession = null; }
+  await refreshAuthState();
   return state.managerSession;
 }
+/* 管理者ログイン(管理画面・設定のログインフォームから)。
+   現場端末(staff/monitor)でログイン中の場合は、その端末セッションを一時的に
+   退避しておき、管理者のログアウト時に元の端末アカウントへ戻す。 */
 async function managerSignIn(email, password){
-  if(!window.__supabaseClient) return { ok:false, error:'Supabaseが設定されていません' };
+  var c = window.__supabaseClient;
+  if(!c) return { ok:false, error:'Supabaseが設定されていません' };
+  var prev = state.managerSession;
+  var prevRole = state.authRole;
+  authSwitching = true;
   try{
-    var res = await window.__supabaseClient.auth.signInWithPassword({ email: email, password: password });
+    var res = await c.auth.signInWithPassword({ email: email, password: password });
     if(res.error){
       var msg = (res.error.message||'').toLowerCase();
       if(msg.indexOf('invalid login credentials')!==-1 || msg.indexOf('invalid email or password')!==-1){
@@ -8720,22 +9602,53 @@ async function managerSignIn(email, password){
       }
       return { ok:false, error: res.error.message };
     }
-    state.managerSession = res.data.session;
+    // 端末アカウント(管理者以外)からの切り替えなら、端末セッションを退避する
+    // (同じアカウントを入力された場合も、拒否時に元のセッションへ戻せるよう退避する)
+    if(prev && prev.refresh_token && !isManagerRole(prevRole)){
+      deviceSessionBackup = { access_token: prev.access_token, refresh_token: prev.refresh_token };
+    }
+    await refreshAuthState();
+    if(!hasManagerSession()){
+      // 管理者ではないアカウント: ログインを取り消して元の端末アカウントに戻す
+      var denied = state.authRoleError ? state.authRoleError : 'このアカウントには管理者権限(manager/admin)がありません';
+      await signOutAndRestoreDevice();
+      return { ok:false, error: denied };
+    }
     return { ok:true };
   }catch(e){
+    console.error('[LOGI LINK] ログイン処理でエラー', e);
     return { ok:false, error: 'ログインに失敗しました' };
+  }finally{
+    authSwitching = false;
   }
+}
+/* 現在のログインを終了し、退避していた端末セッションがあれば元に戻す。 */
+async function signOutAndRestoreDevice(){
+  var c = window.__supabaseClient;
+  var backup = deviceSessionBackup;
+  deviceSessionBackup = null;
+  if(c){
+    // この端末だけのログアウト(他の端末の同じアカウントはログアウトさせない)
+    try{ await c.auth.signOut({ scope:'local' }); }catch(e){ console.error('[LOGI LINK] ログアウト処理でエラー', e); }
+    if(backup){
+      try{
+        var r = await c.auth.setSession(backup);
+        if(r && r.error) console.error('[LOGI LINK] 端末アカウントへの復帰に失敗しました', r.error);
+      }catch(e){ console.error('[LOGI LINK] 端末アカウントへの復帰に失敗しました', e); }
+    }
+  }
+  await refreshAuthState();
 }
 async function managerSignOut(){
-  if(window.__supabaseClient){
-    try{ await window.__supabaseClient.auth.signOut(); }catch(e){}
-  }
-  state.managerSession = null;
-  state.financialUnitPrices = null;
-  state.financialLaborCost = null;
+  authSwitching = true;
+  try{ await signOutAndRestoreDevice(); }
+  finally{ authSwitching = false; }
+  clearFinancialState();
+  if(!hasDataAccess()) stopPolling();
 }
+/* 管理者(manager/admin)としてログインしているか。ログインしているだけでは true にならない。 */
 function hasManagerSession(){
-  return !!(state.managerSession && state.managerSession.user);
+  return !!(state.managerSession && state.managerSession.user && isManagerRole(state.authRole));
 }
 /* ---------- 単価データの取得元(将来kintoneへの切替ポイント) ----------
    現在はSupabaseのunit_pricesテーブルから取得・編集している。
@@ -8780,66 +9693,106 @@ async function fetchProductMasterFromKintone(productCodes){
   return {}; // { [productCode]: {caseQty, saijou, ...} }
 }
 /* ---------- kintone商品マスタ同期(第1段階: 取得して保存するところまで) ----------
-   設定は管理者がUIから入力(アプリID・フィールドコード・Edge Function URL)。
+   設定は管理者がUIから入力(アプリID・フィールドコード)。
    APIトークン等の秘密情報はSupabase Edge Function側(Secrets)にのみ保持し、
    ブラウザ側のコードには一切含めない。
+   呼び出し先の Edge Function は、共有データ(kv_store)に保存されたURLではなく、
+   config.js の Supabase URL から組み立てた自分のプロジェクトの関数に固定する
+   (第三者がURLを書き換えて管理者のログイン情報を送らせることを防ぐ)。
+   ログイン情報は supabase.functions.invoke が Authorization ヘッダーで送る。
+   bodyにはアクセストークン・Supabase URL・anonキーを含めない。
    この関数群は、上のfetchProductMasterFromKintone(CSV照合用の将来のスタブ)とは
    独立している。CSVとの照合処理(第2段階)は今回実装しない。 */
+var KINTONE_SYNC_FUNCTION_NAME = 'sync-product-master';
+function kintoneSyncFunctionUrl(){
+  var cfg = window.SUPABASE_CONFIG || {};
+  return String(cfg.url||'').replace(/\/+$/, '')+'/functions/v1/'+KINTONE_SYNC_FUNCTION_NAME;
+}
+function defaultKintoneProductSettings(){
+  return { kintoneAppId:'', fieldCodes:{ productCode:'', productName:'', packQty:'', cubicVolume:'', customerName:'' } };
+}
+/* 保存・送信する設定から、URLなど想定外の項目を取り除く(過去に保存された edgeFunctionUrl は使わない) */
+function sanitizeKintoneProductSettings(s){
+  var d = defaultKintoneProductSettings();
+  s = s || {};
+  var fc = s.fieldCodes || {};
+  return {
+    kintoneAppId: String(s.kintoneAppId||''),
+    fieldCodes: {
+      productCode: String(fc.productCode||''), productName: String(fc.productName||''),
+      packQty: String(fc.packQty||''), cubicVolume: String(fc.cubicVolume||''), customerName: String(fc.customerName||'')
+    }
+  };
+}
 async function loadKintoneProductSettings(){
-  try{
-    var r = await window.storage.get('kintone-product-settings', true);
-    return r && r.value ? JSON.parse(r.value) : {
-      edgeFunctionUrl:'', kintoneAppId:'',
-      fieldCodes:{ productCode:'', productName:'', packQty:'', cubicVolume:'', customerName:'' }
-    };
-  }catch(e){
-    return { edgeFunctionUrl:'', kintoneAppId:'', fieldCodes:{ productCode:'', productName:'', packQty:'', cubicVolume:'', customerName:'' } };
-  }
+  var raw = await loadKeyJson('kintone-product-settings', defaultKintoneProductSettings);
+  if(isUnverified(raw)) return raw;
+  return sanitizeKintoneProductSettings(raw);
 }
 async function saveKintoneProductSettings(settings){
-  try{ await window.storage.set('kintone-product-settings', JSON.stringify(settings), true); }catch(e){}
+  return persistKey('kintone-product-settings', sanitizeKintoneProductSettings(settings));
 }
 async function loadKintoneSyncStatus(){
   try{
     var r = await window.storage.get('kintone-product-sync-status', true);
     return r && r.value ? JSON.parse(r.value) : null;
-  }catch(e){ return null; }
+  }catch(e){
+    if(!window.storage.isNotFound(e)) console.error('[LOGI LINK] kintone同期状況の読み込みに失敗しました', e);
+    return null;
+  }
 }
 async function saveKintoneSyncStatus(status){
-  try{ await window.storage.set('kintone-product-sync-status', JSON.stringify(status), true); }catch(e){}
+  return persistKey('kintone-product-sync-status', status);
+}
+/* Edge Function のエラー応答から利用者向けのメッセージを取り出す */
+async function describeFunctionsError(err){
+  var status = null, msg = null;
+  try{
+    if(err && err.context && typeof err.context.status==='number') status = err.context.status;
+    if(err && err.context && typeof err.context.json==='function'){
+      var body = await err.context.json();
+      if(body && body.error) msg = String(body.error);
+    }
+  }catch(e){}
+  if(msg) return msg;
+  if(status===401 || status===403) return '管理者としての認証を確認できませんでした(status '+status+')。再度ログインしてください。';
+  if(status) return '接続エラーが発生しました(status '+status+')。';
+  return 'Edge Functionへの接続に失敗しました。';
 }
 async function syncProductMasterFromKintone(settings){
   if(!hasManagerSession()) return { ok:false, error:'管理者としてログインしてください。' };
-  if(!settings.edgeFunctionUrl) return { ok:false, error:'Edge Function URLが設定されていません。' };
-  if(!settings.kintoneAppId) return { ok:false, error:'kintoneアプリIDが設定されていません。' };
-  if(!settings.fieldCodes || !settings.fieldCodes.productCode) return { ok:false, error:'商品コードのフィールドコードが設定されていません。' };
-  var cfg = window.SUPABASE_CONFIG || {};
-  var accessToken = state.managerSession && state.managerSession.access_token;
-  if(!accessToken) return { ok:false, error:'ログイン情報が確認できませんでした。再度ログインしてください。' };
+  // 実行直前にもロールを確認し直す(ロールが外された・ログインが切れた場合に実行しない)
+  await refreshAuthState();
+  if(!hasManagerSession()) return { ok:false, error:'管理者としてログインしてください。' };
+  var s = sanitizeKintoneProductSettings(settings);
+  if(!s.kintoneAppId) return { ok:false, error:'kintoneアプリIDが設定されていません。' };
+  if(!s.fieldCodes.productCode) return { ok:false, error:'商品コードのフィールドコードが設定されていません。' };
+  var c = window.__supabaseClient;
+  if(!c || !c.functions || typeof c.functions.invoke!=='function') return { ok:false, error:'Supabaseの関数呼び出しが利用できません。' };
   try{
-    var res = await fetch(settings.edgeFunctionUrl, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({
-        kintoneAppId: settings.kintoneAppId,
-        fieldCodes: settings.fieldCodes,
-        supabaseUrl: cfg.url,
-        supabaseAnonKey: cfg.anonKey,
-        accessToken: accessToken
-      })
+    var res = await c.functions.invoke(KINTONE_SYNC_FUNCTION_NAME, {
+      body: { kintoneAppId: s.kintoneAppId, fieldCodes: s.fieldCodes }
     });
-    var data = await res.json().catch(function(){ return null; });
-    if(!res.ok || !data || !data.ok){
-      return { ok:false, error: (data && data.error) ? data.error : ('接続エラーが発生しました(status '+res.status+')。') };
+    if(res.error){
+      console.error('[LOGI LINK] kintone同期(Edge Function)でエラー', res.error);
+      return { ok:false, error: await describeFunctionsError(res.error) };
+    }
+    var data = res.data;
+    if(typeof data==='string'){ try{ data = JSON.parse(data); }catch(e){ data = null; } }
+    if(!data || !data.ok){
+      return { ok:false, error: (data && data.error) ? data.error : 'Edge Functionから想定外の応答がありました。' };
     }
     var status = {
       fetchedCount: data.fetchedCount, savedCount: data.savedCount,
       skippedNoProductCode: data.skippedNoProductCode, fetchedAt: data.fetchedAt
     };
-    await saveKintoneSyncStatus(status);
+    if(!(await saveKintoneSyncStatus(status))){
+      console.error('[LOGI LINK] kintone同期は成功しましたが、同期状況の保存に失敗しました');
+    }
     return { ok:true, status: status };
   }catch(e){
-    return { ok:false, error:'Edge Functionへの接続に失敗しました。URLの設定をご確認ください。' };
+    console.error('[LOGI LINK] kintone同期(Edge Function)への接続に失敗しました', e);
+    return { ok:false, error:'Edge Functionへの接続に失敗しました。' };
   }
 }
 async function getProductMasterInfoBatch(productCodes){
@@ -8933,6 +9886,7 @@ function renderVcCaseCountWidget(taskId){
   '</div>';
 }
 function openQuantityModal(nextTaskId, isEndDay){
+  if(state.taskActionBusy) return; // 保存処理中の再操作は受け付けない(二重登録防止)
   var log = currentLog(state.activeStaffId);
   state.suppressRender = true;
   if(log){
@@ -8957,11 +9911,17 @@ function openQuantityModal(nextTaskId, isEndDay){
   render();
 }
 async function finishCsvLinkedLog(log, nextTaskId, isEndDay){
-  finalizeActiveSubTimer(log);
-  log.end = new Date().toISOString();
-  log.quantity = null;
-  delete log.breakdown;
-  await saveDay(state.day);
+  if(state.taskActionBusy){ state.suppressRender = false; return; }
+  state.taskActionBusy = true;
+  try{
+    finalizeActiveSubTimer(log);
+    log.end = new Date().toISOString();
+    log.quantity = null;
+    delete log.breakdown;
+    await saveDay(state.day);
+  }finally{
+    state.taskActionBusy = false;
+  }
   state.suppressRender = false;
   if(isEndDay){
     state.day.summaryFor = state.activeStaffId;
@@ -9011,7 +9971,23 @@ function startTaskWithSubcatCheck(taskId){
   startTask(taskId, firstSubcat);
 }
 async function startTask(taskId, chosenSubcat){
+  // 安全策: 1スタッフにつき進行中の実績は1件だけ。確認と追加は同期的に行うため、
+  // 連打や二重呼び出しでも同じ作業の実績が2件作られることはない。
+  var openLogs = openLogsForStaff(state.day, state.activeStaffId);
+  if(openLogs.some(function(l){ return l.taskId===taskId; })){
+    state.suppressRender = false;
+    render();
+    return;
+  }
+  if(openLogs.length){
+    // 別の作業(または休憩)が進行中のまま開始しようとした場合は、通常の切替手順に戻す
+    state.suppressRender = false;
+    requestTaskSwitch(taskId);
+    return;
+  }
   var entry = {id:uid(), staffId:state.activeStaffId, taskId:taskId, start:new Date().toISOString(), end:null, quantity:null};
+  var snapshotName = taskNameSnapshot(taskId);
+  if(snapshotName) entry.taskName = snapshotName;
   var task = taskById(taskId);
   if(task.subcategories && task.subcategories.length){
     entry.activeSubcat = chosenSubcat || subcatName(task.subcategories[0]);
@@ -9019,13 +9995,20 @@ async function startTask(taskId, chosenSubcat){
     entry.subTimes = {};
   }
   state.day.logs.push(entry);
-  await saveDay(state.day);
+  state.taskActionBusy = true;
+  try{
+    await saveDay(state.day);
+  }finally{
+    state.taskActionBusy = false;
+  }
   state.suppressRender = false;
   render();
 }
 async function checkAutoBreak(){
+  if(!canAutoWrite()) return; // monitor(閲覧専用)は自動休憩の書き込みを行わない
   if(!state.breakSettings || !state.breakSettings.enabled) return;
   if(!state.day || state.day.date !== todayStr()) return;
+  if(isUnverified(state.day)) return; // 本日の実績を読み込めていない間は自動処理しない
   var day = state.day;
   var now = new Date();
   var nowStr = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
@@ -9034,20 +10017,31 @@ async function checkAutoBreak(){
   if(!day.autoBreakEnded) day.autoBreakEnded = {};
   var changed = false;
   presentStaff().forEach(function(s){
-    var log = currentLog(s.id);
+    // 同じスタッフに進行中の実績が複数残らないよう、先頭の1件だけでなく
+    // 進行中のものをすべて対象にする
+    var openLogs = openLogsForStaff(day, s.id);
+    var workLogs = openLogs.filter(function(l){ return l.taskId!=='BREAK'; });
+    var breakLogs = openLogs.filter(function(l){ return l.taskId==='BREAK'; });
     if(inBreak){
-      if(!day.autoBreakStarted[s.id] && log && log.taskId!=='BREAK'){
-        finalizeActiveSubTimer(log);
-        log.end = new Date().toISOString();
-        if(log.quantity==null && !log.breakdown) log.quantity = 0;
-        day.logs.push({id:uid(), staffId:s.id, taskId:'BREAK', start:new Date().toISOString(), end:null, quantity:null});
+      if(!day.autoBreakStarted[s.id] && workLogs.length){
+        workLogs.forEach(function(log){
+          finalizeActiveSubTimer(log);
+          log.end = new Date().toISOString();
+          if(log.quantity==null && !log.breakdown) log.quantity = 0;
+        });
+        if(!breakLogs.length){
+          day.logs.push({id:uid(), staffId:s.id, taskId:'BREAK', start:new Date().toISOString(), end:null, quantity:null});
+        }
+        breakLogs.slice(1).forEach(function(bl){ bl.end = new Date().toISOString(); bl.quantity = null; });
         day.autoBreakStarted[s.id] = true;
         changed = true;
       }
     }else{
-      if(!day.autoBreakEnded[s.id] && log && log.taskId==='BREAK'){
-        log.end = new Date().toISOString();
-        log.quantity = null;
+      if(!day.autoBreakEnded[s.id] && breakLogs.length){
+        breakLogs.forEach(function(log){
+          log.end = new Date().toISOString();
+          log.quantity = null;
+        });
         day.autoBreakEnded[s.id] = true;
         changed = true;
       }
@@ -9058,8 +10052,10 @@ async function checkAutoBreak(){
   }
 }
 async function checkAutoShift(){
+  if(!canAutoWrite()) return; // monitor(閲覧専用)は自動出退勤の書き込みを行わない
   if(!state.shiftSettings || !state.shiftSettings.enabled) return;
   if(!state.day || state.day.date !== todayStr()) return;
+  if(isUnverified(state.day)) return; // 本日の実績を読み込めていない間は自動処理しない
   var day = state.day;
   var now = new Date();
   var wd = now.getDay();
@@ -9089,8 +10085,8 @@ async function checkAutoShift(){
       day.attendance[s.id] = false;
       day.autoShiftEnded[s.id] = true;
       changed = true;
-      var log = currentLog(s.id);
-      if(log && log.end===null){
+      // 退勤時は、そのスタッフの進行中の実績をすべて終了する(複数残さない)
+      openLogsForStaff(day, s.id).forEach(function(log){
         finalizeActiveSubTimer(log);
         log.end = new Date().toISOString();
         if(log.taskId==='BREAK'){
@@ -9098,7 +10094,7 @@ async function checkAutoShift(){
         }else if(log.quantity==null && !log.breakdown){
           log.quantity = 0;
         }
-      }
+      });
     }
   });
   if(changed){
@@ -9107,14 +10103,22 @@ async function checkAutoShift(){
 }
 async function closeLogAndProceed(qty, breakdown){
   var m = state.modal;
-  var log = state.day.logs.find(function(l){ return l.staffId===state.activeStaffId && l.taskId===m.closingTaskId && l.end===null; });
-  if(log){
-    finalizeActiveSubTimer(log);
-    log.end = new Date().toISOString();
-    log.quantity = qty;
-    if(breakdown){ log.breakdown = breakdown; } else { delete log.breakdown; }
+  // 確定ボタンの連打で2回処理されないようにする(2回目は何もしない)
+  if(!m || m.submitting) return;
+  m.submitting = true;
+  state.taskActionBusy = true;
+  try{
+    var log = state.day.logs.find(function(l){ return l.staffId===state.activeStaffId && l.taskId===m.closingTaskId && l.end===null; });
+    if(log){
+      finalizeActiveSubTimer(log);
+      log.end = new Date().toISOString();
+      log.quantity = qty;
+      if(breakdown){ log.breakdown = breakdown; } else { delete log.breakdown; }
+    }
+    await saveDay(state.day);
+  }finally{
+    state.taskActionBusy = false;
   }
-  await saveDay(state.day);
   state.modal = null;
   if(m.isEndDay){
     state.day.summaryFor = state.activeStaffId;
@@ -9205,6 +10209,8 @@ async function saveAddLog(){
   }
   var day = managerActiveDay();
   var entry = { id: uid(), staffId: staffId, taskId: taskId, start: start, end: end, quantity: quantity };
+  var addLogName = taskNameSnapshot(taskId);
+  if(addLogName) entry.taskName = addLogName;
   if(breakdown) entry.breakdown = breakdown;
   day.logs.push(entry);
   state.modal = null;
@@ -9274,6 +10280,11 @@ async function saveEditLog(){
     delete log.breakdown;
   }
   var staffSelect = document.getElementById('editStaffSelect');
+  if(log.taskId!==taskSelect.value){
+    // 作業を付け替えた場合は、記録している作業名も付け替え先に合わせる
+    var editLogName = taskNameSnapshot(taskSelect.value);
+    if(editLogName) log.taskName = editLogName; else delete log.taskName;
+  }
   log.taskId = taskSelect.value;
   log.staffId = staffSelect ? staffSelect.value : log.staffId;
   log.start = newStart;
@@ -9567,6 +10578,8 @@ function bindQtyBreakdownModal(m){
   });
   var confirmBtn = document.getElementById('qtyConfirmBreakdown');
   if(confirmBtn) confirmBtn.addEventListener('click', function(){
+    if(confirmBtn.disabled) return;
+    confirmBtn.disabled = true;
     var total = m.subcategories.reduce(function(a,s){ return a+(m.values[s.name]||0); },0);
     closeLogAndProceed(total, Object.assign({}, m.values));
   });
@@ -10414,6 +11427,8 @@ function bindModal(){
   });
   var confirmBtn = document.getElementById('qtyConfirm');
   if(confirmBtn) confirmBtn.addEventListener('click', function(){
+    if(confirmBtn.disabled) return;
+    confirmBtn.disabled = true;
     closeCurrentAndProceed(m.value);
   });
 }
@@ -10508,7 +11523,7 @@ function renderMonitor(){
   var monNavHtml = '<div class="mon-nav">'+
     '<button type="button" class="mon-nav-item" data-nav-role="" title="ホーム">🏠</button>'+
     monNavItems.map(function(item){
-      return '<button type="button" class="mon-nav-item" data-nav-role="'+item.role+'" title="'+item.label+'">'+item.icon+'</button>';
+      return '<button type="button" class="mon-nav-item" data-nav-role="'+item.role+'" title="'+(isRoleBlockedForAccount(item.role) ? item.label+'('+READONLY_BLOCKED_TITLE+')' : item.label)+'"'+readOnlyBlockedAttrs(item.role)+'>'+item.icon+'</button>';
     }).join('')+
   '</div>';
   var monThemeClass = state.monitorTheme==='light' ? ' mon-theme-light' : '';
@@ -10599,6 +11614,11 @@ function startTicker(){
 
 /* ---------- update notifications (toast) ---------- */
 function showToast(msg, actionLabel, actionFn){
+  // 直前の操作で保存に失敗していた場合は「〜しました」を出さない(失敗の表示と矛盾させない)
+  if(isSuccessToastMessage(msg) && saveFailedDuringCurrentAction()){
+    console.warn('[LOGI LINK] 保存に失敗したため、完了メッセージを表示しません: '+msg);
+    return;
+  }
   var container = document.getElementById('toastContainer');
   if(!container){
     container = document.createElement('div');
@@ -10710,17 +11730,29 @@ function safeSnapshotForChangeDetection(){
     return JSON.stringify({
       roster: state.roster, backlog: state.backlog, templates: state.templates,
       day: state.day, workVolume: state.workVolume, vcCaseLedger: state.vcCaseLedger,
-      breakSettings: state.breakSettings, shiftSettings: state.shiftSettings, achievementSettings: state.achievementSettings
+      breakSettings: state.breakSettings, shiftSettings: state.shiftSettings, achievementSettings: state.achievementSettings,
+      staffingSuggestion: state.staffingSuggestion, reassignmentAlerts: state.reassignmentAlerts
     });
   }catch(e){ return 'x'+Math.random(); }
 }
 async function pollTick(){
   if(pollTickRunning) return;
+  // 未ログイン(またはロール未確認)の間は、kv_store を一切読み書きしない
+  if(!hasDataAccess() || !state.appDataLoaded) return;
   if(!state.role) return;
   if(pendingSaves>0) return;
   if(isUserBusy()) return;
   pollTickRunning = true;
   try{
+    // 前回の保存に失敗した作業一覧・繰り返し作業は、最新データとマージして再保存する
+    // (monitor は閲覧専用のため再保存しない)
+    if(canAutoWrite() && listSaveDirty['task-backlog']) await saveBacklog(state.backlog);
+    if(canAutoWrite() && listSaveDirty['task-templates']) await saveTemplates(state.templates);
+    if(pendingSaves>0 || isUserBusy()) return;
+    /* 取得中にこの端末が書き込みを行った場合、取得したデータはその書き込みより
+       古い可能性がある。古いデータで画面の状態を上書きすると、直後の保存で
+       書き込んだ内容(開始したばかりの実績など)を消してしまうため、適用しない。 */
+    var seqAtStart = window.storage.writeSeq;
     var oldRoster = state.roster;
     var oldBacklog = state.backlog;
     var oldDay = state.day;
@@ -10732,59 +11764,89 @@ async function pollTick(){
        可能性が高いため、直前のデータを保持し、上書きしない(安全側に倒す)。
        これを怠ると、直後のensureTemplateTasksForToday()が「今日の作業がまだ無い」と
        誤判定して重複作成し、その空の状態をsaveBacklog()で永続化してしまう恐れがある。 */
+    var rosterOk = false, backlogOk = false, templatesOk = false;
     try{
       var fetchedRoster = await fetchRosterRaw();
+      rosterOk = true;
       if(fetchedRoster.length>0 || oldRoster.length===0) roster = fetchedRoster;
       else console.warn('スタッフ一覧の取得結果が予期せず空でした。直前のデータを保持します。');
     }catch(e){}
     try{
       var fetchedBacklog = await fetchBacklogRaw();
+      backlogOk = true;
       if(fetchedBacklog.length>0 || oldBacklog.length===0) backlog = fetchedBacklog;
       else console.warn('作業一覧の取得結果が予期せず空でした。直前のデータを保持します。');
     }catch(e){}
     try{
       var fetchedTemplates = await fetchTemplatesRaw();
+      templatesOk = true;
       if(fetchedTemplates.length>0 || state.templates.length===0) templates = fetchedTemplates;
       else console.warn('繰り返し作業一覧の取得結果が予期せず空でした。直前のデータを保持します。');
     }catch(e){}
     var breakSettings = await loadBreakSettings();
     var shiftSettings = await loadShiftSettings();
     var achievementSettings = await loadAchievementSettings();
-    if(pendingSaves>0) return;
+    if(pendingSaves>0 || window.storage.writeSeq!==seqAtStart) return;
+    // 取得に成功した種類は「読み込みが確実」に戻す(起動時の一時的な失敗から回復する)
+    if(rosterOk) setLoadUncertain('roster', false);
+    if(backlogOk) setLoadUncertain('backlog', false);
+    if(templatesOk) setLoadUncertain('templates', false);
     state.roster = roster;
-    state.backlog = backlog;
-    state.templates = templates;
+    // 保存に失敗して再試行待ちの一覧は、この端末の内容を保持する(次回の保存でマージする)
+    if(!listSaveDirty['task-backlog']){
+      if(backlog!==oldBacklog) setListSyncBase('task-backlog', backlog);
+      state.backlog = backlog;
+      rememberTasks(backlog);
+    }
+    if(!listSaveDirty['task-templates']){
+      if(templates!==state.templates) setListSyncBase('task-templates', templates);
+      state.templates = templates;
+    }
     state.breakSettings = breakSettings;
     state.shiftSettings = shiftSettings;
     state.achievementSettings = achievementSettings;
     await ensureTemplateTasksForToday();
+    seqAtStart = window.storage.writeSeq; // 直前の自動生成による自分の書き込みは除外して判定する
     var day;
     if(state.day && state.day.date===todayStr()){
       day = state.day;
       try{
-        var r = await window.storage.get('day:'+todayStr(), true);
-        if(r && r.value) day = JSON.parse(r.value);
+        var fetchedDay = await fetchDayRaw(todayStr());
+        if(fetchedDay) day = fetchedDay;
+        // 起動時に読み込めなかった(未確認の)空データは、「本当に無い」と確認できたら通常の空データにする
+        else if(isUnverified(state.day)) day = freshDay(todayStr());
       }catch(e){ /* keep existing day data on transient fetch failure */ }
     }else{
       day = await loadDay();
+      seqAtStart = window.storage.writeSeq; // loadDay内の祝日補正による自分の書き込みは除外
     }
-    if(pendingSaves>0) return;
+    if(pendingSaves>0 || window.storage.writeSeq!==seqAtStart) return;
     state.day = day;
-    var freshWorkVolume = await loadWorkVolume(todayStr());
-    if(freshWorkVolume) state.workVolume = freshWorkVolume;
+    // 読み込みに失敗した(未確認の)データで、表示中の正しいデータを置き換えない
+    try{
+      var freshWorkVolume = await fetchWorkVolumeRaw(todayStr());
+      if(freshWorkVolume) state.workVolume = freshWorkVolume;
+      else if(isUnverified(state.workVolume)) state.workVolume = emptyWorkVolume();
+    }catch(e){ /* 取得失敗: 表示中の内容を保持する */ }
     var freshCaseLedger = await loadVcCaseLedger(todayStr());
-    if(freshCaseLedger) state.vcCaseLedger = freshCaseLedger;
+    if(freshCaseLedger && !isUnverified(freshCaseLedger)) state.vcCaseLedger = freshCaseLedger;
     var freshAck = await loadChecklistAck(todayStr());
-    if(freshAck) state.dailyChecklistAck = freshAck;
+    if(freshAck && !isUnverified(freshAck)) state.dailyChecklistAck = freshAck;
     var freshAttempts = await loadVcImportAttempts(todayStr());
-    if(freshAttempts) state.vcImportAttemptsToday = freshAttempts;
+    if(freshAttempts && !isUnverified(freshAttempts)) state.vcImportAttemptsToday = freshAttempts;
+    await refreshDailyInstructionsForPoll();
     notifyChanges(oldRoster, oldBacklog, oldDay, state.roster, state.backlog, state.day);
     await checkAutoBreak();
     await checkAutoShift();
     var newSnapshot = safeSnapshotForChangeDetection();
     var dataChanged = newSnapshot !== state.lastSnapshotStr;
     state.lastSnapshotStr = newSnapshot;
-    if(!isUserBusy() && dataChanged) render();
+    // 保存失敗後の再同期では、データの差分が無くても再描画して画面を保存済みの内容に戻す
+    // 管理者ログインフォームに入力中・ログイン処理中は描き直さない(入力内容と送信中のフォームを消さない)
+    if(!isUserBusy() && !isLoginFormInUse() && (dataChanged || state.forceRenderAfterResync)){
+      state.forceRenderAfterResync = false;
+      render();
+    }
   } finally {
     pollTickRunning = false;
   }
@@ -10849,6 +11911,7 @@ function migrateSubcatIds(list){
   return changed;
 }
 async function migrateSubcatIdsIfNeeded(){
+  if(!canAutoWrite()) return; // monitor(閲覧専用)は自動移行しない
   if(state.dataLoadUncertain){
     console.warn('データ読み込みが不確実なため、内訳作業IDの補完をスキップしました。');
     return;
@@ -10857,6 +11920,242 @@ async function migrateSubcatIdsIfNeeded(){
   var templatesChanged = migrateSubcatIds(state.templates);
   if(backlogChanged) await saveBacklog(state.backlog);
   if(templatesChanged) await saveTemplates(state.templates);
+}
+/* ---------- ログインが必要な画面(未ログイン・ロール未設定) ----------
+   ログインを確認できるまで、kv_store のデータは一切読み込まない。
+   現場端末は一度ログインすれば、Supabase Auth のセッション(自動更新)で
+   ログアウトするまで継続して利用できる。 */
+function appRoleLabel(role){
+  return { admin:'管理者(admin)', manager:'管理者', staff:'現場端末', monitor:'モニター(閲覧専用)' }[role] || '未設定';
+}
+function renderAuthScreen(){
+  var inputStyle = 'width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:10px;margin-bottom:10px;font-size:15px;';
+  var head = '<div class="gate-eyebrow">Warehouse Dispatch Board</div><h1 class="gate-title">LOGI LINK</h1>';
+  if(!state.authChecked || state.appDataLoading){
+    return '<div class="gate" id="authScreen" data-auth-stage="loading">'+head+
+      '<p class="gate-sub">'+(state.appDataLoading ? 'データを読み込んでいます...' : 'ログイン状態を確認しています...')+'</p></div>';
+  }
+  if(!FIELD_LOGIN_REQUIRED){
+    // 現場はログイン不要の運用: ここに来るのはデータの読み込みに失敗した場合だけ
+    return '<div class="gate" id="authScreen" data-auth-stage="loadError">'+head+
+      '<p class="gate-sub" style="font-weight:700;">データを読み込めませんでした</p>'+
+      '<p class="gate-sub" style="max-width:520px;">通信状態を確認して、もう一度お試しください。</p>'+
+      '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">'+
+        '<button type="button" class="add-btn" id="authRetryBtn">再試行</button>'+
+      '</div>'+
+    '</div>';
+  }
+  if(!state.managerSession){
+    var lf = loginFormDefaults(state.deviceLoginDraft);
+    return '<div class="gate" id="authScreen" data-auth-stage="login">'+head+
+      '<p class="gate-sub" style="font-weight:700;">ログインが必要です</p>'+
+      '<p class="gate-sub" style="max-width:520px;">この端末で使うアカウント(現場端末用・モニター用・管理者用)のメールアドレスとパスワードでログインしてください。一度ログインすると、ログアウトするまでこの端末ではログインしたまま使えます。</p>'+
+      '<div class="panel" style="max-width:420px;width:100%;margin:0 auto;text-align:left;">'+
+        '<form id="deviceLoginForm" autocomplete="on" novalidate style="margin:0;">'+
+        (state.deviceLoginError ? '<div id="deviceLoginError" style="color:var(--rust-600);font-size:13px;margin-bottom:10px;">'+esc(state.deviceLoginError)+'</div>' : '')+
+        '<label for="deviceLoginEmail" style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">メールアドレス</label>'+
+        '<input type="email" id="deviceLoginEmail" name="email" autocomplete="username" value="'+esc(lf.email)+'" style="'+inputStyle+'">'+
+        '<label for="deviceLoginPassword" style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">パスワード</label>'+
+        '<input type="password" id="deviceLoginPassword" name="password" autocomplete="current-password" style="'+inputStyle+'margin-bottom:14px;">'+
+        renderRememberEmailCheckbox('deviceLoginRemember', lf.remember)+
+        '<button type="submit" class="add-btn" id="deviceLoginBtn" style="width:100%;" '+(state.deviceLoginBusy?'disabled':'')+'>'+(state.deviceLoginBusy?'ログイン中...':'ログイン')+'</button>'+
+        '</form>'+
+      '</div>'+
+    '</div>';
+  }
+  var email = (state.managerSession.user && state.managerSession.user.email) || '';
+  var msg = state.authRoleError
+    ? state.authRoleError
+    : 'このアカウント('+email+')には、LOGI LINKの利用権限(役割)が設定されていません。管理者に、Supabaseの user_roles への登録(staff / monitor / manager / admin)を依頼してください。';
+  return '<div class="gate" id="authScreen" data-auth-stage="'+(state.authRoleError?'roleError':'norole')+'">'+head+
+    '<p class="gate-sub" style="font-weight:700;">ログインが必要です</p>'+
+    '<p class="gate-sub" style="max-width:520px;">'+esc(msg)+'</p>'+
+    '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">'+
+      (state.authRoleError ? '<button type="button" class="add-btn" id="authRetryBtn">再試行</button>' : '')+
+      '<button type="button" class="pill-btn" id="authSignOutBtn">ログアウト</button>'+
+    '</div>'+
+  '</div>';
+}
+function bindAuthScreen(){
+  var loginForm = document.getElementById('deviceLoginForm');
+  if(loginForm){
+    // ボタンのクリックとEnterキーは、どちらもフォームの送信としてここに来る
+    loginForm.addEventListener('submit', async function(ev){
+      ev.preventDefault();
+      if(state.deviceLoginBusy) return;
+      var email = document.getElementById('deviceLoginEmail').value.trim();
+      var password = document.getElementById('deviceLoginPassword').value;
+      var remember = document.getElementById('deviceLoginRemember').checked;
+      // ログインに失敗して画面を描き直しても、メールアドレスとチェックは残す(パスワードは残さない)
+      state.deviceLoginDraft = { email: email, remember: remember };
+      if(!email || !password){ state.deviceLoginError = 'メールアドレスとパスワードを入力してください'; render(); return; }
+      state.deviceLoginBusy = true;
+      state.deviceLoginError = '';
+      setLoginFormBusyInPlace('deviceLoginBtn', 'deviceLoginError', true);
+      var result = await deviceSignIn(email, password);
+      password = null;
+      state.deviceLoginBusy = false;
+      if(result.ok){
+        applyRememberEmailChoice(email, remember);
+        state.deviceLoginDraft = null;
+        render(); // 成功時だけ描き直す(ログインフォームが消える)
+      }else{
+        state.deviceLoginError = result.error || 'ログインに失敗しました';
+        setLoginFormBusyInPlace('deviceLoginBtn', 'deviceLoginError', false);
+        showLoginErrorInPlace('deviceLoginForm', 'deviceLoginError', '13px', state.deviceLoginError, 'deviceLoginPassword');
+      }
+    });
+  }
+  var retryBtn = document.getElementById('authRetryBtn');
+  if(retryBtn) retryBtn.addEventListener('click', async function(){
+    await refreshAuthState();
+    if(hasDataAccess() && !state.appDataLoaded){
+      try{ await loadAppData(); }
+      catch(e){ console.error('[LOGI LINK] データの読み込みに失敗しました', e); }
+    }
+    render();
+  });
+  var outBtn = document.getElementById('authSignOutBtn');
+  if(outBtn) outBtn.addEventListener('click', async function(){ await deviceSignOut(); });
+}
+/* 端末としてのログイン(ログインが必要な画面から) */
+async function deviceSignIn(email, password){
+  var c = window.__supabaseClient;
+  if(!c) return { ok:false, error:'Supabaseが設定されていません' };
+  authSwitching = true;
+  try{
+    var res = await c.auth.signInWithPassword({ email: email, password: password });
+    if(res.error){
+      var msg = (res.error.message||'').toLowerCase();
+      if(msg.indexOf('invalid login credentials')!==-1 || msg.indexOf('invalid email or password')!==-1){
+        return { ok:false, error:'メールアドレスまたはパスワードが正しくありません' };
+      }
+      return { ok:false, error: res.error.message };
+    }
+    deviceSessionBackup = null;
+    await refreshAuthState();
+  }catch(e){
+    console.error('[LOGI LINK] ログイン処理でエラー', e);
+    return { ok:false, error:'ログインに失敗しました' };
+  }finally{
+    authSwitching = false;
+  }
+  // ロールが無い・確認できない場合は、ログインしたまま「権限がありません」の画面を出す
+  if(!hasDataAccess()) return { ok:true };
+  if(!state.appDataLoaded) await loadAppData();
+  return { ok:true };
+}
+/* この端末からのログアウト。画面上のデータも破棄し、ログイン画面に戻る。 */
+async function deviceSignOut(){
+  var c = window.__supabaseClient;
+  authSwitching = true;
+  try{
+    deviceSessionBackup = null;
+    if(c) await c.auth.signOut({ scope:'local' });
+  }catch(e){ console.error('[LOGI LINK] ログアウト処理でエラー', e); }
+  finally{ authSwitching = false; }
+  await refreshAuthState();
+  stopPolling();
+  clearAppDataForSignOut();
+  render();
+}
+function clearAppDataForSignOut(){
+  state.appDataLoaded = false;
+  state.role = null; state.activeStaffId = null; state.modal = null;
+  state.roster = []; state.backlog = []; state.templates = [];
+  state.day = null; state.workVolume = null; state.vcCaseLedger = null;
+  state.managerDay = null; state.managerWorkVolume = null; state.managerDate = null;
+  state.customerTaskMapping = null;
+  clearFinancialState();
+}
+/* ---------- ログインフォームの入力補助(メールアドレスの記憶) ----------
+   記憶するのはメールアドレスだけ(この端末のブラウザの localStorage)。
+   パスワードはLOGI LINK側では一切保存しない(ブラウザのパスワードマネージャーに任せる)。 */
+var REMEMBER_EMAIL_KEY = 'logilink_remembered_email';
+function loadRememberedEmail(){
+  try{ return String(localStorage.getItem(REMEMBER_EMAIL_KEY) || ''); }catch(e){ return ''; }
+}
+/* ログインに成功したときに呼ぶ。ONなら記憶し、OFFなら既存の記憶を消す。 */
+function applyRememberEmailChoice(email, remember){
+  try{
+    if(remember && email) localStorage.setItem(REMEMBER_EMAIL_KEY, email);
+    else localStorage.removeItem(REMEMBER_EMAIL_KEY);
+  }catch(e){}
+}
+/* 入力欄に出すメールアドレスとチェックの初期値。draft はログイン失敗後の再表示用(メールアドレスのみ)。 */
+function loginFormDefaults(draft){
+  var saved = loadRememberedEmail();
+  return {
+    email: (draft && typeof draft.email==='string') ? draft.email : saved,
+    remember: (draft && typeof draft.remember==='boolean') ? draft.remember : !!saved
+  };
+}
+/* ログイン処理中・失敗時は、フォームを描き直さずにその場で表示だけ変える。
+   送信したフォーム要素を残しておくと、ブラウザのパスワードマネージャーが
+   「送信 → 通信成功 → フォームが消えた(=ログイン成功)」を判断でき、保存を提案できる。
+   (失敗時にフォームを作り直すと、誤ったパスワードでも成功と誤判定される恐れがある) */
+function setLoginFormBusyInPlace(btnId, errorId, busy){
+  var btn = document.getElementById(btnId);
+  if(btn){ btn.disabled = !!busy; btn.textContent = busy ? 'ログイン中...' : 'ログイン'; }
+  var err = document.getElementById(errorId);
+  if(busy && err && err.parentNode) err.parentNode.removeChild(err);
+}
+function showLoginErrorInPlace(formId, errorId, fontSize, message, passwordId){
+  var form = document.getElementById(formId);
+  if(!form){ render(); return; }
+  var el = document.getElementById(errorId);
+  if(!el){
+    el = document.createElement('div');
+    el.id = errorId;
+    el.style.cssText = 'color:var(--rust-600);font-size:'+fontSize+';margin-bottom:10px;';
+    form.insertBefore(el, form.firstChild);
+  }
+  el.textContent = message;
+  var pw = document.getElementById(passwordId);
+  if(pw){ pw.value = ''; try{ pw.focus(); }catch(e){} }
+}
+/* ログインフォームを使用中か(ログイン処理中、または管理者ログインフォームに入力中・フォーカス中)。
+   4秒ごとの自動更新が、この間にフォームを描き直さないようにするために使う。 */
+function isLoginFormInUse(){
+  if(state.managerLoginBusy || state.deviceLoginBusy) return true;
+  var em = document.getElementById('mgrLoginEmail');
+  var pw = document.getElementById('mgrLoginPassword');
+  if(!em && !pw) return false;
+  var active = document.activeElement;
+  return !!((pw && pw.value) || (active && (active===em || active===pw)));
+}
+function renderRememberEmailCheckbox(id, checked){
+  return '<label for="'+id+'" style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--slate-500);margin:-6px 0 14px;cursor:pointer;">'+
+    '<input type="checkbox" id="'+id+'"'+(checked?' checked':'')+' style="margin:0;">メールアドレスを記憶する</label>';
+}
+/* ログインを確認した後に、アプリのデータを読み込む(従来の init の処理)。 */
+async function loadAppData(){
+  if(state.appDataLoading) return;
+  state.appDataLoading = true;
+  try{
+    state.roster = await loadRoster();
+    state.backlog = await loadBacklog();
+    state.templates = await loadTemplates();
+    await migrateSubcatIdsIfNeeded();
+    state.breakSettings = await loadBreakSettings();
+    state.shiftSettings = await loadShiftSettings();
+    state.achievementSettings = await loadAchievementSettings();
+    state.jpHolidays = await loadJpHolidays();
+    await ensureTemplateTasksForToday();
+    state.day = await loadDay();
+    state.workVolume = await loadWorkVolumeOrEmpty(todayStr());
+    state.vcCaseLedger = await loadVcCaseLedger(todayStr());
+    state.dailyChecklistAck = await loadChecklistAck(todayStr());
+    state.taskPriority = await loadTaskPriority(todayStr());
+    state.productivityMaster = await loadProductivityMaster();
+    state.vcImportAttemptsToday = await loadVcImportAttempts(todayStr());
+    state.dailyInstructionsDate = todayStr();
+    await checkAutoBreak();
+    await checkAutoShift();
+    state.appDataLoaded = true;
+  }finally{
+    state.appDataLoading = false;
+  }
 }
 async function init(){
   if(!window.SUPABASE_CONFIG || !window.SUPABASE_CONFIG.url || window.SUPABASE_CONFIG.url.indexOf('YOUR-PROJECT')!==-1){
@@ -10867,25 +12166,17 @@ async function init(){
     document.getElementById('app').innerHTML = renderStorageWarning();
     return;
   }
-  state.roster = await loadRoster();
-  state.backlog = await loadBacklog();
-  state.templates = await loadTemplates();
-  await migrateSubcatIdsIfNeeded();
-  state.breakSettings = await loadBreakSettings();
-  state.shiftSettings = await loadShiftSettings();
-  state.achievementSettings = await loadAchievementSettings();
-  state.jpHolidays = await loadJpHolidays();
-  await ensureTemplateTasksForToday();
-  state.day = await loadDay();
-  state.workVolume = await loadWorkVolume(todayStr());
-  if(!state.workVolume) state.workVolume = emptyWorkVolume();
-  state.vcCaseLedger = await loadVcCaseLedger(todayStr());
-  state.dailyChecklistAck = await loadChecklistAck(todayStr());
-  state.taskPriority = await loadTaskPriority(todayStr());
-  state.productivityMaster = await loadProductivityMaster();
-  state.vcImportAttemptsToday = await loadVcImportAttempts(todayStr());
-  await checkAutoBreak();
-  await checkAutoShift();
+  setupAuthListener();
+  render(); // 「ログイン状態を確認しています...」
+  // 先にログイン状態とロールを確認する(管理者の判定用)。
+  // 現場はログイン不要の運用(FIELD_LOGIN_REQUIRED=false)のため、未ログインでもデータを読み込む。
+  await refreshAuthState();
+  state.managerSessionChecked = true;
+  if(hasDataAccess()){
+    render(); // 「データを読み込んでいます...」
+    try{ await loadAppData(); }
+    catch(e){ console.error('[LOGI LINK] データの読み込みに失敗しました', e); }
+  }
   render();
   startTicker();
 }

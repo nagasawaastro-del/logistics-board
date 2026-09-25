@@ -346,6 +346,60 @@ input,select{font-family:inherit;}
 .stf-badge-active{background:#EFF8FF;color:#175CD3;border:1px solid #B2DDFF;}
 .stf-badge-done{background:#F2F4F7;color:#475467;border:1px solid #D0D5DD;}
 .stf-today-line{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;}
+/* ---- 設定・今日の状況のカード一覧(PCは2列、狭い画面は1列。横スクロールなし) ---- */
+.ll-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px;}
+.ll-toolbar .reg-search{flex:1 1 200px;margin:0;min-width:0;}
+.ll-toolbar select{border:1px solid var(--paper-line);border-radius:8px;padding:8px;font-size:13px;background:#fff;}
+.ll-section-title{font-size:15px;font-weight:700;margin:16px 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.ll-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:10px;}
+@media (max-width:640px){.ll-grid{grid-template-columns:1fr;}}
+.ll-card{border:1px solid var(--paper-line);border-radius:var(--radius-lg);background:#fff;padding:10px 12px;min-width:0;overflow-wrap:anywhere;display:flex;flex-direction:column;gap:6px;}
+.ll-card-head{display:flex;align-items:center;gap:6px;min-width:0;}
+.ll-card-name{font-weight:700;font-size:15px;flex:1;min-width:0;}
+.ll-card-sub{font-size:12px;color:var(--slate-500);}
+.ll-card-meta{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:13px;color:var(--ink-900);}
+.ll-card-meta .muted{color:var(--slate-500);}
+.ll-card-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center;margin-top:2px;}
+.ll-btn{border:1px solid var(--paper-line);background:#fff;border-radius:8px;padding:5px 12px;font-size:13px;font-weight:600;cursor:pointer;color:var(--ink-900);}
+.ll-btn:hover{background:var(--paper-50);}
+.ll-btn-primary{background:var(--indigo-600,#4F46E5);border-color:transparent;color:#fff;}
+.ll-btn-primary:hover{background:#4338CA;}
+.ll-tag{display:inline-block;font-size:11px;font-weight:700;border-radius:999px;padding:1px 8px;background:#F2F4F7;color:#475467;white-space:nowrap;}
+.ll-tag-on{background:#EFF8FF;color:#175CD3;}
+.ll-tag-warn{background:#FEF3F2;color:#B42318;}
+.ll-stars{color:#F79009;letter-spacing:1px;font-size:13px;}
+.ll-att{border:0;border-radius:999px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer;}
+.ll-att.on{background:#ECFDF3;color:#067647;}
+.ll-att.off{background:#F2F4F7;color:#667085;}
+.ll-add-panel{border:1px dashed var(--paper-line);border-radius:var(--radius-lg);padding:12px;margin-bottom:12px;background:var(--paper-50);}
+.ll-add-panel .panel{box-shadow:none;border:0;padding:0;background:transparent;}
+.ll-seg{display:inline-flex;border:1px solid var(--paper-line);border-radius:10px;overflow:hidden;margin-bottom:10px;}
+.ll-seg button{border:0;background:#fff;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;}
+.ll-seg button.active{background:var(--ink-900,#101828);color:#fff;}
+.ll-details{margin-top:14px;}
+.ll-details > summary{cursor:pointer;font-weight:700;padding:10px 0;}
+/* 今日の状況 */
+.ll-status-bar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px;}
+@media (max-width:640px){.ll-status-bar{grid-template-columns:repeat(2,minmax(0,1fr));}}
+.ll-status{border:1px solid var(--paper-line);border-radius:var(--radius-lg);padding:8px 10px;background:#fff;min-width:0;}
+.ll-status-label{font-size:12px;color:var(--slate-500);font-weight:600;}
+.ll-status-value{font-size:20px;font-weight:700;font-family:var(--font-mono);}
+.ll-status-sub{font-size:11px;color:var(--slate-500);overflow-wrap:anywhere;}
+.ll-status.is-red{border-color:#FDA29B;background:#FEF3F2;}
+.ll-tcard{border-left:6px solid #D0D5DD;}
+.ll-tcard.is-red{border-left-color:#D92D20;}
+.ll-tcard.is-yellow{border-left-color:#F79009;}
+.ll-tcard.is-green{border-left-color:#12B76A;}
+.ll-tcard-warn{font-size:13px;font-weight:700;color:#B42318;}
+/* 編集画面(グループ分け) */
+.ll-modal-wide{max-width:640px !important;text-align:left;max-height:calc(100vh - 40px);overflow-y:auto;}
+.ll-form-group{border-top:1px solid var(--paper-line);padding-top:10px;margin-top:10px;}
+.ll-form-group:first-of-type{border-top:0;padding-top:0;margin-top:0;}
+.ll-form-group-title{font-size:13px;font-weight:700;color:var(--ink-900);margin-bottom:6px;}
+.ll-radio-row{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;margin-bottom:6px;}
+.ll-form-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 20px;}
+.ll-form-cols > div > .ll-form-group:first-child{border-top:0;padding-top:0;margin-top:0;}
+@media (max-width:640px){.ll-form-cols{grid-template-columns:1fr;}.ll-form-cols > div + div > .ll-form-group:first-child{border-top:1px solid var(--paper-line);padding-top:10px;margin-top:10px;}}
 .dash-ok-banner{background:#ECFDF3;border:1px solid #ABEFC6;color:#067647;border-radius:var(--radius-md);padding:10px 14px;font-weight:600;margin-bottom:14px;}
 .dash-row-missing{background:#FEF3F2;}
 .dash-row-checking{background:#FFFAEB;}
@@ -7664,52 +7718,155 @@ function renderStaffSettingsPanel(){
   var WD = ['日','月','火','水','木','金','土'];
   var day = state.day;
   var roster = state.roster.filter(function(s){ return !s.archived; });
-  var rosterHtml = roster.map(function(s){
+  var shiftOn = !!(state.shiftSettings && state.shiftSettings.enabled);
+  // 一覧はコンパクトなカード。詳細な設定は「編集」から(保存/キャンセル)。出勤/欠勤だけは一覧で即時に切り替えられる
+  var cardsHtml = roster.map(function(s){
     var on = !!day.attendance[s.id];
+    var endOverride = day.shiftEndOverrides && day.shiftEndOverrides[s.id];
+    var endStr = endOverride || (shiftOn ? state.shiftSettings.end : '');
+    var startStr = (day.shiftStartOverrides && day.shiftStartOverrides[s.id]) || (shiftOn ? state.shiftSettings.start : '');
+    var hoursText = (startStr && endStr) ? (startStr+'〜'+endStr+(endOverride ? '(本日変更)' : '')) : '勤務時間の設定なし';
+    var open = (day.logs||[]).find(function(l){ return l.staffId===s.id && l.end===null; });
+    var nowText = !on ? '' : (open ? (open.taskId==='BREAK' ? '🍽 休憩中' : '▶ '+taskById(open.taskId).name) : '作業なし');
     var pattern = s.pattern || defaultPattern();
-    var dayToggles = pattern.map(function(v,i){
-      return '<button class="pattern-day '+(v?'on':'')+'" data-pattern-toggle="'+s.id+'|'+i+'">'+WD[i]+'</button>';
-    }).join('');
-    var currentAvatarColor = avatarColorForStaff(s);
-    var avatarSwatches = TASK_COLORS.map(function(c){
-      return '<div class="avatar-swatch '+(currentAvatarColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-avatar-color="'+s.id+'|'+c.hex+'"></div>';
-    }).join('');
-    var overtimeRow = '';
-    if(state.shiftSettings && state.shiftSettings.enabled){
-      var overrideVal = (day.shiftEndOverrides && day.shiftEndOverrides[s.id]) || '';
-      overtimeRow = '<div class="overtime-row">'+
-        '<span class="overtime-label">🕐 本日の終業を延長</span>'+
-        '<input type="time" class="overtime-input" data-overtime-end="'+s.id+'" value="'+esc(overrideVal)+'">'+
-      '</div>';
-    }
-    return '<div class="roster-item">'+
-      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
-        '<span class="roster-name">'+esc(s.name)+'</span>'+
-        '<div class="roster-controls">'+
-          '<button class="toggle-att '+(on?'on':'off')+'" data-toggle-att="'+s.id+'">'+(on?'出勤中':'欠勤')+'</button>'+
-          '<button class="icon-x" data-del-staff="'+s.id+'" title="'+esc(s.name)+'を削除" aria-label="'+esc(s.name)+'を削除">&times;</button>'+
-        '</div>'+
+    var days = pattern.map(function(v,i){ return v ? WD[i] : ''; }).join('') || 'なし';
+    var tags = (s.autoAssignExcluded===true ? '<span class="ll-tag ll-tag-warn">自動配置の対象外</span>' : '')+
+      (s.offOnHolidays ? '<span class="ll-tag">祝日休み</span>' : '');
+    return '<div class="ll-card" data-staff-card="'+s.id+'">'+
+      '<div class="ll-card-head">'+
+        '<span class="task-color-dot" style="background:'+avatarColorForStaff(s)+'"></span>'+
+        '<span class="ll-card-name">'+esc(s.name)+'</span>'+
+        '<button class="ll-att '+(on?'on':'off')+'" data-toggle-att="'+s.id+'" title="押すとすぐに切り替わります">'+(on?'🟢 出勤':'⚪ 欠勤')+'</button>'+
       '</div>'+
-      '<div class="pattern-row">'+dayToggles+'</div>'+
-      '<button class="holiday-off-toggle '+(s.offOnHolidays?'on':'')+'" data-holiday-off-toggle="'+s.id+'">🎌 祝日も休みにする</button>'+
-      // 自動配置の対象外(初期値は対象)。対象外でも手動での配置・作業開始はできる
-      '<button class="holiday-off-toggle '+(s.autoAssignExcluded===true?'on':'')+'" data-auto-assign-toggle="'+s.id+'" style="margin-left:6px;">🚫 自動配置の対象外'+(s.autoAssignExcluded===true?'(設定中)':'')+'</button>'+
-      overtimeRow+
-      '<div class="avatar-swatch-row" title="アバターカラー(累計実績画面のキャラクターの色)">'+avatarSwatches+'</div>'+
+      '<div class="ll-card-meta"><span>'+esc(hoursText)+'</span>'+(nowText?'<span>'+esc(nowText)+'</span>':'')+'</div>'+
+      '<div class="ll-card-meta"><span class="muted">出勤曜日 '+esc(days)+'</span>'+tags+'</div>'+
+      '<div class="ll-card-actions">'+
+        '<button class="ll-btn" data-edit-staff="'+s.id+'">編集</button>'+
+        '<button class="icon-x" data-del-staff="'+s.id+'" title="'+esc(s.name)+'を削除" aria-label="'+esc(s.name)+'を削除">&times;</button>'+
+      '</div>'+
     '</div>';
   }).join('') || '<div class="empty-note">スタッフを登録してください。</div>';
 
   return '<div class="panel">'+
     '<div class="panel-title">スタッフ設定 <span class="count-badge">'+roster.filter(function(s){ return day.attendance[s.id]; }).length+' / '+roster.length+'(本日出勤)</span></div>'+
-    '<div class="pool-hint" style="margin-bottom:8px;">曜日ボタンで通常の出勤パターンを設定。本日の出退勤はボタンで個別に切替できます。</div>'+
-    '<div class="roster-list">'+rosterHtml+'</div>'+
-    '<div class="add-row">'+
-      '<input type="text" id="newStaffInput" placeholder="名前を入力" value="'+esc(state.newStaffDraftName)+'">'+
+    '<div class="pool-hint" style="margin-bottom:8px;">「🟢 出勤／⚪ 欠勤」は押すとすぐに切り替わります。名前・色・出勤曜日・本日の勤務終了時刻などは「編集」から変更できます。</div>'+
+    '<div class="add-row" style="margin-bottom:12px;">'+
+      '<input type="text" id="newStaffInput" placeholder="追加するスタッフの名前" value="'+esc(state.newStaffDraftName)+'">'+
       '<button class="add-btn" id="addStaffBtn">追加</button>'+
+    '</div>'+
+    '<div class="ll-grid">'+cardsHtml+'</div>'+
+  '</div>';
+}
+/* スタッフの詳細設定(編集画面)。保存を押すまでは画面の中だけで変更し、保存時に既存と同じ saveRoster / saveDay・操作履歴で保存する */
+function openStaffEditModal(s){
+  var day = state.day;
+  state.modal = { kind:'staffEdit', staffId: s.id, name: s.name, avatarColor: avatarColorForStaff(s), pattern: (s.pattern || defaultPattern()).slice(),
+    attendance: !!day.attendance[s.id], shiftEnd: (day.shiftEndOverrides && day.shiftEndOverrides[s.id]) || '',
+    offOnHolidays: !!s.offOnHolidays, autoAssignExcluded: s.autoAssignExcluded===true };
+  state.suppressRender = true;
+  render();
+}
+function renderStaffEditModal(m){
+  var WD = ['日','月','火','水','木','金','土'];
+  var shiftOn = !!(state.shiftSettings && state.shiftSettings.enabled);
+  var swatches = TASK_COLORS.map(function(c){
+    return '<div class="avatar-swatch '+(m.avatarColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-staff-edit-color="'+c.hex+'"></div>';
+  }).join('');
+  var days = m.pattern.map(function(v,i){
+    return '<button type="button" class="pattern-day '+(v?'on':'')+'" data-staff-edit-day="'+i+'">'+WD[i]+'</button>';
+  }).join('');
+  var lbl = function(t){ return '<label style="font-size:11px;color:var(--slate-500);display:block;margin:0 0 4px;">'+t+'</label>'; };
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card ll-modal-wide">'+
+      '<div class="modal-task-name" style="text-align:center;margin-bottom:12px;">スタッフを編集</div>'+
+      '<div class="ll-form-group"><div class="ll-form-group-title">基本</div>'+
+        lbl('名前')+'<input type="text" id="staffEditName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:9px;font-size:14px;margin-bottom:8px;">'+
+        lbl('色(累計実績画面のキャラクターの色)')+'<div class="avatar-swatch-row">'+swatches+'</div>'+
+      '</div>'+
+      '<div class="ll-form-group"><div class="ll-form-group-title">本日</div>'+
+        '<div class="ll-radio-row">'+
+          '<label><input type="radio" name="staffEditAtt" value="on" '+(m.attendance?'checked':'')+'> 🟢 出勤</label>'+
+          '<label><input type="radio" name="staffEditAtt" value="off" '+(!m.attendance?'checked':'')+'> ⚪ 欠勤</label>'+
+        '</div>'+
+        (shiftOn ? (lbl('本日の勤務終了時刻(空欄なら通常の終業 '+esc(state.shiftSettings.end)+')')+
+          '<input type="time" id="staffEditShiftEnd" value="'+esc(m.shiftEnd)+'" style="border:2px solid var(--paper-line);border-radius:10px;padding:8px;font-size:14px;">')
+          : '<div class="pool-hint" style="margin:0;">本日の勤務終了時刻は、「勤務時間設定」で自動出退勤を有効にすると設定できます。</div>')+
+      '</div>'+
+      '<div class="ll-form-group"><div class="ll-form-group-title">出勤曜日(通常の出勤パターン)</div>'+
+        '<div class="pattern-row">'+days+'</div>'+
+        '<label style="display:block;font-size:13px;margin-top:8px;"><input type="checkbox" id="staffEditHoliday" '+(m.offOnHolidays?'checked':'')+'> 🎌 祝日も休みにする</label>'+
+      '</div>'+
+      '<div class="ll-form-group"><div class="ll-form-group-title">人員配置</div>'+
+        '<label style="display:block;font-size:13px;"><input type="checkbox" id="staffEditAutoExcluded" '+(m.autoAssignExcluded?'checked':'')+'> 🚫 自動配置の対象外にする(手動での配置・作業開始はできます)</label>'+
+      '</div>'+
+      '<div class="modal-actions" style="margin-top:14px;">'+
+        '<button class="modal-cancel" id="staffEditCancelBtn">キャンセル</button>'+
+        '<button class="modal-confirm" id="staffEditSaveBtn">保存</button>'+
+      '</div>'+
     '</div>'+
   '</div>';
 }
+function bindStaffEditModal(m){
+  var nameEl = document.getElementById('staffEditName');
+  // 色・曜日のボタンで描き直すときに、入力中の値が消えないよう画面の状態に残す
+  function keepInputs(){
+    if(nameEl) state.modal.name = nameEl.value;
+    var att = document.querySelector('input[name="staffEditAtt"]:checked'); if(att) state.modal.attendance = att.value==='on';
+    var se = document.getElementById('staffEditShiftEnd'); if(se) state.modal.shiftEnd = se.value;
+    var h = document.getElementById('staffEditHoliday'); if(h) state.modal.offOnHolidays = h.checked;
+    var ax = document.getElementById('staffEditAutoExcluded'); if(ax) state.modal.autoAssignExcluded = ax.checked;
+  }
+  document.querySelectorAll('[data-staff-edit-color]').forEach(function(el){
+    el.addEventListener('click', function(){ keepInputs(); state.modal.avatarColor = el.getAttribute('data-staff-edit-color'); render(); });
+  });
+  document.querySelectorAll('[data-staff-edit-day]').forEach(function(el){
+    el.addEventListener('click', function(){ keepInputs(); var i = parseInt(el.getAttribute('data-staff-edit-day'),10); state.modal.pattern[i] = !state.modal.pattern[i]; render(); });
+  });
+  var cancel = document.getElementById('staffEditCancelBtn');
+  if(cancel) cancel.addEventListener('click', function(){ state.modal = null; state.suppressRender = false; render(); });
+  var save = document.getElementById('staffEditSaveBtn');
+  if(save) save.addEventListener('click', async function(){
+    keepInputs();
+    var d = state.modal;
+    var name = (d.name||'').trim();
+    if(!name){ if(nameEl){ nameEl.style.borderColor = '#F04438'; nameEl.focus(); } return; }
+    var s = state.roster.find(function(x){ return x.id===d.staffId; });
+    if(!s){ state.modal = null; state.suppressRender = false; render(); return; }
+    var day = state.day;
+    var rosterChanged = false, dayChanged = false;
+    var beforeName = s.name, beforeAtt = !!day.attendance[s.id], beforeExcluded = s.autoAssignExcluded===true;
+    if(s.name!==name){ s.name = name; rosterChanged = true; }
+    if(avatarColorForStaff(s)!==d.avatarColor){ s.avatarColor = d.avatarColor; rosterChanged = true; }
+    if(JSON.stringify(s.pattern || defaultPattern())!==JSON.stringify(d.pattern)){ s.pattern = d.pattern.slice(); rosterChanged = true; }
+    if(!!s.offOnHolidays!==d.offOnHolidays){ s.offOnHolidays = d.offOnHolidays; rosterChanged = true; }
+    if(beforeExcluded!==d.autoAssignExcluded){ if(d.autoAssignExcluded) s.autoAssignExcluded = true; else delete s.autoAssignExcluded; rosterChanged = true; }
+    if(beforeAtt!==d.attendance){ day.attendance[s.id] = d.attendance; dayChanged = true; }
+    if(state.shiftSettings && state.shiftSettings.enabled){
+      var curEnd = (day.shiftEndOverrides && day.shiftEndOverrides[s.id]) || '';
+      if(curEnd!==(d.shiftEnd||'')){
+        if(!day.shiftEndOverrides) day.shiftEndOverrides = {};
+        if(d.shiftEnd) day.shiftEndOverrides[s.id] = d.shiftEnd; else delete day.shiftEndOverrides[s.id];
+        dayChanged = true;
+      }
+    }
+    state.modal = null; state.suppressRender = false;
+    var ok = true;
+    if(rosterChanged) ok = (await saveRoster(state.roster))!==false && ok;
+    if(dayChanged) ok = (await saveDay(day))!==false && ok;
+    if(beforeName!==s.name) await appendAuditLog({ action:'スタッフ名変更', target: s.name, before: beforeName, after: s.name });
+    if(beforeAtt!==d.attendance) await appendAuditLog({ action:'出勤状態変更', target: s.name, before: (beforeAtt?'出勤中':'欠勤'), after: (d.attendance?'出勤中':'欠勤') });
+    if(beforeExcluded!==d.autoAssignExcluded) await appendAuditLog({ action:'自動配置の対象設定', target: s.name, before: beforeExcluded?'対象外':'対象', after: d.autoAssignExcluded?'対象外':'対象' });
+    render();
+    if(ok && (rosterChanged || dayChanged)) showToast('「'+s.name+'」の設定を保存しました');
+  });
+}
 function bindStaffSettingsPanel(){
+  document.querySelectorAll('[data-edit-staff]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var s = state.roster.find(function(x){ return x.id===el.getAttribute('data-edit-staff'); });
+      if(s) openStaffEditModal(s);
+    });
+  });
   document.querySelectorAll('[data-toggle-att]').forEach(function(el){
     el.addEventListener('click', async function(){
       var id = el.getAttribute('data-toggle-att');
@@ -7828,6 +7985,111 @@ function bindStaffSettingsPanel(){
       render();
     });
   });
+}
+/* 今日の状況(確認する画面)。人員配置の共通計算(computeTodayStaffingPlanNow)の結果を表示するだけで、計算はしない。
+   上部に全体状況、その下に作業カードを「要対応 → 進行中 → 完了」の順に並べる。 */
+function renderTodayStatusBoard(tasks){
+  if(!state.staffingSuggestionLoaded){
+    loadStaffingSuggestion(todayStr()).then(function(d){ state.staffingSuggestion = d; state.staffingSuggestionLoaded = true; render(); });
+  }
+  var plan = computeTodayStaffingPlanNow();
+  if(!plan) return '';
+  var RED = { short:1, shortNoCandidate:1, overdue:1, breakHold:1 };
+  var red = [], yellow = [], green = [], notStarted = [];
+  var byPrio = function(a,b){ return (a.t.priorityLevel||4)-(b.t.priorityLevel||4) || String(a.t.deadline||'99:99').localeCompare(String(b.t.deadline||'99:99')); };
+  function staffOn(taskId){
+    return Object.keys(plan.staff).filter(function(sid){ return plan.staff[sid].present && plan.staff[sid].currentTaskId===taskId; })
+      .map(function(sid){ return plan.staff[sid].name+(plan.staff[sid].onBreak ? '(休憩中)' : ''); });
+  }
+  tasks.forEach(function(t){
+    var c = plan.taskById[t.id] || null;
+    var item = { t: t, c: c, names: staffOn(t.id) };
+    if(c){
+      if(c.status==='done') green.push(item);
+      else if(RED[c.status]) red.push(item);
+      else yellow.push(item);
+    }else if(item.names.length){
+      yellow.push(item); // CSVの数量がない作業(手待ち作業など)で、今だれかが作業している
+    }else{
+      notStarted.push(t);
+    }
+  });
+  red.sort(byPrio); yellow.sort(byPrio); green.sort(byPrio);
+  // 手待ち・空き: 手待ち作業をしている出勤者 / どの作業にもついていない出勤者(休憩中の人は含めない)
+  var idleNames = [], freeNames = [];
+  Object.keys(plan.staff).forEach(function(sid){
+    var s = plan.staff[sid];
+    if(!s.present) return;
+    if(!s.currentTaskId){ freeNames.push(s.name); return; }
+    if(s.currentTaskId==='BREAK') return;
+    var ct = taskById(s.currentTaskId);
+    if(ct && ct.idleLikely===true) idleNames.push(s.name);
+  });
+  function statusBox(cls, label, value, sub){
+    return '<div class="ll-status '+cls+'"><div class="ll-status-label">'+label+'</div><div class="ll-status-value">'+value+'</div>'+(sub?'<div class="ll-status-sub">'+sub+'</div>':'')+'</div>';
+  }
+  var bar = '<div class="ll-status-bar" id="todayStatusBar">'+
+    statusBox(red.length?'is-red':'', '🔴 要対応', red.length+'件', red.length ? esc(red.map(function(x){ return x.t.name; }).join('・')) : '')+
+    statusBox('', '🟡 作業中', yellow.length+'件', '')+
+    statusBox('', '🟢 完了', green.length+'件', '')+
+    statusBox('', '⚪ 手待ち・空き', (idleNames.length+freeNames.length)+'人',
+      '手待ち '+idleNames.length+'人'+(idleNames.length?'('+esc(idleNames.join('・'))+')':'')+' / 空き '+freeNames.length+'人'+(freeNames.length?'('+esc(freeNames.join('・'))+')':''))+
+  '</div>';
+  function unitNote(c){ return c ? staffingPiecesNote(c) : ''; }
+  function card(x, color){
+    var t = x.t, c = x.c;
+    var cls = color==='red' ? 'is-red' : (color==='green' ? 'is-green' : 'is-yellow');
+    var icon = color==='red' ? '🔴' : (color==='green' ? '🟢' : '🟡');
+    var lines = [];
+    if(c && color==='green'){
+      lines.push('<span>'+formatNum(c.plannedQty)+' / '+formatNum(c.plannedQty)+esc(c.unit)+'</span><span>完了'+(c.completedAt?'('+fmtClock(c.completedAt)+')':'')+'</span>');
+    }else if(c){
+      lines.push('<span>残り <b>'+formatNum(c.remainingQty)+'</b>'+esc(c.unit)+unitNote(c)+'</span>'+(t.deadline?'<span class="muted">締切 '+esc(t.deadline)+'</span>':''));
+      lines.push('<span>現在 '+(c.currentCount+c.plannedWorkers.length)+'人'+(c.neededPeople!==null && color==='red' ? ' / 必要 '+c.neededPeople+'人' : '')+'</span>'+
+        (planEtaText(plan, t.id) ? '<span class="muted">完了予定 '+esc(planEtaText(plan, t.id))+'</span>' : ''));
+    }else{
+      lines.push('<span class="muted">CSVの数量なし</span>'+(t.deadline?'<span class="muted">締切 '+esc(t.deadline)+'</span>':''));
+      lines.push('<span>現在 '+x.names.length+'人</span>');
+    }
+    if(x.names.length && color!=='green') lines.push('<span class="muted">'+esc(x.names.join('・'))+'</span>');
+    var warn = '';
+    if(color==='red'){
+      if(c.status==='overdue') warn = '⚠ 締切を過ぎています';
+      else if(c.status==='breakHold') warn = '⏸ 休憩中(休憩後に再計算)';
+      else if(c.additionalNeeded) warn = '⚠ '+c.additionalNeeded+'人不足'+(c.status==='shortNoCandidate'?'(追加できる人がいません)':'');
+      else if(c.shortageQty>0.01) warn = '⚠ 不足 '+formatNum(Math.ceil(c.shortageQty))+esc(c.unit);
+    }else if(c && !c.rate && color!=='green'){
+      warn = '<span style="color:var(--slate-500);font-weight:600;">生産性未設定(必要人数は計算できません)</span>';
+    }
+    var actions = '';
+    if(color!=='green'){
+      actions = '<div class="ll-card-actions">'+
+        (color==='red' ? '<button type="button" class="ll-btn ll-btn-primary" data-admin-hub-tab="staffing">配置を見る</button>' : '')+
+        '<button type="button" class="ll-btn" data-open-assign-picker="'+t.id+'">割り当て</button>'+
+      '</div>';
+    }
+    return '<div class="ll-card ll-tcard '+cls+'" data-today-task="'+t.id+'">'+
+      '<div class="ll-card-head"><span class="ll-card-name">'+icon+' '+esc(t.name)+'</span></div>'+
+      lines.map(function(l){ return '<div class="ll-card-meta">'+l+'</div>'; }).join('')+
+      (warn ? '<div class="ll-tcard-warn">'+warn+'</div>' : '')+
+      actions+
+    '</div>';
+  }
+  function section(title, arr, color){
+    if(!arr.length) return '';
+    return '<div class="ll-section-title">'+title+' <span class="count-badge">'+arr.length+'件</span></div>'+
+      '<div class="ll-grid">'+arr.map(function(x){ return card(x, color); }).join('')+'</div>';
+  }
+  var noneNote = (!red.length && !yellow.length && !green.length) ? '<div class="empty-note">本日の作業の状況はまだありません(CSV取込・作業開始で表示されます)</div>' : '';
+  var notStartedHtml = notStarted.length ? '<div class="pool-hint" style="margin-top:10px;">未着手(CSVの数量なし): '+notStarted.map(function(t){ return esc(t.name); }).join('・')+'</div>' : '';
+  return '<div class="panel" style="margin-bottom:14px;" id="todayStatusBoard">'+
+    '<div class="stf-head"><div class="panel-title">📋 今日の状況</div><div class="stf-asof">'+esc(fmtClockMs(plan.nowMs))+'時点・自動計算'+(plan.breakHold?'・休憩中':'')+'</div></div>'+
+    bar+
+    section('🔴 要対応', red, 'red')+
+    section('🟡 進行中', yellow, 'yellow')+
+    section('🟢 完了', green, 'green')+
+    noneNote+notStartedHtml+
+  '</div>';
 }
 function renderManager(){
   var viewDate = managerActiveDate();
@@ -8057,9 +8319,16 @@ function renderManager(){
     '</tr>';
   }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この日の記録はまだありません</td></tr>';
 
-  // ---- ダッシュボード要約は todayDashboardHtml(サマリーカード+作業者別業務時間)に統合済み ----
-  // 本日を表示しているときは、共通計算による「本日の作業の見込み」を先頭に出す
-  var dashboardBar = (isToday ? renderTodayPlanSummary() : '') + todayDashboardHtml;
+  // ---- 画面の構成 ----
+  // 上部: 今日の状況(確認用。人員配置の共通計算の結果をカードで表示)。
+  // 従来の「割り当て(ドラッグ・全員割り当て・作業の追加/編集/削除)」「出勤・業務時間のまとめ」「作業実績の表」は、
+  // 機能はそのままで折りたたみの詳細へ移す。本日以外の日付では、割り当ての詳細を最初から開いておく。
+  if(!state.mgrOpen) state.mgrOpen = {};
+  var openAssign = state.mgrOpen.assign!==undefined ? state.mgrOpen.assign : !isToday;
+  var openStaffBlock = state.mgrOpen.staff===true;
+  var openLogs = state.mgrOpen.logs===true;
+  var dashboardBar = isToday ? renderTodayStatusBoard(tasks) : '';
+  var staffSummaryTitle = '👥 出勤・業務時間のまとめ'+(needsCheckRows.length ? '(要確認 '+needsCheckRows.length+'人)' : '');
 
   return ''+
   '<div class="mgr-wrap">'+
@@ -8068,6 +8337,8 @@ function renderManager(){
     dateNav+
     unassignedBanner+
     brokenBanner+
+    '<details class="ll-details" id="mgrAssignDetails" data-mgr-open="assign" '+(openAssign?'open':'')+'>'+
+    '<summary>🧩 割り当ての詳細(スタッフの割り当て・作業の追加/編集/削除)</summary>'+
     '<div class="mgr-grid">'+
       '<div class="panel">'+
         '<div class="panel-title">出勤スタッフ <span class="count-badge">'+present.length+' / '+roster.length+'</span></div>'+
@@ -8085,12 +8356,20 @@ function renderManager(){
         '</div>'+
       '</div>'+
     '</div>'+
-    '<div class="panel" style="margin-top:20px;">'+
+    '</details>'+
+    '<details class="ll-details" id="mgrStaffDetails" data-mgr-open="staff" '+(openStaffBlock?'open':'')+'>'+
+    '<summary>'+esc(staffSummaryTitle)+'</summary>'+
+    todayDashboardHtml.replace('📋 今日の状況', '👥 出勤・業務時間のまとめ')+
+    '</details>'+
+    '<details class="ll-details" id="mgrLogDetails" data-mgr-open="logs" '+(openLogs?'open':'')+'>'+
+    '<summary>📝 作業実績(この日の記録) '+logsSorted.length+'件</summary>'+
+    '<div class="panel" style="margin-top:4px;">'+
       '<div class="panel-title">作業実績(この日の記録) <span class="count-badge">'+logsSorted.length+'件</span></div>'+
       '<div class="pool-hint" style="margin-bottom:10px;">パートさんが入力した内容に誤りがあれば「編集」から修正できます。パートさんが入力し忘れた実績は「+ 実績を手動で追加」から入力できます。</div>'+
       '<button class="add-btn" id="openAddLogBtn" style="margin-bottom:12px;">+ 実績を手動で追加</button>'+
       '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>件数</th><th></th></tr></thead><tbody>'+logRows+'</tbody></table></div>'+
     '</div>'+
+    '</details>'+
     '<div class="pool-hint" style="margin-top:16px;text-align:center;">自動出退勤・休憩・CSV取込バッチ管理・実績目標・管理者PINは、トップ画面の「⚙️ 設定」から変更できます。</div>'+
   '</div>';
 }
@@ -8305,6 +8584,13 @@ function renderTaskForm(){
   '</div>';
 }
 function bindManager(){
+  // 折りたたみの詳細(割り当て・出勤のまとめ・作業実績)の開閉を覚えておく(描き直しても閉じないように)
+  document.querySelectorAll('[data-mgr-open]').forEach(function(el){
+    el.addEventListener('toggle', function(){
+      if(!state.mgrOpen) state.mgrOpen = {};
+      state.mgrOpen[el.getAttribute('data-mgr-open')] = el.open;
+    });
+  });
   document.querySelectorAll('[data-manager-view]').forEach(function(el){
     el.addEventListener('click', function(){
       state.managerViewMode = el.getAttribute('data-manager-view');
@@ -8697,44 +8983,10 @@ function dateLabelFromStr(dateStr){
 function renderRegister(){
   if(!state.regNewDate) state.regNewDate = tomorrowStr();
   if(state.regSearchQuery===undefined) state.regSearchQuery = '';
+  if(!state.wmFilter) state.wmFilter = 'all';
   var swatches = TASK_COLORS.map(function(c){
     return '<div class="swatch '+(state.newTaskColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-color-swatch="'+c.hex+'"></div>';
   }).join('');
-
-  var query = state.regSearchQuery.trim().toLowerCase();
-  var upcoming = activeBacklog().filter(function(t){ return t.workDate >= todayStr(); })
-    .filter(function(t){ return !query || t.name.toLowerCase().indexOf(query)!==-1; })
-    .sort(function(a,b){ return a.workDate < b.workDate ? -1 : (a.workDate > b.workDate ? 1 : 0); });
-  var groups = {};
-  var order = [];
-  upcoming.forEach(function(t){
-    if(!groups[t.workDate]){ groups[t.workDate] = []; order.push(t.workDate); }
-    groups[t.workDate].push(t);
-  });
-  var listHtml = order.map(function(dateStr){
-    var items = groups[dateStr].slice().sort(byTaskColor(function(t){ return t.color; }));
-    var rows = items.map(function(t){
-      var badge = t.fromTemplate ? '<span class="reg-row-badge">定型</span>' : '';
-      var catBadge = '<span class="reg-row-cat reg-row-cat-'+taskCategory(t)+'">'+esc(taskCategory(t))+'</span>';
-      return '<div class="reg-row">'+
-        '<span class="task-color-dot" style="background:'+t.color+'"></span>'+
-        '<span class="reg-row-name">'+esc(t.name)+'</span>'+
-        catBadge+
-        badge+
-        '<span class="reg-row-unit">'+esc(t.unit)+'</span>'+
-        '<button class="log-edit-btn" data-edit-backlog="'+t.id+'">編集</button>'+
-        '<button class="icon-x" data-del-backlog="'+t.id+'" title="'+esc(t.name)+'を削除" aria-label="'+esc(t.name)+'を削除">&times;</button>'+
-      '</div>';
-    }).join('');
-    var isOpen = state.regExpandedDates && Object.prototype.hasOwnProperty.call(state.regExpandedDates, dateStr)
-      ? state.regExpandedDates[dateStr]
-      : dateStr===todayStr();
-    return '<details class="reg-group" data-date-group="'+dateStr+'" '+(isOpen?'open':'')+'>'+
-      '<summary class="reg-group-summary"><span class="reg-group-date">'+dateLabelFromStr(dateStr)+'</span><span class="count-badge">'+items.length+'件</span></summary>'+
-      '<div class="reg-group-items">'+rows+'</div>'+
-    '</details>';
-  }).join('') || '<div class="empty-note">'+(query?'一致する作業が見つかりません。':'登録済みの作業はまだありません。')+'</div>';
-
   var WD = ['日','月','火','水','木','金','土'];
   if(!state.newTemplatePattern) state.newTemplatePattern = defaultPattern();
   var draftToggles = state.newTemplatePattern.map(function(v,i){
@@ -8743,26 +8995,74 @@ function renderRegister(){
   var tmplSwatches = TASK_COLORS.map(function(c){
     return '<div class="swatch '+(state.newTemplateColor===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-tmpl-color-swatch="'+c.hex+'"></div>';
   }).join('');
-  var templateRows = activeTemplates().slice().sort(byTaskColor(function(t){ return t.color; })).map(function(tmpl){
-    var pattern = tmpl.pattern || defaultPattern();
-    var toggles = pattern.map(function(v,i){
-      return '<button class="pattern-day '+(v?'on':'')+'" data-tmpl-pattern-toggle="'+tmpl.id+'|'+i+'">'+WD[i]+'</button>';
-    }).join('');
-    return '<div class="roster-item">'+
-      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'+
-        '<span class="roster-name"><span class="task-color-dot" style="background:'+tmpl.color+';display:inline-block;margin-right:6px;"></span>'+esc(tmpl.name)+' <span style="font-size:11px;color:var(--slate-500);font-weight:400;">('+esc(tmpl.unit)+')</span></span>'+
-        '<div class="roster-controls">'+
-          '<button class="log-edit-btn" data-edit-template="'+tmpl.id+'">編集</button>'+
-          '<button class="icon-x" data-del-template="'+tmpl.id+'" title="繰り返し作業「'+esc(tmpl.name)+'」を削除" aria-label="繰り返し作業「'+esc(tmpl.name)+'」を削除">&times;</button>'+
-        '</div>'+
-      '</div>'+
-      '<div class="pattern-row">'+toggles+'</div>'+
-    '</div>';
-  }).join('') || '<div class="empty-note">毎日/毎週発生する作業を登録すると、該当する曜日に自動で本日分の作業として追加されます。</div>';
 
-  return '<div class="mgr-wrap"><div class="mgr-grid" style="grid-template-columns:320px 1fr;">'+
-    '<div style="display:flex;flex-direction:column;gap:20px;">'+
-    '<div class="panel">'+
+  // CSV連携(得意先・作業枠マスターの紐付け)の表示用。読み取りだけで、ここでは保存しない
+  if(!state.customerTaskMapping && state.wmCsvMapping===undefined){
+    state.wmCsvMapping = null;
+    loadKeyJson('customer-task-mapping', function(){ return { entries: [] }; }).then(function(d){
+      state.wmCsvMapping = isUnverified(d) ? { entries: [] } : d;
+      if(!isUserBusy()) render();
+    });
+  }
+  var mapping = state.customerTaskMapping || state.wmCsvMapping || { entries: [] };
+  function csvLinked(item, isTemplate){
+    return (mapping.entries||[]).some(function(e){
+      if(!e.enabled) return false;
+      return isTemplate ? e.templateId===item.id : (e.taskId===item.id && !e.templateId);
+    });
+  }
+  var query = state.regSearchQuery.trim().toLowerCase();
+  function visible(item, isTemplate){
+    if(query && item.name.toLowerCase().indexOf(query)===-1) return false;
+    if(state.wmFilter==='csv' && !csvLinked(item, isTemplate)) return false;
+    if(state.wmFilter==='idle' && item.idleLikely!==true) return false;
+    return true;
+  }
+  // 作業マスタのカード(一覧では重要な設定だけを表示し、詳細は「編集」で開く)
+  function card(item, isTemplate){
+    var lvl = item.priorityLevel || 4;
+    var stars = '★★★★'.slice(0, 5-lvl);
+    var basis = staffingBasisOf(item);
+    var basisShort = { pieces:'ピース数', count:'件数', lines:'明細数' }[basis];
+    var pattern = item.pattern || defaultPattern();
+    var days = isTemplate ? (pattern.map(function(v,i){ return v ? WD[i] : ''; }).join('') || 'なし') : '';
+    var csv = csvLinked(item, isTemplate);
+    var idle = item.idleLikely===true;
+    var editAttr = isTemplate ? 'data-edit-template="'+item.id+'"' : 'data-edit-backlog="'+item.id+'"';
+    var delAttr = isTemplate ? 'data-del-template="'+item.id+'"' : 'data-del-backlog="'+item.id+'"';
+    return '<div class="ll-card" data-wm-card="'+(isTemplate?'tmpl':'task')+':'+item.id+'">'+
+      '<div class="ll-card-head">'+
+        '<span class="task-color-dot" style="background:'+(item.color||'#999')+'"></span>'+
+        '<span class="ll-card-name">'+esc(item.name)+'</span>'+
+        (isTemplate ? '<span class="ll-card-sub">'+esc(days)+'</span>' : '<span class="ll-card-sub">📅 '+esc(dateLabelFromStr(item.workDate))+'</span>')+
+      '</div>'+
+      '<div class="ll-card-meta">'+
+        '<span><span class="ll-stars">'+stars+'</span> <span class="muted">優先'+lvl+'</span></span>'+
+        '<span>'+esc(basisShort)+'</span>'+
+        '<span class="muted">締切 '+esc(item.deadline || '－')+'</span>'+
+      '</div>'+
+      '<div class="ll-card-meta">'+
+        '<span class="ll-tag '+(csv?'ll-tag-on':'')+'">CSV '+(csv?'●':'－')+'</span>'+
+        '<span class="ll-tag '+(idle?'ll-tag-on':'')+'">手待ち '+(idle?'●(優先'+(item.idlePriorityLevel||3)+')':'－')+'</span>'+
+      '</div>'+
+      '<div class="ll-card-actions">'+
+        '<button class="ll-btn" '+editAttr+'>編集</button>'+
+        '<button class="icon-x" '+delAttr+' title="'+esc(item.name)+'を削除" aria-label="'+esc(item.name)+'を削除">&times;</button>'+
+      '</div>'+
+    '</div>';
+  }
+  var templates = activeTemplates().slice().sort(function(a,b){ return (a.priorityLevel||4)-(b.priorityLevel||4) || byTaskColor(function(t){ return t.color; })(a,b); });
+  var oneOffs = activeBacklog().filter(function(t){ return !t.fromTemplate && t.workDate>=todayStr(); })
+    .sort(function(a,b){ return a.workDate<b.workDate ? -1 : (a.workDate>b.workDate ? 1 : (a.priorityLevel||4)-(b.priorityLevel||4)); });
+  var tmplVisible = templates.filter(function(t){ return visible(t, true); });
+  var oneOffVisible = oneOffs.filter(function(t){ return visible(t, false); });
+  var tmplCards = tmplVisible.map(function(t){ return card(t, true); }).join('') ||
+    '<div class="empty-note">'+(templates.length ? '条件に合う繰り返し作業はありません。' : '毎日/曜日で発生する作業を「＋作業追加」から登録すると、該当する曜日に自動でその日の作業として追加されます。')+'</div>';
+  var oneOffCards = oneOffVisible.map(function(t){ return card(t, false); }).join('') ||
+    '<div class="empty-note">'+(oneOffs.length ? '条件に合う単発の作業はありません。' : '本日以降の単発の作業はありません。')+'</div>';
+
+  // 作業の追加(既存の登録フォームをそのまま使う。入力欄のIDも同じ)
+  var oneOffForm = ''+
       '<div class="panel-title">単発の作業を登録</div>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業日</label>'+
       '<input type="date" id="regDate" value="'+state.regNewDate+'" min="'+todayStr()+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
@@ -8776,8 +9076,8 @@ function renderRegister(){
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
       '<div class="swatches" style="margin-bottom:14px;">'+swatches+'</div>'+
       '<button class="add-btn" id="regSubmitBtn" style="width:100%;padding:11px;">この作業を登録</button>'+
-    '</div>'+
-    '<div class="panel">'+
+  '';
+  var tmplForm = ''+
       '<div class="panel-title">毎日/曜日で繰り返す作業</div>'+
       '<div class="pool-hint" style="margin-bottom:10px;">該当する曜日になると、自動でその日の作業として登録されます。</div>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
@@ -8792,17 +9092,51 @@ function renderRegister(){
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">発生する曜日</label>'+
       '<div class="pattern-row" style="margin-bottom:14px;">'+draftToggles+'</div>'+
       '<button class="add-btn" id="tmplSubmitBtn" style="width:100%;padding:11px;margin-bottom:16px;">この繰り返し作業を登録</button>'+
-      '<div class="roster-list">'+templateRows+'</div>'+
+  '';
+  var addPanel = '';
+  if(state.wmAddMode){
+    addPanel = '<div class="ll-add-panel" id="wmAddPanel">'+
+      '<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;">'+
+        '<div class="ll-seg">'+
+          '<button type="button" class="'+(state.wmAddMode==='template'?'active':'')+'" data-wm-add-type="template">🔁 繰り返し作業</button>'+
+          '<button type="button" class="'+(state.wmAddMode==='oneoff'?'active':'')+'" data-wm-add-type="oneoff">📅 単発作業</button>'+
+        '</div>'+
+        '<button type="button" class="ll-btn" id="wmAddCloseBtn">閉じる</button>'+
+      '</div>'+
+      '<div class="panel" style="max-width:520px;">'+(state.wmAddMode==='oneoff' ? oneOffForm : tmplForm)+'</div>'+
+    '</div>';
+  }
+
+  return '<div class="mgr-wrap"><div class="panel">'+
+    '<div class="panel-title">📦 作業マスタ</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">作業ごとの設定です。今日の作業は、ここの設定(曜日・締切・優先順位など)から自動で作られます。日ごとの状況は「管理者 → 今日の状況」で確認できます。</div>'+
+    '<div class="ll-toolbar">'+
+      '<input type="text" id="regSearchInput" class="reg-search" placeholder="作業名で検索..." value="'+esc(state.regSearchQuery)+'">'+
+      '<select id="wmFilterSelect">'+
+        '<option value="all" '+(state.wmFilter==='all'?'selected':'')+'>すべて</option>'+
+        '<option value="csv" '+(state.wmFilter==='csv'?'selected':'')+'>CSV連携あり</option>'+
+        '<option value="idle" '+(state.wmFilter==='idle'?'selected':'')+'>手待ち作業</option>'+
+      '</select>'+
+      '<button type="button" class="add-btn" id="wmAddBtn">＋作業追加</button>'+
     '</div>'+
-    '</div>'+
-    '<div class="panel">'+
-      '<div class="panel-title">登録済みの作業(本日以降) <span class="count-badge">'+upcoming.length+'件</span></div>'+
-      '<input type="text" id="regSearchInput" class="reg-search" placeholder="作業名で絞り込み..." value="'+esc(state.regSearchQuery)+'">'+
-      listHtml+
-    '</div>'+
+    addPanel+
+    '<div class="ll-section-title">🔁 繰り返し作業 <span class="count-badge">'+tmplVisible.length+'件</span></div>'+
+    '<div class="ll-grid" id="wmTemplateGrid">'+tmplCards+'</div>'+
+    '<div class="ll-section-title">📅 単発の作業(本日以降) <span class="count-badge">'+oneOffVisible.length+'件</span></div>'+
+    '<div class="ll-grid" id="wmOneOffGrid">'+oneOffCards+'</div>'+
   '</div></div>';
 }
 function bindRegister(){
+  // 作業マスタの一覧: 「＋作業追加」(繰り返し/単発の切り替え)・絞り込み。登録そのものは下の既存の処理をそのまま使う
+  var wmAddBtn = document.getElementById('wmAddBtn');
+  if(wmAddBtn) wmAddBtn.addEventListener('click', function(){ state.wmAddMode = state.wmAddMode ? null : 'template'; render(); });
+  var wmAddClose = document.getElementById('wmAddCloseBtn');
+  if(wmAddClose) wmAddClose.addEventListener('click', function(){ state.wmAddMode = null; state.suppressRender = false; render(); });
+  document.querySelectorAll('[data-wm-add-type]').forEach(function(el){
+    el.addEventListener('click', function(){ state.wmAddMode = el.getAttribute('data-wm-add-type'); render(); });
+  });
+  var wmFilter = document.getElementById('wmFilterSelect');
+  if(wmFilter) wmFilter.addEventListener('change', function(){ state.wmFilter = wmFilter.value; render(); });
   var dateInput = document.getElementById('regDate');
   var nameInput = document.getElementById('regName');
   var unitInput = document.getElementById('regUnit');
@@ -11067,6 +11401,25 @@ function bindWorkMasterPriorityFields(context, nameInputId, unitInputId){
     });
   });
 }
+/* 作業量の基準のラジオボタン → 同じID(…StaffingBasis)の隠し欄へ値を渡し、change を通知する
+   (readWorkMasterPriorityFields・bindWorkMasterPriorityFields は、この隠し欄の値を従来どおり読む) */
+function bindStaffingBasisRadios(context){
+  document.querySelectorAll('input[name="'+context+'StaffingBasisRadio"]').forEach(function(r){
+    r.addEventListener('change', function(){
+      var h = document.getElementById(context+'StaffingBasis');
+      if(!h) return;
+      h.value = r.value;
+      h.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  });
+}
+/* 編集画面を描き直す前に、入力中の作業名・単位を画面の状態に残す(色や曜日を押しても入力が消えないように) */
+function keepEditNameUnit(nameId, unitId){
+  if(!state.modal) return;
+  var n = document.getElementById(nameId), u = document.getElementById(unitId);
+  if(n) state.modal.name = n.value;
+  if(u) state.modal.unit = u.value;
+}
 function readWorkMasterPriorityFields(context){
   var deadlineInput = document.getElementById(context+'Deadline');
   var priorityInput = document.getElementById(context+'PriorityLevel');
@@ -11158,8 +11511,10 @@ async function deleteEditTask(){
 function bindEditTaskModal(m){
   // 人員配置の基準設定(締切・優先順位・手待ち作業・作業量の基準)は、描き直しても消えないよう画面の状態に残す
   bindWorkMasterPriorityFields('editTask', 'editTaskName', 'editTaskUnit');
+  bindStaffingBasisRadios('editTask');
   document.querySelectorAll('[data-edit-task-color]').forEach(function(el){
     el.addEventListener('click', function(){
+      keepEditNameUnit('editTaskName', 'editTaskUnit');
       state.modal.color = el.getAttribute('data-edit-task-color');
       render();
     });
@@ -11273,9 +11628,23 @@ async function deleteEditTemplate(){
 }
 function bindEditTemplateModal(m){
   bindWorkMasterPriorityFields('editTmpl', 'editTmplName', 'editTmplUnit');
+  bindStaffingBasisRadios('editTmpl');
   document.querySelectorAll('[data-edit-tmpl-color]').forEach(function(el){
     el.addEventListener('click', function(){
+      keepEditNameUnit('editTmplName', 'editTmplUnit');
       state.modal.color = el.getAttribute('data-edit-tmpl-color');
+      render();
+    });
+  });
+  // 発生する曜日(一覧の曜日ボタンから移した設定)。保存を押すまでは画面の中だけで変更する
+  document.querySelectorAll('[data-edit-tmpl-day]').forEach(function(el){
+    el.addEventListener('click', function(){
+      keepEditNameUnit('editTmplName', 'editTmplUnit');
+      var tmplNow = state.templates.find(function(t){ return t.id===m.templateId; });
+      var pat = (state.modal.patternDraft || (tmplNow && tmplNow.pattern) || defaultPattern()).slice();
+      var i = parseInt(el.getAttribute('data-edit-tmpl-day'),10);
+      pat[i] = !pat[i];
+      state.modal.patternDraft = pat;
       render();
     });
   });
@@ -11286,7 +11655,18 @@ function bindEditTemplateModal(m){
     render();
   });
   var saveBtn = document.getElementById('editSaveBtn');
-  if(saveBtn) saveBtn.addEventListener('click', saveEditTemplate);
+  // 保存: 曜日を変えた場合は、従来の曜日ボタンと同じくテンプレートに反映し、先の日付の作業を作る(ensureTemplateTasksForUpcoming)。
+  // それ以外の項目は従来どおり saveEditTemplate で保存する
+  if(saveBtn) saveBtn.addEventListener('click', async function(){
+    var nameEl = document.getElementById('editTmplName');
+    if(!nameEl || !(nameEl.value||'').trim()){ await saveEditTemplate(); return; } // 名前が空: 既存の保存処理が入力エラーを表示する(曜日も変更しない)
+    var tmplNow = state.templates.find(function(t){ return t.id===m.templateId; });
+    var draft = state.modal && state.modal.patternDraft;
+    var patternChanged = !!(tmplNow && draft && JSON.stringify(tmplNow.pattern || defaultPattern())!==JSON.stringify(draft));
+    if(patternChanged) tmplNow.pattern = draft.slice();
+    await saveEditTemplate();
+    if(patternChanged){ await ensureTemplateTasksForUpcoming(14); render(); }
+  });
   var deleteBtn = document.getElementById('editDeleteBtn');
   if(deleteBtn) deleteBtn.addEventListener('click', deleteEditTemplate);
   bindCategoryToggle();
@@ -11330,6 +11710,7 @@ function renderModal(){
   if(m.kind==='editLog') return renderEditLogModal(m);
   if(m.kind==='editTask') return renderEditTaskModal(m);
   if(m.kind==='editTemplate') return renderEditTemplateModal(m);
+  if(m.kind==='staffEdit') return renderStaffEditModal(m);
   if(m.kind==='qtyBreakdown') return renderQtyBreakdownModal(m);
   if(m.kind==='addLog') return renderAddLogModal(m);
   if(m.kind==='vcPreview') return renderVcPreviewModal(m);
@@ -12035,43 +12416,52 @@ function editFieldSwatches(colorState, dataAttr){
 /* 人員配置の基準となる4項目(締切・優先順位・手待ち発生可能性・手待ち時の配置変更可否)。
    単発作業・繰り返し作業(テンプレート)の両方の編集モーダルで共通利用する。
    これらは作業名ではなく、対象オブジェクト(task/template)の安定IDに紐付く。 */
+/* 作業マスタ編集画面の「作業量・優先順位・締切・手待ち作業」。入力欄のIDは従来どおり(readWorkMasterPriorityFields がそのまま読む)。
+   作業量の基準はラジオボタンで選び、同じID(…StaffingBasis)の隠し欄に値を入れて保存時に読み取る。 */
 function renderWorkMasterPriorityFields(context, m){
   var deadline = m.deadline || '';
   var priorityLevel = m.priorityLevel || 4;
   var idleLikely = m.idleLikely === true;
   var idlePriorityLevel = m.idlePriorityLevel || 3;
-  return '<div style="border-top:1px solid var(--paper-line);padding-top:12px;margin-bottom:14px;">'+
-    '<div style="font-size:12px;font-weight:700;color:var(--slate-500);margin-bottom:8px;">人員配置の基準設定(任意)</div>'+
-    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">締切時刻(未設定でも構いません)</label>'+
-    '<input type="time" id="'+context+'Deadline" value="'+esc(deadline)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:12px;">'+
-    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">優先順位</label>'+
-    '<select id="'+context+'PriorityLevel" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:12px;">'+
-      '<option value="1" '+(priorityLevel===1?'selected':'')+'>1 = 最優先</option>'+
-      '<option value="2" '+(priorityLevel===2?'selected':'')+'>2 = 高</option>'+
-      '<option value="3" '+(priorityLevel===3?'selected':'')+'>3 = 中</option>'+
-      '<option value="4" '+(priorityLevel===4?'selected':'')+'>4 = 低</option>'+
-    '</select>'+
-    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業量の基準(人員配置)</label>'+
-    '<div class="pool-hint" style="margin:0 0 6px;">人員配置の残作業量・生産性・必要人数・完了予定を、どの数量で計算するかを選びます(CSVの数量を使います)。</div>'+
-    '<select id="'+context+'StaffingBasis" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:12px;">'+
-      STAFFING_BASIS_ORDER.map(function(b){
-        return '<option value="'+b+'" '+(staffingBasisOf(m)===b?'selected':'')+'>'+esc(STAFFING_BASES[b].name)+(b==='pieces'?'(初期値)':'')+'</option>';
-      }).join('')+
-    '</select>'+
-    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">手待ち作業</label>'+
-    '<div class="pool-hint" style="margin:0 0 6px;">通常作業がないときに、余っているスタッフへ割り当てる作業です。</div>'+
-    '<label style="display:inline-block;font-size:13px;margin-right:14px;"><input type="radio" name="'+context+'IdleLikely" value="no" '+(!idleLikely?'checked':'')+'> OFF(通常作業)</label>'+
-    '<label style="display:inline-block;font-size:13px;margin-bottom:12px;"><input type="radio" name="'+context+'IdleLikely" value="yes" '+(idleLikely?'checked':'')+'> ON(手待ち作業)</label>'+
-    (idleLikely ? (
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:8px 0 4px;">手待ち作業での優先度</label>'+
-      '<div class="pool-hint" style="margin:0 0 6px;">手待ち作業が複数ある場合、数字が小さい作業から割り当てます。</div>'+
-      '<select id="'+context+'IdlePriorityLevel" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:12px;">'+
-        '<option value="1" '+(idlePriorityLevel===1?'selected':'')+'>1</option>'+
-        '<option value="2" '+(idlePriorityLevel===2?'selected':'')+'>2</option>'+
-        '<option value="3" '+(idlePriorityLevel===3?'selected':'')+'>3</option>'+
-      '</select>'
-    ) : '')+
-  '</div>';
+  var basis = staffingBasisOf(m);
+  var sel = 'width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:9px;font-size:14px;';
+  return ''+
+    '<div class="ll-form-group"><div class="ll-form-group-title">作業量(人員配置の基準)</div>'+
+      '<div class="pool-hint" style="margin:0 0 6px;">残作業量・生産性・必要人数・完了予定を、CSVのどの数量で計算するかを選びます。</div>'+
+      '<div class="ll-radio-row">'+
+        STAFFING_BASIS_ORDER.map(function(b){
+          return '<label><input type="radio" name="'+context+'StaffingBasisRadio" value="'+b+'" '+(basis===b?'checked':'')+'> '+esc(STAFFING_BASES[b].name)+'</label>';
+        }).join('')+
+      '</div>'+
+      '<input type="hidden" id="'+context+'StaffingBasis" value="'+basis+'">'+
+    '</div>'+
+    '<div class="ll-form-group"><div class="ll-form-group-title">優先順位</div>'+
+      '<select id="'+context+'PriorityLevel" style="'+sel+'">'+
+        '<option value="1" '+(priorityLevel===1?'selected':'')+'>1 = 最優先</option>'+
+        '<option value="2" '+(priorityLevel===2?'selected':'')+'>2 = 高</option>'+
+        '<option value="3" '+(priorityLevel===3?'selected':'')+'>3 = 中</option>'+
+        '<option value="4" '+(priorityLevel===4?'selected':'')+'>4 = 低</option>'+
+      '</select>'+
+    '</div>'+
+    '<div class="ll-form-group"><div class="ll-form-group-title">締切</div>'+
+      '<input type="time" id="'+context+'Deadline" value="'+esc(deadline)+'" style="border:2px solid var(--paper-line);border-radius:10px;padding:8px;font-size:14px;"> '+
+      '<span class="pool-hint" style="margin:0;">未設定でも構いません</span>'+
+    '</div>'+
+    '<div class="ll-form-group"><div class="ll-form-group-title">手待ち作業</div>'+
+      '<div class="pool-hint" style="margin:0 0 6px;">通常作業がないときに、余っているスタッフへ割り当てる作業です。</div>'+
+      '<div class="ll-radio-row">'+
+        '<label><input type="radio" name="'+context+'IdleLikely" value="no" '+(!idleLikely?'checked':'')+'> OFF(通常作業)</label>'+
+        '<label><input type="radio" name="'+context+'IdleLikely" value="yes" '+(idleLikely?'checked':'')+'> ON(手待ち作業)</label>'+
+      '</div>'+
+      (idleLikely ? (
+        '<label style="font-size:11px;color:var(--slate-500);display:block;margin:6px 0 4px;">手待ち作業での優先度(数字が小さい作業から割り当てます)</label>'+
+        '<select id="'+context+'IdlePriorityLevel" style="'+sel+'">'+
+          '<option value="1" '+(idlePriorityLevel===1?'selected':'')+'>1</option>'+
+          '<option value="2" '+(idlePriorityLevel===2?'selected':'')+'>2</option>'+
+          '<option value="3" '+(idlePriorityLevel===3?'selected':'')+'>3</option>'+
+        '</select>'
+      ) : '')+
+    '</div>';
 }
 function renderEditTaskModal(m){
   var hasSubcats = (m.subcatsList||[]).length > 0;
@@ -12084,54 +12474,82 @@ function renderEditTaskModal(m){
       '<button type="button" id="jumpToTemplateBtn">🔁 繰り返し設定を編集する</button>'+
     '</div>';
   }
+  var lbl = function(t, mt){ return '<label style="font-size:11px;color:var(--slate-500);display:block;margin:'+(mt||0)+'px 0 4px;">'+t+'</label>'; };
   return '<div class="modal-overlay" id="modalOverlay">'+
-    '<div class="modal-card" style="max-width:400px;text-align:left;">'+
-      '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">作業を編集</div>'+
+    '<div class="modal-card ll-modal-wide">'+
+      '<div class="modal-task-name" style="text-align:center;margin-bottom:12px;">作業を編集</div>'+
       templateNotice+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業日</label>'+
-      '<input type="date" id="editTaskDate" value="'+m.workDate+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
-      '<input type="text" id="editTaskName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">区分(実績画面の出荷/入庫集計に使われます)</label>'+
-      renderCategoryToggle('editTask', m.category)+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">CSV作業量の種類(この作業でCSVを取り込む場合の件数/PO数の表記に使われます)</label>'+
-      '<label style="display:block;font-size:13px;margin:4px 0;"><input type="radio" name="editTaskKind" value="normal" '+((m.taskKind||'normal')==='normal'?'checked':'')+'> 通常出荷(件数)</label>'+
-      '<label style="display:block;font-size:13px;margin:4px 0 10px;"><input type="radio" name="editTaskKind" value="vc" '+(m.taskKind==='vc'?'checked':'')+'> VC(PO数)</label>'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
-      renderSubcatTagInput(m.subcatsList,'editTask','editTaskSubcatText',m.unit)+
+      '<div class="ll-form-cols">'+
+        '<div>'+
+          '<div class="ll-form-group"><div class="ll-form-group-title">基本</div>'+
+            lbl('作業名')+'<input type="text" id="editTaskName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:9px;font-size:14px;margin-bottom:8px;">'+
+            lbl('作業日')+'<input type="date" id="editTaskDate" value="'+m.workDate+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:9px;font-size:14px;">'+
+          '</div>'+
+          renderWorkMasterPriorityFields('editTask', m)+
+        '</div>'+
+        '<div>'+
+          '<div class="ll-form-group"><div class="ll-form-group-title">その他</div>'+
+            lbl('区分(実績画面の出荷/入庫集計に使われます)')+
+            renderCategoryToggle('editTask', m.category)+
+            lbl('CSV作業量の種類(CSVを取り込む場合の件数/PO数の表記)', 10)+
+            '<div class="ll-radio-row">'+
+              '<label><input type="radio" name="editTaskKind" value="normal" '+((m.taskKind||'normal')==='normal'?'checked':'')+'> 通常出荷(件数)</label>'+
+              '<label><input type="radio" name="editTaskKind" value="vc" '+(m.taskKind==='vc'?'checked':'')+'> VC(PO数)</label>'+
+            '</div>'+
+            lbl('内訳(任意。使う場合は単位はここで内訳ごとに設定)', 10)+
+            renderSubcatTagInput(m.subcatsList,'editTask','editTaskSubcatText',m.unit)+
       (hasSubcats ? '' : '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">単位</label><input type="text" id="editTaskUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;">')+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
-      '<div class="swatches" style="margin-bottom:14px;">'+editFieldSwatches(m.color,'edit-task-color')+'</div>'+
-      renderWorkMasterPriorityFields('editTask', m)+
-      '<div class="modal-actions">'+
+            lbl('カラー', 10)+
+            '<div class="swatches">'+editFieldSwatches(m.color,'edit-task-color')+'</div>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="modal-actions" style="margin-top:14px;">'+
         '<button class="modal-cancel" id="editCancelBtn">キャンセル</button>'+
         '<button class="modal-confirm" id="editSaveBtn">保存</button>'+
       '</div>'+
-      '<button id="editDeleteBtn" style="width:100%;margin-top:12px;background:transparent;border:none;color:var(--rust-600);font-size:13px;font-weight:600;padding:8px;">この作業を削除する</button>'+
+      '<button id="editDeleteBtn" style="width:100%;margin-top:10px;background:transparent;border:none;color:var(--rust-600);font-size:13px;font-weight:600;padding:8px;">この作業を削除する</button>'+
     '</div>'+
   '</div>';
 }
 function renderEditTemplateModal(m){
   var hasSubcats = (m.subcatsList||[]).length > 0;
+  var WD = ['日','月','火','水','木','金','土'];
+  var tmplNow = state.templates.find(function(t){ return t.id===m.templateId; });
+  var pat = m.patternDraft || ((tmplNow && tmplNow.pattern) || defaultPattern());
+  var dayToggles = pat.map(function(v,i){
+    return '<button type="button" class="pattern-day '+(v?'on':'')+'" data-edit-tmpl-day="'+i+'">'+WD[i]+'</button>';
+  }).join('');
+  var lbl = function(t, mt){ return '<label style="font-size:11px;color:var(--slate-500);display:block;margin:'+(mt||0)+'px 0 4px;">'+t+'</label>'; };
   return '<div class="modal-overlay" id="modalOverlay">'+
-    '<div class="modal-card" style="max-width:400px;text-align:left;">'+
-      '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">繰り返し作業を編集</div>'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
-      '<input type="text" id="editTmplName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">区分(実績画面の出荷/入庫集計に使われます)</label>'+
-      renderCategoryToggle('editTmpl', m.category)+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
-      renderSubcatTagInput(m.subcatsList,'editTmpl','editTmplSubcatText',m.unit)+
+    '<div class="modal-card ll-modal-wide">'+
+      '<div class="modal-task-name" style="text-align:center;margin-bottom:12px;">繰り返し作業を編集</div>'+
+      '<div class="ll-form-cols">'+
+        '<div>'+
+          '<div class="ll-form-group"><div class="ll-form-group-title">基本</div>'+
+            lbl('作業名')+'<input type="text" id="editTmplName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:9px;font-size:14px;">'+
+          '</div>'+
+          renderWorkMasterPriorityFields('editTmpl', m)+
+        '</div>'+
+        '<div>'+
+          '<div class="ll-form-group"><div class="ll-form-group-title">その他</div>'+
+            lbl('発生する曜日(該当する曜日に、自動でその日の作業が作られます)')+
+            '<div class="pattern-row" style="margin-bottom:6px;">'+dayToggles+'</div>'+
+            lbl('区分(実績画面の出荷/入庫集計に使われます)', 8)+
+            renderCategoryToggle('editTmpl', m.category)+
+            lbl('内訳(任意。使う場合は単位はここで内訳ごとに設定)', 10)+
+            renderSubcatTagInput(m.subcatsList,'editTmpl','editTmplSubcatText',m.unit)+
       (hasSubcats ? '' : '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">単位</label><input type="text" id="editTmplUnit" value="'+esc(m.unit)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;">')+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">カラー</label>'+
-      '<div class="swatches" style="margin-bottom:8px;">'+editFieldSwatches(m.color,'edit-tmpl-color')+'</div>'+
-      '<div class="pool-hint" style="margin-bottom:14px;">発生する曜日は一覧の曜日ボタンから変更できます。</div>'+
-      renderWorkMasterPriorityFields('editTmpl', m)+
-      '<div class="modal-actions">'+
+            lbl('カラー', 10)+
+            '<div class="swatches">'+editFieldSwatches(m.color,'edit-tmpl-color')+'</div>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="modal-actions" style="margin-top:14px;">'+
         '<button class="modal-cancel" id="editCancelBtn">キャンセル</button>'+
         '<button class="modal-confirm" id="editSaveBtn">保存</button>'+
       '</div>'+
-      '<button id="editDeleteBtn" style="width:100%;margin-top:12px;background:transparent;border:none;color:var(--rust-600);font-size:13px;font-weight:600;padding:8px;">この繰り返し作業を削除する</button>'+
+      '<button id="editDeleteBtn" style="width:100%;margin-top:10px;background:transparent;border:none;color:var(--rust-600);font-size:13px;font-weight:600;padding:8px;">この繰り返し作業を削除する</button>'+
     '</div>'+
   '</div>';
 }
@@ -12140,6 +12558,7 @@ function bindModal(){
   if(m.kind==='editLog'){ bindEditLogModal(m); return; }
   if(m.kind==='editTask'){ bindEditTaskModal(m); return; }
   if(m.kind==='editTemplate'){ bindEditTemplateModal(m); return; }
+  if(m.kind==='staffEdit'){ bindStaffEditModal(m); return; }
   if(m.kind==='qtyBreakdown'){ bindQtyBreakdownModal(m); return; }
   if(m.kind==='addLog'){ bindAddLogModal(m); return; }
   if(m.kind==='vcPreview'){ bindVcPreviewModal(m); return; }

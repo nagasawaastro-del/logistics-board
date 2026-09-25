@@ -312,6 +312,40 @@ input,select{font-family:inherit;}
 .dash-card-label{font-size:11px;color:var(--slate-500);font-weight:600;}
 .dash-card-value{font-family:var(--font-mono);font-weight:700;font-size:20px;margin-top:2px;}
 .dash-card-sub{font-size:12px;color:var(--slate-500);}
+/* 人員配置(カード表示)。スマホ幅でも横スクロールしないよう、表は使わず折り返す */
+.stf-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px;margin-bottom:10px;}
+.stf-head .panel-title{margin:0;}
+.stf-asof{font-size:12px;color:var(--slate-500);}
+.stf-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:16px;}
+.stf-summary .dash-card{padding:10px 6px;}
+.stf-summary .dash-card-value{font-size:18px;}
+.stf-summary .is-alert{border-color:#FDB022;background:#FFFAEB;}
+.stf-section-title{font-size:15px;font-weight:700;margin:18px 0 8px;}
+.stf-card{border:1px solid var(--paper-line);border-left:6px solid #F79009;border-radius:var(--radius-lg);padding:12px 14px;margin-bottom:10px;background:#fff;min-width:0;overflow-wrap:anywhere;}
+.stf-card.is-danger{border-left-color:#D92D20;}
+.stf-card.is-idle{border-left-color:#FDB022;}
+.stf-card-name{font-weight:700;font-size:16px;}
+.stf-card-sub{font-size:12px;color:var(--slate-500);margin-left:6px;font-weight:600;}
+.stf-card-nums{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px;font-size:14px;}
+.stf-card-nums b{font-family:var(--font-mono);}
+.stf-need{color:#B54708;font-weight:700;}
+.stf-person{margin-top:8px;padding:8px 10px;border-radius:var(--radius-md);background:#F0F9FF;}
+.stf-person-name{font-weight:700;}
+.stf-person-why{font-size:12px;color:var(--slate-500);margin-top:2px;}
+.stf-warn{margin-top:8px;font-size:13px;color:#B42318;font-weight:600;}
+.stf-confirm{margin:6px 0 4px;}
+.stf-confirm .add-btn{width:100%;font-size:17px;padding:14px;}
+.stf-confirm-note{font-size:12px;color:var(--slate-500);margin-top:6px;text-align:center;}
+.stf-none{background:#ECFDF3;border:1px solid #ABEFC6;color:#067647;border-radius:var(--radius-md);padding:12px 14px;font-weight:700;}
+.stf-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:8px 0;border-bottom:1px solid var(--paper-line);font-size:14px;min-width:0;overflow-wrap:anywhere;}
+.stf-row:last-child{border-bottom:none;}
+.stf-row-main{font-weight:700;}
+.stf-row-meta{color:var(--slate-500);font-size:13px;}
+.stf-badge{display:inline-block;font-size:12px;font-weight:700;border-radius:999px;padding:2px 10px;white-space:nowrap;}
+.stf-badge-pending{background:#FFFAEB;color:#B54708;border:1px solid #FEDF89;}
+.stf-badge-active{background:#EFF8FF;color:#175CD3;border:1px solid #B2DDFF;}
+.stf-badge-done{background:#F2F4F7;color:#475467;border:1px solid #D0D5DD;}
+.stf-today-line{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;}
 .dash-ok-banner{background:#ECFDF3;border:1px solid #ABEFC6;color:#067647;border-radius:var(--radius-md);padding:10px 14px;font-weight:600;margin-bottom:14px;}
 .dash-row-missing{background:#FEF3F2;}
 .dash-row-checking{background:#FFFAEB;}
@@ -1105,6 +1139,16 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-25', items:[
+    '【作業指示の一本化】作業者画面の作業指示を「配置計算 → 管理者が確定 → 本日の作業指示」の1本の流れに統一しました。管理者が確定した配置だけを「📋 本日の作業指示/○○を開始してください」として表示し、未確定の配置案や、人手が足りている優先作業を作業者へ指示することはなくなりました',
+    '人員不足の作業には ①空いている人 → ②手待ち作業中の人(手待ち作業にCSV数量が残っていても対象)→ ③抜けても今の作業が期限までに終わる人 の順で配置案を作ります。不足がなければ手待ち作業中の人は動かしません',
+    '優先作業に不足がないときは、空いている人に、作業マスタの「手待ち作業での優先度」が高い手待ち作業から割り当てます(これまでは複数の手待ち作業へ順番に振り分けていました)',
+    '旧「配置変更指示」(配置変更の確定・作業者画面の通知)と旧「次のおすすめ」は、新しい作業指示と別の指示を出すおそれがあったため使わないようにしました。保存済みの旧データは削除せず、管理者画面の履歴にはそのまま表示されます',
+    '作業者画面の「完了予定」は、締切ではなく各作業者の勤務終了時刻を基準に計算するようにしました。勤務終了までに終わらない場合は「18:00以降」のように表示します',
+    '【人員配置画面の整理】10列の表をやめ、「今日の状況 → 対応が必要な作業(入れる人まで作業ごとに表示)→ 手待ち作業への配置 → ✅ 配置を確定 → 確定済み(未開始/作業中)→ 人員が足りている作業」の順のカード表示にしました。スマホでも横スクロールせずに確認できます。計算の詳細は折りたたみの中に残しています',
+    '管理者画面の完了予定も、作業者画面と同じ勤務終了基準にそろえました。人員配置画面から旧「配置変更指示(履歴)」の表示を外しました(保存済みのデータは残しています)',
+    '「今日の状況」の作業見込みの表は、人員配置と同じ内容だったため1行の要約にしました。また「配置確定」「未配置」のカードは、人員配置の「確定」とは別の意味(担当作業が設定されているか)のため、「担当あり」「担当なし」に名前を変えました。配置の計算方法は変更していません'
+  ]},
   { date:'2026-10-28', items:[
     '【セキュリティ】管理者機能(管理者・設定・収支・単価・人件費・kintone同期)は、ログインしているだけでなく、アカウントの役割が管理者(manager/admin)の場合のみ使えるようにしました。現場の画面(本日の作業・実績入力・集計・モニター・カレンダー)は、これまでどおりログインなしで使えます',
     '管理者ログインの画面で「メールアドレスを記憶する」を選べるようにしました(この端末のブラウザにメールアドレスだけを保存し、パスワードは保存しません)。ブラウザのパスワード保存機能にも対応しました',
@@ -3242,7 +3286,7 @@ async function fetchOptionalJson(key){
 async function refreshDailyInstructionsForPoll(){
   resetDailyInstructionsIfDateChanged();
   var needed = (state.role==='input' && !!state.activeStaffId) ||
-    (state.role==='adminHub' && state.adminHubTab==='staffing');
+    (state.role==='adminHub' && (state.adminHubTab==='staffing' || state.adminHubTab==='today' || !state.adminHubTab));
   if(!needed) return;
   var dateStr = todayStr();
   var seqAtStart = window.storage.writeSeq;
@@ -3468,14 +3512,17 @@ function addWorkingMinutesSkippingBreaks(fromMs, neededWorkingMinutes, breakSett
     if(brEnd<=brStart){ brStart = null; brEnd = null; }
   }
   var cursor = fromMs;
-  var remainingMs = neededWorkingMinutes*60000;
-  while(remainingMs>0){
+  // ミリ秒の整数に丸める(小数のままだと、大きな時刻値との加減算の誤差で残りが0にならず、
+  // 無限ループになることがあった)
+  var remainingMs = Math.ceil(neededWorkingMinutes*60000);
+  if(!isFinite(remainingMs)) return (hardLimitMs!==undefined && hardLimitMs!==null) ? hardLimitMs : fromMs;
+  for(var guard=0; remainingMs>0 && guard<10; guard++){
     if(hardLimitMs!==undefined && hardLimitMs!==null && cursor>=hardLimitMs) return hardLimitMs;
     var segmentEnd = (hardLimitMs!==undefined && hardLimitMs!==null) ? hardLimitMs : (cursor+remainingMs);
     if(brStart!==null && cursor<brStart && brStart<segmentEnd) segmentEnd = brStart; // 休憩開始で一旦区切る
     if(brStart!==null && cursor>=brStart && cursor<brEnd){ cursor = brEnd; continue; } // 休憩中ならスキップ
     var available = segmentEnd-cursor;
-    if(available>=remainingMs){ return cursor+remainingMs; }
+    if(available>=remainingMs || available<=0){ return cursor+remainingMs; }
     remainingMs -= available;
     cursor = segmentEnd;
   }
@@ -3534,8 +3581,494 @@ function computeTaskUrgency(task, workVolume, taskPriority, productivityMaster, 
   }
   return { taskId: task.id, qty: qty, primaryCount: totals.primaryCount, roughHours: roughHours, deadlineMinutes: deadlineMinutes, priorityLevel: priorityLevel, urgency: urgency, neededPeopleCount: neededPeopleCount, unit: (productivityMaster[task.id]&&productivityMaster[task.id].unit)||'個' };
 }
+/* ============================================================
+   本日の自動配置(共通計算)
+   ------------------------------------------------------------
+   「今日の状況」「人員配置」「実績入力」はすべてこの計算結果を使う(画面ごとに人数計算をしない)。
+   画面を開いた時・再表示した時に、その時点の最新データと現在時刻から計算する。
+   この関数は計算結果を返すだけで、保存は一切しない。保存するのは管理者が配置を確定した時だけ
+   (confirmTodayStaffingProposals)。
+   計算の流れ:
+     CSV予定数量 − 完了数量 = 残作業量
+     現在時刻 → 締切(未設定なら勤務終了) = 残り時間
+     Σ(現在の作業者ごとの 残り時間 × 生産性) = 現在の処理能力
+     残作業量 − 現在の処理能力 = 不足数量
+     不足があれば ①空いている人 → ②手待ち作業の人 → ③余力のある人 の順で追加配置を検討
+     残作業量 ÷ (配置人数ぶんの生産性の合計) → 予定完了時刻
+   ============================================================ */
+var STAFFING_TIER_LABELS = { 1:'空いている人', 2:'手待ち作業の人', 3:'余力のある作業の人', next:'次の作業(手待ち)', noprod:'生産性未設定の作業' };
+function staffShiftEndMs(staffId, day, shiftSettings){
+  var endStr = (day.shiftEndOverrides && day.shiftEndOverrides[staffId]) || (shiftSettings && shiftSettings.enabled ? shiftSettings.end : null) || '18:00';
+  return new Date(day.date+'T'+endStr+':00').getTime();
+}
+function defaultShiftEndMs(day, shiftSettings){
+  var endStr = (shiftSettings && shiftSettings.enabled ? shiftSettings.end : null) || '18:00';
+  return new Date(day.date+'T'+endStr+':00').getTime();
+}
+function fmtClockMs(ms){
+  if(ms===null || ms===undefined || !isFinite(ms)) return null;
+  var d = new Date(ms);
+  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+/* 作業の完了記録(次の作業を開始した=前の作業を完了した)。day.taskCompletion[taskId] に保存される。 */
+function taskCompletionFor(day, taskId){
+  return (day && day.taskCompletion && day.taskCompletion[taskId]) || null;
+}
+/* 保存済みの「確定済み配置」を一覧にする。旧形式(status:'confirmed' + assignments)も読める。 */
+function normalizeConfirmedInstructions(sug){
+  if(!sug) return [];
+  if(Array.isArray(sug.confirmedItems)) return sug.confirmedItems.slice();
+  if(sug.status==='confirmed' && Array.isArray(sug.assignments)){
+    return sug.assignments.map(function(a, i){
+      return { id: 'legacy-'+i, staffId: a.staffId, taskId: a.taskId, expectedQty: a.expectedQty||null,
+        confirmedAt: sug.confirmedAt || sug.generatedAt || null, tier: null, fromTaskId: a.reassignFrom||null };
+    });
+  }
+  return [];
+}
+/* 確定済み配置の進み具合: pending(まだ開始していない) / active(作業中) / done(開始後、別の作業へ移った) */
+function instructionProgress(item, day){
+  var sinceMs = item.confirmedAt ? new Date(item.confirmedAt).getTime() : 0;
+  // 確定後に開始した実績に加え、確定時点で既にその作業をしていた実績(確定後も続いていたもの)も数える
+  // (確定前からその作業をしていた人の指示が「未開始」のまま残り続けないようにする)
+  var logs = (day.logs||[]).filter(function(l){
+    if(l.staffId!==item.staffId || l.taskId!==item.taskId) return false;
+    return new Date(l.start).getTime()>=sinceMs-1000 || l.end===null || new Date(l.end).getTime()>=sinceMs;
+  });
+  if(!logs.length) return 'pending';
+  if(logs.some(function(l){ return l.end===null; })) return 'active';
+  return 'done';
+}
+/* 画面から共通計算を呼ぶための入口(その時点の state と現在時刻を使う)。 */
+function buildTodayStaffingContext(nowDate){
+  return {
+    day: state.day, workVolume: state.workVolume||emptyWorkVolume(), backlog: state.backlog||[], roster: state.roster||[],
+    productivityMaster: state.productivityMaster||{}, staffingSuggestion: state.staffingSuggestion,
+    shiftSettings: state.shiftSettings, breakSettings: state.breakSettings, now: nowDate || new Date()
+  };
+}
+function computeTodayStaffingPlanNow(){
+  if(!state.day || state.day.date!==todayStr()) return null;
+  return computeTodayStaffingPlan(buildTodayStaffingContext(new Date()));
+}
+function computeTodayStaffingPlan(ctx){
+  var day = ctx.day, wv = ctx.workVolume||emptyWorkVolume(), backlog = ctx.backlog||[], roster = ctx.roster||[];
+  var master = ctx.productivityMaster||{}, shift = ctx.shiftSettings, brk = ctx.breakSettings;
+  var now = ctx.now || new Date(), nowMs = now.getTime(), dateStr = day.date;
+  var todayTasks = backlog.filter(function(t){ return t.workDate===dateStr && !t.archived; });
+  var taskMap = {}; todayTasks.forEach(function(t){ taskMap[t.id] = t; });
+
+  // ---- 作業者の状態 ----
+  var openByStaff = {};
+  (day.logs||[]).forEach(function(l){ if(l.end===null && !openByStaff[l.staffId]) openByStaff[l.staffId] = l; });
+  var staffInfo = {};
+  roster.forEach(function(s){
+    if(s.archived) return;
+    var present = !!(day.attendance && day.attendance[s.id]);
+    var endMs = staffShiftEndMs(s.id, day, shift);
+    var log = openByStaff[s.id];
+    staffInfo[s.id] = {
+      id: s.id, name: s.name, present: present, excluded: s.autoAssignExcluded===true, shiftEndMs: endMs,
+      remainMin: present ? workingMinutesExcludingBreaks(nowMs, endMs, brk, dateStr) : 0,
+      currentTaskId: log ? log.taskId : null
+    };
+  });
+  function capacityFor(sid, taskId, deadlineMs){
+    var info = staffInfo[sid];
+    var endMs = (deadlineMs!==null && deadlineMs!==undefined) ? Math.min(deadlineMs, info.shiftEndMs) : info.shiftEndMs;
+    var availMin = workingMinutesExcludingBreaks(nowMs, endMs, brk, dateStr);
+    var p = productivityRateFor(master, taskId, sid);
+    var rate = (p.rate && p.rate>0) ? p.rate : null;
+    return { staffId: sid, name: info.name, availMin: availMin, rate: rate, basis: p.basis, capQty: rate ? rate*availMin/60 : 0 };
+  }
+
+  // ---- 確定済み配置(再計算しても消さない) ----
+  var confirmed = normalizeConfirmedInstructions(ctx.staffingSuggestion).map(function(it){
+    return Object.assign({}, it, { progress: instructionProgress(it, day) });
+  });
+  var pendingConfirmedByStaff = {};
+  confirmed.forEach(function(it){ if(it.progress==='pending' && !pendingConfirmedByStaff[it.staffId]) pendingConfirmedByStaff[it.staffId] = it; });
+
+  // ---- 作業ごとの計算(CSV予定数量がある作業) ----
+  var dayEndMs = defaultShiftEndMs(day, shift);
+  var calcs = todayTasks.filter(function(t){ return wvTotalsForTask(wv, t.id).totalQty>0; }).map(function(t){
+    var totals = wvTotalsForTask(wv, t.id);
+    var planned = totals.totalQty;
+    var comp = taskCompletionFor(day, t.id);
+    var completed = comp ? Math.min(planned, Math.max(0, comp.qty||0)) : 0;
+    var remaining = Math.max(0, planned-completed);
+    var avg = productivityRateFor(master, t.id, null);
+    var rate = (avg.rate && avg.rate>0) ? avg.rate : null;
+    var deadlineMs = t.deadline ? new Date(dateStr+'T'+t.deadline+':00').getTime() : null;
+    var limitMs = deadlineMs!==null ? deadlineMs : dayEndMs;
+    var remainTimeMin = workingMinutesExcludingBreaks(nowMs, limitMs, brk, dateStr);
+    var workers = Object.keys(staffInfo).filter(function(sid){ return staffInfo[sid].currentTaskId===t.id; })
+      .map(function(sid){ return capacityFor(sid, t.id, deadlineMs); });
+    // 確定済みで未開始の配置は、この作業の予定人員として数える(二重に追加しない)
+    var plannedWorkers = confirmed.filter(function(it){ return it.progress==='pending' && it.taskId===t.id && staffInfo[it.staffId] && staffInfo[it.staffId].currentTaskId!==t.id; })
+      .map(function(it){ return capacityFor(it.staffId, t.id, deadlineMs); });
+    var capacity = workers.concat(plannedWorkers).reduce(function(a,w){ return a+w.capQty; }, 0);
+    var perPersonQty = rate ? rate*remainTimeMin/60 : null;
+    var shortage = rate ? Math.max(0, remaining-capacity) : null;
+    // 必要人数・追加人数は「人数」ではなく処理能力(capacity)から判断する。capacity は各作業者の
+    // 勤務終了(締切があれば早い方)までの休憩を除いた実働時間 × 生産性の合計なので、途中で退勤する人は
+    // その分だけ少なく数えられている。不足数量(shortage)を、新しく入る人1人分の処理可能数量で割って追加人数を出す。
+    var crewCount = workers.length + plannedWorkers.length;
+    var neededPeople = null, additionalNeeded = null;
+    if(remaining<=0){ neededPeople = 0; additionalNeeded = 0; }
+    else if(rate && remainTimeMin>0){
+      if(shortage>0.01){
+        additionalNeeded = Math.ceil(shortage/perPersonQty);
+        neededPeople = crewCount + additionalNeeded;
+      }else{
+        // 足りている場合は、全員が残り時間いっぱい働く前提の人数(ただし今いる人数を超えない)
+        additionalNeeded = 0;
+        neededPeople = Math.min(Math.ceil(remaining/perPersonQty), crewCount);
+      }
+    }
+    return {
+      taskId: t.id, name: t.name, unit: t.unit || '個', color: t.color,
+      priorityLevel: (t.priorityLevel!==undefined && t.priorityLevel!==null) ? t.priorityLevel : 4,
+      deadline: t.deadline || null, deadlineMs: deadlineMs, limitMs: limitMs, limitKind: deadlineMs!==null ? 'deadline' : 'shiftEnd',
+      plannedQty: planned, primaryCount: totals.primaryCount, completedQty: completed, completedAt: comp ? comp.at : null,
+      remainingQty: remaining, rate: rate, rateBasis: avg.basis, sampleCount: avg.sampleCount,
+      remainTimeMin: remainTimeMin, perPersonQty: perPersonQty,
+      workers: workers, plannedWorkers: plannedWorkers, currentCount: workers.length, capacity: capacity,
+      shortageQty: shortage, neededPeople: neededPeople,
+      additionalNeeded: additionalNeeded,
+      proposals: [], status: null, etaMs: null, etaWithProposalsMs: null, workerEta: null
+    };
+  });
+  var calcByTask = {}; calcs.forEach(function(c){ calcByTask[c.taskId] = c; });
+
+  // ---- 配置候補者 ----
+  var used = {};
+  function candidateTier(sid){
+    var info = staffInfo[sid];
+    if(!info || !info.present || info.excluded || info.remainMin<=0 || used[sid] || pendingConfirmedByStaff[sid]) return null;
+    var cur = info.currentTaskId;
+    if(!cur || cur==='BREAK') return 1;
+    var curTask = taskMap[cur] || backlog.find(function(t){ return t.id===cur; });
+    // 手待ち作業中の人は、その手待ち作業にCSV数量が残っていても「手待ち作業の人」として扱う
+    if(curTask && curTask.idleLikely===true) return 2;
+    var src = calcByTask[cur];
+    if(src && src.rate && src.remainingQty>0){
+      // 余力: この人を外しても、今の作業を締切(または勤務終了)までに終えられる見込み
+      var mine = src.workers.find(function(w){ return w.staffId===sid; });
+      if(mine && (src.capacity - mine.capQty) >= src.remainingQty) return 3;
+    }
+    return null;
+  }
+  var proposals = [];
+  function pickFor(calc){
+    var targetIsIdleWork = !!(taskMap[calc.taskId] && taskMap[calc.taskId].idleLikely===true);
+    for(var tier=1; tier<=3; tier++){
+      if(tier===2 && targetIsIdleWork) continue; // 手待ち作業から別の手待ち作業へは動かさない
+      var best = null;
+      Object.keys(staffInfo).forEach(function(sid){
+        if(candidateTier(sid)!==tier) return;
+        var cap = capacityFor(sid, calc.taskId, calc.deadlineMs);
+        if(!cap.rate || cap.capQty<=0) return;
+        if(!best || cap.capQty>best.capQty) best = cap;
+      });
+      if(best) return { cap: best, tier: tier };
+    }
+    return null;
+  }
+  function addProposal(sid, calc, tier, cap, reason){
+    var info = staffInfo[sid];
+    used[sid] = true;
+    var p = { staffId: sid, name: info.name, taskId: calc ? calc.taskId : null, tier: tier, fromTaskId: info.currentTaskId && info.currentTaskId!=='BREAK' ? info.currentTaskId : null,
+      capQty: cap ? cap.capQty : null, availMin: cap ? cap.availMin : null, rate: cap ? cap.rate : null, basis: cap ? cap.basis : null, reason: reason };
+    proposals.push(p);
+    if(calc && calc.proposals) calc.proposals.push(p);
+    if(tier===3){
+      var src = calcByTask[info.currentTaskId];
+      var mine = src && src.workers.find(function(w){ return w.staffId===sid; });
+      if(mine) src.capacity -= mine.capQty;
+    }
+    return p;
+  }
+  var byPriority = function(a,b){
+    if(a.priorityLevel!==b.priorityLevel) return a.priorityLevel-b.priorityLevel;
+    if(a.deadlineMs!==null && b.deadlineMs!==null && a.deadlineMs!==b.deadlineMs) return a.deadlineMs-b.deadlineMs;
+    if(a.deadlineMs!==null && b.deadlineMs===null) return -1;
+    if(a.deadlineMs===null && b.deadlineMs!==null) return 1;
+    return (b.shortageQty||0)-(a.shortageQty||0);
+  };
+  calcs.slice().sort(byPriority).forEach(function(calc){
+    if(calc.remainingQty<=0) return;
+    if(!calc.rate){
+      // 生産性未設定: 必要人数は計算できない。誰もいなければ空いている人を1名だけ配置候補にする
+      if(calc.workers.length || calc.plannedWorkers.length) return;
+      var free = Object.keys(staffInfo).find(function(sid){ return candidateTier(sid)===1; });
+      if(free) addProposal(free, calc, 'noprod', null, '生産性未設定のため、必要人数を計算できません。担当者がいないため1名を配置');
+      return;
+    }
+    var shortage = calc.shortageQty;
+    while(shortage>0.01){
+      var pick = pickFor(calc);
+      if(!pick) break;
+      addProposal(pick.cap.staffId, calc, pick.tier, pick.cap,
+        '不足'+Math.ceil(shortage)+calc.unit+'を補うため('+STAFFING_TIER_LABELS[pick.tier]+'から、処理見込み'+Math.round(pick.cap.capQty)+calc.unit+')');
+      shortage -= pick.cap.capQty;
+    }
+  });
+  // ---- 余った空いている人: 手待ち作業を、作業マスタの手待ち優先順位が高いものから割り当てる ----
+  // 不足の無い優先作業へは割り当てない(手待ち作業中の人もここでは動かさない)。
+  var idleWorkTasks = todayTasks.filter(function(t){ return t.idleLikely===true && !(calcByTask[t.id] && calcByTask[t.id].remainingQty<=0); })
+    .sort(function(a,b){ return (a.idlePriorityLevel||3)-(b.idlePriorityLevel||3); });
+  // CSV数量のある手待ち作業は、残作業を処理しきれる人数が揃ったら次の手待ち作業へ回す(数量なしは上限なし)
+  var idleShortage = {};
+  idleWorkTasks.forEach(function(t){ var c = calcByTask[t.id]; idleShortage[t.id] = c ? (c.rate ? Math.max(0, c.shortageQty - c.proposals.reduce(function(a,p){ return a+(p.capQty||0); }, 0)) : Infinity) : Infinity; });
+  Object.keys(staffInfo).forEach(function(sid){
+    if(candidateTier(sid)!==1) return;
+    var target = idleWorkTasks.find(function(t){ return idleShortage[t.id]>0.01; });
+    if(!target) return;
+    var calc = calcByTask[target.id] || null;
+    var cap = calc ? capacityFor(sid, target.id, calc.deadlineMs) : null;
+    if(cap && isFinite(idleShortage[target.id])) idleShortage[target.id] -= cap.capQty;
+    addProposal(sid, calc || { taskId: target.id }, 'next', cap, '優先作業に不足が無いため、手待ち作業(手待ち優先度'+(target.idlePriorityLevel||3)+')を担当');
+  });
+
+  // ---- 予定完了時刻・状態 ----
+  calcs.forEach(function(c){
+    var rateSum = c.workers.concat(c.plannedWorkers).reduce(function(a,w){ return a+(w.rate||0); }, 0);
+    var rateSumWith = rateSum + c.proposals.reduce(function(a,p){ return a+(p.rate||0); }, 0);
+    if(c.remainingQty<=0){
+      c.etaMs = c.completedAt ? new Date(c.completedAt).getTime() : nowMs;
+      c.etaWithProposalsMs = c.etaMs;
+      c.status = 'done';
+    }else{
+      c.etaMs = rateSum>0 ? addWorkingMinutesSkippingBreaks(nowMs, c.remainingQty/rateSum*60, brk, dateStr, null) : null;
+      c.etaWithProposalsMs = rateSumWith>0 ? addWorkingMinutesSkippingBreaks(nowMs, c.remainingQty/rateSumWith*60, brk, dateStr, null) : null;
+      // 作業者画面の「完了予定」専用(締切は使わず勤務終了時刻基準)。配置計算には使わない
+      c.workerEta = shiftBasedEtaMs(c.remainingQty, c.workers.concat(c.plannedWorkers).map(function(w){
+        return { rate: w.rate||0, shiftEndMs: staffInfo[w.staffId] ? staffInfo[w.staffId].shiftEndMs : null };
+      }), nowMs, brk, dateStr);
+      if(!c.rate) c.status = 'noProductivity';
+      else if(c.limitMs<=nowMs) c.status = 'overdue';
+      else if(c.shortageQty>0.01 && !c.proposals.length) c.status = 'shortNoCandidate';
+      else if(c.shortageQty>0.01) c.status = 'short';
+      else c.status = 'ok';
+    }
+  });
+  // 確定済み配置のうち、作業が終わった・無くなったもの(不要の可能性)
+  confirmed.forEach(function(it){
+    var c = calcByTask[it.taskId];
+    var t = taskMap[it.taskId];
+    it.maybeUnneeded = it.progress==='pending' && (!t || (c && c.remainingQty<=0));
+  });
+
+  return {
+    date: dateStr, nowMs: nowMs, generatedAt: now.toISOString(),
+    tasks: calcs, taskById: calcByTask, idleWorkTasks: idleWorkTasks.map(function(t){ return { taskId: t.id, name: t.name, idlePriorityLevel: t.idlePriorityLevel||3 }; }),
+    proposals: proposals, confirmed: confirmed, staff: staffInfo,
+    productivityMissing: calcs.filter(function(c){ return !c.rate && c.remainingQty>0; }).map(function(c){ return c.taskId; })
+  };
+}
+/* 作業者画面の「本日の作業指示」。管理者が確定した配置(まだ開始していないもの)だけを返す。
+   未確定の配置案・優先順位からの推測では指示を出さない(配置計算 → 管理者の確定 → 作業指示 の1本の流れ)。
+   今の作業・完了した作業は出さない(同じ作業を繰り返し指示しない)。 */
+function nextTaskForStaff(plan, staffId, day){
+  if(!plan) return null;
+  var info = plan.staff[staffId];
+  var current = info ? info.currentTaskId : null;
+  function usable(taskId){
+    if(!taskId || taskId===current || taskId==='BREAK') return false;
+    var c = plan.taskById[taskId];
+    if(c && c.remainingQty<=0) return false;
+    return true;
+  }
+  var conf = plan.confirmed.filter(function(it){ return it.staffId===staffId && it.progress==='pending' && usable(it.taskId); })
+    .sort(function(a,b){ return String(a.confirmedAt).localeCompare(String(b.confirmedAt)); })[0];
+  if(conf) return { taskId: conf.taskId, source: 'confirmed', expectedQty: conf.expectedQty };
+  return null;
+}
+/* 作業者画面用の予定完了時刻。締切は使わず、各作業者が自分の勤務終了時刻まで
+   生産性どおりに処理する前提で、休憩を除きながら残作業量を消化し終える時刻を返す。
+   crew: [{ rate, shiftEndMs }]。勤務終了までに終わらない場合は { ms: 最後の勤務終了, beyondShift: true }。 */
+function shiftBasedEtaMs(remainingQty, crew, nowMs, breakSettings, dateStr){
+  var members = (crew||[]).filter(function(w){ return w.rate>0 && w.shiftEndMs>nowMs; });
+  if(!members.length || !(remainingQty>0)) return null;
+  var ends = members.map(function(w){ return w.shiftEndMs; })
+    .filter(function(v, i, a){ return a.indexOf(v)===i; }).sort(function(a,b){ return a-b; });
+  var cursor = nowMs, remaining = remainingQty;
+  for(var i=0; i<ends.length; i++){
+    var segEnd = ends[i];
+    var rateSum = members.reduce(function(a,w){ return a+(w.shiftEndMs>cursor ? w.rate : 0); }, 0);
+    var segMin = workingMinutesExcludingBreaks(cursor, segEnd, breakSettings, dateStr);
+    var segQty = rateSum*segMin/60;
+    if(rateSum>0 && segQty>=remaining){
+      return { ms: addWorkingMinutesSkippingBreaks(cursor, remaining/rateSum*60, breakSettings, dateStr, segEnd), beyondShift: false };
+    }
+    remaining -= segQty;
+    cursor = segEnd;
+  }
+  return { ms: ends[ends.length-1], beyondShift: true };
+}
+/* 作業者向けの完了予定時刻(現在の配置+確定済みの配置・勤務終了時刻基準。締切・余裕時間は出さない) */
+function planEtaText(plan, taskId){
+  var c = plan && plan.taskById[taskId];
+  if(!c || c.remainingQty<=0 || !c.workerEta) return null;
+  return fmtClockMs(c.workerEta.ms)+(c.workerEta.beyondShift ? '以降' : '');
+}
+/* 管理者が配置案を確定する。確定済みの配置は残したまま、今回の案を追加する(勝手に消さない)。
+   staffing-suggestion:日付 と day.assignments の両方へ保存する。 */
+async function confirmTodayStaffingProposals(plan){
+  if(!plan || !plan.proposals.length) return { ok:false, msg:'確定する配置案がありません' };
+  if(!hasManagerSession()) return { ok:false, msg:'管理者としてログインしてください' };
+  var dateStr = todayStr();
+  var nowIso = new Date().toISOString();
+  var prev = state.staffingSuggestion;
+  var items = normalizeConfirmedInstructions(prev);
+  plan.proposals.forEach(function(p){
+    if(!p.taskId) return;
+    items.push({ id: uid(), staffId: p.staffId, taskId: p.taskId, tier: p.tier, fromTaskId: p.fromTaskId||null,
+      expectedQty: p.capQty!==null && p.capQty!==undefined ? Math.round(p.capQty) : null, reason: p.reason||'', confirmedAt: nowIso });
+  });
+  var sug = {
+    version: 2, date: dateStr, status: 'confirmed', confirmedAt: nowIso,
+    confirmedBy: (state.managerSession && state.managerSession.user && state.managerSession.user.email) || '管理者',
+    confirmedItems: items,
+    // 旧版の画面との互換用(同じ内容)
+    assignments: items.map(function(it){ return { staffId: it.staffId, taskId: it.taskId, expectedQty: it.expectedQty, reassignFrom: it.fromTaskId||null }; }),
+    taskSummaries: plan.tasks.map(function(c){ return { taskId: c.taskId, qty: c.plannedQty, unit: c.unit }; }),
+    unassignedStaffIds: []
+  };
+  var day = state.day;
+  plan.proposals.forEach(function(p){
+    if(!p.taskId) return;
+    var arr = day.assignments[p.staffId] || [];
+    if(arr.indexOf(p.taskId)===-1) arr.push(p.taskId);
+    day.assignments[p.staffId] = arr;
+  });
+  var okDay = await saveDay(day);
+  if(!okDay) return { ok:false, msg:'本日の配置(day.assignments)を保存できませんでした' };
+  var okSug = await saveStaffingSuggestion(dateStr, sug);
+  if(okSug===false) return { ok:false, msg:'配置の確定内容を保存できませんでした' };
+  state.staffingSuggestion = sug;
+  state.staffingSuggestionLoaded = true;
+  await appendAuditLog({ action:'配置案を確定', target: dateStr, before: null, after: plan.proposals.length+'件を確定(確定済み合計'+items.length+'件)' });
+  return { ok:true, count: plan.proposals.length };
+}
+/* 「次の作業を開始した=前の作業を完了した」。その作業にまだ他の作業者がいる場合は完了にしない。
+   完了数量は、その時点のCSV予定数量(あとから追加されたCSVぶんは残作業になる)。 */
+function markTaskCompletedIfLastWorker(day, taskId, staffId){
+  if(!taskId || taskId==='BREAK') return false;
+  var others = (day.logs||[]).some(function(l){ return l.end===null && l.taskId===taskId && l.staffId!==staffId; });
+  if(others) return false;
+  var planned = wvTotalsForTask(state.workVolume||emptyWorkVolume(), taskId).totalQty;
+  if(!day.taskCompletion) day.taskCompletion = {};
+  day.taskCompletion[taskId] = { at: new Date().toISOString(), qty: planned, by: staffId };
+  return true;
+}
+/* 管理者用: 途中で次の作業へ移った場合などに「未完了に戻す」 */
+async function reopenTaskCompletion(taskId){
+  var day = state.day;
+  if(!day || !day.taskCompletion || !day.taskCompletion[taskId]) return false;
+  delete day.taskCompletion[taskId];
+  var ok = await saveDay(day);
+  if(ok) await appendAuditLog({ action:'作業を未完了に戻す', target: taskById(taskId).name, before:'完了', after:'未完了' });
+  return ok;
+}
+/* 本日の作業に関わるデータ(CSV・作業マスタ・出勤など)が変わったとき。計算結果は保存しないので、
+   最新データで画面を描き直すよう印を付けるだけ。 */
+function onTodayStaffingInputsChanged(dateStr){
+  if(dateStr && dateStr!==todayStr()) return;
+  state.forceRenderAfterResync = true;
+}
+/* 「今日の状況」「人員配置」「実績入力」を開いたとき: 他の端末・設定画面での変更も含め、
+   最新データを読み直してから再計算する(読み込みだけで、保存はしない)。
+   ※render()/bind処理の中からは呼ばないこと(画面を開く操作のときだけ呼ぶ)。 */
+var freshTodayDataTimer = null;
+function requestFreshTodayData(){
+  if(!hasDataAccess() || !state.appDataLoaded) return;
+  if(freshTodayDataTimer) return;
+  freshTodayDataTimer = setTimeout(async function(){
+    freshTodayDataTimer = null;
+    try{
+      var sug = await fetchOptionalJson('staffing-suggestion:'+todayStr());
+      if(sug.ok){ state.staffingSuggestion = sug.value; state.staffingSuggestionLoaded = true; }
+    }catch(e){}
+    try{
+      var pm = await loadKeyJson('productivity-master', function(){ return {}; });
+      if(!isUnverified(pm)) state.productivityMaster = migrateProductivityMasterToTemplateKeys(pm).master;
+    }catch(e){}
+    try{
+      var meta = await loadProductivityMeta();
+      if(!isUnverified(meta)) state.productivityMeta = meta;
+    }catch(e){}
+    state.forceRenderAfterResync = true;
+    try{ await pollTick(); }catch(e){ console.error('[LOGI LINK] 本日のデータの読み直しに失敗しました', e); }
+    if(state.forceRenderAfterResync && !isUserBusy() && !isLoginFormInUse()){ state.forceRenderAfterResync = false; render(); }
+  }, 0);
+}
+/* ---------- 生産性の自動更新 ----------
+   人員配置を開いたとき、必要な場合だけ直近30日の実績から生産性を作り直す(管理者のみ・保存を伴う)。
+   前回の更新日時・対象日は productivity-master-meta に記録する。 */
+async function loadProductivityMeta(){
+  return loadKeyJson('productivity-master-meta', function(){ return {}; });
+}
+async function rebuildProductivityMasterFromRecentDays(){
+  // 重要: 既存の生産性マスタに「加算」すると、複数回実行するたびに同じ実績が
+  // 二重・三重に計上されてしまう。実績データ(day.logs)を正とし、直近30日分から
+  // 毎回ゼロベースで再構築することで、何度実行しても同じ結果になるようにする。
+  var master = {};
+  var todayD = new Date();
+  var updatedDays = 0;
+  for(var i=0;i<30;i++){ // 直近30日分から蓄積する
+    var d = new Date(todayD.getTime() - i*86400000);
+    var dStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    var day = (dStr===todayStr()) ? state.day : await loadDayByDate(dStr);
+    if(!day || !day.logs || !day.logs.length) continue;
+    var wv = await getWorkVolumeForDate(dStr);
+    if(!wv || isUnverified(wv)) continue;
+    updateProductivityMasterFromDay(master, dStr, day, wv);
+    updatedDays++;
+  }
+  var ok = await saveProductivityMaster(master);
+  if(ok!==false){
+    state.productivityMaster = master;
+    var meta = { updatedAt: new Date().toISOString(), basisDate: todayStr(), days: updatedDays };
+    if(await persistKey('productivity-master-meta', meta)) state.productivityMeta = meta;
+  }
+  return { ok: ok!==false, updatedDays: updatedDays };
+}
+function productivityRefreshNeeded(meta){
+  if(!meta || !meta.updatedAt) return true;
+  if(meta.basisDate!==todayStr()) return true;
+  var updatedMs = new Date(meta.updatedAt).getTime();
+  if(Date.now()-updatedMs < 30*60000) return false; // 30分以内に更新済みなら更新しない
+  // 前回の更新以降に、本日の作業が終わった(実績が増えた)場合だけ更新する
+  return ((state.day && state.day.logs) || []).some(function(l){ return l.end && l.taskId!=='BREAK' && new Date(l.end).getTime()>updatedMs; });
+}
+var productivityAutoRefreshState = { running:false, lastTriedAt:0 };
+function maybeAutoRefreshProductivity(){
+  if(productivityAutoRefreshState.running || !hasManagerSession() || !canAutoWrite()) return;
+  if(state.productivityMeta===undefined || isUnverified(state.productivityMeta)) return; // 更新記録を読めていない間は書き込まない
+  if(Date.now()-productivityAutoRefreshState.lastTriedAt < 10*60000) return; // 失敗時の連続再試行を防ぐ
+  if(!productivityRefreshNeeded(state.productivityMeta)) return;
+  productivityAutoRefreshState.running = true;
+  productivityAutoRefreshState.lastTriedAt = Date.now();
+  setTimeout(async function(){
+    try{
+      var r = await rebuildProductivityMasterFromRecentDays();
+      if(r.ok) await appendAuditLog({ action:'生産性データ自動更新', target:'productivity-master', before:null, after: r.updatedDays+'日分を反映' });
+    }catch(e){ console.error('[LOGI LINK] 生産性の自動更新に失敗しました', e); }
+    finally{ productivityAutoRefreshState.running = false; }
+    if(!isUserBusy()) render();
+  }, 0);
+}
+function productivityMetaText(){
+  var m = state.productivityMeta;
+  if(!m || !m.updatedAt) return '生産性 最終更新：未更新';
+  var d = new Date(m.updatedAt);
+  return '生産性 最終更新：'+(d.getMonth()+1)+'月'+d.getDate()+'日 '+d.getHours()+'時'+String(d.getMinutes()).padStart(2,'0')+'分';
+}
 /* 配置案を作成する(貪欲法)。候補者は「出勤中」かつ「現在アクティブな作業が無い(空き)」人のみ。
    進行中の作業者を強制的に動かすことはしない(v1のシンプル方針)。 */
+/* 廃止(呼び出し元なし): 旧配置計算。現在の配置は computeTodayStaffingPlan() に一本化している。 */
 function computeStaffingSuggestion(day, workVolume, taskPriority, productivityMaster, nowDate, backlog, roster){
   var dateStr = day.date;
   var tasks = tasksWithVolumeForDate(backlog, dateStr, workVolume);
@@ -3719,6 +4252,7 @@ function computeStaffingSuggestion(day, workVolume, taskPriority, productivityMa
 }
 /* 作業完了直後の「次のおすすめ作業」。その人が今から入った場合の見込み処理量が
    最も締切に効く作業を1件返す。 */
+/* 廃止(呼び出し元は legacyMaybeShowNextSuggestionDisabled のみ): 独自の「次のおすすめ」計算。 */
 function suggestNextTaskFor(staffId, day, workVolume, taskPriority, productivityMaster, nowDate, backlog){
   var dateStr = day.date;
   var tasks = tasksWithVolumeForDate(backlog, dateStr, workVolume);
@@ -3756,61 +4290,13 @@ async function savePendingAssignmentSuggestions(dateStr, data){
    状態が変わった際に、次の配置候補を最新の状態へ再評価する。
    recordNextAssignmentSuggestion()と判定ロジックを共有しつつ、「今回の追加量」では
    なく「現在の総量」を使って再評価する点が異なる。 */
+/* CSV取込・編集のあとに呼ばれる。以前はここで「1名だけの配置候補」を別の計算で作って保存していたが、
+   現在は共通計算(computeTodayStaffingPlan)に一本化したため、保存はせず、最新データで画面を再計算させるだけ。 */
 async function refreshAssignmentSuggestionForTask(taskId, targetDate){
-  if(targetDate!==todayStr()) return;
-  if(!state.pendingAssignmentSuggestions) state.pendingAssignmentSuggestions = await loadPendingAssignmentSuggestions(targetDate);
-  var task = state.backlog.find(function(t){ return t.id===taskId; });
-  var totals = wvTotalsForTask(state.workVolume, taskId);
-  if(!task || task.archived===true || !totals.totalQty){
-    // 作業が存在しない、またはこの作業枠にはもうCSV作業量が無い(=紐付けが外れた)。
-    // 古い提案が残っていれば取り下げる。
-    if(state.pendingAssignmentSuggestions[taskId]){
-      delete state.pendingAssignmentSuggestions[taskId];
-      await savePendingAssignmentSuggestions(targetDate, state.pendingAssignmentSuggestions);
-    }
-    return;
-  }
-  await recordNextAssignmentSuggestion(taskId, totals.totalQty, targetDate);
+  onTodayStaffingInputsChanged(targetDate);
 }
 async function recordNextAssignmentSuggestion(taskId, newQty, targetDate){
-  if(targetDate!==todayStr()) return;
-  if(!state.productivityMaster) state.productivityMaster = await loadProductivityMaster();
-  if(!state.taskPriority) state.taskPriority = await loadTaskPriority(targetDate);
-  if(!state.pendingAssignmentSuggestions) state.pendingAssignmentSuggestions = await loadPendingAssignmentSuggestions(targetDate);
-  var task = state.backlog.find(function(t){ return t.id===taskId; });
-  if(!task || task.archived===true) return;
-
-  // 重要: 「今回追加された数量(newQty)」だけで判断せず、CSV確定後の現在の
-  // 総作業量・現在アクティブな人数・締切・優先順位から、本当に人員が
-  // 不足しているかを再計算する(既存のcomputeTaskUrgencyをそのまま利用)。
-  var nowDate = new Date();
-  var urgency = computeTaskUrgency(task, state.workVolume, state.taskPriority, state.productivityMaster, nowDate);
-  var activeCount = activeStaffCountForTask(state.day, taskId);
-
-  if(urgency.neededPeopleCount!==null && urgency.neededPeopleCount<=activeCount){
-    // 締切が設定されていて、かつ現在の配置で足りている。
-    // 古い提案が残っていれば取り下げる(ケースA・Fに対応: 追加配置しない)。
-    if(state.pendingAssignmentSuggestions[taskId]){
-      delete state.pendingAssignmentSuggestions[taskId];
-      await savePendingAssignmentSuggestions(targetDate, state.pendingAssignmentSuggestions);
-    }
-    return;
-  }
-  // 締切が未設定で「本当に足りているか」を判断できない場合は、判断不能として
-  // 提案自体を止めてしまうのではなく、従来通り(今回追加分から候補者を探す)動作を維持する。
-  // (既存機能を壊さないことを優先し、締切設定を促す形にはしない)
-
-  var suggestion = suggestNextAssignmentForNewVolume(taskId, newQty, state.day, state.productivityMaster, nowDate, state.backlog, state.roster);
-  if(!suggestion) return;
-  // 表示用に、今回の追加分と現在の総量・不足人数を区別して保持する(セクション20)。
-  suggestion.newQty = newQty;
-  suggestion.totalQty = urgency.qty;
-  suggestion.totalPrimaryCount = urgency.primaryCount;
-  suggestion.neededPeopleCount = urgency.neededPeopleCount;
-  suggestion.activeCount = activeCount;
-  suggestion.createdAt = new Date().toISOString();
-  state.pendingAssignmentSuggestions[taskId] = suggestion;
-  await savePendingAssignmentSuggestions(targetDate, state.pendingAssignmentSuggestions);
+  onTodayStaffingInputsChanged(targetDate);
 }
 /* ---------- 配置変更候補・配置変更アラート ---------- */
 async function loadReassignmentAlerts(dateStr){
@@ -3923,7 +4409,12 @@ function computeReassignmentCandidates(day, workVolume, productivityMaster, nowD
 }
 /* 配置変更を実際に確定する。現在の実績ログを終了し、新しい作業のログを開始する
    (履歴を書き換えない。中断・新規開始として記録が残る)。 */
+/* 廃止: 配置変更は「配置計算 → 管理者の確定(confirmTodayStaffingProposals) → 本日の作業指示」に一本化した。
+   別ルートで実績ログ・配置変更指示を書き込まないよう、何も保存せずに終了する。旧処理は下の legacy 版に残す。 */
 async function confirmReassignment(staffId, fromTaskId, toTaskId){
+  return { ok:false, msg:'配置変更は「人員配置」タブで配置案を確定してください(この操作は廃止されました)' };
+}
+async function legacyConfirmReassignment(staffId, fromTaskId, toTaskId){
   var day = state.day;
   var log = (day.logs||[]).find(function(l){ return l.staffId===staffId && l.taskId===fromTaskId && l.end===null; });
   if(!log) return { ok:false, msg:'対象の実績が見つかりません(既に終了している可能性があります)' };
@@ -4322,12 +4813,35 @@ async function restoreWvImport(dateStr, importId){
   if(dateStr===todayStr()) state.workVolume = data;
   if(state.wvTargetDate===dateStr || (!state.wvTargetDate && dateStr===todayStr())) state.wvViewData = data;
 }
+/* 取込を別の日付へ移すときの、移動先の作業IDを求める。
+   繰り返し作業(テンプレート由来)は、移動先の日付の同じテンプレートの作業へ付け替える。
+   単発作業は、その作業自体が移動先の日付の作業である場合だけ使える。
+   見つからない場合は null(推測で別の作業に紐付けない)。 */
+function resolveTaskIdForDate(taskId, toDateStr){
+  var src = state.backlog.find(function(t){ return t.id===taskId; });
+  if(!src) return { taskId:null, msg:'元の作業が作業一覧に見つかりません(削除された可能性があります)' };
+  if(src.fromTemplate){
+    var inst = state.backlog.find(function(t){ return t.fromTemplate===src.fromTemplate && t.workDate===toDateStr && !t.archived; });
+    if(inst) return { taskId: inst.id, msg:null };
+    return { taskId:null, msg:'移動先の日付('+toDateStr+')に「'+src.name+'」の作業がまだありません。繰り返し作業の設定と、移動先の日付を確認してください' };
+  }
+  if(src.workDate===toDateStr && !src.archived) return { taskId: src.id, msg:null };
+  return { taskId:null, msg:'「'+src.name+'」は'+(src.workDate||'日付未設定')+'だけの単発作業のため、'+toDateStr+'へは移動できません。移動先の日付に作業を作成してから、取込の紐付けを変更してください' };
+}
 async function moveWvImportDate(fromDateStr, toDateStr, importId){
   if(fromDateStr===toDateStr) return { ok:false, msg:'同じ日付です' };
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(toDateStr||''))) return { ok:false, msg:'日付の形式が正しくありません(例: 2026-09-10)' };
   var fromData = await getWorkVolumeForDate(fromDateStr);
   var imp = fromData.imports.find(function(i){ return i.id===importId; });
   if(!imp) return { ok:false, msg:'取込が見つかりません' };
+  // 元の日付の作業IDを持ったまま移動しない。移動先の日付の作業へ付け替えられない場合は、何も変更せずに中止する。
+  var resolved = resolveTaskIdForDate(imp.taskId, toDateStr);
+  if(!resolved.taskId) return { ok:false, msg:'移動を中止しました: '+resolved.msg };
+  var fromTaskId = imp.taskId;
+  imp.taskId = resolved.taskId;
+  if(fromTaskId!==resolved.taskId){ imp.movedFromTaskId = fromTaskId; imp.movedFromDate = fromDateStr; }
   var movedBatches = fromData.batches.filter(function(b){ return b.importId===importId; });
+  movedBatches.forEach(function(b){ if(b.taskId===fromTaskId) b.taskId = resolved.taskId; });
   fromData.imports = fromData.imports.filter(function(i){ return i.id!==importId; });
   fromData.batches = fromData.batches.filter(function(b){ return b.importId!==importId; });
   await saveWorkVolume(fromDateStr, fromData);
@@ -5074,24 +5588,8 @@ function bindProductivityTab(){
     staffingRefreshProductivityBtn.addEventListener('click', async function(){
       staffingRefreshProductivityBtn.disabled = true;
       staffingRefreshProductivityBtn.textContent = '更新中...';
-      // 重要: 既存の生産性マスタに「加算」すると、複数回実行するたびに同じ実績が
-      // 二重・三重に計上されてしまう。実績データ(day.logs)を正とし、直近30日分から
-      // 毎回ゼロベースで再構築することで、何度実行しても同じ結果になるようにする。
-      var master = {};
-      var todayD = new Date();
-      var updatedDays = 0;
-      for(var i=0;i<30;i++){ // 直近30日分から蓄積する
-        var d = new Date(todayD.getTime() - i*86400000);
-        var dStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-        var day = (dStr===todayStr()) ? state.day : await loadDayByDate(dStr);
-        if(!day || !day.logs || !day.logs.length) continue;
-        var wv = await getWorkVolumeForDate(dStr);
-        if(!wv) continue;
-        updateProductivityMasterFromDay(master, dStr, day, wv);
-        updatedDays++;
-      }
-      await saveProductivityMaster(master);
-      state.productivityMaster = master;
+      var r = await rebuildProductivityMasterFromRecentDays();
+      var updatedDays = r.updatedDays;
       await appendAuditLog({ action:'生産性データ更新', target:'productivity-master', before:null, after: updatedDays+'日分を反映' });
       showToast('直近30日のうち、実績のあった'+updatedDays+'日分を生産性データに反映しました');
       render();
@@ -5102,244 +5600,285 @@ function taskSummaryUnitFor(sug, taskId){
   var ts = (sug.taskSummaries||[]).find(function(x){ return x.taskId===taskId; });
   return ts ? ts.unit : '';
 }
-function renderStaffing(){
-  var dateStr = todayStr();
-  resetDailyInstructionsIfDateChanged();
-  if(state.taskPriority===null){
-    loadTaskPriority(dateStr).then(function(d){ state.taskPriority = d; render(); });
-    return '<div class="mgr-wrap"><div class="empty-note">読み込み中...</div></div>';
-  }
-  if(state.productivityMaster===null){
-    loadProductivityMaster().then(function(d){ state.productivityMaster = d; render(); });
-    return '<div class="mgr-wrap"><div class="empty-note">読み込み中...</div></div>';
-  }
-  if(!state.staffingSuggestionLoaded){
-    loadStaffingSuggestion(dateStr).then(function(d){ state.staffingSuggestion = d; state.staffingSuggestionLoaded = true; render(); });
-    return '<div class="mgr-wrap"><div class="empty-note">読み込み中...</div></div>';
-  }
-  if(state.pendingAssignmentSuggestions===null){
-    loadPendingAssignmentSuggestions(dateStr).then(function(d){ state.pendingAssignmentSuggestions = d; render(); });
-    return '<div class="mgr-wrap"><div class="empty-note">読み込み中...</div></div>';
-  }
-  if(state.reassignmentAlerts===null){
-    loadReassignmentAlerts(dateStr).then(function(d){ state.reassignmentAlerts = d; render(); });
-    return '<div class="mgr-wrap"><div class="empty-note">読み込み中...</div></div>';
-  }
-  var reassignmentCandidateGroups = computeReassignmentCandidates(state.day, state.workVolume||emptyWorkVolume(), state.productivityMaster, new Date(), state.backlog, state.roster, state.taskPriority);
-  var nextRecommendedTasks = computeNextRecommendedTasks(state.day, state.workVolume||emptyWorkVolume(), state.backlog, state.pendingAssignmentSuggestions, reassignmentCandidateGroups);
-  var todayTasks = tasksForDate(dateStr).filter(function(t){
-    var wvTotals = wvTotalsForTask(state.workVolume||emptyWorkVolume(), t.id);
-    return wvTotals && wvTotals.totalQty>0;
+function fmtMinutesJa(min){
+  if(min===null || min===undefined || !isFinite(min)) return '―';
+  var m = Math.max(0, Math.round(min));
+  var h = Math.floor(m/60), r = m%60;
+  return h ? (h+'時間'+(r?r+'分':'')) : (r+'分');
+}
+var STAFFING_STATUS_LABELS = {
+  done: '✅ 完了', ok: '🟢 足りている', short: '🟠 不足(追加案あり)', shortNoCandidate: '🔴 不足(追加できる人がいません)',
+  noProductivity: '⚪ 生産性未設定', overdue: '🔴 締切超過'
+};
+/* ---------- 人員配置の表示(UIのみ) ----------
+   計算は computeTodayStaffingPlan() の結果をそのまま使い、ここでは並べ方・言い方だけを決める。
+   管理者の完了予定は、作業者画面と同じ planEtaText(勤務終了基準)で表示する。 */
+function staffingOverview(plan){
+  var presentCount = Object.keys(plan.staff).filter(function(sid){ return plan.staff[sid].present; }).length;
+  var sorted = plan.tasks.slice().sort(function(a,b){ return a.priorityLevel-b.priorityLevel || ((a.deadlineMs||Infinity)-(b.deadlineMs||Infinity)); });
+  // 対応が必要な作業: 人員不足・締切超過、または優先作業への配置案(手待ち作業への配置案を除く)がある作業
+  var needAction = sorted.filter(function(c){
+    if(c.remainingQty<=0) return false;
+    if(c.status==='short' || c.status==='shortNoCandidate' || c.status==='overdue') return true;
+    return c.proposals.some(function(p){ return p.tier!=='next'; });
   });
-
-  // ---- CSV取込起点の「次の配置候補」。CSVを取り込むたびに1件ずつここに積み上がる。
-  //      既に配置確定した分・作業に紐付かなくなった分は表示しない。 ----
-  var pendingKeys = Object.keys(state.pendingAssignmentSuggestions||{});
-  var pendingRows = pendingKeys.map(function(taskId){
-    var sug = state.pendingAssignmentSuggestions[taskId];
-    var t = taskById(taskId);
-    if(!t || t.archived===true) return ''; // 作業が無効化されていれば表示しない(データは残るが無視)
-    var neededHoursText = sug.neededHours!==null ? sug.neededHours.toFixed(1)+'人時' : '生産性データ不足のため目安を計算できません';
-    var body;
-    if(sug.best){
-      var basisLabel = sug.best.basis==='individual' ? 'この作業での個人生産性' : (sug.best.basis==='taskAverage' ? '作業全体の標準生産性' : '生産性不明');
-      var rateText = sug.best.rate!==null ? sug.best.rate.toFixed(1)+esc(sug.unit)+'/人時' : '不明';
-      body = '<div class="checklist-item-action" style="font-size:15px;font-weight:700;color:var(--amber-500);margin:8px 0 4px;">推奨: '+esc(sug.best.name)+'さん</div>'+
-        '<div class="checklist-item-action">理由: '+basisLabel+' '+rateText+'・現在手待ち・本日の作業時間'+sug.best.workedMinutesToday+'分'+(sug.best.sampleCount?'(サンプル'+sug.best.sampleCount+'日)':'')+'</div>'+
-        (sug.runnerUp ? '<div class="checklist-item-action" style="color:var(--slate-500);">次点: '+esc(sug.runnerUp.name)+'さん</div>' : '')+
-        '<button type="button" class="add-btn" data-confirm-next-assignment="'+esc(taskId)+'|'+esc(sug.best.staffId)+'" style="margin-top:8px;">この配置を確定('+esc(sug.best.name)+'さんを'+esc(t.name)+'へ)</button> '+
-        '<button type="button" class="vc-manage-toggle-btn" data-dismiss-next-assignment="'+esc(taskId)+'">この提案を消す</button>';
-    }else{
-      body = '<div class="checklist-item-action">'+esc(sug.noCandidateReason||'現在、配置できる候補者がいません')+'</div>'+
-        '<button type="button" class="vc-manage-toggle-btn" data-dismiss-next-assignment="'+esc(taskId)+'" style="margin-top:6px;">この提案を消す</button>';
-    }
-    return '<div class="checklist-item">'+
-      '<div class="checklist-item-title"><span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span> '+esc(t.name)+'</div>'+
-      '<div class="checklist-item-action" style="color:var(--slate-500);">今回のCSV追加分: '+formatNum(sug.newQty)+'ピース'+'</div>'+
-      (sug.totalPrimaryCount!==undefined ? '<div class="checklist-item-action" style="color:var(--slate-500);">本日の出荷件数: '+formatNum(sug.totalPrimaryCount)+'件 ・ 本日のピース数: '+formatNum(sug.totalQty)+'ピース</div>' : '')+
-      (sug.neededPeopleCount!==undefined ? '<div class="checklist-item-action" style="color:var(--slate-500);">必要人数の見込み: '+sug.neededPeopleCount+'人(現在'+sug.activeCount+'人配置中・不足'+(sug.neededPeopleCount-sug.activeCount)+'人)</div>' : '')+
-      '<div class="checklist-item-action">締切までの必要人時(見込み): '+neededHoursText+'</div>'+
-      body+
-    '</div>';
-  }).join('');
-  var pendingPanelHtml = '<div class="panel" style="margin-bottom:14px;">'+
-    '<div class="panel-title">🆕 次の配置候補(CSV取込起点)</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">CSVを取り込むたびに、現在の総作業量・現在の配置人数・締切から「本当に人員が不足しているか」を再計算し、不足している場合だけ次の配置を提案します。既に配置人数で足りている場合は表示されません。既に作業中のスタッフを勝手に動かすことはありません。</div>'+
-    (pendingRows || '<div class="empty-note">現在、新しい提案はありません(不足が見込まれる場合にここへ表示されます)</div>')+
-  '</div>';
-
-  // ---- 🔄配置変更候補: 現在は別作業中だが、その作業が「手待ち発生可能性あり・配置変更可」で、
-  //      かつ配置先の作業が人員不足の場合に、配置変更候補として提示する。
-  //      「手待ち可能性あり」は「今まさに手待ちしている」という意味ではないため、断定的な表現は避ける。 ----
-  var reassignRows = reassignmentCandidateGroups.map(function(g){
-    var candRows = g.candidates.map(function(c){
-      return '<div class="checklist-item" style="margin-top:8px;background:var(--paper-50);">'+
-        '<div class="checklist-item-title">'+esc(c.name)+'さん <span class="pool-hint" style="margin:0;">(現在: '+esc(c.fromTaskName)+')</span></div>'+
-        '<div class="checklist-item-action" style="color:var(--slate-500);">候補理由: '+c.reasons.map(esc).join('・')+'</div>'+
-        (c.rate!==null ? '<div class="checklist-item-action">'+esc(g.taskName)+'での生産性見込み: '+c.rate.toFixed(1)+esc(g.unit)+'/人時('+(c.basis==='individual'?'個人実績':'作業全体の標準')+')</div>' : '')+
-        '<button type="button" class="add-btn" data-open-reassign-confirm="'+esc(c.staffId)+'|'+esc(c.fromTaskId)+'|'+esc(g.taskId)+'" style="margin-top:6px;padding:6px 14px;font-size:13px;">'+esc(g.taskName)+'へ配置変更</button>'+
-      '</div>';
-    }).join('');
-    return '<div class="checklist-item" style="margin-top:10px;">'+
-      '<div class="checklist-item-title">'+esc(g.taskName)+
-        (g.deadlineMinutes!==null ? ' — 締切まで残り'+Math.round(g.deadlineMinutes)+'分' : '')+
-        ' — 不足'+g.shortage+'人(必要'+g.neededPeopleCount+'人・現在'+g.activeCount+'人)'+
-      '</div>'+
-      candRows+
-    '</div>';
-  }).join('');
-  var reassignPanelHtml = '<div class="panel" style="margin-bottom:14px;">'+
-    '<div class="panel-title">🔄 配置変更候補</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">現在は別の作業をしているものの、その作業で手待ちが発生する可能性があり、人員が不足している作業への配置変更候補として提示します。「手待ち可能性あり」は今まさに手待ちしているという意味ではありません。実際に配置を変更するかは、必ず管理者が確認・確定してください。</div>'+
-    (reassignRows || '<div class="empty-note">現在、配置変更が必要な状況はありません</div>')+
-    (state.reassignmentAlerts && state.reassignmentAlerts.length ? (
-      '<div class="pool-hint" style="margin-top:14px;font-weight:700;">本日の配置変更指示</div>'+
-      state.reassignmentAlerts.slice().reverse().map(function(a){
-        return '<div class="checklist-item-action">'+esc(staffById(a.staffId).name)+'さん: '+esc(taskById(a.fromTaskId).name)+'→'+esc(taskById(a.toTaskId).name)+
-          '('+(a.status==='acknowledged'?'✓ 確認済み '+fmtClock(a.acknowledgedAt):'未確認')+')</div>';
-      }).join('')
-    ) : '')+
-  '</div>';
-
-  // ---- 🟢次におすすめの作業: 優先して人員を動かす必要が無い場合の、補助的な提案。
-  //      自動配置ではなく、既存の配置候補・配置変更候補とは別枠で表示する(競合させない)。 ----
-  var recommendRows = nextRecommendedTasks.map(function(t){
-    return '<div class="checklist-item" style="margin-top:8px;">'+
-      '<div class="checklist-item-title">'+esc(t.name)+'</div>'+
-      '<div class="checklist-item-action">作業量(見込み): '+formatNum(t.qty)+esc(t.unit)+' ・ 優先順位: '+t.priorityLevel+(t.deadline?' ・ 締切: '+esc(t.deadline):'')+'</div>'+
-      '<div class="checklist-item-action">現在配置: '+t.activeCount+'人 ・ 状況: '+esc(t.status)+'</div>'+
-    '</div>';
-  }).join('');
-  var recommendPanelHtml = '<div class="panel" style="margin-bottom:14px;">'+
-    '<div class="panel-title">🟢 次におすすめの作業</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">現在、優先して人員を移動させる必要がある作業がない場合の、継続・着手候補です。自動で配置されるものではありません。人員不足が見込まれる作業は、上の「配置変更候補」をご確認ください。</div>'+
-    (recommendRows || '<div class="empty-note">現在、おすすめできる作業はありません</div>')+
-  '</div>';
-
-  var resultHtml = '';
-  var sug = state.staffingSuggestion;
-  if(state.staffingLoading){
-    resultHtml = '<div class="empty-note">計算中...</div>';
-  }else if(sug && sug.status==='confirmed'){
-    // ---- 確定後: 「本日の作業指示」として、指示文の形式で表示する(候補・おすすめ等の表現は使わない) ----
-    var instructionRows = sug.assignments.map(function(a){
-      var s = staffById(a.staffId), t = taskById(a.taskId);
-      var isMove = a.reassignFrom ? true : false;
-      var verb = isMove ? ('「'+esc(taskById(a.reassignFrom).name)+'」から「'+esc(t.name)+'」へ移動してください') : (esc(t.name)+'を担当してください');
-      return '<div class="checklist-item" style="border-left:4px solid var(--amber-500);">'+
-        '<div class="checklist-item-title" style="font-size:15px;">🟢 '+esc(s.name)+'さん</div>'+
-        '<div class="checklist-item-action" style="font-size:14px;font-weight:700;color:var(--ink-900);margin:4px 0;">'+verb+'</div>'+
-        '<div class="checklist-item-action">作業量の目安: '+formatNum(a.expectedQty)+esc((taskSummaryUnitFor(sug,a.taskId))||'')+'</div>'+
-      '</div>';
-    }).join('') || '<div class="empty-note">本日の作業指示はありません</div>';
-    var noInstructionNames = (sug.unassignedStaffIds||[]).map(function(sid){ return staffById(sid).name; }).join('、');
-    resultHtml = '<div class="panel-title" style="font-size:15px;margin-top:16px;">📋 本日の作業指示(確定済み '+fmtClock(sug.confirmedAt)+')</div>'+
-      '<div class="pool-hint" style="margin-bottom:10px;">この内容は管理者が確定した指示です。パートスタッフの画面にも、それぞれの作業指示が表示されます。</div>'+
-      instructionRows+
-      (noInstructionNames ? '<div class="pool-hint" style="margin-top:10px;">指示を出せなかったスタッフ(見込みを立てられる作業がありません): '+esc(noInstructionNames)+'</div>' : '')+
-      '<button type="button" class="vc-manage-toggle-btn" id="staffingCreateBtn" style="margin-top:12px;">状況が変わったので再計算する</button>';
-  }else if(sug){
-    var taskRows = sug.taskSummaries.map(function(ts){
-      var t = taskById(ts.taskId);
-      var shortageWarn = (ts.shortage!==null && ts.shortage>0.5) ? '<span style="color:#F04438;font-weight:700;"> ⚠️不足の可能性(見込み'+Math.round(ts.expectedQty)+'/'+formatNum(ts.qty)+ts.unit+')</span>' : '';
-      var roughHoursText = ts.roughHours!==null ? ts.roughHours.toFixed(1)+'人時(標準生産性ベースの目安)' : '生産性データ不足のため目安を計算できません';
-      return '<div class="checklist-item">'+
-        '<div class="checklist-item-title">'+esc(t.name)+' — 作業量 '+formatNum(ts.qty)+ts.unit+shortageWarn+'</div>'+
-        '<div class="checklist-item-action">目安必要人時: '+roughHoursText+(ts.deadlineMinutes!==null?' ・ 締切まで'+Math.round(ts.deadlineMinutes)+'分':' ・ 締切未設定')+'</div>'+
-      '</div>';
-    }).join('');
-    var assignRows = sug.assignments.map(function(a){
-      var s = staffById(a.staffId), t = taskById(a.taskId);
-      var basisLabel = a.productivityBasis==='individual' ? '個人実績' : (a.productivityBasis==='taskAverage' ? '作業全体の標準値' : '不明');
-      return '<tr><td>'+esc(s.name)+'</td><td>'+esc(t.name)+'</td><td class="num">見込み '+formatNum(a.expectedQty)+'</td><td class="num">'+(a.rate?a.rate.toFixed(1)+'/h('+basisLabel+')':'-')+'</td><td>'+esc(a.reason)+'</td></tr>';
-    }).join('') || '<tr><td colspan="5" style="color:var(--slate-500);">配置なし</td></tr>';
-    var unassignedNames = (sug.unassignedStaffIds||[]).map(function(sid){ return staffById(sid).name; }).join('、') || 'なし';
-
-    resultHtml = '<div class="panel-title" style="font-size:15px;margin-top:16px;">作業ごとの状況</div>'+
-      taskRows+
-      '<div class="panel-title" style="font-size:15px;margin-top:16px;">配置案</div>'+
-      '<div class="pool-hint" style="margin-bottom:8px;">まだ確定していません。内容をご確認のうえ「確定する」を押してください。確定すると、この内容がパートスタッフへの作業指示として表示されます。</div>'+
-      '<table class="report-table"><thead><tr><th>作業者</th><th>作業</th><th>見込み処理量</th><th>生産性</th><th>理由</th></tr></thead><tbody>'+assignRows+'</tbody></table>'+
-      '<div class="pool-hint" style="margin-top:8px;">配置対象外の出勤者(見込みを立てられる作業がありません): '+esc(unassignedNames)+'</div>'+
-      '<div class="pool-hint" style="margin-top:4px;">※「見込み処理量」は生産性からの目安であり、実際の完了数量ではありません。「残作業量」は正確な実績データが無いため算出していません。</div>'+
-      '<button type="button" class="add-btn" id="staffingConfirmBtn" style="margin-top:10px;">この配置案を確定する</button>';
-  }else{
-    resultHtml = '<div class="empty-note">まだ配置案がありません。「配置案を作成する」を押してください。</div>';
+  var needIds = {}; needAction.forEach(function(c){ needIds[c.taskId] = true; });
+  var shortTasks = needAction.filter(function(c){ return c.status==='short' || c.status==='shortNoCandidate'; });
+  var addPeople = shortTasks.reduce(function(a,c){ return a+(c.additionalNeeded||0); }, 0);
+  var idleProposals = plan.proposals.filter(function(p){ return p.tier==='next'; });
+  var others = sorted.filter(function(c){ return !needIds[c.taskId]; });
+  return { presentCount: presentCount, needAction: needAction, shortTasks: shortTasks, addPeople: addPeople, idleProposals: idleProposals, others: others };
+}
+/* 配置案1人分の「どこから来る人か」 */
+function staffingProposalFromText(p){
+  var from = p.fromTaskId ? taskById(p.fromTaskId).name : '';
+  if(p.tier===1) return '空いている人';
+  if(p.tier===2) return '手待ち作業'+(from?'「'+from+'」':'')+'から';
+  if(p.tier===3) return '余力のある作業'+(from?'「'+from+'」':'')+'から';
+  if(p.tier==='noprod') return '空いている人(生産性未設定の作業)';
+  return '';
+}
+/* 理由文から、上の「どこから来る人か」と重なる部分を省く */
+function staffingProposalReasonText(p){
+  return String(p.reason||'').replace(/\((空いている人|手待ち作業の人|余力のある作業の人)から、/, '(');
+}
+/* 配置案を確定した場合の完了予定(作業者画面と同じ勤務終了基準の計算 shiftBasedEtaMs を使う。表示専用) */
+function staffingEtaWithProposalsText(plan, c){
+  if(!c.proposals.length || c.remainingQty<=0) return null;
+  var crew = c.workers.concat(c.plannedWorkers).concat(c.proposals).map(function(w){
+    return { rate: w.rate||0, shiftEndMs: plan.staff[w.staffId] ? plan.staff[w.staffId].shiftEndMs : null };
+  });
+  var r = shiftBasedEtaMs(c.remainingQty, crew, plan.nowMs, state.breakSettings, plan.date);
+  return r ? fmtClockMs(r.ms)+(r.beyondShift ? '以降' : '') : null;
+}
+/* 管理者「今日の状況」用の1行要約。詳細は人員配置タブに一本化する */
+function renderTodayPlanSummary(){
+  if(!state.staffingSuggestionLoaded){
+    loadStaffingSuggestion(todayStr()).then(function(d){ state.staffingSuggestion = d; state.staffingSuggestionLoaded = true; render(); });
   }
-
-  return '<div class="mgr-wrap">'+
-    pendingPanelHtml+
-    reassignPanelHtml+
-    recommendPanelHtml+
-    '<div class="panel">'+
-      '<div class="panel-title">👥 人員配置</div>'+
-      '<div class="pool-hint" style="margin-bottom:10px;">締切・優先順位・作業者ごとの生産性実績から、配置案を自動作成します。締切・優先順位は「設定→作業マスタ」の各作業の設定を使用します。作成された案は確認のうえ「確定」してください。</div>'+
-      (sug && sug.status==='confirmed' ? '' : '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">'+
-        '<button type="button" class="add-btn" id="staffingCreateBtn">配置案を作成/再計算する</button>'+
-      '</div>')+
-      resultHtml+
+  var plan = computeTodayStaffingPlanNow();
+  if(!plan) return '';
+  var ov = staffingOverview(plan);
+  var pendingConfirmed = plan.confirmed.filter(function(it){ return it.progress==='pending'; }).length;
+  var parts = [];
+  if(!ov.shortTasks.length && !ov.needAction.length && !ov.idleProposals.length) parts.push('✅ 追加の配置は必要ありません');
+  if(ov.shortTasks.length) parts.push('<span class="stf-need">人員不足 '+ov.shortTasks.length+'作業・追加'+ov.addPeople+'人</span>');
+  else if(ov.needAction.length) parts.push('<span class="stf-need">対応が必要な作業 '+ov.needAction.length+'件</span>');
+  if(ov.idleProposals.length) parts.push('手待ち作業への配置案 '+ov.idleProposals.length+'人');
+  if(pendingConfirmed) parts.push('確定済み・未開始 '+pendingConfirmed+'人');
+  var text = parts.length ? parts.join(' ・ ') : '✅ 現在、追加の配置は必要ありません';
+  return '<div class="panel" style="margin-bottom:14px;" id="todayPlanSummary">'+
+    '<div class="stf-today-line">'+
+      '<div><b>👥 人員配置</b>　'+text+'</div>'+
+      '<button type="button" class="vc-manage-toggle-btn" data-admin-hub-tab="staffing">→ 人員配置を確認</button>'+
     '</div>'+
   '</div>';
 }
+function staffingTierText(p){
+  return STAFFING_TIER_LABELS[p.tier] || '';
+}
+/* 人員配置タブ。画面を開くたびに共通計算(computeTodayStaffingPlan)で最新状態を計算して表示する(保存はしない)。
+   並び: 今日の状況 → 対応が必要な作業(+配置案) → 手待ち作業への配置 → 配置を確定 → 確定済み → 足りている作業 → 計算の詳細 */
+function renderStaffing(){
+  var dateStr = todayStr();
+  resetDailyInstructionsIfDateChanged();
+  var loading = '<div class="mgr-wrap"><div class="empty-note">読み込み中...</div></div>';
+  if(!state.staffingSuggestionLoaded){
+    loadStaffingSuggestion(dateStr).then(function(d){ state.staffingSuggestion = d; state.staffingSuggestionLoaded = true; render(); });
+    return loading;
+  }
+  if(state.productivityMeta===undefined){
+    loadProductivityMeta().then(function(m){ state.productivityMeta = m; render(); });
+    return loading;
+  }
+  maybeAutoRefreshProductivity();
+  var plan = computeTodayStaffingPlanNow();
+  if(!plan) return '<div class="mgr-wrap"><div class="empty-note">本日のデータを読み込み中...</div></div>';
+  var nowText = fmtClockMs(plan.nowMs);
+  var ov = staffingOverview(plan);
+  function staffName(sid){ return (plan.staff[sid] && plan.staff[sid].name) || staffById(sid).name; }
+  function etaLine(c){
+    var eta = planEtaText(plan, c.taskId);
+    return eta ? '完了予定 <b>'+esc(eta)+'</b>' : (c.rate ? '完了予定 ―(作業中の人がいません)' : '');
+  }
+
+  // ---- ① 今日の状況 ----
+  var summaryHtml = '<div class="stf-summary" id="staffingSummary">'+
+    '<div class="dash-card"><div class="dash-card-label">出勤</div><div class="dash-card-value">'+ov.presentCount+'人</div></div>'+
+    '<div class="dash-card'+(ov.shortTasks.length?' is-alert':'')+'"><div class="dash-card-label">人員不足</div><div class="dash-card-value">'+ov.shortTasks.length+'作業</div></div>'+
+    '<div class="dash-card'+(ov.addPeople?' is-alert':'')+'"><div class="dash-card-label">追加が必要</div><div class="dash-card-value">'+ov.addPeople+'人</div></div>'+
+  '</div>';
+
+  // ---- ② 対応が必要な作業(作業ごとに、入れる人まで1枚のカードにまとめる) ----
+  var needHtml = ov.needAction.map(function(c){
+    var danger = c.status==='shortNoCandidate' || c.status==='overdue';
+    var planned = c.plannedWorkers.length ? ' <span class="stf-row-meta">(確定済み・未開始 '+c.plannedWorkers.length+'人を含む)</span>' : '';
+    var nums = '<div class="stf-card-nums">'+
+      '<span>残り <b>'+formatNum(c.remainingQty)+'</b>'+esc(c.unit)+'</span>'+
+      (c.neededPeople!==null ? '<span>現在 <b>'+(c.currentCount+c.plannedWorkers.length)+'</b>人 → 必要 <b>'+c.neededPeople+'</b>人'+planned+'</span>' : '<span>現在 <b>'+(c.currentCount+c.plannedWorkers.length)+'</b>人</span>')+
+      (c.additionalNeeded ? '<span class="stf-need">あと'+c.additionalNeeded+'人</span>' : '')+
+      // 途中で勤務終了する人がいると「必要人数」は満たしていても処理量が足りないことがあるため、不足数量も出す
+      (c.shortageQty!==null && c.shortageQty>0.01 ? '<span class="stf-need">不足 '+formatNum(Math.ceil(c.shortageQty))+esc(c.unit)+'</span>' : '')+
+    '</div>';
+    var etaNow = planEtaText(plan, c.taskId);
+    var etaAfter = staffingEtaWithProposalsText(plan, c);
+    var etaHtml = (etaNow || etaAfter) ? '<div class="stf-row-meta" style="margin-top:4px;">'+
+      (etaNow ? '完了予定 '+esc(etaNow)+(etaAfter?'(今の人数のまま)':'') : '')+
+      (etaAfter ? (etaNow?' → ':'')+'配置を確定すると '+esc(etaAfter) : '')+'</div>' : '';
+    var people = c.proposals.filter(function(p){ return p.tier!=='next'; }).map(function(p){
+      return '<div class="stf-person" data-staffing-proposal="'+esc(p.staffId)+'|'+esc(p.taskId)+'">'+
+        '<div class="stf-person-name">＋ '+esc(p.name)+'さん <span class="stf-card-sub" style="margin:0;">('+esc(staffingProposalFromText(p))+')</span></div>'+
+        '<div class="stf-person-why">理由: '+esc(staffingProposalReasonText(p))+'</div>'+
+      '</div>';
+    }).join('');
+    var warn = '';
+    if(c.status==='shortNoCandidate') warn = '<div class="stf-warn">⚠ 追加で配置できる人がいません(出勤・勤務時間・手待ち作業の人を確認してください)</div>';
+    else if(c.status==='overdue') warn = '<div class="stf-warn">⚠ 締切を過ぎています</div>';
+    else if(!c.rate) warn = '<div class="stf-warn">生産性が未設定のため、必要人数を計算できません(実績がたまると自動で計算されます)</div>';
+    return '<div class="stf-card'+(danger?' is-danger':'')+'" data-staffing-task="'+esc(c.taskId)+'">'+
+      '<div><span class="stf-card-name">'+(danger?'🔴 ':'🟠 ')+esc(c.name)+'</span>'+(c.deadline?'<span class="stf-card-sub">締切 '+esc(c.deadline)+'</span>':'')+'</div>'+
+      nums+etaHtml+people+warn+
+    '</div>';
+  }).join('');
+  var needSection = ov.needAction.length ? ('<div class="stf-section-title">⚠ 対応が必要な作業</div>'+needHtml) : '';
+
+  // ---- ③ 手待ち作業への配置(優先作業に不足がないときの、空いている人の配置案) ----
+  var idleSection = ov.idleProposals.length ? (
+    '<div class="stf-section-title">🟡 手待ち作業への配置</div>'+
+    '<div class="stf-card is-idle">'+
+      ov.idleProposals.map(function(p){
+        var t = taskById(p.taskId);
+        return '<div class="stf-row" data-staffing-proposal="'+esc(p.staffId)+'|'+esc(p.taskId)+'">'+
+          '<span class="stf-row-main">＋ '+esc(p.name)+'さん → '+esc(t.name)+'</span>'+
+          '<span class="stf-row-meta">手待ち優先度'+esc(String(t.idlePriorityLevel||3))+'</span>'+
+        '</div>';
+      }).join('')+
+    '</div>'
+  ) : '';
+
+  // ---- ④ 配置を確定(配置案があるときだけ。配置案の直後に置く) ----
+  var confirmHtml = plan.proposals.length ? (
+    '<div class="stf-confirm">'+
+      '<button type="button" class="add-btn" id="staffingConfirmBtn">✅ 配置を確定('+plan.proposals.length+'人)</button>'+
+      '<div class="stf-confirm-note">確定すると、各作業者の画面に「📋 本日の作業指示」として表示されます</div>'+
+    '</div>'
+  ) : '';
+  var noneHtml = '';
+  if(!plan.proposals.length && !ov.needAction.length){
+    noneHtml = '<div class="stf-none" id="staffingNoAction">✅ 現在、追加の配置は必要ありません</div>';
+  }
+
+  // ---- ⑤ 確定済み(確定=作業開始ではないことが分かるよう、進み具合を出す) ----
+  var progressBadge = {
+    pending: '<span class="stf-badge stf-badge-pending">確定済み・未開始</span>',
+    active: '<span class="stf-badge stf-badge-active">確定済み・作業中</span>',
+    done: '<span class="stf-badge stf-badge-done">確定済み・終了</span>'
+  };
+  var progressOrder = { pending:0, active:1, done:2 };
+  var confirmedRows = plan.confirmed.slice().sort(function(a,b){
+    return (progressOrder[a.progress]-progressOrder[b.progress]) || String(b.confirmedAt).localeCompare(String(a.confirmedAt));
+  }).map(function(it){
+    return '<div class="stf-row" data-staffing-confirmed="'+esc(it.staffId)+'|'+esc(it.taskId)+'">'+
+      '<span class="stf-row-main">'+esc(staffName(it.staffId))+'さん → '+esc(taskById(it.taskId).name)+'</span>'+
+      (progressBadge[it.progress]||'')+
+      (it.confirmedAt ? '<span class="stf-row-meta">'+fmtClock(it.confirmedAt)+'確定</span>' : '')+
+      (it.maybeUnneeded ? '<span style="color:var(--rust-600);font-weight:700;font-size:13px;">⚠ 不要の可能性(作業が完了しています)</span>' : '')+
+    '</div>';
+  }).join('');
+  var confirmedSection = confirmedRows ? ('<div class="stf-section-title">✅ 確定済み</div><div class="stf-card" style="border-left-color:#12B76A;" id="staffingConfirmed">'+confirmedRows+'</div>') : '';
+
+  // ---- ⑥ 人員が足りている作業・完了した作業(簡易表示) ----
+  var otherRows = ov.others.map(function(c){
+    var planned = c.plannedWorkers.length ? '・確定済み・未開始'+c.plannedWorkers.length+'人' : '';
+    if(c.status==='done'){
+      var reopen = c.completedAt ? ' <button type="button" class="vc-manage-toggle-btn" data-reopen-task="'+esc(c.taskId)+'" style="padding:2px 8px;font-size:11px;">未完了に戻す</button>' : '';
+      return '<div class="stf-row" data-staffing-task="'+esc(c.taskId)+'"><span class="stf-row-main">✅ '+esc(c.name)+'</span><span class="stf-row-meta">完了'+(c.completedAt?'('+fmtClock(c.completedAt)+')':'')+'</span>'+reopen+'</div>';
+    }
+    var head = c.rate ? '🟢 ' : '⚪ ';
+    var meta = '残り'+formatNum(c.remainingQty)+c.unit+'・'+c.currentCount+'人'+planned;
+    var eta = etaLine(c);
+    return '<div class="stf-row" data-staffing-task="'+esc(c.taskId)+'">'+
+      '<span class="stf-row-main">'+head+esc(c.name)+'</span>'+
+      '<span class="stf-row-meta">'+esc(meta)+(c.rate?'':'(生産性未設定)')+'</span>'+
+      (eta ? '<span class="stf-row-meta">'+eta+'</span>' : '')+
+    '</div>';
+  }).join('');
+  var othersSection = otherRows ? ('<div class="stf-section-title">🟢 人員が足りている作業</div><div class="stf-card" style="border-left-color:#12B76A;">'+otherRows+'</div>') : '';
+  var noTasksNote = plan.tasks.length ? '' : '<div class="empty-note" style="margin-top:10px;">本日のCSV作業量がある作業はありません</div>';
+
+  // ---- ⑦ 計算の詳細(折りたたみ。普段は見なくてよい) ----
+  var detailBlocks = plan.tasks.map(function(c){
+    var workersText = c.workers.map(function(w){ return esc(w.name)+'さん '+formatNum(Math.round(w.capQty))+esc(c.unit); }).join('・');
+    var plannedText = c.plannedWorkers.map(function(w){ return esc(w.name)+'さん '+formatNum(Math.round(w.capQty))+esc(c.unit); }).join('・');
+    var limitText = c.limitKind==='deadline' ? ('締切 '+esc(c.deadline)) : ('締切なし → 勤務終了 '+esc(fmtClockMs(c.limitMs)));
+    var etaNow = planEtaText(plan, c.taskId), etaAfter = staffingEtaWithProposalsText(plan, c);
+    var lines = [
+      'CSV予定数量 '+formatNum(c.plannedQty)+esc(c.unit)+'(出荷'+formatNum(c.primaryCount)+'件)',
+      '完了数量 '+formatNum(c.completedQty)+esc(c.unit)+(c.completedAt?'('+fmtClock(c.completedAt)+'に完了扱い)':''),
+      '残作業量 '+formatNum(c.remainingQty)+esc(c.unit),
+      '生産性 '+(c.rate ? c.rate.toFixed(1)+esc(c.unit)+'/人時('+(c.rateBasis==='taskAverage'?'作業全体の実績':'個人実績')+'・サンプル'+c.sampleCount+'日)' : '未設定(実績不足のため計算できません)'),
+      '現在人数 '+c.currentCount+'人'+(workersText?'('+workersText+')':'')+(c.plannedWorkers.length?' + 確定済みで未開始 '+c.plannedWorkers.length+'人('+plannedText+')':''),
+      '現在時刻 '+esc(nowText)+' / '+limitText+' / 残り時間 '+fmtMinutesJa(c.remainTimeMin),
+      '1人あたり処理可能数量 '+(c.perPersonQty!==null?formatNum(Math.round(c.perPersonQty))+esc(c.unit):'―'),
+      '現在の総処理能力 '+formatNum(Math.round(c.capacity))+esc(c.unit),
+      '不足数量 '+(c.shortageQty===null?'―(生産性未設定)':formatNum(Math.ceil(c.shortageQty))+esc(c.unit)),
+      '必要人数 '+(c.neededPeople===null?'―':c.neededPeople+'人')+' / 追加人数 '+(c.additionalNeeded===null?'―':c.additionalNeeded+'人'),
+      '追加配置 → '+(c.proposals.length ? c.proposals.map(function(p){ return esc(p.name)+'さん('+esc(staffingTierText(p))+(p.capQty!==null?'・処理見込み'+formatNum(Math.round(p.capQty))+esc(c.unit):'')+')'; }).join('・') : 'なし'),
+      '完了予定(勤務終了基準) → '+(c.status==='done' ? '完了済み' : ((etaNow ? esc(etaNow) : '―')+(etaAfter ? ' / 配置を確定すると '+esc(etaAfter) : '')))
+    ];
+    return '<div class="checklist-item" data-staffing-detail="'+esc(c.taskId)+'">'+
+      '<div class="checklist-item-title">'+esc(c.name)+' <span class="pool-hint" style="margin:0;">('+esc(STAFFING_STATUS_LABELS[c.status]||'')+')</span></div>'+
+      lines.map(function(l, i){ return '<div class="checklist-item-action">'+(i?'↓ ':'')+l+'</div>'; }).join('')+
+    '</div>';
+  }).join('');
+  var idleText = plan.idleWorkTasks.length ? plan.idleWorkTasks.map(function(t){ return esc(t.name)+'(手待ち優先度'+t.idlePriorityLevel+')'; }).join('・') : 'なし';
+  var detailHtml = '<details class="panel" style="margin-top:14px;" id="staffingDetail"'+(state.staffingDetailOpen?' open':'')+'>'+
+    '<summary style="cursor:pointer;font-weight:700;">🔍 配置計算の詳細(なぜこの配置になったか)</summary>'+
+    '<div class="pool-hint" style="margin:8px 0;" id="staffingMeta">現在時刻 '+esc(nowText)+' ・ '+esc(productivityMetaText())+(productivityAutoRefreshState.running?'(更新中...)':'')+'。この画面を開いた時点の最新データ(CSV・作業マスタの優先順位と締切・出勤・勤務終了時刻・生産性)から自動で計算しています。計算結果は保存されず、配置を確定したときだけ保存されます。</div>'+
+    '<div class="pool-hint" style="margin:8px 0;">残作業量 = CSV予定数量 − 完了数量 / 現在の処理能力 = 各作業者の(残り時間 × 生産性)の合計 / 不足数量 = 残作業量 − 現在の処理能力。不足がある作業だけ、①空いている人 → ②手待ち作業の人 → ③余力のある作業の人 の順で追加します。自動配置対象外のスタッフ・欠勤・勤務終了済みの人は候補にしません。完了予定は作業者画面と同じく、各作業者の勤務終了時刻までに処理できる量で計算しています。</div>'+
+    (detailBlocks || '<div class="empty-note">本日のCSV作業量がある作業はありません</div>')+
+    '<div class="checklist-item-action" style="margin-top:8px;">手待ち作業(CSV数量なし): '+idleText+'</div>'+
+  '</details>';
+
+  return '<div class="mgr-wrap">'+
+    '<div class="panel" id="staffingPanel">'+
+      '<div class="stf-head"><div class="panel-title">👥 人員配置</div><div class="stf-asof">'+esc(nowText)+'時点・自動計算</div></div>'+
+      summaryHtml+
+      noneHtml+
+      needSection+
+      idleSection+
+      confirmHtml+
+      confirmedSection+
+      othersSection+
+      noTasksNote+
+    '</div>'+
+    detailHtml+
+  '</div>';
+}
 function bindStaffing(){
-  document.querySelectorAll('[data-open-reassign-confirm]').forEach(function(el){
-    el.addEventListener('click', function(){
-      var parts = el.getAttribute('data-open-reassign-confirm').split('|');
-      state.modal = { kind:'reassignConfirm', staffId: parts[0], fromTaskId: parts[1], toTaskId: parts[2] };
-      render();
-    });
-  });
-  document.querySelectorAll('[data-confirm-next-assignment]').forEach(function(el){
-    el.addEventListener('click', async function(){
-      var parts = el.getAttribute('data-confirm-next-assignment').split('|');
-      var taskId = parts[0], staffId = parts[1];
-      var day = state.day;
-      var arr = day.assignments[staffId] || [];
-      if(arr.indexOf(taskId)===-1) arr.push(taskId);
-      day.assignments[staffId] = arr;
-      await saveDay(day);
-      var sug = state.pendingAssignmentSuggestions[taskId];
-      delete state.pendingAssignmentSuggestions[taskId];
-      await savePendingAssignmentSuggestions(todayStr(), state.pendingAssignmentSuggestions);
-      await appendAuditLog({ action:'次の配置候補を確定', target: taskById(taskId).name, before:null, after: staffById(staffId).name+'さんを配置(CSV追加分'+(sug?formatNum(sug.newQty)+'ピース':'')+')' });
-      showToast(staffById(staffId).name+'さんを'+taskById(taskId).name+'へ配置しました');
-      render();
-    });
-  });
-  document.querySelectorAll('[data-dismiss-next-assignment]').forEach(function(el){
-    el.addEventListener('click', async function(){
-      var taskId = el.getAttribute('data-dismiss-next-assignment');
-      delete state.pendingAssignmentSuggestions[taskId];
-      await savePendingAssignmentSuggestions(todayStr(), state.pendingAssignmentSuggestions);
-      render();
-    });
-  });
-  var staffingCreateBtn = document.getElementById('staffingCreateBtn');
-  if(staffingCreateBtn){
-    staffingCreateBtn.addEventListener('click', async function(){
-      state.staffingLoading = true;
-      render();
-      var result = computeStaffingSuggestion(state.day, state.workVolume||emptyWorkVolume(), state.taskPriority||{}, state.productivityMaster||{}, new Date(), state.backlog, state.roster);
-      await saveStaffingSuggestion(todayStr(), result);
-      state.staffingSuggestion = result;
-      state.staffingLoading = false;
-      await appendAuditLog({ action:'配置案を作成', target: todayStr(), before:null, after: result.assignments.length+'件の配置' });
+  var detailEl = document.getElementById('staffingDetail');
+  if(detailEl) detailEl.addEventListener('toggle', function(){ state.staffingDetailOpen = detailEl.open; });
+  var confirmBtn = document.getElementById('staffingConfirmBtn');
+  if(confirmBtn){
+    confirmBtn.addEventListener('click', async function(){
+      if(confirmBtn.disabled) return;
+      confirmBtn.disabled = true;
+      // 押した時点の最新状態で計算し直してから確定する
+      var plan = computeTodayStaffingPlanNow();
+      var r = await confirmTodayStaffingProposals(plan);
+      showToast(r.ok ? ('配置を確定しました('+r.count+'人)。作業者の画面に「📋 本日の作業指示」として表示されます') : ('⚠️ '+r.msg));
       render();
     });
   }
-  var staffingConfirmBtn = document.getElementById('staffingConfirmBtn');
-  if(staffingConfirmBtn){
-    staffingConfirmBtn.addEventListener('click', async function(){
-      if(!state.staffingSuggestion) return;
-      state.staffingSuggestion.status = 'confirmed';
-      state.staffingSuggestion.confirmedAt = new Date().toISOString();
-      state.staffingSuggestion.confirmedBy = state.activeStaffId || '管理者';
-      await saveStaffingSuggestion(todayStr(), state.staffingSuggestion);
-      await appendAuditLog({ action:'配置案を確定', target: todayStr(), before:'draft', after: state.staffingSuggestion.assignments.length+'件を確定' });
-      showToast('配置案を確定しました');
+  document.querySelectorAll('[data-reopen-task]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var tid = el.getAttribute('data-reopen-task');
+      if(!confirm('「'+taskById(tid).name+'」を未完了に戻します。残作業量が再計算されます。よろしいですか?')) return;
+      var ok = await reopenTaskCompletion(tid);
+      showToast(ok ? '未完了に戻しました' : '⚠️ 保存できませんでした');
       render();
     });
-  }
+  });
 }
 function renderManagerLoginForm(title, description){
   var lf = loginFormDefaults(state.managerLoginDraft);
@@ -6315,6 +6854,7 @@ function bindGate(){
       state.role = role;
       render();
       startPolling();
+      if(role==='input' || role==='adminHub') requestFreshTodayData(); // 本日の作業系の画面は最新データで再計算する
     });
   });
   var openBtn = document.getElementById('changelogOpenBtn');
@@ -6403,6 +6943,7 @@ function bindCommon(){
       state.modal = null;
       render();
       if(role) startPolling();
+      if(role==='input' || role==='adminHub') requestFreshTodayData(); // 本日の作業系の画面は最新データで再計算する
     });
   });
   var b = document.getElementById('switchRoleBtn');
@@ -6544,6 +7085,8 @@ function bindAdminHub(){
     el.addEventListener('click', function(){
       state.adminHubTab = el.getAttribute('data-admin-hub-tab');
       render();
+      // 「今日の状況」「人員配置」を開いたら、最新データを読み直して再計算する
+      if(state.adminHubTab==='today' || state.adminHubTab==='staffing') requestFreshTodayData();
     });
   });
   if(state.adminHubTab==='staffing') bindStaffing();
@@ -6997,6 +7540,8 @@ function renderStaffSettingsPanel(){
       '</div>'+
       '<div class="pattern-row">'+dayToggles+'</div>'+
       '<button class="holiday-off-toggle '+(s.offOnHolidays?'on':'')+'" data-holiday-off-toggle="'+s.id+'">🎌 祝日も休みにする</button>'+
+      // 自動配置の対象外(初期値は対象)。対象外でも手動での配置・作業開始はできる
+      '<button class="holiday-off-toggle '+(s.autoAssignExcluded===true?'on':'')+'" data-auto-assign-toggle="'+s.id+'" style="margin-left:6px;">🚫 自動配置の対象外'+(s.autoAssignExcluded===true?'(設定中)':'')+'</button>'+
       overtimeRow+
       '<div class="avatar-swatch-row" title="アバターカラー(累計実績画面のキャラクターの色)">'+avatarSwatches+'</div>'+
     '</div>';
@@ -7043,6 +7588,19 @@ function bindStaffSettingsPanel(){
           render();
         }
       });
+    });
+  });
+  document.querySelectorAll('[data-auto-assign-toggle]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var id = el.getAttribute('data-auto-assign-toggle');
+      var s = state.roster.find(function(x){ return x.id===id; });
+      if(!s) return;
+      var before = s.autoAssignExcluded===true;
+      if(before) delete s.autoAssignExcluded; else s.autoAssignExcluded = true;
+      if(!(await saveRoster(state.roster))){ render(); return; }
+      await appendAuditLog({ action:'自動配置の対象設定', target: s.name, before: before?'対象外':'対象', after: before?'対象':'対象外' });
+      showToast('「'+s.name+'」を自動配置の'+(before?'対象にしました':'対象外にしました'));
+      render();
     });
   });
   var newStaffInput = document.getElementById('newStaffInput');
@@ -7159,8 +7717,8 @@ function renderManager(){
     '<div class="dash-card"><div class="dash-card-icon">👥</div><div class="dash-card-label">出勤</div><div class="dash-card-value">'+summary.presentCount+'人</div></div>'+
     '<div class="dash-card"><div class="dash-card-icon">🔵</div><div class="dash-card-label">作業中</div><div class="dash-card-value">'+summary.workingCount+'人</div></div>'+
     '<div class="dash-card"><div class="dash-card-icon">🟠</div><div class="dash-card-label">要確認</div><div class="dash-card-value">'+summary.checkingCount+'人</div></div>'+
-    '<div class="dash-card"><div class="dash-card-icon">⏳</div><div class="dash-card-label">未配置</div><div class="dash-card-value">'+summary.idleCount+'人</div></div>'+
-    '<div class="dash-card"><div class="dash-card-icon">✅</div><div class="dash-card-label">配置確定</div><div class="dash-card-value">'+summary.confirmedCount+'人</div></div>'+
+    '<div class="dash-card"><div class="dash-card-icon">⏳</div><div class="dash-card-label">担当なし</div><div class="dash-card-value">'+summary.idleCount+'人</div></div>'+
+    '<div class="dash-card"><div class="dash-card-icon">📌</div><div class="dash-card-label">担当あり</div><div class="dash-card-value">'+summary.confirmedCount+'人</div></div>'+
   '</div>';
 
   // ---- ④⑥⑦ 作業者別業務時間(誰が・何を・何時から何時まで・何時間、入力チェック) ----
@@ -7171,7 +7729,7 @@ function renderManager(){
       '<div style="font-weight:700;margin-bottom:6px;">⚠️ 業務時間 要確認('+needsCheckRows.length+'人)</div>'+
       needsCheckRows.map(function(r){
         var assigned = (day.assignments[r.staffId]||[]).map(function(tid){ return taskById(tid).name; }).join('・') || 'なし';
-        return '<div style="margin-top:4px;"><b>'+esc(r.name)+'さん</b> ー 出勤:○ / 配置:'+esc(assigned)+' / 開始:未入力 / 終了:未入力</div>';
+        return '<div style="margin-top:4px;"><b>'+esc(r.name)+'さん</b> ー 出勤:○ / 担当:'+esc(assigned)+' / 開始:未入力 / 終了:未入力</div>';
       }).join('')+
     '</div>'
   ) : '<div class="dash-ok-banner">✅ 業務時間の入力漏れはありません</div>';
@@ -7348,7 +7906,8 @@ function renderManager(){
   }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この日の記録はまだありません</td></tr>';
 
   // ---- ダッシュボード要約は todayDashboardHtml(サマリーカード+作業者別業務時間)に統合済み ----
-  var dashboardBar = todayDashboardHtml;
+  // 本日を表示しているときは、共通計算による「本日の作業の見込み」を先頭に出す
+  var dashboardBar = (isToday ? renderTodayPlanSummary() : '') + todayDashboardHtml;
 
   return ''+
   '<div class="mgr-wrap">'+
@@ -9124,44 +9683,33 @@ function renderInput(){
     return renderSummary(staff);
   }
   resetDailyInstructionsIfDateChanged();
-  if(state.reassignmentAlerts===null){
-    loadReassignmentAlerts(todayStr()).then(function(d){ state.reassignmentAlerts = d; render(); });
-  }
-  var myPendingAlert = (state.reassignmentAlerts||[]).find(function(a){ return a.staffId===state.activeStaffId && a.status==='pending'; });
-  var reassignAlertBanner = '';
-  if(myPendingAlert){
-    var fromT = taskById(myPendingAlert.fromTaskId), toT = taskById(myPendingAlert.toTaskId);
-    reassignAlertBanner = '<div class="next-suggest-banner" style="border-color:var(--amber-500);">'+
-      '<div class="next-suggest-title">🔔 配置変更指示</div>'+
-      '<div class="next-suggest-task">現在の作業: '+esc(fromT.name)+' → 次の作業: '+esc(toT.name)+'</div>'+
-      '<div class="next-suggest-meta">管理者から配置変更の指示があります。</div>'+
-      '<button type="button" class="add-btn" data-ack-reassign-alert="'+myPendingAlert.id+'" style="margin-top:8px;">確認</button>'+
-    '</div>';
-  }
+  // 旧「配置変更指示」(reassignment-alerts)は、作業者画面には出さない。作業指示は確定済み配置
+  // (confirmTodayStaffingProposals)からの「本日の作業指示」だけに一本化している。保存済みの旧データは消さない。
   var assignedIds = (state.day.assignments[state.activeStaffId] || []).slice().sort(byTaskColor(function(tid){ return taskById(tid).color; }));
   var log = currentLog(state.activeStaffId);
 
+  // ---- 今の作業・次の作業・完了予定(共通計算の結果を使う。配置理由・金額などの管理情報は出さない) ----
+  if(!state.staffingSuggestionLoaded){
+    loadStaffingSuggestion(todayStr()).then(function(d){ state.staffingSuggestion = d; state.staffingSuggestionLoaded = true; render(); });
+  }
+  var workerPlan = computeTodayStaffingPlanNow();
   var workInstructionBanner = '';
-  if(!myPendingAlert && !state.showNextSuggestBanner){
-    if(!state.staffingSuggestionLoaded){
-      loadStaffingSuggestion(todayStr()).then(function(d){ state.staffingSuggestion = d; state.staffingSuggestionLoaded = true; render(); });
-    }
-    var confirmedPlan = state.staffingSuggestion;
-    if(confirmedPlan && confirmedPlan.status==='confirmed'){
-      var myInstruction = confirmedPlan.assignments.find(function(a){ return a.staffId===state.activeStaffId; });
-      // 既にその作業を開始済みなら、あらためて指示を出す必要はない
-      if(myInstruction && !(log && log.taskId===myInstruction.taskId)){
-        var instrTask = taskById(myInstruction.taskId);
-        var estCompletion1 = estimateCompletionTimeText(myInstruction.taskId, state.activeStaffId, new Date(), state.day);
-        workInstructionBanner = '<div class="next-suggest-banner" style="border-color:var(--amber-500);">'+
-          '<div class="next-suggest-title">📋 本日の作業指示</div>'+
-          '<div class="next-suggest-task">'+esc(instrTask.name)+'を担当してください</div>'+
-          '<div class="next-suggest-meta">作業量の目安: '+formatNum(myInstruction.expectedQty)+esc(taskSummaryUnitFor(confirmedPlan, myInstruction.taskId))+(estCompletion1?' ・ 完了予定 '+estCompletion1:'')+'</div>'+
-          '<div class="next-suggest-actions">'+
-            '<button type="button" class="add-btn" data-suggest-start="'+myInstruction.taskId+'">この作業を開始</button>'+
-          '</div>'+
-        '</div>';
-      }
+  if(workerPlan){
+    // 管理者が確定した配置だけを「本日の作業指示」として出す(未確定の配置案は出さない)
+    var myNext = nextTaskForStaff(workerPlan, state.activeStaffId, state.day);
+    if(myNext){
+      var nextT = taskById(myNext.taskId);
+      var nextEta = planEtaText(workerPlan, myNext.taskId);
+      var hasCurrent = !!(log && log.taskId!=='BREAK');
+      workInstructionBanner = '<div class="next-suggest-banner" id="workerNextTask" style="border-color:var(--amber-500);">'+
+        '<div class="next-suggest-title">📋 本日の作業指示</div>'+
+        '<div class="next-suggest-task">'+esc(nextT.name)+'を開始してください</div>'+
+        (nextEta ? '<div class="next-suggest-meta">完了予定 '+esc(nextEta)+'</div>' : '')+
+        '<div class="next-suggest-actions">'+
+          '<button type="button" class="add-btn" data-suggest-start="'+esc(myNext.taskId)+'">次の作業を開始</button>'+
+        '</div>'+
+        (hasCurrent ? '<div class="pool-hint" style="margin-top:6px;">次の作業を開始すると、今の作業は完了になります。</div>' : '')+
+      '</div>';
     }
   }
   var onBreak = log && log.taskId==='BREAK';
@@ -9174,49 +9722,8 @@ function renderInput(){
       '<div class="break-banner-sub">'+esc(state.breakSettings.start)+'〜'+esc(state.breakSettings.end)+' は自動で休憩になります。作業をタップすると休憩を終えて再開します。</div>'+
     '</div>';
   }
+  // 旧「次のおすすめ」「本日の作業指示」表示(legacyMaybeShowNextSuggestion 用)は廃止。作業指示は上の workInstructionBanner だけ
   var suggestBanner = '';
-  if(state.showNextSuggestBanner){
-    if(state.nextTaskSuggestModal){
-      var sug = state.nextTaskSuggestModal;
-      var sugTask = taskById(sug.taskId);
-      if(sug.isConfirmedInstruction){
-        var estCompletion2 = estimateCompletionTimeText(sug.taskId, state.activeStaffId, new Date(), state.day);
-        suggestBanner = '<div class="next-suggest-banner" style="border-color:var(--amber-500);">'+
-          '<div class="next-suggest-title">📋 本日の作業指示</div>'+
-          '<div class="next-suggest-task">'+esc(sugTask.name)+'を開始してください</div>'+
-          '<div class="next-suggest-meta">作業量の目安: '+formatNum(sug.qty)+esc(taskSummaryUnitFor(state.staffingSuggestion, sug.taskId))+(estCompletion2?' ・ 完了予定 '+estCompletion2:'')+'</div>'+
-          '<div class="next-suggest-actions">'+
-            '<button type="button" class="add-btn" data-suggest-start="'+sug.taskId+'">この作業を開始</button>'+
-          '</div>'+
-        '</div>';
-      }else{
-        suggestBanner = '<div class="next-suggest-banner">'+
-          '<div class="next-suggest-title">✓ 完了しました。次のおすすめ</div>'+
-          '<div class="next-suggest-task">'+esc(sugTask.name)+'</div>'+
-          '<div class="next-suggest-meta">'+
-            (sug.deadlineMinutes!==null ? '締切まで残り'+Math.round(sug.deadlineMinutes)+'分' : '締切設定なし')+
-            (sug.rate ? ' ・ あなたの生産性の目安: '+sug.rate.toFixed(1)+'/時' : '')+
-          '</div>'+
-          '<div class="next-suggest-actions">'+
-            '<button type="button" class="add-btn" data-suggest-start="'+sug.taskId+'">この作業を開始</button>'+
-            '<button type="button" class="vc-manage-toggle-btn" data-suggest-dismiss="1">他の作業を選ぶ</button>'+
-          '</div>'+
-        '</div>';
-      }
-    }else if(state.nextSuggestIsConfirmedContext){
-      suggestBanner = '<div class="next-suggest-banner">'+
-        '<div class="next-suggest-title">✓ 完了しました</div>'+
-        '<div class="pool-hint" style="margin:6px 0 10px;">現在、次の作業指示はありません。管理者に確認してください。</div>'+
-        '<button type="button" class="vc-manage-toggle-btn" data-suggest-dismiss="1">閉じる</button>'+
-      '</div>';
-    }else{
-      suggestBanner = '<div class="next-suggest-banner">'+
-        '<div class="next-suggest-title">✓ 完了しました</div>'+
-        '<div class="pool-hint" style="margin:6px 0 10px;">おすすめできる作業がありません(締切設定や生産性データが不足している可能性があります)。下から次の作業を選んでください。</div>'+
-        '<button type="button" class="vc-manage-toggle-btn" data-suggest-dismiss="1">閉じる</button>'+
-      '</div>';
-    }
-  }
   var body;
   if(!assignedIds.length){
     body = '<div class="no-task-note">本日の作業がまだ割り当てられていません。下の「他の作業を追加」から選んで始められます。</div>';
@@ -9241,7 +9748,8 @@ function renderInput(){
           var subActive = log.activeSubcat === sc.name;
           var timerAttrs = subActive ? ' data-live-subtimer-start="'+log.activeSubcatStart+'" data-live-subtimer-base="'+subAccum+'"' : '';
           var timerText = subActive ? fmtElapsed(subAccum + (Date.now()-new Date(log.activeSubcatStart).getTime())) : fmtElapsed(subAccum);
-          var countControlsHtml = csvLinked ? '' :
+          // 作業者には数量(件数)を入力させない。内訳ごとの時間の記録だけ残す
+          var countControlsHtml = (csvLinked || WORKER_QUANTITY_INPUT_DISABLED) ? '' :
             '<div class="qty-break-controls">'+
               '<button type="button" class="qty-btn qty-btn-sm" data-live-count="'+esc(tid)+'|'+esc(sc.name)+'|-1">-1</button>'+
               '<div class="qty-break-value" data-live-count-val="'+esc(tid)+'|'+esc(sc.name)+'">'+v+'</div>'+
@@ -9256,17 +9764,18 @@ function renderInput(){
             countControlsHtml+
           '</div>';
         }).join('');
-        var liveTitle = csvLinked ? '内訳ごとに時間を記録(切り替える内訳の▶を押してください)' : '内訳ごとに件数・時間を記録(切り替える内訳の▶を押してください)';
+        var liveTitle = (csvLinked || WORKER_QUANTITY_INPUT_DISABLED) ? '内訳ごとに時間を記録(切り替える内訳の▶を押してください)' : '内訳ごとに件数・時間を記録(切り替える内訳の▶を押してください)';
         liveCountersHtml = '<div class="task-tile-live-counters"><div class="task-tile-live-title">'+liveTitle+'</div>'+liveRows+'</div>';
       }
       if(isActive && isVcKindTask(tid)){
         liveCountersHtml += renderVcCaseCountWidget(tid);
       }
-      var completeBtnHtml = isActive ? '<button type="button" class="log-stop-btn" data-complete-and-suggest="'+tid+'" style="margin-top:10px;">✓ 完了して次を確認する</button>' : '';
+      // 完了ボタンは使わない(次の作業を開始した時点で完了扱い)。数量入力を伴わない旧ボタンは表示しない
+      var completeBtnHtml = (isActive && !WORKER_QUANTITY_INPUT_DISABLED) ? '<button type="button" class="log-stop-btn" data-complete-and-suggest="'+tid+'" style="margin-top:10px;">✓ 完了して次を確認する</button>' : '';
       var completionTimeHtml = '';
       if(isActive){
-        var estCompletion3 = estimateCompletionTimeText(tid, state.activeStaffId, new Date(), state.day);
-        if(estCompletion3) completionTimeHtml = '<div class="task-tile-unit">完了予定: '+esc(estCompletion3)+'</div>';
+        var estCompletion3 = planEtaText(workerPlan, tid);
+        if(estCompletion3) completionTimeHtml = '<div class="task-tile-unit">完了予定 '+esc(estCompletion3)+'</div>';
       }
       return '<div class="task-tile '+(isActive?'active-task':'')+'" data-tap-task="'+tid+'" style="border-left:6px solid '+t.color+'">'+
         '<div><div class="task-tile-name">'+esc(t.name)+' '+csvLinkBadge(tid)+'</div><div class="task-tile-unit">単位: '+esc(t.unit)+'</div>'+completionTimeHtml+'</div>'+
@@ -9304,7 +9813,7 @@ function renderInput(){
       '<div><div class="staff-header-name">'+esc(staff.name)+'</div><div class="staff-header-sub">作業をタップすると開始/切替します</div></div>'+
       '<button class="back-link" id="backToNames">戻る</button>'+
     '</div>'+
-    '<div class="task-tile-wrap">'+reassignAlertBanner+workInstructionBanner+breakBanner+suggestBanner+body+otherTasksHtml+'</div>'+
+    '<div class="task-tile-wrap">'+workInstructionBanner+breakBanner+suggestBanner+body+otherTasksHtml+'</div>'+
     '<div class="end-day-bar"><button class="end-day-btn" id="endDayBtn">本日の作業を終了する</button></div>'+
   '</div>';
 }
@@ -9357,6 +9866,7 @@ function bindInput(){
       state.nextTaskSuggestModal = null;
       render();
       startTicker();
+      requestFreshTodayData(); // 最新の作業量・配置で「次の作業」「完了予定」を計算する
     });
   });
   var backBtn = document.getElementById('backToNames');
@@ -9890,7 +10400,9 @@ function openQuantityModal(nextTaskId, isEndDay){
   var log = currentLog(state.activeStaffId);
   state.suppressRender = true;
   if(log){
-    if(isCsvLinkedTask(log.taskId)){
+    // 作業者は数量を入力しない: 次の作業を開始した(または本日の作業を終了した)時点で、前の作業を完了扱いにする。
+    // (数量・内訳の入力画面は、以下の旧処理として残しているが、作業者画面からは使わない)
+    if(WORKER_QUANTITY_INPUT_DISABLED || isCsvLinkedTask(log.taskId)){
       finishCsvLinkedLog(log, nextTaskId, isEndDay);
       return;
     }
@@ -9910,6 +10422,8 @@ function openQuantityModal(nextTaskId, isEndDay){
   }
   render();
 }
+/* 作業者画面では数量を入力させない(次の作業開始=前の作業完了)。VC作業のケース数入力は別機能として残す。 */
+var WORKER_QUANTITY_INPUT_DISABLED = true;
 async function finishCsvLinkedLog(log, nextTaskId, isEndDay){
   if(state.taskActionBusy){ state.suppressRender = false; return; }
   state.taskActionBusy = true;
@@ -9918,6 +10432,8 @@ async function finishCsvLinkedLog(log, nextTaskId, isEndDay){
     log.end = new Date().toISOString();
     log.quantity = null;
     delete log.breakdown;
+    // 次の作業を開始した=前の作業を完了した(他の作業者がまだ作業中なら完了にしない)
+    if(log.taskId!=='BREAK') markTaskCompletedIfLastWorker(state.day, log.taskId, log.staffId);
     await saveDay(state.day);
   }finally{
     state.taskActionBusy = false;
@@ -9933,7 +10449,21 @@ async function finishCsvLinkedLog(log, nextTaskId, isEndDay){
     render();
   }
 }
+/* 作業を終えた直後の「次の作業」。以前は確定済みの指示(1人1件)をそのまま出していたため、
+   指示された作業を終えると同じ作業が再び指示される問題があった。現在は実績入力画面の
+   「📋 本日の作業指示」(nextTaskForStaff:確定済み配置のみ)が次の作業を出すため、ここでは別の提案を作らない。 */
 function maybeShowNextSuggestion(){
+  state.pendingNextSuggestion = false;
+  state.showNextSuggestBanner = false;
+  state.nextTaskSuggestModal = null;
+  state.nextSuggestIsConfirmedContext = false;
+}
+/* 廃止(呼び出し元なし): 確定済み配置・独自のおすすめ(suggestNextTaskFor)から別の指示を出していた旧処理。
+   作業指示は nextTaskForStaff(確定済み配置のみ)に一本化したため、呼ばれても何も表示しない。 */
+function legacyMaybeShowNextSuggestion(){
+  maybeShowNextSuggestion();
+}
+function legacyMaybeShowNextSuggestionDisabled(){
   if(!state.pendingNextSuggestion) return;
   state.pendingNextSuggestion = false;
   if(!state.activeStaffId) return;
@@ -11592,6 +12122,7 @@ function bindMonitor(){
 
 /* ---------- ticking / polling ---------- */
 var tickerHandle = null;
+var lastStaffingMinuteKey = Math.floor(Date.now()/60000);
 function startTicker(){
   if(tickerHandle) return;
   tickerHandle = setInterval(function(){
@@ -11604,6 +12135,14 @@ function startTicker(){
       var start = new Date(el.getAttribute('data-live-subtimer-start')).getTime();
       el.textContent = fmtElapsed(base + (Date.now()-start));
     });
+    // 残り時間・完了予定は現在時刻でも変わるため、本日の作業系の画面は1分ごとに再計算して描き直す(表示だけ・保存しない)
+    var minuteKey = Math.floor(Date.now()/60000);
+    if(minuteKey!==lastStaffingMinuteKey){
+      lastStaffingMinuteKey = minuteKey;
+      var onTodayScreen = (state.role==='input' && !!state.activeStaffId) ||
+        (state.role==='adminHub' && hasManagerSession() && (state.adminHubTab==='staffing' || state.adminHubTab==='today' || !state.adminHubTab));
+      if(onTodayScreen && hasDataAccess() && state.appDataLoaded && !isUserBusy() && !isLoginFormInUse() && pendingSaves===0) render();
+    }
     var clockEl = document.getElementById('monClock');
     if(clockEl){
       var now = new Date();

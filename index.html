@@ -3679,7 +3679,11 @@ function computeTodayStaffingPlan(ctx){
     var availMin = workingMinutesExcludingBreaks(nowMs, endMs, brk, dateStr);
     var p = productivityRateFor(master, taskId, sid);
     var rate = (p.rate && p.rate>0) ? p.rate : null;
-    return { staffId: sid, name: info.name, availMin: availMin, rate: rate, basis: p.basis, capQty: rate ? rate*availMin/60 : 0 };
+    // 休憩中の人(休憩前の作業の担当として保持)は、担当人数には数えるが、今の処理能力には数えない
+    var capQty = (rate && !info.onBreak) ? rate*availMin/60 : 0;
+    // 休憩明けから勤務終了までに処理できる量(休憩中の担当者のみ)。不足数量の計算にだけ使う
+    var breakCapQty = (rate && info.onBreak) ? rate*availMin/60 : 0;
+    return { staffId: sid, name: info.name, availMin: availMin, rate: rate, basis: p.basis, capQty: capQty, breakCapQty: breakCapQty };
   }
 
   // ---- 確定済み配置(再計算しても消さない) ----
@@ -3688,6 +3692,38 @@ function computeTodayStaffingPlan(ctx){
   });
   var pendingConfirmedByStaff = {};
   confirmed.forEach(function(it){ if(it.progress==='pending' && !pendingConfirmedByStaff[it.staffId]) pendingConfirmedByStaff[it.staffId] = it; });
+
+  // ---- 休憩をまたいだ担当の継続 ----
+  // 自動休憩(checkAutoBreak)は休憩開始時に作業記録を終了して休憩記録を始めるが、休憩は作業の完了ではない。
+  // 休憩中、または休憩が終わってまだ次の作業を始めていない人は、休憩前の作業が未完了なら、
+  // その作業を続けている担当者として扱う(空いている人・手待ちの人にしない)。保存データは変更しない。
+  var breakEndMs = (brk && brk.enabled && brk.end) ? new Date(dateStr+'T'+brk.end+':00').getTime() : null;
+  function taskBeforeBreak(sid){
+    var logs = (day.logs||[]).filter(function(l){ return l.staffId===sid; })
+      .sort(function(a,b){ return new Date(a.start).getTime()-new Date(b.start).getTime(); });
+    var last = logs[logs.length-1];
+    if(!last || last.taskId!=='BREAK') return null; // 休憩のあとに別の作業を始めている
+    // 休憩の途中で「本日の作業を終了」した場合など(休憩終了時刻より前に休憩記録が終わっている)は継続しない
+    if(last.end!==null && breakEndMs!==null && new Date(last.end).getTime() < breakEndMs-60000) return null;
+    var prev = null;
+    for(var i=logs.length-2; i>=0; i--){ if(logs[i].taskId!=='BREAK'){ prev = logs[i]; break; } }
+    if(!prev || !prev.end) return null;
+    // 休憩の開始によって終わった作業記録であること
+    if(Math.abs(new Date(prev.end).getTime()-new Date(last.start).getTime()) > 60000) return null;
+    return prev.taskId;
+  }
+  Object.keys(staffInfo).forEach(function(sid){
+    var info = staffInfo[sid];
+    if(info.currentTaskId && info.currentTaskId!=='BREAK') return; // 作業中の人はそのまま
+    if(!info.present || info.remainMin<=0) return;                 // 退勤・勤務終了
+    if(pendingConfirmedByStaff[sid]) return;                        // 管理者が配置を確定済み(確定した配置を優先)
+    var tid = taskBeforeBreak(sid);
+    if(!tid || !taskMap[tid]) return;                               // 当日の対象外になった作業
+    if(taskCompletionFor(day, tid)) return;                         // 作業が完了している
+    info.onBreak = info.currentTaskId==='BREAK';
+    info.currentTaskId = tid;
+    info.continuingAfterBreak = true;
+  });
 
   // ---- 作業ごとの計算(CSV予定数量がある作業) ----
   var dayEndMs = defaultShiftEndMs(day, shift);
@@ -3708,8 +3744,11 @@ function computeTodayStaffingPlan(ctx){
     var plannedWorkers = confirmed.filter(function(it){ return it.progress==='pending' && it.taskId===t.id && staffInfo[it.staffId] && staffInfo[it.staffId].currentTaskId!==t.id; })
       .map(function(it){ return capacityFor(it.staffId, t.id, deadlineMs); });
     var capacity = workers.concat(plannedWorkers).reduce(function(a,w){ return a+w.capQty; }, 0);
+    // 休憩中の担当者は今の処理能力は0だが、休憩明けに作業を続けるため、不足数量はその分を含めて判断する
+    // (休憩で一時的に0人分になったことを理由に、不足・追加配置を出さない)
+    var breakCapacity = workers.concat(plannedWorkers).reduce(function(a,w){ return a+(w.breakCapQty||0); }, 0);
     var perPersonQty = rate ? rate*remainTimeMin/60 : null;
-    var shortage = rate ? Math.max(0, remaining-capacity) : null;
+    var shortage = rate ? Math.max(0, remaining-capacity-breakCapacity) : null;
     // 必要人数・追加人数は「人数」ではなく処理能力(capacity)から判断する。capacity は各作業者の
     // 勤務終了(締切があれば早い方)までの休憩を除いた実働時間 × 生産性の合計なので、途中で退勤する人は
     // その分だけ少なく数えられている。不足数量(shortage)を、新しく入る人1人分の処理可能数量で割って追加人数を出す。
@@ -3733,7 +3772,7 @@ function computeTodayStaffingPlan(ctx){
       plannedQty: planned, primaryCount: totals.primaryCount, completedQty: completed, completedAt: comp ? comp.at : null,
       remainingQty: remaining, rate: rate, rateBasis: avg.basis, sampleCount: avg.sampleCount,
       remainTimeMin: remainTimeMin, perPersonQty: perPersonQty,
-      workers: workers, plannedWorkers: plannedWorkers, currentCount: workers.length, capacity: capacity,
+      workers: workers, plannedWorkers: plannedWorkers, currentCount: workers.length, capacity: capacity, breakCapacity: breakCapacity,
       shortageQty: shortage, neededPeople: neededPeople,
       additionalNeeded: additionalNeeded,
       proposals: [], status: null, etaMs: null, etaWithProposalsMs: null, workerEta: null
@@ -3746,6 +3785,7 @@ function computeTodayStaffingPlan(ctx){
   function candidateTier(sid){
     var info = staffInfo[sid];
     if(!info || !info.present || info.excluded || info.remainMin<=0 || used[sid] || pendingConfirmedByStaff[sid]) return null;
+    if(info.onBreak) return null; // 休憩中で休憩前の作業を担当している人は、別作業の候補にしない
     var cur = info.currentTaskId;
     if(!cur || cur==='BREAK') return 1;
     var curTask = taskMap[cur] || backlog.find(function(t){ return t.id===cur; });
@@ -3796,7 +3836,11 @@ function computeTodayStaffingPlan(ctx){
     if(a.deadlineMs===null && b.deadlineMs!==null) return 1;
     return (b.shortageQty||0)-(a.shortageQty||0);
   };
+  // 自動休憩の時間帯は、追加の配置案を作らない(休憩中の人を動かさず、休憩明けに通常どおり再計算する)
+  var brkStartMs = (brk && brk.enabled && brk.start && brk.end) ? new Date(dateStr+'T'+brk.start+':00').getTime() : null;
+  var inBreakWindow = brkStartMs!==null && breakEndMs!==null && breakEndMs>brkStartMs && nowMs>=brkStartMs && nowMs<breakEndMs;
   calcs.slice().sort(byPriority).forEach(function(calc){
+    if(inBreakWindow) return;
     if(calc.remainingQty<=0) return;
     if(!calc.rate){
       // 生産性未設定: 必要人数は計算できない。誰もいなければ空いている人を1名だけ配置候補にする
@@ -3822,6 +3866,7 @@ function computeTodayStaffingPlan(ctx){
   var idleShortage = {};
   idleWorkTasks.forEach(function(t){ var c = calcByTask[t.id]; idleShortage[t.id] = c ? (c.rate ? Math.max(0, c.shortageQty - c.proposals.reduce(function(a,p){ return a+(p.capQty||0); }, 0)) : Infinity) : Infinity; });
   Object.keys(staffInfo).forEach(function(sid){
+    if(inBreakWindow) return;
     if(candidateTier(sid)!==1) return;
     var target = idleWorkTasks.find(function(t){ return idleShortage[t.id]>0.01; });
     if(!target) return;
@@ -3848,6 +3893,7 @@ function computeTodayStaffingPlan(ctx){
       }), nowMs, brk, dateStr);
       if(!c.rate) c.status = 'noProductivity';
       else if(c.limitMs<=nowMs) c.status = 'overdue';
+      else if(c.shortageQty>0.01 && inBreakWindow) c.status = 'breakHold'; // 休憩中は配置案を出さず、休憩明けに再計算
       else if(c.shortageQty>0.01 && !c.proposals.length) c.status = 'shortNoCandidate';
       else if(c.shortageQty>0.01) c.status = 'short';
       else c.status = 'ok';
@@ -3861,7 +3907,7 @@ function computeTodayStaffingPlan(ctx){
   });
 
   return {
-    date: dateStr, nowMs: nowMs, generatedAt: now.toISOString(),
+    date: dateStr, nowMs: nowMs, generatedAt: now.toISOString(), breakHold: inBreakWindow,
     tasks: calcs, taskById: calcByTask, idleWorkTasks: idleWorkTasks.map(function(t){ return { taskId: t.id, name: t.name, idlePriorityLevel: t.idlePriorityLevel||3 }; }),
     proposals: proposals, confirmed: confirmed, staff: staffInfo,
     productivityMissing: calcs.filter(function(c){ return !c.rate && c.remainingQty>0; }).map(function(c){ return c.taskId; })
@@ -5607,7 +5653,7 @@ function fmtMinutesJa(min){
   return h ? (h+'時間'+(r?r+'分':'')) : (r+'分');
 }
 var STAFFING_STATUS_LABELS = {
-  done: '✅ 完了', ok: '🟢 足りている', short: '🟠 不足(追加案あり)', shortNoCandidate: '🔴 不足(追加できる人がいません)',
+  done: '✅ 完了', ok: '🟢 足りている', short: '🟠 不足(追加案あり)', shortNoCandidate: '🔴 不足(追加できる人がいません)', breakHold: '⏸ 休憩中(休憩後に再計算)',
   noProductivity: '⚪ 生産性未設定', overdue: '🔴 締切超過'
 };
 /* ---------- 人員配置の表示(UIのみ) ----------
@@ -5619,7 +5665,7 @@ function staffingOverview(plan){
   // 対応が必要な作業: 人員不足・締切超過、または優先作業への配置案(手待ち作業への配置案を除く)がある作業
   var needAction = sorted.filter(function(c){
     if(c.remainingQty<=0) return false;
-    if(c.status==='short' || c.status==='shortNoCandidate' || c.status==='overdue') return true;
+    if(c.status==='short' || c.status==='shortNoCandidate' || c.status==='overdue' || c.status==='breakHold') return true;
     return c.proposals.some(function(p){ return p.tier!=='next'; });
   });
   var needIds = {}; needAction.forEach(function(c){ needIds[c.taskId] = true; });
@@ -5735,6 +5781,7 @@ function renderStaffing(){
     if(c.status==='shortNoCandidate') warn = '<div class="stf-warn">⚠ 追加で配置できる人がいません(出勤・勤務時間・手待ち作業の人を確認してください)</div>';
     else if(c.status==='overdue') warn = '<div class="stf-warn">⚠ 締切を過ぎています</div>';
     else if(!c.rate) warn = '<div class="stf-warn">生産性が未設定のため、必要人数を計算できません(実績がたまると自動で計算されます)</div>';
+    else if(c.status==='breakHold') warn = '<div class="stf-warn" style="color:var(--slate-500);">⏸ 休憩中のため、追加の配置案は休憩終了後に計算します</div>';
     return '<div class="stf-card'+(danger?' is-danger':'')+'" data-staffing-task="'+esc(c.taskId)+'">'+
       '<div><span class="stf-card-name">'+(danger?'🔴 ':'🟠 ')+esc(c.name)+'</span>'+(c.deadline?'<span class="stf-card-sub">締切 '+esc(c.deadline)+'</span>':'')+'</div>'+
       nums+etaHtml+people+warn+
@@ -5820,7 +5867,7 @@ function renderStaffing(){
       '現在人数 '+c.currentCount+'人'+(workersText?'('+workersText+')':'')+(c.plannedWorkers.length?' + 確定済みで未開始 '+c.plannedWorkers.length+'人('+plannedText+')':''),
       '現在時刻 '+esc(nowText)+' / '+limitText+' / 残り時間 '+fmtMinutesJa(c.remainTimeMin),
       '1人あたり処理可能数量 '+(c.perPersonQty!==null?formatNum(Math.round(c.perPersonQty))+esc(c.unit):'―'),
-      '現在の総処理能力 '+formatNum(Math.round(c.capacity))+esc(c.unit),
+      '現在の総処理能力 '+formatNum(Math.round(c.capacity))+esc(c.unit)+(c.breakCapacity ? '(休憩中の担当者は0。休憩明けの処理能力 '+formatNum(Math.round(c.breakCapacity))+esc(c.unit)+' は不足数量の計算に含めています)' : ''),
       '不足数量 '+(c.shortageQty===null?'―(生産性未設定)':formatNum(Math.ceil(c.shortageQty))+esc(c.unit)),
       '必要人数 '+(c.neededPeople===null?'―':c.neededPeople+'人')+' / 追加人数 '+(c.additionalNeeded===null?'―':c.additionalNeeded+'人'),
       '追加配置 → '+(c.proposals.length ? c.proposals.map(function(p){ return esc(p.name)+'さん('+esc(staffingTierText(p))+(p.capQty!==null?'・処理見込み'+formatNum(Math.round(p.capQty))+esc(c.unit):'')+')'; }).join('・') : 'なし'),
@@ -5842,7 +5889,7 @@ function renderStaffing(){
 
   return '<div class="mgr-wrap">'+
     '<div class="panel" id="staffingPanel">'+
-      '<div class="stf-head"><div class="panel-title">👥 人員配置</div><div class="stf-asof">'+esc(nowText)+'時点・自動計算</div></div>'+
+      '<div class="stf-head"><div class="panel-title">👥 人員配置</div><div class="stf-asof">'+esc(nowText)+'時点・自動計算'+(plan.breakHold?'・休憩中(配置案は休憩終了後)':'')+'</div></div>'+
       summaryHtml+
       noneHtml+
       needSection+
@@ -9709,6 +9756,22 @@ function renderInput(){
           '<button type="button" class="add-btn" data-suggest-start="'+esc(myNext.taskId)+'">次の作業を開始</button>'+
         '</div>'+
         (hasCurrent ? '<div class="pool-hint" style="margin-top:6px;">次の作業を開始すると、今の作業は完了になります。</div>' : '')+
+      '</div>';
+    }
+  }
+  // 休憩が終わり、休憩前の作業(未完了)をまだ再開していない場合の案内。確定済みの作業指示があればそちらを優先する
+  if(!workInstructionBanner && workerPlan && !log){
+    var myPlanInfo = workerPlan.staff[state.activeStaffId];
+    if(myPlanInfo && myPlanInfo.continuingAfterBreak){
+      var resumeT = taskById(myPlanInfo.currentTaskId);
+      var resumeEta = planEtaText(workerPlan, myPlanInfo.currentTaskId);
+      workInstructionBanner = '<div class="next-suggest-banner" id="workerResumeTask">'+
+        '<div class="next-suggest-title">⏯ 休憩前の作業を継続</div>'+
+        '<div class="next-suggest-task">'+esc(resumeT.name)+'を再開してください</div>'+
+        (resumeEta ? '<div class="next-suggest-meta">完了予定 '+esc(resumeEta)+'</div>' : '')+
+        '<div class="next-suggest-actions">'+
+          '<button type="button" class="add-btn" data-suggest-start="'+esc(myPlanInfo.currentTaskId)+'">作業を再開</button>'+
+        '</div>'+
       '</div>';
     }
   }

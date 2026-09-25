@@ -2979,7 +2979,8 @@ function ensureTemplateTasksForDateSync(dateStr){
     // IDは「テンプレートID_作業日」で決定的に作る。複数の端末がほぼ同時に同じ日の
     // 作業を生成しても同じIDになり、保存時のマージで1件にまとまる(重複・ID消失を防ぐ)。
     state.backlog.push({id:tmpl.id+'_'+dateStr, name:tmpl.name, unit:tmpl.unit, color:tmpl.color, workDate:dateStr, archived:false, fromTemplate:tmpl.id, subcategories:tmpl.subcategories||[], category:taskCategory(tmpl),
-      deadline: tmpl.deadline||null, priorityLevel: tmpl.priorityLevel||4, idleLikely: tmpl.idleLikely===true, idlePriorityLevel: tmpl.idlePriorityLevel||3});
+      deadline: tmpl.deadline||null, priorityLevel: tmpl.priorityLevel||4, idleLikely: tmpl.idleLikely===true, idlePriorityLevel: tmpl.idlePriorityLevel||3,
+      staffingBasis: staffingBasisOf(tmpl)});
     existingKeys[key] = true;
     changed = true;
   });
@@ -3107,6 +3108,21 @@ function migrateProductivityMasterToTemplateKeys(master){
       t.byStaff[sid].totalQty += s.totalQty||0;
       t.byStaff[sid].totalHours += s.totalHours||0;
       t.byStaff[sid].sampleCount += s.sampleCount||0;
+      Object.keys(s.byBasis||{}).forEach(function(b){
+        if(!t.byStaff[sid].byBasis) t.byStaff[sid].byBasis = {};
+        if(!t.byStaff[sid].byBasis[b]) t.byStaff[sid].byBasis[b] = { totalQty:0, totalHours:0, sampleCount:0 };
+        t.byStaff[sid].byBasis[b].totalQty += s.byBasis[b].totalQty||0;
+        t.byStaff[sid].byBasis[b].totalHours += s.byBasis[b].totalHours||0;
+        t.byStaff[sid].byBasis[b].sampleCount += s.byBasis[b].sampleCount||0;
+      });
+    });
+    // 人員配置の基準(件数・明細数)ごとの生産性も同じように合算する(ここで引き継がないと読み込み時に消える)
+    Object.keys(entry.byBasis||{}).forEach(function(b){
+      if(!t.byBasis) t.byBasis = {};
+      if(!t.byBasis[b]) t.byBasis[b] = { totalQty:0, totalHours:0, sampleCount:0 };
+      t.byBasis[b].totalQty += entry.byBasis[b].totalQty||0;
+      t.byBasis[b].totalHours += entry.byBasis[b].totalHours||0;
+      t.byBasis[b].sampleCount += entry.byBasis[b].sampleCount||0;
     });
     Object.keys(entry.bySubcat||{}).forEach(function(scName){
       var sc = entry.bySubcat[scName];
@@ -3178,6 +3194,20 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume){
     m.taskAverage.totalQty += qty;
     m.taskAverage.totalHours += taskHours;
     m.taskAverage.sampleCount += 1;
+    // 人員配置の基準が件数・明細数の作業用に、同じ作業時間で件数・明細数の生産性も集計する
+    // (ピース数は上の taskAverage。マスタは毎回ゼロから作り直すため二重加算にはならない)
+    if(!m.byBasis) m.byBasis = {};
+    var basisQtys = {};
+    STAFFING_BASIS_ORDER.forEach(function(b){
+      if(b==='pieces') return;
+      var bq = qtyForBasis(wvTotals, b);
+      if(!bq) return;
+      basisQtys[b] = bq;
+      if(!m.byBasis[b]) m.byBasis[b] = { totalQty:0, totalHours:0, sampleCount:0 };
+      m.byBasis[b].totalQty += bq;
+      m.byBasis[b].totalHours += taskHours;
+      m.byBasis[b].sampleCount += 1;
+    });
 
     // その日その作業に従事したスタッフ一覧(内訳の有無に関わらずtaskId単位)
     var staffIdsOnTask = Object.keys(agg.perStaff).filter(function(sid){
@@ -3192,6 +3222,13 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume){
       m.byStaff[sid].totalQty += qty;
       m.byStaff[sid].totalHours += staffHours;
       m.byStaff[sid].sampleCount += 1;
+      Object.keys(basisQtys).forEach(function(b){
+        if(!m.byStaff[sid].byBasis) m.byStaff[sid].byBasis = {};
+        if(!m.byStaff[sid].byBasis[b]) m.byStaff[sid].byBasis[b] = { totalQty:0, totalHours:0, sampleCount:0 };
+        m.byStaff[sid].byBasis[b].totalQty += basisQtys[b];
+        m.byStaff[sid].byBasis[b].totalHours += staffHours;
+        m.byStaff[sid].byBasis[b].sampleCount += 1;
+      });
     }
   });
   return master;
@@ -3236,10 +3273,45 @@ function subcatProductivityRateFor(master, taskId, subcatName){
   }
   return { rate: sm.taskAverage.totalQty/sm.taskAverage.totalHours, unit: sm.unit, sampleCount: sm.taskAverage.sampleCount };
 }
-function productivityRateFor(master, taskId, staffId){
+/* ---------- 人員配置の作業量の基準(ピース数・件数・明細数) ----------
+   作業マスタの staffingBasis で選ぶ。未設定は 'pieces'(従来どおり出荷引当数の合計)。
+   予定数量・完了数量・生産性・処理能力・不足・必要人数・完了予定を、選んだ基準の数量で統一して計算する。
+   ケースはCSVに予定ケース数が無いため対象外(予定ケース数を取得できるようになったら、ここに追加する)。 */
+var STAFFING_BASES = {
+  pieces: { field:'totalQty', label:'ピース', name:'ピース数(出荷引当数の合計)' },
+  count:  { field:'primaryCount', label:'件', vcLabel:'PO', name:'件数(荷主出荷NOの数・VCはPO数)' },
+  lines:  { field:'lineCount', label:'明細', name:'明細数(CSVの明細行の数)' }
+};
+var STAFFING_BASIS_ORDER = ['pieces','count','lines'];
+function staffingBasisOf(task){
+  var b = task && task.staffingBasis;
+  return STAFFING_BASES[b] ? b : 'pieces';
+}
+function qtyForBasis(totals, basis){
+  var def = STAFFING_BASES[basis] || STAFFING_BASES.pieces;
+  return (totals && totals[def.field]) || 0;
+}
+function basisUnitLabel(basis, isVc){
+  var def = STAFFING_BASES[basis] || STAFFING_BASES.pieces;
+  return (isVc && def.vcLabel) ? def.vcLabel : def.label;
+}
+/* basis を省略、または 'pieces' の場合は従来どおり(taskAverage・byStaff = ピース数)。
+   'count'・'lines' の場合は、同じ実績から集計した byBasis の生産性を使う。 */
+function productivityRateFor(master, taskId, staffId, basis){
   var key = resolveProductivityKey(taskId);
   var m = master && master[key];
   if(!m) return { rate:null, basis:'none', sampleCount:0 };
+  if(basis && basis!=='pieces'){
+    var sb = staffId && m.byStaff && m.byStaff[staffId] && m.byStaff[staffId].byBasis && m.byStaff[staffId].byBasis[basis];
+    if(sb && sb.sampleCount>=PRODUCTIVITY_MIN_SAMPLES && sb.totalHours>0){
+      return { rate: sb.totalQty/sb.totalHours, basis:'individual', sampleCount: sb.sampleCount };
+    }
+    var tb = m.byBasis && m.byBasis[basis];
+    if(tb && tb.sampleCount>=1 && tb.totalHours>0){
+      return { rate: tb.totalQty/tb.totalHours, basis:'taskAverage', sampleCount: tb.sampleCount };
+    }
+    return { rate:null, basis:'none', sampleCount:0 };
+  }
   if(staffId && m.byStaff && m.byStaff[staffId] && m.byStaff[staffId].sampleCount>=PRODUCTIVITY_MIN_SAMPLES){
     var s = m.byStaff[staffId];
     return { rate: s.totalQty/s.totalHours, basis:'individual', sampleCount: s.sampleCount };
@@ -3657,6 +3729,12 @@ function computeTodayStaffingPlan(ctx){
   var now = ctx.now || new Date(), nowMs = now.getTime(), dateStr = day.date;
   var todayTasks = backlog.filter(function(t){ return t.workDate===dateStr && !t.archived; });
   var taskMap = {}; todayTasks.forEach(function(t){ taskMap[t.id] = t; });
+  // VCの作業か(件数の単位を「PO」と表示するため。isVcKindTask と同じ判定を、計算に渡されたデータで行う)
+  function isVcTaskIn(t){
+    if(t && t.taskKind) return t.taskKind==='vc';
+    var imp = wvActiveImports(wv).find(function(i){ return i.taskId===t.id; });
+    return !!(imp && imp.taskKind==='vc');
+  }
 
   // ---- 作業者の状態 ----
   var openByStaff = {};
@@ -3677,7 +3755,8 @@ function computeTodayStaffingPlan(ctx){
     var info = staffInfo[sid];
     var endMs = (deadlineMs!==null && deadlineMs!==undefined) ? Math.min(deadlineMs, info.shiftEndMs) : info.shiftEndMs;
     var availMin = workingMinutesExcludingBreaks(nowMs, endMs, brk, dateStr);
-    var p = productivityRateFor(master, taskId, sid);
+    // 生産性は、その作業の人員配置の基準(ピース数・件数・明細数)の数量/人時
+    var p = productivityRateFor(master, taskId, sid, staffingBasisOf(taskMap[taskId]));
     var rate = (p.rate && p.rate>0) ? p.rate : null;
     // 休憩中の人(休憩前の作業の担当として保持)は、担当人数には数えるが、今の処理能力には数えない
     var capQty = (rate && !info.onBreak) ? rate*availMin/60 : 0;
@@ -3729,11 +3808,23 @@ function computeTodayStaffingPlan(ctx){
   var dayEndMs = defaultShiftEndMs(day, shift);
   var calcs = todayTasks.filter(function(t){ return wvTotalsForTask(wv, t.id).totalQty>0; }).map(function(t){
     var totals = wvTotalsForTask(wv, t.id);
-    var planned = totals.totalQty;
+    // 予定・完了・残りは、作業マスタで選んだ人員配置の基準の数量で統一する(未設定はピース数=従来どおり)
+    var basis = staffingBasisOf(t);
+    var planned = qtyForBasis(totals, basis);
     var comp = taskCompletionFor(day, t.id);
-    var completed = comp ? Math.min(planned, Math.max(0, comp.qty||0)) : 0;
+    // 完了記録の数量: 基準ごとの数量があればそれを使う。古い記録(ピース数のみ)は、完了時のピース数の割合で換算する
+    function completedFor(b, plannedB){
+      if(!comp) return 0;
+      var q;
+      if(comp.qtyByBasis && typeof comp.qtyByBasis[b]==='number') q = comp.qtyByBasis[b];
+      else if(b==='pieces') q = comp.qty||0;
+      else q = totals.totalQty>0 ? plannedB*Math.min(1, (comp.qty||0)/totals.totalQty) : plannedB;
+      return Math.min(plannedB, Math.max(0, q));
+    }
+    var completed = completedFor(basis, planned);
     var remaining = Math.max(0, planned-completed);
-    var avg = productivityRateFor(master, t.id, null);
+    var remainingPieces = Math.max(0, totals.totalQty-completedFor('pieces', totals.totalQty)); // 補足表示用
+    var avg = productivityRateFor(master, t.id, null, basis);
     var rate = (avg.rate && avg.rate>0) ? avg.rate : null;
     var deadlineMs = t.deadline ? new Date(dateStr+'T'+t.deadline+':00').getTime() : null;
     var limitMs = deadlineMs!==null ? deadlineMs : dayEndMs;
@@ -3766,7 +3857,10 @@ function computeTodayStaffingPlan(ctx){
       }
     }
     return {
-      taskId: t.id, name: t.name, unit: t.unit || '個', color: t.color,
+      // unit は人員配置の基準の単位(作業マスタの自由入力の単位は計算の単位として使わない)
+      taskId: t.id, name: t.name, unit: basisUnitLabel(basis, isVcTaskIn(t)), color: t.color,
+      basis: basis, basisName: STAFFING_BASES[basis].name, piecesQty: totals.totalQty, remainingPieces: remainingPieces,
+      lineCount: totals.lineCount,
       priorityLevel: (t.priorityLevel!==undefined && t.priorityLevel!==null) ? t.priorityLevel : 4,
       deadline: t.deadline || null, deadlineMs: deadlineMs, limitMs: limitMs, limitKind: deadlineMs!==null ? 'deadline' : 'shiftEnd',
       plannedQty: planned, primaryCount: totals.primaryCount, completedQty: completed, completedAt: comp ? comp.at : null,
@@ -4004,9 +4098,12 @@ function markTaskCompletedIfLastWorker(day, taskId, staffId){
   if(!taskId || taskId==='BREAK') return false;
   var others = (day.logs||[]).some(function(l){ return l.end===null && l.taskId===taskId && l.staffId!==staffId; });
   if(others) return false;
-  var planned = wvTotalsForTask(state.workVolume||emptyWorkVolume(), taskId).totalQty;
+  var totals = wvTotalsForTask(state.workVolume||emptyWorkVolume(), taskId);
+  var planned = totals.totalQty;
   if(!day.taskCompletion) day.taskCompletion = {};
-  day.taskCompletion[taskId] = { at: new Date().toISOString(), qty: planned, by: staffId };
+  // qty は従来どおりピース数。人員配置の基準(件数・明細数)で残作業量を出せるよう、基準ごとの数量も残す
+  day.taskCompletion[taskId] = { at: new Date().toISOString(), qty: planned, by: staffId,
+    qtyByBasis: { pieces: totals.totalQty, count: totals.primaryCount, lines: totals.lineCount } };
   return true;
 }
 /* 管理者用: 途中で次の作業へ移った場合などに「未完了に戻す」 */
@@ -4076,13 +4173,15 @@ async function rebuildProductivityMasterFromRecentDays(){
   var ok = await saveProductivityMaster(master);
   if(ok!==false){
     state.productivityMaster = master;
-    var meta = { updatedAt: new Date().toISOString(), basisDate: todayStr(), days: updatedDays };
+    var meta = { updatedAt: new Date().toISOString(), basisDate: todayStr(), days: updatedDays, schema: PRODUCTIVITY_SCHEMA };
     if(await persistKey('productivity-master-meta', meta)) state.productivityMeta = meta;
   }
   return { ok: ok!==false, updatedDays: updatedDays };
 }
+var PRODUCTIVITY_SCHEMA = 2; // 2: 人員配置の基準(件数・明細数)ごとの生産性(byBasis)を含む
 function productivityRefreshNeeded(meta){
   if(!meta || !meta.updatedAt) return true;
+  if(!(meta.schema>=PRODUCTIVITY_SCHEMA)) return true; // 件数・明細数の生産性がまだ無い形式なら、1回作り直す
   if(meta.basisDate!==todayStr()) return true;
   var updatedMs = new Date(meta.updatedAt).getTime();
   if(Date.now()-updatedMs < 30*60000) return false; // 30分以内に更新済みなら更新しない
@@ -5675,6 +5774,11 @@ function staffingOverview(plan){
   var others = sorted.filter(function(c){ return !needIds[c.taskId]; });
   return { presentCount: presentCount, needAction: needAction, shortTasks: shortTasks, addPeople: addPeople, idleProposals: idleProposals, others: others };
 }
+/* 基準がピース数以外の作業で、残りのピース数を補足として出す(例: 「残り 120件(600ピース)」) */
+function staffingPiecesNote(c){
+  if(!c || c.basis==='pieces' || c.remainingPieces===undefined) return '';
+  return '('+formatNum(Math.round(c.remainingPieces))+'ピース)';
+}
 /* 配置案1人分の「どこから来る人か」 */
 function staffingProposalFromText(p){
   var from = p.fromTaskId ? taskById(p.fromTaskId).name : '';
@@ -5760,7 +5864,7 @@ function renderStaffing(){
     var danger = c.status==='shortNoCandidate' || c.status==='overdue';
     var planned = c.plannedWorkers.length ? ' <span class="stf-row-meta">(確定済み・未開始 '+c.plannedWorkers.length+'人を含む)</span>' : '';
     var nums = '<div class="stf-card-nums">'+
-      '<span>残り <b>'+formatNum(c.remainingQty)+'</b>'+esc(c.unit)+'</span>'+
+      '<span>残り <b>'+formatNum(c.remainingQty)+'</b>'+esc(c.unit)+staffingPiecesNote(c)+'</span>'+
       (c.neededPeople!==null ? '<span>現在 <b>'+(c.currentCount+c.plannedWorkers.length)+'</b>人 → 必要 <b>'+c.neededPeople+'</b>人'+planned+'</span>' : '<span>現在 <b>'+(c.currentCount+c.plannedWorkers.length)+'</b>人</span>')+
       (c.additionalNeeded ? '<span class="stf-need">あと'+c.additionalNeeded+'人</span>' : '')+
       // 途中で勤務終了する人がいると「必要人数」は満たしていても処理量が足りないことがあるため、不足数量も出す
@@ -5842,7 +5946,7 @@ function renderStaffing(){
       return '<div class="stf-row" data-staffing-task="'+esc(c.taskId)+'"><span class="stf-row-main">✅ '+esc(c.name)+'</span><span class="stf-row-meta">完了'+(c.completedAt?'('+fmtClock(c.completedAt)+')':'')+'</span>'+reopen+'</div>';
     }
     var head = c.rate ? '🟢 ' : '⚪ ';
-    var meta = '残り'+formatNum(c.remainingQty)+c.unit+'・'+c.currentCount+'人'+planned;
+    var meta = '残り'+formatNum(c.remainingQty)+c.unit+staffingPiecesNote(c)+'・'+c.currentCount+'人'+planned;
     var eta = etaLine(c);
     return '<div class="stf-row" data-staffing-task="'+esc(c.taskId)+'">'+
       '<span class="stf-row-main">'+head+esc(c.name)+'</span>'+
@@ -5860,7 +5964,8 @@ function renderStaffing(){
     var limitText = c.limitKind==='deadline' ? ('締切 '+esc(c.deadline)) : ('締切なし → 勤務終了 '+esc(fmtClockMs(c.limitMs)));
     var etaNow = planEtaText(plan, c.taskId), etaAfter = staffingEtaWithProposalsText(plan, c);
     var lines = [
-      'CSV予定数量 '+formatNum(c.plannedQty)+esc(c.unit)+'(出荷'+formatNum(c.primaryCount)+'件)',
+      '人員配置の基準 '+esc(c.basisName)+'(CSV: 件数'+formatNum(c.primaryCount)+'・明細'+formatNum(c.lineCount)+'・ピース'+formatNum(c.piecesQty)+')',
+      'CSV予定数量 '+formatNum(c.plannedQty)+esc(c.unit),
       '完了数量 '+formatNum(c.completedQty)+esc(c.unit)+(c.completedAt?'('+fmtClock(c.completedAt)+'に完了扱い)':''),
       '残作業量 '+formatNum(c.remainingQty)+esc(c.unit),
       '生産性 '+(c.rate ? c.rate.toFixed(1)+esc(c.unit)+'/人時('+(c.rateBasis==='taskAverage'?'作業全体の実績':'個人実績')+'・サンプル'+c.sampleCount+'日)' : '未設定(実績不足のため計算できません)'),
@@ -10926,18 +11031,50 @@ function bindEditLogModal(m){
 }
 
 function openEditTaskModal(task){
-  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate, subcatsList: (task.subcategories||[]).slice(), subcatDraft: {name:'', unit:''}, category: taskCategory(task), fromTemplate: task.fromTemplate || null, taskKind: task.taskKind || 'normal' };
+  state.modal = { kind:'editTask', taskId: task.id, name: task.name, unit: task.unit, color: task.color, workDate: task.workDate, subcatsList: (task.subcategories||[]).slice(), subcatDraft: {name:'', unit:''}, category: taskCategory(task), fromTemplate: task.fromTemplate || null, taskKind: task.taskKind || 'normal', staffingBasis: staffingBasisOf(task),
+    // 人員配置の基準設定は、保存済みの値を画面に読み込む(読み込まないと、保存時に初期値で上書きされてしまう)
+    deadline: task.deadline || null, priorityLevel: task.priorityLevel || 4, idleLikely: task.idleLikely===true, idlePriorityLevel: task.idlePriorityLevel || 3 };
   state.suppressRender = true;
   render();
 }
 /* renderWorkMasterPriorityFieldsに対応する読み取り処理。フォームからの入力を
    task/template側の安定フィールドとして返す。 */
+/* 人員配置の基準設定の入力を、変更した時点で画面の状態(state.modal)に残す。
+   色の選択・内訳の追加などで編集画面を描き直しても、入力中の値が保存済みの値に戻らないようにする。
+   「手待ち作業」を切り替えたときは、「手待ち作業での優先度」の欄を出し入れするため描き直す
+   (その際、入力中の名前・単位も残す)。 */
+function bindWorkMasterPriorityFields(context, nameInputId, unitInputId){
+  function sync(){
+    var f = readWorkMasterPriorityFields(context);
+    if(!state.modal) return;
+    state.modal.deadline = f.deadline;
+    state.modal.priorityLevel = f.priorityLevel;
+    state.modal.idleLikely = f.idleLikely;
+    if(document.getElementById(context+'IdlePriorityLevel')) state.modal.idlePriorityLevel = f.idlePriorityLevel;
+    if(f.staffingBasis) state.modal.staffingBasis = f.staffingBasis;
+  }
+  ['Deadline','PriorityLevel','IdlePriorityLevel','StaffingBasis'].forEach(function(suffix){
+    var el = document.getElementById(context+suffix);
+    if(el) el.addEventListener('change', sync);
+  });
+  document.querySelectorAll('input[name="'+context+'IdleLikely"]').forEach(function(el){
+    el.addEventListener('change', function(){
+      sync();
+      var nameEl = document.getElementById(nameInputId), unitEl = document.getElementById(unitInputId);
+      if(state.modal && nameEl) state.modal.name = nameEl.value;
+      if(state.modal && unitEl) state.modal.unit = unitEl.value;
+      render();
+    });
+  });
+}
 function readWorkMasterPriorityFields(context){
   var deadlineInput = document.getElementById(context+'Deadline');
   var priorityInput = document.getElementById(context+'PriorityLevel');
   var idleEl = document.querySelector('input[name="'+context+'IdleLikely"]:checked');
   var idlePriorityInput = document.getElementById(context+'IdlePriorityLevel');
+  var basisInput = document.getElementById(context+'StaffingBasis');
   return {
+    staffingBasis: basisInput ? staffingBasisOf({ staffingBasis: basisInput.value }) : null,
     deadline: (deadlineInput && deadlineInput.value) ? deadlineInput.value : null,
     priorityLevel: priorityInput ? parseInt(priorityInput.value,10) : 4,
     idleLikely: idleEl ? (idleEl.value==='yes') : false,
@@ -10966,6 +11103,7 @@ async function saveEditTask(){
   task.priorityLevel = prio.priorityLevel;
   task.idleLikely = prio.idleLikely;
   task.idlePriorityLevel = prio.idlePriorityLevel;
+  if(prio.staffingBasis) task.staffingBasis = prio.staffingBasis;
   // 重要: この作業が繰り返し作業(テンプレート由来)の場合、自動人員配置に使う項目
   // (締切・優先度・手待ち作業・手待ち作業での優先度)は、日別インスタンスだけでなく
   // テンプレート自体にも反映する。これをしないと、この日だけの設定になってしまい、
@@ -10978,6 +11116,7 @@ async function saveEditTask(){
       tmpl.priorityLevel = task.priorityLevel;
       tmpl.idleLikely = task.idleLikely;
       tmpl.idlePriorityLevel = task.idlePriorityLevel;
+      tmpl.staffingBasis = staffingBasisOf(task);
       await saveTemplates(state.templates);
       // 既に生成済みの、今日以降の同じテンプレート由来の他インスタンスにも合わせておく
       state.backlog.forEach(function(other){
@@ -10986,6 +11125,7 @@ async function saveEditTask(){
           other.priorityLevel = task.priorityLevel;
           other.idleLikely = task.idleLikely;
           other.idlePriorityLevel = task.idlePriorityLevel;
+          other.staffingBasis = staffingBasisOf(task);
         }
       });
     }
@@ -11016,6 +11156,8 @@ async function deleteEditTask(){
   });
 }
 function bindEditTaskModal(m){
+  // 人員配置の基準設定(締切・優先順位・手待ち作業・作業量の基準)は、描き直しても消えないよう画面の状態に残す
+  bindWorkMasterPriorityFields('editTask', 'editTaskName', 'editTaskUnit');
   document.querySelectorAll('[data-edit-task-color]').forEach(function(el){
     el.addEventListener('click', function(){
       state.modal.color = el.getAttribute('data-edit-task-color');
@@ -11048,7 +11190,8 @@ function bindEditTaskModal(m){
 }
 
 function openEditTemplateModal(tmpl){
-  state.modal = { kind:'editTemplate', templateId: tmpl.id, name: tmpl.name, unit: tmpl.unit, color: tmpl.color, subcatsList: (tmpl.subcategories||[]).slice(), subcatDraft: {name:'', unit:''}, category: taskCategory(tmpl) };
+  state.modal = { kind:'editTemplate', templateId: tmpl.id, name: tmpl.name, unit: tmpl.unit, color: tmpl.color, subcatsList: (tmpl.subcategories||[]).slice(), subcatDraft: {name:'', unit:''}, category: taskCategory(tmpl), staffingBasis: staffingBasisOf(tmpl),
+    deadline: tmpl.deadline || null, priorityLevel: tmpl.priorityLevel || 4, idleLikely: tmpl.idleLikely===true, idlePriorityLevel: tmpl.idlePriorityLevel || 3 };
   state.suppressRender = true;
   render();
 }
@@ -11070,6 +11213,7 @@ async function saveEditTemplate(){
   tmpl.priorityLevel = tmplPrio.priorityLevel;
   tmpl.idleLikely = tmplPrio.idleLikely;
   tmpl.idlePriorityLevel = tmplPrio.idlePriorityLevel;
+  if(tmplPrio.staffingBasis) tmpl.staffingBasis = tmplPrio.staffingBasis;
   state.modal = null;
   state.suppressRender = false;
   await saveTemplates(state.templates);
@@ -11087,6 +11231,7 @@ async function saveEditTemplate(){
       task.priorityLevel = tmpl.priorityLevel;
       task.idleLikely = tmpl.idleLikely;
       task.idlePriorityLevel = tmpl.idlePriorityLevel;
+      task.staffingBasis = staffingBasisOf(tmpl);
       changed = true;
     }
   });
@@ -11127,6 +11272,7 @@ async function deleteEditTemplate(){
   });
 }
 function bindEditTemplateModal(m){
+  bindWorkMasterPriorityFields('editTmpl', 'editTmplName', 'editTmplUnit');
   document.querySelectorAll('[data-edit-tmpl-color]').forEach(function(el){
     el.addEventListener('click', function(){
       state.modal.color = el.getAttribute('data-edit-tmpl-color');
@@ -11904,6 +12050,13 @@ function renderWorkMasterPriorityFields(context, m){
       '<option value="2" '+(priorityLevel===2?'selected':'')+'>2 = 高</option>'+
       '<option value="3" '+(priorityLevel===3?'selected':'')+'>3 = 中</option>'+
       '<option value="4" '+(priorityLevel===4?'selected':'')+'>4 = 低</option>'+
+    '</select>'+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業量の基準(人員配置)</label>'+
+    '<div class="pool-hint" style="margin:0 0 6px;">人員配置の残作業量・生産性・必要人数・完了予定を、どの数量で計算するかを選びます(CSVの数量を使います)。</div>'+
+    '<select id="'+context+'StaffingBasis" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:12px;">'+
+      STAFFING_BASIS_ORDER.map(function(b){
+        return '<option value="'+b+'" '+(staffingBasisOf(m)===b?'selected':'')+'>'+esc(STAFFING_BASES[b].name)+(b==='pieces'?'(初期値)':'')+'</option>';
+      }).join('')+
     '</select>'+
     '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">手待ち作業</label>'+
     '<div class="pool-hint" style="margin:0 0 6px;">通常作業がないときに、余っているスタッフへ割り当てる作業です。</div>'+

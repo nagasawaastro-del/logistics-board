@@ -3417,7 +3417,7 @@ async function refreshDailyInstructionsForPoll(){
   var dateStr = todayStr();
   var seqAtStart = window.storage.writeSeq;
   var sug = await fetchOptionalJson('staffing-suggestion:'+dateStr);
-  var alerts = await fetchOptionalJson('reassignment-alerts:'+dateStr);
+  // 旧「配置変更指示」(reassignment-alerts:日付)は画面に出さないため読み込まない(保存済みのデータはそのまま残す)
   // 取得中に日付が変わった・この端末が書き込んだ場合は、古い内容で上書きしない
   if(dateStr!==todayStr() || state.dailyInstructionsDate!==dateStr) return;
   if(pendingSaves>0 || window.storage.writeSeq!==seqAtStart) return;
@@ -3428,8 +3428,6 @@ async function refreshDailyInstructionsForPoll(){
   }else if(sug.ok && !state.staffingSuggestion){
     state.staffingSuggestionLoaded = true;
   }
-  if(alerts.ok && Array.isArray(alerts.value)) state.reassignmentAlerts = alerts.value;
-  else if(alerts.ok && state.reassignmentAlerts===null) state.reassignmentAlerts = [];
 }
 
 /* ---------- 得意先・作業枠マスター(取引先名 → 作業枠 の自動紐付け) ---------- */
@@ -7895,6 +7893,12 @@ function bindStaffEditModal(m){
     var rosterChanged = false, dayChanged = false;
     var beforeName = s.name, beforeAtt = !!day.attendance[s.id], beforeExcluded = s.autoAssignExcluded===true;
     var beforeOwnEnd = isClockStr(s.shiftEnd) ? s.shiftEnd : '', afterOwnEnd = isClockStr(d.ownShiftEnd) ? d.ownShiftEnd : '';
+    // 色・出勤曜日・祝日休みの操作履歴用(名前・出勤・退勤時間・自動配置の対象は、下の既存の履歴で記録している)
+    function staffBasicText(){
+      var WD = ['日','月','火','水','木','金','土'];
+      return '色 '+avatarColorForStaff(s)+' / 出勤曜日 '+((s.pattern || defaultPattern()).map(function(v,i){ return v ? WD[i] : ''; }).join('') || 'なし')+' / 祝日 '+(s.offOnHolidays ? '休み' : '出勤');
+    }
+    var beforeBasic = staffBasicText();
     if(beforeOwnEnd!==afterOwnEnd){ if(afterOwnEnd) s.shiftEnd = afterOwnEnd; else delete s.shiftEnd; rosterChanged = true; }
     if(s.name!==name){ s.name = name; rosterChanged = true; }
     if(avatarColorForStaff(s)!==d.avatarColor){ s.avatarColor = d.avatarColor; rosterChanged = true; }
@@ -7902,9 +7906,11 @@ function bindStaffEditModal(m){
     if(!!s.offOnHolidays!==d.offOnHolidays){ s.offOnHolidays = d.offOnHolidays; rosterChanged = true; }
     if(beforeExcluded!==d.autoAssignExcluded){ if(d.autoAssignExcluded) s.autoAssignExcluded = true; else delete s.autoAssignExcluded; rosterChanged = true; }
     if(beforeAtt!==d.attendance){ day.attendance[s.id] = d.attendance; dayChanged = true; }
+    var beforeTodayEnd = (day.shiftEndOverrides && day.shiftEndOverrides[s.id]) || '', todayEndChanged = false;
     if(state.shiftSettings && state.shiftSettings.enabled){
       var curEnd = (day.shiftEndOverrides && day.shiftEndOverrides[s.id]) || '';
       if(curEnd!==(d.shiftEnd||'')){
+        todayEndChanged = true;
         if(!day.shiftEndOverrides) day.shiftEndOverrides = {};
         if(d.shiftEnd) day.shiftEndOverrides[s.id] = d.shiftEnd; else delete day.shiftEndOverrides[s.id];
         dayChanged = true;
@@ -7912,9 +7918,14 @@ function bindStaffEditModal(m){
     }
     state.modal = null; state.suppressRender = false;
     var ok = true;
-    if(rosterChanged) ok = (await saveRoster(state.roster))!==false && ok;
-    if(dayChanged) ok = (await saveDay(day))!==false && ok;
+    var rosterSaved = true;
+    if(rosterChanged){ rosterSaved = (await saveRoster(state.roster))!==false; ok = rosterSaved && ok; }
+    var daySaved = true;
+    if(dayChanged){ daySaved = (await saveDay(day))!==false; ok = daySaved && ok; }
+    if(todayEndChanged && daySaved) await appendAuditLog({ action:'本日の勤務終了時刻の設定', target: s.name, before: beforeTodayEnd||'未設定', after: (d.shiftEnd||'')||'未設定' });
     if(beforeName!==s.name) await appendAuditLog({ action:'スタッフ名変更', target: s.name, before: beforeName, after: s.name });
+    var afterBasic = staffBasicText();
+    if(rosterSaved && beforeBasic!==afterBasic) await appendAuditLog({ action:'スタッフ設定を変更', target: s.name, before: beforeBasic, after: afterBasic });
     if(beforeAtt!==d.attendance) await appendAuditLog({ action:'出勤状態変更', target: s.name, before: (beforeAtt?'出勤中':'欠勤'), after: (d.attendance?'出勤中':'欠勤') });
     if(beforeOwnEnd!==afterOwnEnd) await appendAuditLog({ action:'退勤時間の設定', target: s.name, before: beforeOwnEnd||'未設定', after: afterOwnEnd||'未設定' });
     if(beforeExcluded!==d.autoAssignExcluded) await appendAuditLog({ action:'自動配置の対象設定', target: s.name, before: beforeExcluded?'対象外':'対象', after: d.autoAssignExcluded?'対象外':'対象' });
@@ -7992,7 +8003,8 @@ function bindStaffSettingsPanel(){
       state.roster.push({id:uid(), name:name, archived:false, pattern:defaultPattern()});
       state.newStaffDraftName = '';
       state.suppressRender = false;
-      await saveRoster(state.roster);
+      var staffAdded = await saveRoster(state.roster);
+      if(staffAdded!==false) await appendAuditLog({ action:'スタッフを追加', target: name, before:null, after:'追加' });
       render();
     });
   }
@@ -8434,7 +8446,7 @@ function renderManager(){
       '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>件数</th><th></th></tr></thead><tbody>'+logRows+'</tbody></table></div>'+
     '</div>'+
     '</details>'+
-    '<div class="pool-hint" style="margin-top:16px;text-align:center;">自動出退勤・休憩・CSV取込バッチ管理・実績目標・管理者PINは、トップ画面の「⚙️ 設定」から変更できます。</div>'+
+    '<div class="pool-hint" style="margin-top:16px;text-align:center;">スタッフ・作業マスタ・勤務時間と休憩・実績目標は、上部メニューの「⚙️ 設定」から変更できます。</div>'+
   '</div>';
 }
 
@@ -8557,7 +8569,6 @@ var SETTINGS_HUB_TABS = [
   { key:'staff', label:'スタッフ設定', icon:'🧑' },
   { key:'task', label:'作業マスタ', icon:'📦' },
   { key:'shift', label:'勤務時間設定', icon:'⏰' },
-  { key:'productivity', label:'生産性設定', icon:'📈' },
   { key:'pricing', label:'単価・人件費設定', icon:'💴' },
   { key:'customerMapping', label:'得意先・作業枠マスター', icon:'🔗' },
   { key:'kintoneProduct', label:'kintone連携設定', icon:'🔌' },
@@ -8595,8 +8606,6 @@ function renderSettingsHub(){
       content = renderCustomerMappingPanel();
     }else if(state.settingsHubTab==='shift'){
       content = panels.shiftPanel + panels.breakPanel;
-    }else if(state.settingsHubTab==='productivity'){
-      content = '<div class="pool-hint">生産性データの内容・更新は、管理者→生産性の画面で確認・更新できます。ここでは設定できる項目は現在ありません。</div>';
     }else if(state.settingsHubTab==='system'){
       content = panels.accountInfoHtml + panels.backupPanel;
     }else{ // basic
@@ -8855,14 +8864,16 @@ function bindManager(){
       if(!name){ newTaskNameInput.style.borderColor = '#F04438'; newTaskNameInput.focus(); return; }
       var unit = newTaskUnitInput ? ((newTaskUnitInput.value||'件').trim() || '件') : '件';
       var subcats = (state.newTaskDraftSubcats||[]).slice();
-      state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:managerActiveDate(), archived:false, subcategories:subcats, category:state.newTaskDraftCategory});
+      var boardDate = managerActiveDate();
+      state.backlog.push({id:uid(), name:name, unit:unit, color:state.newTaskColor, workDate:boardDate, archived:false, subcategories:subcats, category:state.newTaskDraftCategory});
       state.newTaskColIndex = -1;
       state.newTaskDraftName = '';
       state.newTaskDraftUnit = '件';
       state.newTaskDraftSubcats = [];
       state.newTaskSubcatDraft = {name:'', unit:''};
       state.suppressRender = false;
-      await saveBacklog(state.backlog);
+      var boardSaved = await saveBacklog(state.backlog);
+      if(boardSaved!==false) await appendAuditLog({ action:'今日の作業を追加', target: name, before:null, after:'今日の状況から追加('+boardDate+')' });
       render();
     });
   }
@@ -8970,11 +8981,17 @@ function bindSettings(){
   var shiftEnabledInput = document.getElementById('shiftEnabledInput');
   var shiftStartInput = document.getElementById('shiftStartInput');
   var shiftEndInput = document.getElementById('shiftEndInput');
+  // 操作履歴の表示用(例: 「有効 09:00〜18:00」)
+  function timeSettingsText(s){ return s ? ((s.enabled?'有効':'無効')+' '+s.start+'〜'+s.end) : '未設定'; }
   function saveShiftSettingsFromInputs(){
-    saveShiftSettings({
+    var before = timeSettingsText(state.shiftSettings);
+    var next = {
       enabled: !!(shiftEnabledInput && shiftEnabledInput.checked),
       start: (shiftStartInput && shiftStartInput.value) || '09:00',
       end: (shiftEndInput && shiftEndInput.value) || '18:00'
+    };
+    saveShiftSettings(next).then(function(ok){
+      if(ok!==false && before!==timeSettingsText(next)) appendAuditLog({ action:'勤務時間設定を変更', target:'自動出退勤', before: before, after: timeSettingsText(next) });
     });
   }
   if(shiftEnabledInput) shiftEnabledInput.addEventListener('change', function(){
@@ -8995,10 +9012,14 @@ function bindSettings(){
   var breakStartInput = document.getElementById('breakStartInput');
   var breakEndInput = document.getElementById('breakEndInput');
   function saveBreakSettingsFromInputs(){
-    saveBreakSettings({
+    var before = timeSettingsText(state.breakSettings);
+    var next = {
       enabled: !!(breakEnabledInput && breakEnabledInput.checked),
       start: (breakStartInput && breakStartInput.value) || '12:00',
       end: (breakEndInput && breakEndInput.value) || '13:00'
+    };
+    saveBreakSettings(next).then(function(ok){
+      if(ok!==false && before!==timeSettingsText(next)) appendAuditLog({ action:'休憩設定を変更', target:'自動休憩', before: before, after: timeSettingsText(next) });
     });
   }
   if(breakEnabledInput) breakEnabledInput.addEventListener('change', function(){
@@ -9023,7 +9044,10 @@ function bindSettings(){
     achievementTargetInput.addEventListener('change', function(){
       var v = parseInt(achievementTargetInput.value,10);
       if(isNaN(v) || v<0) v = 0;
-      saveAchievementSettings({ monthlyTargetPieces: v });
+      var before = (state.achievementSettings && state.achievementSettings.monthlyTargetPieces);
+      saveAchievementSettings({ monthlyTargetPieces: v }).then(function(ok){
+        if(ok!==false && before!==v) appendAuditLog({ action:'月間目標を変更', target:'実績画面の月間目標(出荷ピース数)', before: before==null ? '未設定' : String(before), after: String(v) });
+      });
     });
   }
 
@@ -9246,7 +9270,8 @@ function bindRegister(){
       state.regDraftSubcats = [];
       state.regSubcatDraft = {name:'', unit:''};
       state.suppressRender = false;
-      await saveBacklog(state.backlog);
+      var regSaved = await saveBacklog(state.backlog);
+      if(regSaved!==false) await appendAuditLog({ action:'作業マスタを追加', target: name, before:null, after:'単発作業 '+workDate });
       render();
     });
   }
@@ -9316,7 +9341,8 @@ function bindRegister(){
       state.tmplDraftSubcats = [];
       state.tmplSubcatDraft = {name:'', unit:''};
       state.suppressRender = false;
-      await saveTemplates(state.templates);
+      var tmplSaved = await saveTemplates(state.templates);
+      if(tmplSaved!==false) await appendAuditLog({ action:'作業マスタを追加', target: name, before:null, after:'繰り返し作業' });
       await ensureTemplateTasksForUpcoming(14);
       render();
     });
@@ -11558,10 +11584,23 @@ function readWorkMasterPriorityFields(context){
     idlePriorityLevel: idlePriorityInput ? parseInt(idlePriorityInput.value,10) : 3
   };
 }
+/* 作業マスタの操作履歴用の要約。保存前後で比べて、変更があった場合だけ「作業マスタを編集」を記録する */
+function workMasterAuditText(t){
+  var WD = ['日','月','火','水','木','金','土'];
+  var basis = STAFFING_BASES[staffingBasisOf(t)];
+  return t.name+' / 単位 '+t.unit+
+    (t.workDate ? ' / 日付 '+t.workDate : '')+
+    (t.pattern ? ' / 曜日 '+(t.pattern.map(function(v,i){ return v ? WD[i] : ''; }).join('') || 'なし') : '')+
+    ' / 優先 '+(t.priorityLevel||'-')+' / 締切 '+(t.deadline||'なし')+' / 基準 '+(basis ? basis.label : '-')+
+    (t.idleLikely ? ' / 手待ち作業(優先 '+(t.idlePriorityLevel||'-')+')' : '')+
+    ' / 区分 '+(t.category||'-')+(t.taskKind==='vc' ? ' / VC' : '')+' / 色 '+t.color+
+    ((t.subcategories||[]).length ? ' / 内訳 '+t.subcategories.map(subcatName).join('・') : '');
+}
 async function saveEditTask(){
   var m = state.modal;
   var task = state.backlog.find(function(t){ return t.id===m.taskId; });
   if(!task){ state.modal=null; state.suppressRender=false; render(); return; }
+  var auditBefore = workMasterAuditText(task);
   var nameInput = document.getElementById('editTaskName');
   var unitInput = document.getElementById('editTaskUnit');
   var dateInput = document.getElementById('editTaskDate');
@@ -11609,7 +11648,9 @@ async function saveEditTask(){
   }
   state.modal = null;
   state.suppressRender = false;
-  await saveBacklog(state.backlog);
+  var editSaved = await saveBacklog(state.backlog);
+  var auditAfter = workMasterAuditText(task);
+  if(editSaved!==false && auditAfter!==auditBefore) await appendAuditLog({ action:'作業マスタを編集', target: task.name, before: auditBefore, after: auditAfter });
   render();
 }
 async function deleteEditTask(){
@@ -11621,13 +11662,16 @@ async function deleteEditTask(){
   task.archived = true;
   state.modal = null;
   state.suppressRender = false;
-  await saveBacklog(state.backlog);
+  var delSaved = await saveBacklog(state.backlog);
+  // 作業マスタ一覧の×ボタンでの削除と同じ操作履歴の形式で記録する
+  if(delSaved!==false) await appendAuditLog({ action:'作業削除', target: taskName, before:'有効', after:'削除' });
   render();
   showToast('「'+taskName+'」を削除しました', '元に戻す', async function(){
     var cur = state.backlog.find(function(x){ return x.id===taskId; });
     if(cur){
       cur.archived = false;
-      await saveBacklog(state.backlog);
+      var undoSaved = await saveBacklog(state.backlog);
+      if(undoSaved!==false) await appendAuditLog({ action:'作業削除の取り消し', target: taskName, before:'削除', after:'有効' });
       render();
     }
   });
@@ -11674,10 +11718,12 @@ function openEditTemplateModal(tmpl){
   state.suppressRender = true;
   render();
 }
-async function saveEditTemplate(){
+async function saveEditTemplate(auditBeforeText){
   var m = state.modal;
   var tmpl = state.templates.find(function(t){ return t.id===m.templateId; });
   if(!tmpl){ state.modal=null; state.suppressRender=false; render(); return; }
+  // 曜日は保存ボタンの処理で先に反映されるため、変更前の要約はそこで作って渡される
+  var auditBefore = (typeof auditBeforeText==='string') ? auditBeforeText : workMasterAuditText(tmpl);
   var nameInput = document.getElementById('editTmplName');
   var unitInput = document.getElementById('editTmplUnit');
   var name = (nameInput.value||'').trim();
@@ -11695,7 +11741,9 @@ async function saveEditTemplate(){
   if(tmplPrio.staffingBasis) tmpl.staffingBasis = tmplPrio.staffingBasis;
   state.modal = null;
   state.suppressRender = false;
-  await saveTemplates(state.templates);
+  var tmplEditSaved = await saveTemplates(state.templates);
+  var auditAfter = workMasterAuditText(tmpl);
+  if(tmplEditSaved!==false && auditAfter!==auditBefore) await appendAuditLog({ action:'作業マスタを編集', target: tmpl.name+'(繰り返し作業)', before: auditBefore, after: auditAfter });
 
   var today = todayStr();
   var changed = false;
@@ -11725,7 +11773,7 @@ async function deleteEditTemplate(){
   var templateId = tmpl.id;
   var tmplName = tmpl.name;
   tmpl.archived = true;
-  await saveTemplates(state.templates);
+  var tmplDelSaved = await saveTemplates(state.templates);
   var today = todayStr();
   var cascadedIds = [];
   state.backlog.forEach(function(task){
@@ -11735,18 +11783,21 @@ async function deleteEditTemplate(){
     }
   });
   if(cascadedIds.length) await saveBacklog(state.backlog);
+  // 作業マスタ一覧の×ボタンでの削除と同じ操作履歴の形式で記録する
+  if(tmplDelSaved!==false) await appendAuditLog({ action:'繰り返し作業削除', target: tmplName, before:'有効', after:'削除('+cascadedIds.length+'件の生成済み作業も削除)' });
   state.modal = null;
   state.suppressRender = false;
   render();
   showToast('繰り返し作業「'+tmplName+'」を削除しました', '元に戻す', async function(){
     var curTmpl = state.templates.find(function(x){ return x.id===templateId; });
     if(curTmpl) curTmpl.archived = false;
-    await saveTemplates(state.templates);
+    var undoSaved = await saveTemplates(state.templates);
     cascadedIds.forEach(function(taskId){
       var task = state.backlog.find(function(x){ return x.id===taskId; });
       if(task) task.archived = false;
     });
     if(cascadedIds.length) await saveBacklog(state.backlog);
+    if(undoSaved!==false) await appendAuditLog({ action:'繰り返し作業削除の取り消し', target: tmplName, before:'削除', after:'有効' });
     render();
   });
 }
@@ -11787,8 +11838,9 @@ function bindEditTemplateModal(m){
     var tmplNow = state.templates.find(function(t){ return t.id===m.templateId; });
     var draft = state.modal && state.modal.patternDraft;
     var patternChanged = !!(tmplNow && draft && JSON.stringify(tmplNow.pattern || defaultPattern())!==JSON.stringify(draft));
+    var auditBeforeText = tmplNow ? workMasterAuditText(tmplNow) : undefined;
     if(patternChanged) tmplNow.pattern = draft.slice();
-    await saveEditTemplate();
+    await saveEditTemplate(auditBeforeText);
     if(patternChanged){ await ensureTemplateTasksForUpcoming(14); render(); }
   });
   var deleteBtn = document.getElementById('editDeleteBtn');

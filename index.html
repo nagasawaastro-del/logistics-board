@@ -389,6 +389,8 @@ input,select{font-family:inherit;}
 .ll-tcard{border-left:6px solid #D0D5DD;}
 .ll-tcard.is-red{border-left-color:#D92D20;}
 .ll-tcard.is-yellow{border-left-color:#F79009;}
+.ll-tcard.is-orange{border-left-color:#EF6820;background:#FFF6ED;}
+.ll-tcard.is-orange .ll-tcard-warn{color:#B54708;}
 .ll-tcard.is-green{border-left-color:#12B76A;}
 .ll-tcard-warn{font-size:13px;font-weight:700;color:#B42318;}
 /* 編集画面(グループ分け) */
@@ -3835,6 +3837,14 @@ function computeTodayStaffingPlan(ctx){
   });
   var pendingConfirmedByStaff = {};
   confirmed.forEach(function(it){ if(it.progress==='pending' && !pendingConfirmedByStaff[it.staffId]) pendingConfirmedByStaff[it.staffId] = it; });
+  // 「作業完了後の配置予定」として確定した指示(startAfterTaskId あり)は、元の作業を続けている間は「待機中」。
+  // 待機中は、予約先の作業の今の人数・処理能力には数えない(元の作業が終わってから加わるため)。
+  // startAfterTaskId の無い従来の確定済み配置は、これまでどおりの扱い。
+  function isWaitingReservation(it){
+    if(!it || !it.startAfterTaskId || it.progress!=='pending') return false;
+    var info = staffInfo[it.staffId];
+    return !!info && info.currentTaskId===it.startAfterTaskId;
+  }
 
   // ---- 休憩をまたいだ担当の継続 ----
   // 自動休憩(checkAutoBreak)は休憩開始時に作業記録を終了して休憩記録を始めるが、休憩は作業の完了ではない。
@@ -3859,8 +3869,10 @@ function computeTodayStaffingPlan(ctx){
     var info = staffInfo[sid];
     if(info.currentTaskId && info.currentTaskId!=='BREAK') return; // 作業中の人はそのまま
     if(!info.present || info.remainMin<=0) return;                 // 退勤・勤務終了
-    if(pendingConfirmedByStaff[sid]) return;                        // 管理者が配置を確定済み(確定した配置を優先)
     var tid = taskBeforeBreak(sid);
+    // 管理者が配置を確定済み(確定した配置を優先)。ただし休憩前の作業の「完了後の配置予定」なら、休憩前の作業を続ける
+    var pendingIt = pendingConfirmedByStaff[sid];
+    if(pendingIt && !(pendingIt.startAfterTaskId && pendingIt.startAfterTaskId===tid)) return;
     if(!tid || !taskMap[tid]) return;                               // 当日の対象外になった作業
     if(taskCompletionFor(day, tid)) return;                         // 作業が完了している
     info.onBreak = info.currentTaskId==='BREAK';
@@ -3919,7 +3931,7 @@ function computeTodayStaffingPlan(ctx){
     var workers = Object.keys(staffInfo).filter(function(sid){ return staffInfo[sid].currentTaskId===t.id; })
       .map(function(sid){ return capacityFor(sid, t.id, deadlineMs); });
     // 確定済みで未開始の配置は、この作業の予定人員として数える(二重に追加しない)
-    var plannedWorkers = confirmed.filter(function(it){ return it.progress==='pending' && it.taskId===t.id && staffInfo[it.staffId] && staffInfo[it.staffId].currentTaskId!==t.id; })
+    var plannedWorkers = confirmed.filter(function(it){ return it.progress==='pending' && it.taskId===t.id && staffInfo[it.staffId] && staffInfo[it.staffId].currentTaskId!==t.id && !isWaitingReservation(it); })
       .map(function(it){ return capacityFor(it.staffId, t.id, deadlineMs); });
     var capacity = workers.concat(plannedWorkers).reduce(function(a,w){ return a+w.capQty; }, 0);
     // 休憩中の担当者は今の処理能力は0だが、休憩明けに作業を続けるため、不足数量はその分を含めて判断する
@@ -4083,6 +4095,93 @@ function computeTodayStaffingPlan(ctx){
       else c.status = 'ok';
     }
   });
+  // ---- 作業完了後の配置予定(予約) ----
+  // 上の「今すぐの配置案」を作った後で、まだ不足が残る作業に、今の作業が終わったら回せる人を1人1件まで予約する。
+  // 予約は時刻固定ではなく「今の作業が終わったら次はこの作業」という意味。完了予定は目安で、再計算のたびに作り直す。
+  // 今すぐの配置案・不足・状態などの計算結果は変更しない(ここでは別の項目として返すだけ)。
+  var RESERVE_MIN_WORK_MIN = 15;   // 予約先で最低限働ける実働時間(分)
+  var RESERVE_ETA_MARGIN_MIN = 15; // 今の作業の完了予定の見込み違いに備える余裕(分)
+  var reservations = [], reservationByTask = {}, staffAvailability = {};
+  // fromMs から(締切があれば早い方の)勤務終了までの、休憩を除いた処理見込み
+  function capacityFromFor(sid, taskId, fromMs, deadlineMs){
+    var info = staffInfo[sid];
+    var endMs = (deadlineMs!==null && deadlineMs!==undefined) ? Math.min(deadlineMs, info.shiftEndMs) : info.shiftEndMs;
+    var availMin = fromMs<endMs ? workingMinutesExcludingBreaks(fromMs, endMs, brk, dateStr) : 0;
+    var p = productivityRateFor(master, taskId, sid, staffingBasisOf(taskMap[taskId]));
+    var rate = (p.rate && p.rate>0) ? p.rate : null;
+    return { availMin: availMin, rate: rate, basis: p.basis, capQty: rate ? rate*availMin/60 : 0 };
+  }
+  // 今の作業が終わる見込み時刻(目安)。今の作業に残る人(今すぐの配置案で抜ける人を除く)で残りを処理し終える時刻
+  // forConfirmed: 確定済みの予約の見込み計算用(今の作業が人員不足でも、終わる見込み時刻は出す)
+  function currentTaskFreeAt(sid, forConfirmed){
+    var c = calcByTask[staffInfo[sid].currentTaskId];
+    if(!c) return { reason:'今の作業にCSVの数量がないため、終わる時刻を計算できません' };
+    if(!c.rate) return { reason:'今の作業の生産性が未設定のため、終わる時刻を計算できません' };
+    if(!forConfirmed && (c.limitMs<=nowMs || (c.shortageQty||0)>0.01)) return { reason:'今の作業が人員不足のため' };
+    var rateSum = c.workers.concat(c.plannedWorkers).filter(function(w){ return !used[w.staffId]; }).reduce(function(a,w){ return a+(w.rate||0); }, 0);
+    if(!(rateSum>0)) return { reason:'今の作業の終わる時刻を計算できません' };
+    return { etaMs: addWorkingMinutesSkippingBreaks(nowMs, c.remainingQty/rateSum*60, brk, dateStr, null), taskId: c.taskId, priorityLevel: c.priorityLevel };
+  }
+  function reserveStartFrom(etaMs){ return addWorkingMinutesSkippingBreaks(etaMs, RESERVE_ETA_MARGIN_MIN, brk, dateStr, null); }
+  Object.keys(staffInfo).forEach(function(sid){
+    var info = staffInfo[sid], a;
+    if(!info.present) a = { kind:'unavailable', reason:'出勤していません' };
+    else if(info.excluded) a = { kind:'unavailable', reason:'自動配置の対象外です' };
+    else if(info.remainMin<=0) a = { kind:'unavailable', reason:'勤務時間が終了しています' };
+    else if(used[sid]) a = { kind:'now', reason:'今すぐの配置案があります' };
+    else if(pendingConfirmedByStaff[sid]) a = { kind:'confirmed', reason:'確定済みの指示があります' };
+    else if(candidateTier(sid)!==null) a = { kind:'now', reason: STAFFING_TIER_LABELS[candidateTier(sid)] };
+    else if(!info.currentTaskId || info.currentTaskId==='BREAK') a = { kind:'unavailable', reason:'今の作業がありません' };
+    else if(taskMap[info.currentTaskId] && taskMap[info.currentTaskId].idleLikely===true) a = { kind:'unavailable', reason:'手待ち作業中です' };
+    else{
+      var f = currentTaskFreeAt(sid);
+      if(f.reason) a = { kind:'unavailable', reason: f.reason, currentTaskId: info.currentTaskId };
+      else{
+        var startMs = reserveStartFrom(f.etaMs);
+        var leftMin = startMs<info.shiftEndMs ? workingMinutesExcludingBreaks(startMs, info.shiftEndMs, brk, dateStr) : 0;
+        if(leftMin<RESERVE_MIN_WORK_MIN) a = { kind:'unavailable', reason:'今の作業の完了予定のあと、勤務終了までの時間が短いため', currentTaskId: info.currentTaskId, freeAtMs: f.etaMs };
+        else a = { kind:'afterCurrent', currentTaskId: info.currentTaskId, freeAtMs: f.etaMs, startMs: startMs, currentPriority: f.priorityLevel };
+      }
+    }
+    staffAvailability[sid] = a;
+  });
+  if(!inBreakWindow){
+    calcs.slice().sort(byPriority).forEach(function(c){
+      if(!c.rate || c.remainingQty<=0 || c.limitMs<=nowMs) return;
+      if(taskMap[c.taskId] && taskMap[c.taskId].idleLikely===true) return; // 手待ち作業は予約先にしない
+      var rem = (c.shortageQty||0) - c.proposals.reduce(function(a,p){ return a+(p.capQty||0); }, 0);
+      // 確定済みで待機中の予約(元の作業が終わったら加わる人)の処理見込みを先に差し引く
+      var waiting = confirmed.filter(function(it){ return it.taskId===c.taskId && isWaitingReservation(it); }).map(function(it){
+        var f = currentTaskFreeAt(it.staffId, true);
+        var cap = f.etaMs ?capacityFromFor(it.staffId, c.taskId, reserveStartFrom(f.etaMs), c.deadlineMs) : { capQty:0, availMin:0 };
+        return { staffId: it.staffId, afterTaskId: it.startAfterTaskId, freeAtMs: f.etaMs||null, capQty: cap.capQty, availMin: cap.availMin };
+      });
+      rem -= waiting.reduce(function(a,w){ return a+w.capQty; }, 0);
+      var list = [];
+      while(rem>0.01){
+        var best = null;
+        Object.keys(staffAvailability).forEach(function(sid){
+          var a = staffAvailability[sid];
+          if(a.kind!=='afterCurrent' || a.reserved || a.currentTaskId===c.taskId) return;
+          var cap = capacityFromFor(sid, c.taskId, a.startMs, c.deadlineMs);
+          if(!cap.rate || cap.availMin<RESERVE_MIN_WORK_MIN) return; // 勤務終了・締切までに働ける時間が足りない
+          if(!best || a.freeAtMs<best.a.freeAtMs || (a.freeAtMs===best.a.freeAtMs && cap.capQty>best.cap.capQty)) best = { sid: sid, a: a, cap: cap };
+        });
+        if(!best) break;
+        best.a.reserved = true;
+        best.a.reservedTaskId = c.taskId;
+        var r = { staffId: best.sid, name: staffInfo[best.sid].name, taskId: c.taskId, afterTaskId: best.a.currentTaskId,
+          freeAtMs: best.a.freeAtMs, startMs: best.a.startMs, availMin: best.cap.availMin, capQty: best.cap.capQty, rate: best.cap.rate, basis: best.cap.basis,
+          // 予約先のほうが今の作業より優先順位が高い(自動で中断はしない。管理者への注意表示だけ)
+          higherPriorityThanCurrent: c.priorityLevel < best.a.currentPriority,
+          reason: c.name+'が人員不足(不足'+Math.ceil(rem)+c.unit+(c.deadline?'・締切'+c.deadline:'')+')' };
+        reservations.push(r); list.push(r);
+        rem -= best.cap.capQty;
+      }
+      if(list.length || waiting.length) reservationByTask[c.taskId] = { reservations: list, waitingConfirmed: waiting, shortageAfterQty: Math.max(0, rem) };
+    });
+  }
+
   // 確定済み配置のうち、作業が終わった・無くなったもの(不要の可能性)
   confirmed.forEach(function(it){
     var c = calcByTask[it.taskId];
@@ -4094,6 +4193,7 @@ function computeTodayStaffingPlan(ctx){
     date: dateStr, nowMs: nowMs, generatedAt: now.toISOString(), breakHold: inBreakWindow,
     tasks: calcs, taskById: calcByTask, idleWorkTasks: idleWorkTasks.map(function(t){ return { taskId: t.id, name: t.name, idlePriorityLevel: t.idlePriorityLevel||3 }; }),
     proposals: proposals, confirmed: confirmed, staff: staffInfo,
+    reservations: reservations, reservationByTask: reservationByTask, staffAvailability: staffAvailability,
     productivityMissing: calcs.filter(function(c){ return !c.rate && c.remainingQty>0; }).map(function(c){ return c.taskId; })
   };
 }
@@ -4112,7 +4212,9 @@ function nextTaskForStaff(plan, staffId, day){
   }
   var conf = plan.confirmed.filter(function(it){ return it.staffId===staffId && it.progress==='pending' && usable(it.taskId); })
     .sort(function(a,b){ return String(a.confirmedAt).localeCompare(String(b.confirmedAt)); })[0];
-  if(conf) return { taskId: conf.taskId, source: 'confirmed', expectedQty: conf.expectedQty };
+  // 作業完了後の配置予定(startAfterTaskId)で、元の作業をまだ続けている場合は afterTaskId を付ける(「開始してください」とは出さない)
+  if(conf) return { taskId: conf.taskId, source: 'confirmed', expectedQty: conf.expectedQty,
+    afterTaskId: (conf.startAfterTaskId && current===conf.startAfterTaskId) ? conf.startAfterTaskId : null };
   return null;
 }
 /* 作業者画面用の予定完了時刻。締切は使わず、各作業者が自分の勤務終了時刻まで
@@ -4146,7 +4248,8 @@ function planEtaText(plan, taskId){
 /* 管理者が配置案を確定する。確定済みの配置は残したまま、今回の案を追加する(勝手に消さない)。
    staffing-suggestion:日付 と day.assignments の両方へ保存する。 */
 async function confirmTodayStaffingProposals(plan){
-  if(!plan || !plan.proposals.length) return { ok:false, msg:'確定する配置案がありません' };
+  var reservations = (plan && plan.reservations) || [];
+  if(!plan || (!plan.proposals.length && !reservations.length)) return { ok:false, msg:'確定する配置案がありません' };
   if(!hasManagerSession()) return { ok:false, msg:'管理者としてログインしてください' };
   var dateStr = todayStr();
   var nowIso = new Date().toISOString();
@@ -4156,6 +4259,11 @@ async function confirmTodayStaffingProposals(plan){
     if(!p.taskId) return;
     items.push({ id: uid(), staffId: p.staffId, taskId: p.taskId, tier: p.tier, fromTaskId: p.fromTaskId||null,
       expectedQty: p.capQty!==null && p.capQty!==undefined ? Math.round(p.capQty) : null, reason: p.reason||'', confirmedAt: nowIso });
+  });
+  // 作業完了後の配置予定: 「元の作業(startAfterTaskId)が終わったら開始する」指示として同じ一覧に保存する
+  reservations.forEach(function(r){
+    items.push({ id: uid(), staffId: r.staffId, taskId: r.taskId, tier: 'after', fromTaskId: r.afterTaskId, startAfterTaskId: r.afterTaskId,
+      expectedQty: Math.round(r.capQty||0), reason: r.reason||'', confirmedAt: nowIso });
   });
   var sug = {
     version: 2, date: dateStr, status: 'confirmed', confirmedAt: nowIso,
@@ -4167,7 +4275,7 @@ async function confirmTodayStaffingProposals(plan){
     unassignedStaffIds: []
   };
   var day = state.day;
-  plan.proposals.forEach(function(p){
+  plan.proposals.concat(reservations).forEach(function(p){
     if(!p.taskId) return;
     var arr = day.assignments[p.staffId] || [];
     if(arr.indexOf(p.taskId)===-1) arr.push(p.taskId);
@@ -4179,8 +4287,8 @@ async function confirmTodayStaffingProposals(plan){
   if(okSug===false) return { ok:false, msg:'配置の確定内容を保存できませんでした' };
   state.staffingSuggestion = sug;
   state.staffingSuggestionLoaded = true;
-  await appendAuditLog({ action:'配置案を確定', target: dateStr, before: null, after: plan.proposals.length+'件を確定(確定済み合計'+items.length+'件)' });
-  return { ok:true, count: plan.proposals.length };
+  await appendAuditLog({ action:'配置案を確定', target: dateStr, before: null, after: (reservations.length ? '今すぐ'+plan.proposals.length+'件・作業完了後'+reservations.length+'件' : plan.proposals.length+'件')+'を確定(確定済み合計'+items.length+'件)' });
+  return { ok:true, count: plan.proposals.length+reservations.length };
 }
 /* 「次の作業を開始した=前の作業を完了した」。その作業にまだ他の作業者がいる場合は完了にしない。
    完了数量は、その時点のCSV予定数量(あとから追加されたCSVぶんは残作業になる)。 */
@@ -5954,8 +6062,14 @@ function renderStaffing(){
   '</div>';
 
   // ---- ② 対応が必要な作業(作業ごとに、入れる人まで1枚のカードにまとめる) ----
+  var rbt = plan.reservationByTask || {};
+  var resvAll = plan.reservations || [];
+  function aboutClock(ms){ return ms ? '約'+fmtClockMs(ms) : '―'; }
   var needHtml = ov.needAction.map(function(c){
-    var danger = c.status==='shortNoCandidate' || c.status==='overdue';
+    var rv = rbt[c.taskId];
+    // 今すぐ配置できる人がいなくても、作業完了後の配置予定で不足を補える見込みなら赤にしない
+    var coveredByResv = !!(rv && (rv.reservations.length || rv.waitingConfirmed.length) && rv.shortageAfterQty<=0.01);
+    var danger = (c.status==='shortNoCandidate' && !coveredByResv) || c.status==='overdue';
     var planned = c.plannedWorkers.length ? ' <span class="stf-row-meta">(確定済み・未開始 '+c.plannedWorkers.length+'人を含む)</span>' : '';
     var nums = '<div class="stf-card-nums">'+
       '<span>残り <b>'+formatNum(Math.round(c.remainingQty))+'</b>'+esc(c.unit)+staffingPiecesNote(c)+staffingEstMark(c)+'</span>'+
@@ -5975,14 +6089,27 @@ function renderStaffing(){
         '<div class="stf-person-why">理由: '+esc(staffingProposalReasonText(p))+'</div>'+
       '</div>';
     }).join('');
+    // 作業完了後の配置予定(この作業へ回る予定の人)
+    var resvPeople = rv ? rv.reservations.map(function(r){
+      return '<div class="stf-person" data-staffing-reservation="'+esc(r.staffId)+'|'+esc(r.taskId)+'">'+
+        '<div class="stf-person-name">⏭ '+esc(r.name)+'さん <span class="stf-card-sub" style="margin:0;">('+esc(taskById(r.afterTaskId).name)+'の完了後・'+esc(aboutClock(r.freeAtMs))+'ごろ〜)</span></div>'+
+        '<div class="stf-person-why">処理見込み '+formatNum(Math.round(r.capQty))+esc(c.unit)+'(目安)'+(r.higherPriorityThanCurrent ? ' <b style="color:var(--rust-600);">⚠ 今の作業より優先度の高い作業です</b>' : '')+'</div>'+
+      '</div>';
+    }).join('') + rv.waitingConfirmed.map(function(w){
+      return '<div class="stf-person"><div class="stf-person-name">⏭ '+esc(staffName(w.staffId))+'さん <span class="stf-card-sub" style="margin:0;">(確定済み・'+esc(taskById(w.afterTaskId).name)+'の完了後・'+esc(aboutClock(w.freeAtMs))+'ごろ〜)</span></div></div>';
+    }).join('') : '';
     var warn = '';
-    if(c.status==='shortNoCandidate') warn = '<div class="stf-warn">⚠ 追加で配置できる人がいません(出勤・勤務時間・手待ち作業の人を確認してください)</div>';
+    if(c.status==='shortNoCandidate' && rv && (rv.reservations.length || rv.waitingConfirmed.length)){
+      warn = '<div class="stf-warn" style="color:var(--amber-700,#B54708);">今すぐ配置できる人はいません → 作業完了後に'+(rv.reservations.length+rv.waitingConfirmed.length)+'人が配置予定'+
+        (rv.shortageAfterQty>0.01 ? '(それでも不足 '+formatNum(Math.ceil(rv.shortageAfterQty))+esc(c.unit)+')' : '')+'</div>';
+    }
+    else if(c.status==='shortNoCandidate') warn = '<div class="stf-warn">⚠ 追加で配置できる人がいません(出勤・勤務時間・手待ち作業の人を確認してください)</div>';
     else if(c.status==='overdue') warn = '<div class="stf-warn">⚠ 締切を過ぎています</div>';
     else if(!c.rate) warn = '<div class="stf-warn">生産性が未設定のため、必要人数を計算できません(実績がたまると自動で計算されます)</div>';
     else if(c.status==='breakHold') warn = '<div class="stf-warn" style="color:var(--slate-500);">⏸ 休憩中のため、追加の配置案は休憩終了後に計算します</div>';
     return '<div class="stf-card'+(danger?' is-danger':'')+'" data-staffing-task="'+esc(c.taskId)+'">'+
       '<div><span class="stf-card-name">'+(danger?'🔴 ':'🟠 ')+esc(c.name)+'</span>'+(c.deadline?'<span class="stf-card-sub">締切 '+esc(c.deadline)+'</span>':'')+'</div>'+
-      nums+etaHtml+people+warn+
+      nums+etaHtml+people+resvPeople+warn+
     '</div>';
   }).join('');
   var needSection = ov.needAction.length ? ('<div class="stf-section-title">⚠ 対応が必要な作業</div>'+needHtml) : '';
@@ -6001,10 +6128,28 @@ function renderStaffing(){
     '</div>'
   ) : '';
 
-  // ---- ④ 配置を確定(配置案があるときだけ。配置案の直後に置く) ----
-  var confirmHtml = plan.proposals.length ? (
+  // ---- ③' 作業完了後の配置予定(今の作業が終わったら次に回す人。時刻で移動するものではない) ----
+  var resvSection = resvAll.length ? (
+    '<div class="stf-section-title">⏭ 作業完了後の配置予定</div>'+
+    '<div class="stf-card" id="staffingReservations" style="border-left-color:#2E90FA;">'+
+      '<div class="pool-hint" style="margin:0 0 6px;">今の作業を続け、終わったら次の作業へ回る予定です。完了予定は目安で、進み具合に合わせて自動で更新されます。</div>'+
+      resvAll.map(function(r){
+        return '<div class="stf-row" data-staffing-reservation-row="'+esc(r.staffId)+'|'+esc(r.taskId)+'" style="flex-wrap:wrap;">'+
+          '<span class="stf-row-main">'+esc(r.name)+'さん</span>'+
+          '<span class="stf-row-meta">現在: '+esc(taskById(r.afterTaskId).name)+'</span>'+
+          '<span class="stf-row-meta">完了予定: '+esc(aboutClock(r.freeAtMs))+'(目安)</span>'+
+          '<span class="stf-row-meta">次: <b>'+esc(taskById(r.taskId).name)+'</b></span>'+
+          '<span class="stf-row-meta">理由: '+esc(r.reason)+'</span>'+
+          (r.higherPriorityThanCurrent ? '<span style="color:var(--rust-600);font-weight:700;font-size:13px;">⚠ 今の作業より優先度の高い作業があります(自動では中断しません)</span>' : '')+
+        '</div>';
+      }).join('')+
+    '</div>'
+  ) : '';
+
+  // ---- ④ 配置を確定(配置案・作業完了後の配置予定があるときだけ。配置案の直後に置く) ----
+  var confirmHtml = (plan.proposals.length || resvAll.length) ? (
     '<div class="stf-confirm">'+
-      '<button type="button" class="add-btn" id="staffingConfirmBtn">✅ 配置を確定('+plan.proposals.length+'人)</button>'+
+      '<button type="button" class="add-btn" id="staffingConfirmBtn">✅ 配置を確定('+(resvAll.length ? '今すぐ'+plan.proposals.length+'人・作業完了後'+resvAll.length+'人' : plan.proposals.length+'人')+')</button>'+
       '<div class="stf-confirm-note">確定すると、各作業者の画面に「📋 本日の作業指示」として表示されます</div>'+
     '</div>'
   ) : '';
@@ -6025,7 +6170,9 @@ function renderStaffing(){
   }).map(function(it){
     return '<div class="stf-row" data-staffing-confirmed="'+esc(it.staffId)+'|'+esc(it.taskId)+'">'+
       '<span class="stf-row-main">'+esc(staffName(it.staffId))+'さん → '+esc(taskById(it.taskId).name)+'</span>'+
-      (progressBadge[it.progress]||'')+
+      (it.startAfterTaskId && it.progress==='pending' && plan.staff[it.staffId] && plan.staff[it.staffId].currentTaskId===it.startAfterTaskId
+        ? '<span class="stf-badge stf-badge-pending">確定済み・'+esc(taskById(it.startAfterTaskId).name)+'の完了後に開始</span>'
+        : (progressBadge[it.progress]||''))+
       (it.confirmedAt ? '<span class="stf-row-meta">'+fmtClock(it.confirmedAt)+'確定</span>' : '')+
       (it.maybeUnneeded ? '<span style="color:var(--rust-600);font-weight:700;font-size:13px;">⚠ 不要の可能性(作業が完了しています)</span>' : '')+
     '</div>';
@@ -6097,6 +6244,7 @@ function renderStaffing(){
       noneHtml+
       needSection+
       idleSection+
+      resvSection+
       confirmHtml+
       confirmedSection+
       othersSection+
@@ -8112,8 +8260,11 @@ function renderTodayStatusBoard(tasks){
   function unitNote(c){ return c ? staffingPiecesNote(c) : ''; }
   function card(x, color){
     var t = x.t, c = x.c;
-    var cls = color==='red' ? 'is-red' : (color==='green' ? 'is-green' : 'is-yellow');
-    var icon = color==='red' ? '🔴' : (color==='green' ? '🟢' : '🟡');
+    // 今すぐ追加できる人はいないが、作業完了後の配置予定で不足が解消される見込みの作業は、人員配置画面と同じくオレンジ(表示だけ。計算は変えない)
+    var rvC = (c && c.status==='shortNoCandidate') ? (plan.reservationByTask||{})[t.id] : null;
+    var coveredLater = !!(color==='red' && rvC && (rvC.reservations.length+rvC.waitingConfirmed.length)>0 && rvC.shortageAfterQty<=0.01);
+    var cls = color==='red' ? (coveredLater ? 'is-orange' : 'is-red') : (color==='green' ? 'is-green' : 'is-yellow');
+    var icon = color==='red' ? (coveredLater ? '🟠' : '🔴') : (color==='green' ? '🟢' : '🟡');
     var lines = [];
     if(c && color==='green'){
       lines.push('<span>'+formatNum(c.plannedQty)+' / '+formatNum(c.plannedQty)+esc(c.unit)+'</span><span>完了'+(c.completedAt?'('+fmtClock(c.completedAt)+')':'')+'</span>');
@@ -8130,7 +8281,11 @@ function renderTodayStatusBoard(tasks){
     if(color==='red'){
       if(c.status==='overdue') warn = '⚠ 締切を過ぎています';
       else if(c.status==='breakHold') warn = '⏸ 休憩中(休憩後に再計算)';
-      else if(c.additionalNeeded) warn = '⚠ '+c.additionalNeeded+'人不足'+(c.status==='shortNoCandidate'?'(追加できる人がいません)':'');
+      else if(c.additionalNeeded){
+        var rvT = (plan.reservationByTask||{})[t.id];
+        var rvN = rvT ? rvT.reservations.length+rvT.waitingConfirmed.length : 0;
+        warn = '⚠ '+c.additionalNeeded+'人不足'+(c.status==='shortNoCandidate' ? (rvN ? '(作業完了後に'+rvN+'人配置予定'+(coveredLater ? '' : '・それでも不足あり')+')' : '(追加できる人がいません)') : '');
+      }
       else if(c.shortageQty>0.01) warn = '⚠ 不足 '+formatNum(Math.ceil(c.shortageQty))+esc(c.unit);
     }else if(c && c.status==='estDone'){
       warn = '<span style="color:#067647;font-weight:600;">推定では処理済み(完了の記録なし)</span>';
@@ -10273,7 +10428,19 @@ function renderInput(){
   if(workerPlan){
     // 管理者が確定した配置だけを「本日の作業指示」として出す(未確定の配置案は出さない)
     var myNext = nextTaskForStaff(workerPlan, state.activeStaffId, state.day);
-    if(myNext){
+    if(myNext && myNext.afterTaskId){
+      // 作業完了後の配置予定: 今の作業を優先して続ける。終わったら次の作業へ(時刻で移動するものではない)
+      var nowT = taskById(myNext.afterTaskId), laterT = taskById(myNext.taskId);
+      var nowEta = planEtaText(workerPlan, myNext.afterTaskId);
+      workInstructionBanner = '<div class="next-suggest-banner" id="workerNextTask" data-next-after="'+esc(myNext.afterTaskId)+'">'+
+        '<div class="next-suggest-title">📋 次の作業(予定)</div>'+
+        '<div class="next-suggest-task">'+esc(nowT.name)+'が終わったら、'+esc(laterT.name)+'へ</div>'+
+        '<div class="next-suggest-meta">今の作業「'+esc(nowT.name)+'」を続けてください'+(nowEta ? '(完了予定 約'+esc(nowEta)+'・目安)' : '')+'</div>'+
+        '<div class="next-suggest-actions">'+
+          '<button type="button" class="add-btn" data-suggest-start="'+esc(myNext.taskId)+'">'+esc(nowT.name)+'を終えて'+esc(laterT.name)+'を開始</button>'+
+        '</div>'+
+      '</div>';
+    }else if(myNext){
       var nextT = taskById(myNext.taskId);
       var nextEta = planEtaText(workerPlan, myNext.taskId);
       var hasCurrent = !!(log && log.taskId!=='BREAK');

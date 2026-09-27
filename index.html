@@ -4976,6 +4976,15 @@ function wvTotalsForTask(data, taskId){
     importCount: imports.length
   };
 }
+/* ダミー商品(実績集計の対象外)。CSVの行としては読み込むが、件数・明細・出荷数量・ケース/バラ・才数・
+   得意先別/商品別の集計、生産性・出庫荷役料のどこにも加算しない(集計の入口 parseCsvForWorkVolume で除外する)。
+   商品台帳に無い商品(未登録)とは別扱い。ここに登録した商品コードだけを除外する。 */
+var DUMMY_PRODUCT_CODES = new Set([
+  'dummy-001'
+]);
+function isDummyProductCode(code){
+  return DUMMY_PRODUCT_CODES.has(String(code||'').trim());
+}
 function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
   var reader = new FileReader();
   reader.onload = function(e){
@@ -4994,7 +5003,13 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
       var byCustomer = {};
       var byProduct = {};
       var rowAnomalies = []; // 行レベルの異常(必須項目欠落・得意先不明・数量異常など)。補正はせず、そのまま記録するだけ。
+      var dummyExcluded = { lineCount:0, totalQty:0 }; // ダミー商品の行(集計対象外。確認表示用に数えるだけ)
       rows.forEach(function(r, rowIdx){
+        if(isDummyProductCode(r['商品ID'])){
+          dummyExcluded.lineCount++;
+          dummyExcluded.totalQty += (parseInt(r['出荷引当数'],10) || 0);
+          return;
+        }
         var shipperNo = (r['荷主出荷NO']||'').trim();
         if(!shipperNo){
           rowAnomalies.push({ severity:'error', rowNumber: rowIdx+2, shipperNo:'', customerName:(r['取引先名']||'').trim(), productCode:(r['商品ID']||'').trim(), qty:r['出荷引当数']||'', reason:'必須項目「荷主出荷NO」が空です' });
@@ -5049,7 +5064,7 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
         }
       });
       var shipperGroups = order.map(function(sn){ return groups[sn]; });
-      if(!shipperGroups.length){ errCallback('データが見つかりませんでした。CSVの形式(荷主出荷NO列など)をご確認ください。'); return; }
+      if(!shipperGroups.length && !dummyExcluded.lineCount){ errCallback('データが見つかりませんでした。CSVの形式(荷主出荷NO列など)をご確認ください。'); return; }
       var primaryCount = shipperGroups.length;
       var lineCount = shipperGroups.reduce(function(a,g){ return a+g.lineCount; }, 0);
       var totalQty = shipperGroups.reduce(function(a,g){ return a+g.totalQty; }, 0);
@@ -5078,7 +5093,8 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
       callback({
         primaryCount: primaryCount, lineCount: lineCount, totalQty: totalQty, shipperGroups: shipperGroups,
         rowCount: rows.length, headers: headers, missingColumns: missingColumns,
-        byCustomer: byCustomerFinal, byProduct: byProductFinal, rowAnomalies: rowAnomalies
+        byCustomer: byCustomerFinal, byProduct: byProductFinal, rowAnomalies: rowAnomalies,
+        dummyExcluded: dummyExcluded
       });
     }catch(err){
       errCallback('CSVの読み込みに失敗しました: '+(err.message||err));
@@ -7858,7 +7874,8 @@ function bindCsvImportPanel(){
           rawParseResult: filteredResult,
           skippedShipperNos: skippedShipperNos,
           taskPlans: plan.taskPlans, unmapped: plan.unmapped,
-          rowAnomalies: result.rowAnomalies||[]
+          rowAnomalies: result.rowAnomalies||[],
+          dummyExcluded: result.dummyExcluded || null
         };
         state.autoMapImporting = false;
         autoMapCsvInput.value = '';
@@ -12510,6 +12527,7 @@ function renderAutoMapPreviewModal(m){
     '<div class="checklist-item-title">✅ 正常</div>'+
     '<div class="checklist-item-action">CSV行数: '+formatNum(d.rowCount)+'行 ・ 新規登録: '+formatNum(newPrimaryCount)+'件(出荷番号) ・ ピース数: '+formatNum(newTotalQty)+'</div>'+
     caseLine+
+    (d.dummyExcluded && d.dummyExcluded.lineCount ? '<div class="checklist-item-action" id="autoMapDummySummary" style="color:var(--slate-500);">ダミー商品(集計対象外): '+formatNum(d.dummyExcluded.lineCount)+'行 ・ '+formatNum(d.dummyExcluded.totalQty)+'ピース(件数・出荷数量・ケース/バラには含めていません)</div>' : '')+
     (dupCount>0 || unmappedCount>0 || warningRows.length>0 ? (
       '<div class="checklist-item-title" style="margin-top:8px;color:#B54708;">⚠️ 警告</div>'+
       (unmappedCount>0 ? '<div class="checklist-item-action">作業項目未設定: '+formatNum(unmappedCount)+'件</div>' : '')+

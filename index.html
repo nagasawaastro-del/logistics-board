@@ -3543,7 +3543,9 @@ function filterByProductForShipperNos(byProduct, keepShipperNoSet){
       totalQty += byShipperNo[sn].totalQty;
       primaryShipperNos[sn] = true;
     });
-    result[code] = { productName: p.productName, customerName: p.customerName, primaryShipperNos: primaryShipperNos, lineCount: lineCount, totalQty: totalQty, byShipperNo: byShipperNo };
+    var keptByShipperNo = {};
+    keptShipperNos.forEach(function(sn){ keptByShipperNo[sn] = byShipperNo[sn]; });
+    result[code] = { productName: p.productName, customerName: p.customerName, primaryShipperNos: primaryShipperNos, primaryCount: keptShipperNos.length, lineCount: lineCount, totalQty: totalQty, byShipperNo: keptByShipperNo };
   });
   return result;
 }
@@ -5039,9 +5041,11 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
           byProduct[productCode].primaryShipperNos[shipperNo] = true;
           byProduct[productCode].lineCount++;
           byProduct[productCode].totalQty += qty;
-          if(!byProduct[productCode].byShipperNo[shipperNo]) byProduct[productCode].byShipperNo[shipperNo] = { lineCount:0, totalQty:0 };
+          if(!byProduct[productCode].byShipperNo[shipperNo]) byProduct[productCode].byShipperNo[shipperNo] = { lineCount:0, totalQty:0, qtys:[] };
           byProduct[productCode].byShipperNo[shipperNo].lineCount++;
           byProduct[productCode].byShipperNo[shipperNo].totalQty += qty;
+          // ケース数・ピース数は1明細ごとに計算するため、明細の数量を合算せずに1件ずつ残す
+          byProduct[productCode].byShipperNo[shipperNo].qtys.push(qty);
         }
       });
       var shipperGroups = order.map(function(sn){ return groups[sn]; });
@@ -5066,7 +5070,9 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
       var byProductFinal = {};
       Object.keys(byProduct).forEach(function(k){
         var p = byProduct[k];
-        byProductFinal[k] = { productName: p.productName, customerName: p.customerName, primaryCount: Object.keys(p.primaryShipperNos).length, lineCount: p.lineCount, totalQty: p.totalQty };
+        // byShipperNo(出荷ごとの数量)は、取込済みの出荷を除く絞り込み(filterByProductForShipperNos)と
+        // ケース数・ピース数の計算(出荷ごと)に使う。保存前に取り除く(attachOutboundBreakdown)
+        byProductFinal[k] = { productName: p.productName, customerName: p.customerName, primaryCount: Object.keys(p.primaryShipperNos).length, lineCount: p.lineCount, totalQty: p.totalQty, byShipperNo: p.byShipperNo };
       });
 
       callback({
@@ -7840,6 +7846,11 @@ function bindCsvImportPanel(){
           shipperGroups: newGroups,
           byProduct: filterByProductForShipperNos(result.byProduct, keepSet)
         };
+        // 商品台帳(product_master)の入数・才数から、商品ごとのケース数・ピース数を付ける。
+        // 読み込めない・入数が無い場合も取込は止めず、理由(packQtyStatus)を残す
+        var productCodes = Object.keys(filteredResult.byProduct);
+        var productInfo = productCodes.length ? await getProductMasterInfoBatch(productCodes) : {};
+        filteredResult.byProduct = attachOutboundBreakdown(filteredResult.byProduct, productInfo);
         var plan = buildAutoMappedImportPlan(filteredResult, mapping, targetDate);
         state.autoMapPreviewData = {
           fileName: fileName, targetDate: targetDate, fingerprint: fingerprint, fileSize: fileSize,
@@ -11021,11 +11032,147 @@ async function getUnitPriceSource(){
    (fetchProductMasterFromKintone)は常に空を返すダミーのままだが、
    バッチ化・キャッシュの構造自体は今回のうちに整えておく。 */
 var productMasterCache = {}; // productCode -> {caseQty, saijou, ...} | null(取得したが情報なし)
+/* 商品台帳の情報(入数・才数)を、kintone同期で保存済みの Supabase の product_master テーブルからまとめて読む。
+   kintone へは直接問い合わせない(同期は従来どおり「kintone連携設定 → 同期」で Edge Function が行う)。
+   どの kintone フィールドを入数・才数として取り込むかは、kintone連携設定のフィールドコード(packQty=入数・cubicVolume=才数)で設定する。
+   商品コードの紐付けは従来どおり: CSVの「商品ID」= product_master の product_code。
+   戻り値: { [productCode]: { productCode, productName, packQty, cubicVolume, byCustomer:{取引先名: {packQty, cubicVolume}} } }
+   読み込めない場合は { __error: 理由 } を返す(呼び出し側は処理を止めず「読み込めない」として扱う)。 */
 async function fetchProductMasterFromKintone(productCodes){
-  // 将来: kintoneの商品マスタアプリへ、productCodes をまとめて問い合わせる。
-  // 例: 「商品コード in (…)」のようなクエリで1回のAPIコールにまとめる想定。
-  // 今回はkintone連携を実装しないため、常に空を返す。
-  return {}; // { [productCode]: {caseQty, saijou, ...} }
+  var c = window.__supabaseClient;
+  if(!productCodes || !productCodes.length) return {};
+  if(!c || typeof c.from!=='function') return { __error:'商品台帳(product_master)に接続できません' };
+  var out = {};
+  try{
+    for(var i=0; i<productCodes.length; i+=200){
+      var res = await c.from('product_master').select('product_code,product_name,customer_name,pack_qty,cubic_volume').in('product_code', productCodes.slice(i, i+200));
+      if(res.error) return { __error:'商品台帳(product_master)を読み込めませんでした' };
+      (res.data||[]).forEach(function(r){
+        var code = String(r.product_code||'');
+        if(!code) return;
+        var e = out[code] || (out[code] = { productCode: code, productName: r.product_name||'', packQty: null, cubicVolume: null, byCustomer: {} });
+        var pq = (typeof r.pack_qty==='number') ? r.pack_qty : null, cv = (typeof r.cubic_volume==='number') ? r.cubic_volume : null;
+        if(r.customer_name) e.byCustomer[r.customer_name] = { packQty: pq, cubicVolume: cv };
+        if(e.packQty===null && pq!==null) e.packQty = pq;          // 取引先の指定がない場合に使う値(最初に見つかった登録値)
+        if(e.cubicVolume===null && cv!==null) e.cubicVolume = cv;
+      });
+    }
+  }catch(e){ return { __error:'商品台帳(product_master)を読み込めませんでした' }; }
+  return out;
+}
+/* ---------- ケース数・ピース数(出庫荷役料の計算用) ----------
+   入数あり: ケース数 = FLOOR(出荷数量 ÷ 入数) / ピース数 = 出荷数量 MOD 入数
+   入数なし(未登録・0・不正値・商品台帳を読み込めない): すべてピースとして扱う(ケース数 0 / ピース数 = 出荷数量)。取込は止めない。
+   CSVの1明細ごとに計算して合計する。同じ荷主出荷NO・同じ商品の明細が複数行あっても合算しない(明細7個×2行・入数10 → 0ケース14ピース。1ケース4ピースにはしない)。
+   あとから入数が登録されたときに同じ計算をやり直せるよう、明細ごとの数量(shipmentQtys)を保存する。
+   才数はここでは金額計算に使わない(保持するだけ)。 */
+var PACK_QTY_STATUS_TEXT = {
+  ok: '',
+  missing: '商品台帳に入数が登録されていません(すべてピースとして計算)',
+  invalid: '商品台帳の入数が不正です(0以下または数値でない。すべてピースとして計算)',
+  unavailable: '商品台帳を読み込めなかったため入数がありません(すべてピースとして計算)'
+};
+function packQtyStatusOf(packQty){
+  if(packQty===null || packQty===undefined || packQty==='') return 'missing';
+  var n = Number(packQty);
+  if(!isFinite(n) || n<=0 || Math.floor(n)!==n) return 'invalid';
+  return 'ok';
+}
+function computeCaseBreakdown(qty, packQty){
+  var status = packQtyStatusOf(packQty);
+  var q = Math.max(0, Math.floor(Number(qty)||0));
+  if(status!=='ok') return { caseCount: 0, pieceCount: q, status: status, message: PACK_QTY_STATUS_TEXT[status] };
+  var n = Number(packQty);
+  return { caseCount: Math.floor(q/n), pieceCount: q % n, status: 'ok', message: '' };
+}
+/* 明細ごとの数量(shipmentQtys)から、ケース数・ピース数を計算する(CSV取込時と、あとからの再計算で同じ計算を使う)。
+   例: caseBreakdownFromShipments([7,7], 10) → 0ケース14ピース / caseBreakdownFromShipments([7,7], null) → 0ケース14ピース(すべてピース) */
+function caseBreakdownFromShipments(shipmentQtys, packQty){
+  var caseCount = 0, pieceCount = 0, status = packQtyStatusOf(packQty);
+  (shipmentQtys||[]).forEach(function(q){ var b = computeCaseBreakdown(q, packQty); caseCount += b.caseCount; pieceCount += b.pieceCount; });
+  return { caseCount: caseCount, pieceCount: pieceCount, status: status, message: PACK_QTY_STATUS_TEXT[status] };
+}
+/* CSV取込: 商品ごとの内訳に、入数・才数・ケース数・ピース数を付ける(1明細ごとに計算して合計)。
+   保存する形: { productName, customerName, primaryCount, lineCount, totalQty,
+                 shipmentQtys(CSVの1明細ごとの数量。荷主出荷NOは含めない), packQty, cubicVolume, caseCount, pieceCount, packQtyStatus, packQtyNote }
+   出荷番号・出荷ごとの内訳(byShipperNo)は保存しない。 */
+function attachOutboundBreakdown(byProduct, masterMap){
+  var masterError = !!(masterMap && masterMap.__error);
+  var out = {};
+  Object.keys(byProduct||{}).forEach(function(code){
+    var p = byProduct[code];
+    var m = (!masterError && masterMap && masterMap[code]) || null;
+    var mc = (m && p.customerName && m.byCustomer && m.byCustomer[p.customerName]) || null; // 同じ商品コードが取引先ごとに登録されている場合は取引先の値を優先
+    var packQty = mc && mc.packQty!==null ? mc.packQty : (m ? m.packQty : null);
+    var cubicVolume = mc && mc.cubicVolume!==null ? mc.cubicVolume : (m ? m.cubicVolume : null);
+    var bySn = p.byShipperNo || {};
+    var sns = Object.keys(bySn);
+    // CSVの1明細ごとの数量(同じ荷主出荷NO・同じ商品の明細も合算しない)。[7,7] は [7,7] のまま
+    var shipmentQtys = [];
+    sns.forEach(function(sn){
+      var b = bySn[sn];
+      if(b && Array.isArray(b.qtys)) b.qtys.forEach(function(q){ shipmentQtys.push(q); });
+      else if(b) shipmentQtys.push(b.totalQty);
+    });
+    if(!sns.length) shipmentQtys = [p.totalQty];
+    var b = caseBreakdownFromShipments(shipmentQtys, masterError ? null : packQty);
+    var status = masterError ? 'unavailable' : b.status;
+    out[code] = {
+      productName: p.productName, customerName: p.customerName,
+      primaryCount: (typeof p.primaryCount==='number') ? p.primaryCount : Object.keys(p.primaryShipperNos||{}).length,
+      lineCount: p.lineCount, totalQty: p.totalQty,
+      shipmentQtys: shipmentQtys,
+      packQty: status==='ok' ? Number(packQty) : null,
+      cubicVolume: (typeof cubicVolume==='number') ? cubicVolume : null,
+      caseCount: b.caseCount, pieceCount: b.pieceCount,
+      packQtyStatus: status, packQtyNote: PACK_QTY_STATUS_TEXT[status]
+    };
+  });
+  return out;
+}
+/* ---------- 作業単価マスター(別の kintone アプリ。将来の収支計算用) ----------
+   アプリID・フィールドコードが確定したら、ここを設定する。今回はAPI通信を実装しない(呼び出しても通信しない)。
+   重要: APIトークンはこのファイル(公開されるページ)には絶対に書かない。商品台帳と同じく、
+   Supabase Edge Function の Secrets(例: KINTONE_WORK_PRICE_API_TOKEN)に登録し、サーバー側だけで使う。 */
+var WORK_PRICE_MASTER_CONFIG = {
+  appId: '',
+  apiTokenSecretName: 'KINTONE_WORK_PRICE_API_TOKEN', // トークンそのものではなく、Secrets に登録する名前
+  fields: {
+    workItem: '',   // 作業項目(例: 出庫)
+    category: '',   // 区分(例: ケース / ピース)
+    unitPrice: '',  // 単価(円)
+    unit: ''        // 単位
+  },
+  // 出庫荷役料の計算で使う行の見分け方(作業項目・区分の値)
+  outboundCase: { workItem: '出庫', category: 'ケース' },
+  outboundPiece: { workItem: '出庫', category: 'ピース' }
+};
+function workPriceMasterConfigured(){
+  var c = WORK_PRICE_MASTER_CONFIG;
+  return !!(c.appId && c.fields.workItem && c.fields.unitPrice);
+}
+async function fetchWorkPriceMaster(){
+  // 今回はAPI通信を行わない(設定・Edge Function が用意できてから実装する)
+  return { ok:false, reason: workPriceMasterConfigured() ? '作業単価マスターの取得はまだ実装されていません' : '作業単価マスターの設定(アプリID・フィールドコード)が未入力です', prices: null };
+}
+/* 将来の収支計算用: 出庫荷役料 = ケース数 × 才数 × ケース出庫単価 + ピース数 × ピース出庫単価。
+   line: { caseCount, pieceCount, cubicVolume } / prices: { casePrice, piecePrice }。
+   足りない値がある部分は null にして理由を返す(0円として扱わない)。 */
+function computeOutboundHandlingFee(line, prices){
+  var reasons = [];
+  var caseFee = null, pieceFee = null;
+  var casePrice = prices && typeof prices.casePrice==='number' ? prices.casePrice : null;
+  var piecePrice = prices && typeof prices.piecePrice==='number' ? prices.piecePrice : null;
+  if(!line || line.caseCount===null || line.caseCount===undefined) reasons.push('ケース数がありません(入数未登録)');
+  else if(line.caseCount===0) caseFee = 0;
+  else if(typeof line.cubicVolume!=='number') reasons.push('才数がありません');
+  else if(casePrice===null) reasons.push('ケース出庫単価がありません');
+  else caseFee = line.caseCount * line.cubicVolume * casePrice;
+  if(!line || line.pieceCount===null || line.pieceCount===undefined) reasons.push('ピース数がありません(入数未登録)');
+  else if(line.pieceCount===0) pieceFee = 0;
+  else if(piecePrice===null) reasons.push('ピース出庫単価がありません');
+  else pieceFee = line.pieceCount * piecePrice;
+  return { caseFee: caseFee, pieceFee: pieceFee, total: (caseFee!==null && pieceFee!==null) ? caseFee+pieceFee : null, reasons: reasons };
 }
 /* ---------- kintone商品マスタ同期(第1段階: 取得して保存するところまで) ----------
    設定は管理者がUIから入力(アプリID・フィールドコード)。
@@ -11124,6 +11271,7 @@ async function syncProductMasterFromKintone(settings){
     if(!(await saveKintoneSyncStatus(status))){
       console.error('[LOGI LINK] kintone同期は成功しましたが、同期状況の保存に失敗しました');
     }
+    productMasterCache = {}; // 同期で入数・才数が変わった可能性があるため、読み込み済みの商品台帳情報を捨てる
     return { ok:true, status: status };
   }catch(e){
     console.error('[LOGI LINK] kintone同期(Edge Function)への接続に失敗しました', e);
@@ -11134,6 +11282,12 @@ async function getProductMasterInfoBatch(productCodes){
   var uncached = productCodes.filter(function(code){ return !(code in productMasterCache); });
   if(uncached.length){
     var fetched = await fetchProductMasterFromKintone(uncached);
+    // 読み込めなかった場合は「情報なし」としてキャッシュしない(次回もう一度読む)。呼び出し側へは __error を返す
+    if(fetched && fetched.__error){
+      var partial = { __error: fetched.__error };
+      productCodes.forEach(function(code){ if(code in productMasterCache) partial[code] = productMasterCache[code]; });
+      return partial;
+    }
     uncached.forEach(function(code){
       productMasterCache[code] = (fetched && fetched[code]) ? fetched[code] : null;
     });
@@ -12341,10 +12495,21 @@ function renderAutoMapPreviewModal(m){
   var newTotalQty = d.taskPlans.reduce(function(a,p){return a+p.totalQty;},0) + d.unmapped.reduce(function(a,u){return a+u.totalQty;},0);
   var dupCount = (d.skippedShipperNos||[]).length;
   var unmappedCount = d.unmapped.reduce(function(a,u){return a+u.primaryCount;},0);
+  // 商品台帳の入数によるケース数・ピース数(収支計算用。取込を止めない参考情報)
+  var bp = (d.rawParseResult && d.rawParseResult.byProduct) || {};
+  var bpCodes = Object.keys(bp);
+  var bpOk = bpCodes.filter(function(k){ return bp[k].packQtyStatus==='ok'; });
+  var bpNg = bpCodes.filter(function(k){ return bp[k].packQtyStatus && bp[k].packQtyStatus!=='ok'; });
+  var caseLine = bpCodes.length ? '<div class="checklist-item-action" id="autoMapCaseSummary">ケース数・ピース数: ケース '+
+    formatNum(bpCodes.reduce(function(a,k){ return a+(bp[k].caseCount||0); },0))+'・ピース '+formatNum(bpCodes.reduce(function(a,k){ return a+(bp[k].pieceCount||0); },0))+
+    '(入数あり '+formatNum(bpOk.length)+'商品)'+
+    (bpNg.length ? ' / <span style="color:#B54708;">入数なし '+formatNum(bpNg.length)+'商品はすべてピースとして計算('+bpNg.slice(0,5).map(esc).join('・')+(bpNg.length>5?' ほか':'')+')</span>' : '')+
+    '</div>' : '';
 
   var summaryHtml = '<div class="checklist-item" style="margin-bottom:10px;">'+
     '<div class="checklist-item-title">✅ 正常</div>'+
     '<div class="checklist-item-action">CSV行数: '+formatNum(d.rowCount)+'行 ・ 新規登録: '+formatNum(newPrimaryCount)+'件(出荷番号) ・ ピース数: '+formatNum(newTotalQty)+'</div>'+
+    caseLine+
     (dupCount>0 || unmappedCount>0 || warningRows.length>0 ? (
       '<div class="checklist-item-title" style="margin-top:8px;color:#B54708;">⚠️ 警告</div>'+
       (unmappedCount>0 ? '<div class="checklist-item-action">作業項目未設定: '+formatNum(unmappedCount)+'件</div>' : '')+

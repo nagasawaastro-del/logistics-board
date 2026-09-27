@@ -371,6 +371,11 @@ input,select{font-family:inherit;}
 .ll-att{border:0;border-radius:999px;padding:4px 12px;font-size:12px;font-weight:700;cursor:pointer;}
 .ll-att.on{background:#ECFDF3;color:#067647;}
 .ll-att.off{background:#F2F4F7;color:#667085;}
+.mgr-today-staff{display:flex;flex-direction:column;gap:6px;}
+.mgr-today-staff-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;font-size:13px;min-width:0;padding-bottom:6px;border-bottom:1px dashed var(--paper-line);}
+.mgr-today-staff-name{font-weight:700;min-width:5em;}
+.mgr-today-staff-end{display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;}
+.mgr-today-staff-end input{border:1px solid var(--paper-line);border-radius:8px;padding:3px 6px;font-size:13px;}
 .ll-add-panel{border:1px dashed var(--paper-line);border-radius:var(--radius-lg);padding:12px;margin-bottom:12px;background:var(--paper-50);}
 .ll-add-panel .panel{box-shadow:none;border:0;padding:0;background:transparent;}
 .ll-seg{display:inline-flex;border:1px solid var(--paper-line);border-radius:10px;overflow:hidden;margin-bottom:10px;}
@@ -7943,7 +7948,7 @@ function renderStaffSettingsPanel(){
 
   return '<div class="panel">'+
     '<div class="panel-title">スタッフ設定 <span class="count-badge">'+roster.filter(function(s){ return day.attendance[s.id]; }).length+' / '+roster.length+'(本日出勤)</span></div>'+
-    '<div class="pool-hint" style="margin-bottom:8px;">「🟢 出勤／⚪ 欠勤」は押すとすぐに切り替わります。名前・色・出勤曜日・退勤時間・本日の勤務終了時刻などは「編集」から変更できます。</div>'+
+    '<div class="pool-hint" style="margin-bottom:8px;">「🟢 出勤／⚪ 欠勤」は押すとすぐに切り替わります。名前・色・出勤曜日・退勤時間・本日の勤務終了時刻などは「編集」から変更できます。今日の出勤/欠勤・本日の勤務終了時刻は「管理者 → 今日の状況」の出勤スタッフ欄からも変更できます。</div>'+
     '<div class="add-row" style="margin-bottom:12px;">'+
       '<input type="text" id="newStaffInput" placeholder="追加するスタッフの名前" value="'+esc(state.newStaffDraftName)+'">'+
       '<button class="add-btn" id="addStaffBtn">追加</button>'+
@@ -8559,6 +8564,26 @@ function renderManager(){
   var openStaffBlock = state.mgrOpen.staff===true;
   var openLogs = state.mgrOpen.logs===true;
   var dashboardBar = isToday ? renderTodayStatusBoard(tasks) : '';
+  // ---- 出勤スタッフ: 今日の出勤/欠勤と本日の勤務終了時刻(スタッフ設定と同じデータ day.attendance / day.shiftEndOverrides を編集する) ----
+  var shiftOnM = !!(state.shiftSettings && state.shiftSettings.enabled);
+  var todayStaffHtml = '<div class="mgr-today-staff" id="mgrTodayStaff">'+roster.map(function(s){
+    var on = !!day.attendance[s.id];
+    var ov = (day.shiftEndOverrides && day.shiftEndOverrides[s.id]) || '';
+    // 本日の勤務終了時刻が空欄のときに使われる時刻(通常の退勤時間 → 勤務時間設定の終業)
+    var baseEnd = staffShiftEndStr(s.id, { shiftEndOverrides: {} }, state.shiftSettings, s);
+    var attHtml = isToday
+      ? '<button type="button" class="ll-att '+(on?'on':'off')+'" data-mgr-att="'+s.id+'" title="押すとすぐに切り替わります">'+(on?'🟢 出勤':'⚪ 欠勤')+'</button>'
+      : '<span class="ll-att '+(on?'on':'off')+'">'+(on?'🟢 出勤':'⚪ 欠勤')+'</span>';
+    var endHtml = '';
+    if(shiftOnM){
+      endHtml = isToday
+        ? '<span class="mgr-today-staff-end"><label>本日の勤務終了 <input type="time" data-mgr-shift-end="'+s.id+'" value="'+esc(ov)+'"></label>'+
+            (ov ? '<button type="button" class="vc-manage-toggle-btn" data-mgr-shift-end-clear="'+s.id+'" style="padding:2px 8px;font-size:11px;">解除</button>' : '<span class="muted">空欄なら '+esc(baseEnd)+'</span>')+'</span>'
+        : '<span class="muted">勤務終了 '+esc(ov || baseEnd)+(ov ? '(本日変更)' : '')+'</span>';
+    }
+    return '<div class="mgr-today-staff-row" data-today-staff="'+s.id+'"><span class="mgr-today-staff-name">'+esc(s.name)+'</span>'+attHtml+endHtml+'</div>';
+  }).join('')+'</div>'+
+  (isToday ? '<div class="pool-hint" style="margin:6px 0 0;">出勤/欠勤・本日の勤務終了時刻は、押す・入力するとすぐに保存されます(本日の勤務終了時刻は本日だけの早退・残業です)。</div>' : '<div class="pool-hint" style="margin:6px 0 0;">本日以外の日付は表示のみです。</div>');
   var staffSummaryTitle = '👥 出勤・業務時間のまとめ'+(needsCheckRows.length ? '(要確認 '+needsCheckRows.length+'人)' : '');
 
   return ''+
@@ -8566,16 +8591,18 @@ function renderManager(){
     (isToday ? renderDailyChecklist() : '')+
     dashboardBar+
     dateNav+
+    // 出勤スタッフ(今日の出勤/欠勤・本日の勤務終了時刻)。開いてすぐ見えるよう、割り当ての詳細の外に置く
+    '<div class="panel" id="mgrTodayStaffPanel" style="margin-bottom:14px;">'+
+      '<div class="panel-title">出勤スタッフ <span class="count-badge">'+present.length+' / '+roster.length+'</span></div>'+
+      todayStaffHtml+
+      '<div class="pool-hint" style="margin:8px 0;">名前・色・出勤曜日・通常の退勤時間・スタッフの追加は「設定 → スタッフ設定」で変更できます。</div>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="goToStaffSettingsBtn">⚙️ スタッフ設定を開く</button>'+
+    '</div>'+
     unassignedBanner+
     brokenBanner+
     '<details class="ll-details" id="mgrAssignDetails" data-mgr-open="assign" '+(openAssign?'open':'')+'>'+
     '<summary>🧩 割り当ての詳細(スタッフの割り当て・作業の追加/編集/削除)</summary>'+
-    '<div class="mgr-grid">'+
-      '<div class="panel">'+
-        '<div class="panel-title">出勤スタッフ <span class="count-badge">'+present.length+' / '+roster.length+'</span></div>'+
-        '<div class="pool-hint" style="margin-bottom:8px;">出勤の切替・出勤パターン・スタッフの追加は「設定 → スタッフ設定」に移動しました。</div>'+
-        '<button type="button" class="vc-manage-toggle-btn" id="goToStaffSettingsBtn">⚙️ スタッフ設定を開く</button>'+
-      '</div>'+
+    '<div class="mgr-grid" style="grid-template-columns:1fr;">'+
       '<div class="panel">'+
         '<div class="panel-title">'+esc(dateLabelFromStr(viewDate))+'の作業 <span class="count-badge">'+tasks.length+'件</span></div>'+
         '<div class="pool-hint" style="margin-bottom:8px;">作業登録画面でこの日付の作業として登録されたものが並びます。急ぎの作業はここから直接追加できます。</div>'+
@@ -8869,6 +8896,42 @@ function bindManager(){
     if(errDateInput) errDateInput.addEventListener('change', function(){ switchManagerDate(errDateInput.value); });
     return;
   }
+  // 出勤スタッフ: 今日の出勤/欠勤(スタッフ設定の一覧の切り替えと同じ保存・同じ操作履歴)
+  document.querySelectorAll('[data-mgr-att]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      if(managerActiveDate()!==todayStr() || el.disabled) return;
+      el.disabled = true;
+      var id = el.getAttribute('data-mgr-att');
+      var day = state.day;
+      var before = !!day.attendance[id];
+      day.attendance[id] = !before;
+      var saved = await saveDay(day);
+      if(saved!==false) await appendAuditLog({ action:'出勤状態変更', target: staffById(id).name, before: (before?'出勤中':'欠勤'), after: (day.attendance[id]?'出勤中':'欠勤') });
+      render();
+    });
+  });
+  // 出勤スタッフ: 本日の勤務終了時刻(スタッフ編集画面の「本日の勤務終了時刻」と同じ day.shiftEndOverrides を編集する)
+  async function saveTodayShiftEnd(id, value){
+    if(managerActiveDate()!==todayStr()) return;
+    var day = state.day;
+    var cur = (day.shiftEndOverrides && day.shiftEndOverrides[id]) || '';
+    var next = isClockStr(value) ? value : '';
+    state.suppressRender = false;
+    if(cur===next){ render(); return; }
+    if(!day.shiftEndOverrides) day.shiftEndOverrides = {};
+    if(next) day.shiftEndOverrides[id] = next; else delete day.shiftEndOverrides[id];
+    var saved = await saveDay(day);
+    if(saved!==false) await appendAuditLog({ action:'本日の勤務終了時刻の設定', target: staffById(id).name, before: cur||'未設定', after: next||'未設定' });
+    render();
+  }
+  document.querySelectorAll('[data-mgr-shift-end]').forEach(function(el){
+    el.addEventListener('focusin', function(){ state.suppressRender = true; });
+    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+    el.addEventListener('change', function(){ saveTodayShiftEnd(el.getAttribute('data-mgr-shift-end'), el.value); });
+  });
+  document.querySelectorAll('[data-mgr-shift-end-clear]').forEach(function(el){
+    el.addEventListener('click', function(){ saveTodayShiftEnd(el.getAttribute('data-mgr-shift-end-clear'), ''); });
+  });
   var goToStaffSettingsBtn = document.getElementById('goToStaffSettingsBtn');
   if(goToStaffSettingsBtn) goToStaffSettingsBtn.addEventListener('click', function(){
     state.role = 'settingsHub';

@@ -3842,6 +3842,20 @@ function computeTodayStaffingPlan(ctx){
   var confirmed = normalizeConfirmedInstructions(ctx.staffingSuggestion).map(function(it){
     return Object.assign({}, it, { progress: instructionProgress(it, day) });
   });
+  // 未開始のまま、あとから別の配置に変わったもの(同じ人へのあとの確定・手動配置、または確定後に別の作業を開始)は「変更済み」にする。
+  // 変更済みを未開始のまま数えると、来ない人をこの作業の予定人員に数え続け(不足が隠れる)、その人を次の配置の候補にも出せなくなる。
+  // 確定時点の作業(fromTaskId)・完了後の配置予定の元の作業(startAfterTaskId)・休憩の再開は「別の作業」に含めない。
+  var SUPERSEDE_GRACE_MS = 60000; // 端末ごとの時計のずれで、確定の直前に始めた作業を「確定後」と誤判定しないための余裕
+  confirmed.forEach(function(it){
+    if(it.progress!=='pending') return;
+    var sinceMs = it.confirmedAt ? new Date(it.confirmedAt).getTime() : 0;
+    var newer = confirmed.some(function(o){ return o!==it && o.staffId===it.staffId && o.confirmedAt && it.confirmedAt && o.confirmedAt>it.confirmedAt; });
+    var otherStarted = (day.logs||[]).some(function(l){
+      return l.staffId===it.staffId && l.taskId!=='BREAK' && l.taskId!==it.taskId && l.taskId!==it.fromTaskId && l.taskId!==it.startAfterTaskId &&
+        !!l.start && new Date(l.start).getTime() >= sinceMs+SUPERSEDE_GRACE_MS;
+    });
+    if(newer || otherStarted) it.progress = 'superseded';
+  });
   var pendingConfirmedByStaff = {};
   confirmed.forEach(function(it){ if(it.progress==='pending' && !pendingConfirmedByStaff[it.staffId]) pendingConfirmedByStaff[it.staffId] = it; });
   // 「作業完了後の配置予定」として確定した指示(startAfterTaskId あり)は、元の作業を続けている間は「待機中」。
@@ -3980,6 +3994,13 @@ function computeTodayStaffingPlan(ctx){
     };
   });
   var calcByTask = {}; calcs.forEach(function(c){ calcByTask[c.taskId] = c; });
+  // 確定済み・未開始の配置のうち、配置先の作業が処理済み(完了・推定で処理済み)または本日の対象外になったものは、
+  // 作業者画面にも指示として出ない(nextTaskForStaff)。その指示のためにこの人を次の配置の候補から外し続けないようにする。
+  Object.keys(pendingConfirmedByStaff).forEach(function(sid){
+    var it = pendingConfirmedByStaff[sid];
+    var c = calcByTask[it.taskId];
+    if(!taskMap[it.taskId] || (c && c.remainingQty<=0)) delete pendingConfirmedByStaff[sid];
+  });
 
   // ---- 配置候補者 ----
   var used = {};
@@ -3988,7 +4009,8 @@ function computeTodayStaffingPlan(ctx){
     if(!info || !info.present || info.excluded || info.remainMin<=0 || used[sid] || pendingConfirmedByStaff[sid]) return null;
     if(info.onBreak) return null; // 休憩中で休憩前の作業を担当している人は、別作業の候補にしない
     var cur = info.currentTaskId;
-    if(!cur || cur==='BREAK') return 1;
+    if(cur==='BREAK') return null; // 休憩の記録が続いている人(手動の休憩など)は、空いている人として扱わない
+    if(!cur) return 1;
     var curTask = taskMap[cur] || backlog.find(function(t){ return t.id===cur; });
     // 手待ち作業中の人は、その手待ち作業にCSV数量が残っていても「手待ち作業の人」として扱う
     if(curTask && curTask.idleLikely===true) return 2;
@@ -4067,15 +4089,33 @@ function computeTodayStaffingPlan(ctx){
   // CSV数量のある手待ち作業は、残作業を処理しきれる人数が揃ったら次の手待ち作業へ回す(数量なしは上限なし)
   var idleShortage = {};
   idleWorkTasks.forEach(function(t){ var c = calcByTask[t.id]; idleShortage[t.id] = c ? (c.rate ? Math.max(0, c.shortageQty - c.proposals.reduce(function(a,p){ return a+(p.capQty||0); }, 0)) : Infinity) : Infinity; });
-  Object.keys(staffInfo).forEach(function(sid){
+  // 今の作業(手待ち作業以外)が処理済み(完了・推定で処理済み)なのに、まだその作業を続けている人。
+  // 休憩中・確定済みの未開始の配置がある人・自動配置の対象外・勤務終了の人は含めない。
+  function finishedTaskWorker(sid){
+    var info = staffInfo[sid];
+    if(!info || !info.present || info.excluded || info.remainMin<=0 || info.onBreak || used[sid] || pendingConfirmedByStaff[sid]) return false;
+    var cur = info.currentTaskId;
+    if(!cur || cur==='BREAK') return false;
+    if(taskMap[cur] && taskMap[cur].idleLikely===true) return false;
+    var src = calcByTask[cur];
+    return !!(src && src.remainingQty<=0);
+  }
+  // 空いている人を先に、そのあとに今の作業が処理済みの人を並べる
+  var idleCandidates = Object.keys(staffInfo).filter(function(sid){ return candidateTier(sid)===1; });
+  Object.keys(staffInfo).forEach(function(sid){ if(idleCandidates.indexOf(sid)===-1 && finishedTaskWorker(sid)) idleCandidates.push(sid); });
+  idleCandidates.forEach(function(sid){
     if(inBreakWindow) return;
-    if(candidateTier(sid)!==1) return;
+    if(used[sid]) return;
     var target = idleWorkTasks.find(function(t){ return idleShortage[t.id]>0.01; });
     if(!target) return;
     var calc = calcByTask[target.id] || null;
     var cap = calc ? capacityFor(sid, target.id, calc.deadlineMs) : null;
     if(cap && isFinite(idleShortage[target.id])) idleShortage[target.id] -= cap.capQty;
-    addProposal(sid, calc || { taskId: target.id }, 'next', cap, '優先作業に不足が無いため、手待ち作業(手待ち優先度'+(target.idlePriorityLevel||3)+')を担当');
+    var curCalc = calcByTask[staffInfo[sid].currentTaskId];
+    var why = (curCalc && curCalc.remainingQty<=0)
+      ? '今の作業「'+curCalc.name+'」は処理済みのため、手待ち作業(手待ち優先度'+(target.idlePriorityLevel||3)+')を担当'
+      : '優先作業に不足が無いため、手待ち作業(手待ち優先度'+(target.idlePriorityLevel||3)+')を担当';
+    addProposal(sid, calc || { taskId: target.id }, 'next', cap, why);
   });
 
   // ---- 予定完了時刻・状態 ----
@@ -4138,7 +4178,8 @@ function computeTodayStaffingPlan(ctx){
     else if(used[sid]) a = { kind:'now', reason:'今すぐの配置案があります' };
     else if(pendingConfirmedByStaff[sid]) a = { kind:'confirmed', reason:'確定済みの指示があります' };
     else if(candidateTier(sid)!==null) a = { kind:'now', reason: STAFFING_TIER_LABELS[candidateTier(sid)] };
-    else if(!info.currentTaskId || info.currentTaskId==='BREAK') a = { kind:'unavailable', reason:'今の作業がありません' };
+    else if(info.currentTaskId==='BREAK') a = { kind:'unavailable', reason:'休憩中です' };
+    else if(!info.currentTaskId) a = { kind:'unavailable', reason:'今の作業がありません' };
     else if(taskMap[info.currentTaskId] && taskMap[info.currentTaskId].idleLikely===true) a = { kind:'unavailable', reason:'手待ち作業中です' };
     else{
       var f = currentTaskFreeAt(sid);
@@ -4296,6 +4337,47 @@ async function confirmTodayStaffingProposals(plan){
   state.staffingSuggestionLoaded = true;
   await appendAuditLog({ action:'配置案を確定', target: dateStr, before: null, after: (reservations.length ? '今すぐ'+plan.proposals.length+'件・作業完了後'+reservations.length+'件' : plan.proposals.length+'件')+'を確定(確定済み合計'+items.length+'件)' });
   return { ok:true, count: plan.proposals.length+reservations.length };
+}
+/* 手動配置(今日の状況の「割り当て」・ドラッグで、本日の作業に人を加えたとき)を、確定済み配置(tier:'manual')として記録する。
+   人員配置の計算(computeTodayStaffingPlan)は確定済み・未開始の配置を「予定人員」として数え、その人を別の候補に出さないため、
+   手動で配置した直後も同じ計算のまま再計算される(二重配置にならない)。作業を始めれば、通常の確定済み配置と同じく作業中になる。
+   外したとき(チェックを外す・×)は、まだ開始していない手動配置だけを取り消す。本日以外の日付では何もしない。
+   added / removed: [{ staffId, taskId }]。保存に失敗した場合は false(確定済みの内容は上書きしない)。 */
+async function recordManualPlacements(dateStr, added, removed){
+  added = added || []; removed = removed || [];
+  if(dateStr!==todayStr() || !state.day || state.day.date!==dateStr) return true;
+  if(!added.length && !removed.length) return true;
+  // 他の端末での確定を消さないよう、保存の直前に最新の内容を読み直す(読めなかった場合は保存しない)
+  var prev = await loadKeyJson('staffing-suggestion:'+dateStr, function(){ return {}; });
+  if(isUnverified(prev)) return false;
+  var items = normalizeConfirmedInstructions(prev);
+  var day = state.day;
+  var nowIso = new Date().toISOString();
+  var changed = false;
+  removed.forEach(function(r){
+    var before = items.length;
+    items = items.filter(function(it){ return !(it.tier==='manual' && it.staffId===r.staffId && it.taskId===r.taskId && instructionProgress(it, day)==='pending'); });
+    if(items.length!==before) changed = true;
+  });
+  added.forEach(function(a){
+    var open = (day.logs||[]).find(function(l){ return l.staffId===a.staffId && l.end===null; });
+    if(open && open.taskId===a.taskId) return; // 既にその作業をしている
+    items.push({ id: uid(), staffId: a.staffId, taskId: a.taskId, tier: 'manual', fromTaskId: (open && open.taskId!=='BREAK') ? open.taskId : null,
+      expectedQty: null, reason: '管理者が手動で配置', confirmedAt: nowIso });
+    changed = true;
+  });
+  if(!changed) return true;
+  var sug = Object.assign({}, prev, {
+    version: 2, date: dateStr, status: 'confirmed', confirmedAt: prev.confirmedAt || nowIso,
+    confirmedBy: prev.confirmedBy || (state.managerSession && state.managerSession.user && state.managerSession.user.email) || '管理者',
+    confirmedItems: items,
+    assignments: items.map(function(it){ return { staffId: it.staffId, taskId: it.taskId, expectedQty: it.expectedQty, reassignFrom: it.fromTaskId||null }; })
+  });
+  var ok = await saveStaffingSuggestion(dateStr, sug);
+  if(ok===false) return false;
+  state.staffingSuggestion = sug;
+  state.staffingSuggestionLoaded = true;
+  return true;
 }
 /* 「次の作業を開始した=前の作業を完了した」。その作業にまだ他の作業者がいる場合は完了にしない。
    完了数量は、その時点のCSV予定数量(あとから追加されたCSVぶんは残作業になる)。 */
@@ -6189,9 +6271,10 @@ function renderStaffing(){
   var progressBadge = {
     pending: '<span class="stf-badge stf-badge-pending">確定済み・未開始</span>',
     active: '<span class="stf-badge stf-badge-active">確定済み・作業中</span>',
-    done: '<span class="stf-badge stf-badge-done">確定済み・終了</span>'
+    done: '<span class="stf-badge stf-badge-done">確定済み・終了</span>',
+    superseded: '<span class="stf-badge stf-badge-done">確定済み・別の配置に変更</span>'
   };
-  var progressOrder = { pending:0, active:1, done:2 };
+  var progressOrder = { pending:0, active:1, done:2, superseded:3 };
   var confirmedRows = plan.confirmed.slice().sort(function(a,b){
     return (progressOrder[a.progress]-progressOrder[b.progress]) || String(b.confirmedAt).localeCompare(String(a.confirmedAt));
   }).map(function(it){
@@ -6200,7 +6283,7 @@ function renderStaffing(){
       (it.startAfterTaskId && it.progress==='pending' && plan.staff[it.staffId] && plan.staff[it.staffId].currentTaskId===it.startAfterTaskId
         ? '<span class="stf-badge stf-badge-pending">確定済み・'+esc(taskById(it.startAfterTaskId).name)+'の完了後に開始</span>'
         : (progressBadge[it.progress]||''))+
-      (it.confirmedAt ? '<span class="stf-row-meta">'+fmtClock(it.confirmedAt)+'確定</span>' : '')+
+      (it.confirmedAt ? '<span class="stf-row-meta">'+fmtClock(it.confirmedAt)+(it.tier==='manual' ? '手動配置' : '確定')+'</span>' : '')+
       (it.maybeUnneeded ? '<span style="color:var(--rust-600);font-weight:700;font-size:13px;">⚠ 不要の可能性(作業が完了しています)</span>' : '')+
     '</div>';
   }).join('');
@@ -9002,7 +9085,8 @@ function bindManager(){
       var day = managerActiveDay();
       var arr = day.assignments[sid]||[];
       day.assignments[sid] = arr.filter(function(x){ return x!==tid; });
-      await saveDay(day);
+      var okUnassignDay = await saveDay(day);
+      if(okUnassignDay!==false) await recordManualPlacements(managerActiveDate(), [], [{ staffId: sid, taskId: tid }]);
       var sName = staffById(sid).name, tName = taskById(tid).name;
       await appendAuditLog({ action:'割り当て解除', target: sName+' / '+tName, before:'割り当て済み', after:'解除' });
       render();
@@ -9146,10 +9230,14 @@ function bindManager(){
       if(!staffId) return;
       var day = managerActiveDay();
       var arr = day.assignments[staffId] || [];
-      if(arr.indexOf(taskId)===-1) arr.push(taskId);
+      var isNewAssign = arr.indexOf(taskId)===-1;
+      if(isNewAssign) arr.push(taskId);
       day.assignments[staffId] = arr;
       state.dragStaffId = null;
-      await saveDay(day);
+      var okDragDay = await saveDay(day);
+      if(okDragDay!==false && isNewAssign && !(await recordManualPlacements(managerActiveDate(), [{ staffId: staffId, taskId: taskId }], []))){
+        showToast('⚠️ 割り当ては保存しましたが、人員配置への反映(手動配置の記録)を保存できませんでした');
+      }
       render();
     });
   });
@@ -12851,14 +12939,18 @@ function bindAssignStaffPickerModal(m){
       });
       var present = presentStaffForDay(day);
       var changedCount = 0;
+      var addedPairs = [], removedPairs = [];
       present.forEach(function(s){
         var arr = day.assignments[s.id] || [];
         var hasIt = arr.indexOf(taskId)!==-1;
         var shouldHaveIt = !!checkedIds[s.id];
-        if(shouldHaveIt && !hasIt){ arr.push(taskId); day.assignments[s.id] = arr; changedCount++; }
-        else if(!shouldHaveIt && hasIt){ day.assignments[s.id] = arr.filter(function(x){ return x!==taskId; }); changedCount++; }
+        if(shouldHaveIt && !hasIt){ arr.push(taskId); day.assignments[s.id] = arr; changedCount++; addedPairs.push({ staffId: s.id, taskId: taskId }); }
+        else if(!shouldHaveIt && hasIt){ day.assignments[s.id] = arr.filter(function(x){ return x!==taskId; }); changedCount++; removedPairs.push({ staffId: s.id, taskId: taskId }); }
       });
-      await saveDay(day);
+      var okAssignDay = await saveDay(day);
+      if(okAssignDay!==false && !(await recordManualPlacements(managerActiveDate(), addedPairs, removedPairs))){
+        showToast('⚠️ 割り当ては保存しましたが、人員配置への反映(手動配置の記録)を保存できませんでした');
+      }
       if(changedCount) await appendAuditLog({ action:'スタッフ割り当て(まとめて選択)', target: taskById(taskId).name, before:null, after: Object.keys(checkedIds).length+'名を割り当て' });
       state.modal = null;
       showToast(taskById(taskId).name+'への割り当てを更新しました');

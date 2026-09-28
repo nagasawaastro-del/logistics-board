@@ -3796,6 +3796,19 @@ function computeTodayStaffingPlanNow(){
   if(!state.day || state.day.date!==todayStr()) return null;
   return computeTodayStaffingPlan(buildTodayStaffingContext(new Date()));
 }
+/* 昼休憩中だけ: 休憩終了時刻を仮の現在時刻として、同じ人員配置の計算をもう一度行う(休憩明けの配置予定。表示専用)。
+   保存・確定はしない。休憩中でなければ(休憩設定が無い・時間外)null。通常の計算(ctx.afterBreakPreview なし)は変えない。
+   休憩前の作業が未完了の人は、休憩明けも元の作業の担当のまま(候補にしない)。
+   休憩前の作業が完了済みなどで休憩前の作業に戻らない人は、休憩明けの空き人員として扱う(ctx.afterBreakPreview)。 */
+function computeAfterBreakStaffingPlan(ctx){
+  var brk = ctx && ctx.breakSettings, day = ctx && ctx.day;
+  if(!brk || !brk.enabled || !brk.start || !brk.end || !day) return null;
+  var startMs = new Date(day.date+'T'+brk.start+':00').getTime();
+  var endMs = new Date(day.date+'T'+brk.end+':00').getTime();
+  var nowMs = (ctx.now || new Date()).getTime();
+  if(!(endMs>startMs && nowMs>=startMs && nowMs<endMs)) return null; // 通常の計算の「休憩中」と同じ判定
+  return computeTodayStaffingPlan(Object.assign({}, ctx, { now: new Date(endMs), afterBreakPreview: true }));
+}
 function computeTodayStaffingPlan(ctx){
   var day = ctx.day, wv = ctx.workVolume||emptyWorkVolume(), backlog = ctx.backlog||[], roster = ctx.roster||[];
   var master = ctx.productivityMaster||{}, shift = ctx.shiftSettings, brk = ctx.breakSettings;
@@ -3949,11 +3962,14 @@ function computeTodayStaffingPlan(ctx){
     var deadlineMs = t.deadline ? new Date(dateStr+'T'+t.deadline+':00').getTime() : null;
     var limitMs = deadlineMs!==null ? deadlineMs : dayEndMs;
     var remainTimeMin = workingMinutesExcludingBreaks(nowMs, limitMs, brk, dateStr);
+    // 処理見込みの計算の区切り: 締切前は締切まで(従来どおり)。締切を過ぎた作業は、締切が過ぎたことだけを理由に
+    // 処理見込みを0にしない(0にすると優先度の高い作業が配置候補から消え、優先度の低い作業へ人が回る)ため、各人の勤務終了まで。
+    var capDeadlineMs = (deadlineMs!==null && deadlineMs<=nowMs) ? null : deadlineMs;
     var workers = Object.keys(staffInfo).filter(function(sid){ return staffInfo[sid].currentTaskId===t.id; })
-      .map(function(sid){ return capacityFor(sid, t.id, deadlineMs); });
+      .map(function(sid){ return capacityFor(sid, t.id, capDeadlineMs); });
     // 確定済みで未開始の配置は、この作業の予定人員として数える(二重に追加しない)
     var plannedWorkers = confirmed.filter(function(it){ return it.progress==='pending' && it.taskId===t.id && staffInfo[it.staffId] && staffInfo[it.staffId].currentTaskId!==t.id && !isWaitingReservation(it); })
-      .map(function(it){ return capacityFor(it.staffId, t.id, deadlineMs); });
+      .map(function(it){ return capacityFor(it.staffId, t.id, capDeadlineMs); });
     var capacity = workers.concat(plannedWorkers).reduce(function(a,w){ return a+w.capQty; }, 0);
     // 休憩中の担当者は今の処理能力は0だが、休憩明けに作業を続けるため、不足数量はその分を含めて判断する
     // (休憩で一時的に0人分になったことを理由に、不足・追加配置を出さない)
@@ -3982,7 +3998,7 @@ function computeTodayStaffingPlan(ctx){
       basis: basis, basisName: STAFFING_BASES[basis].name, piecesQty: totals.totalQty, remainingPieces: remainingPieces,
       lineCount: totals.lineCount,
       priorityLevel: (t.priorityLevel!==undefined && t.priorityLevel!==null) ? t.priorityLevel : 4,
-      deadline: t.deadline || null, deadlineMs: deadlineMs, limitMs: limitMs, limitKind: deadlineMs!==null ? 'deadline' : 'shiftEnd',
+      deadline: t.deadline || null, deadlineMs: deadlineMs, capDeadlineMs: capDeadlineMs, limitMs: limitMs, limitKind: deadlineMs!==null ? 'deadline' : 'shiftEnd',
       plannedQty: planned, primaryCount: totals.primaryCount, completedQty: completed, completedAt: comp ? comp.at : null,
       remainingQty: remaining, remainingRecordedQty: remainingRecorded, estimatedDoneQty: estimatedDone,
       rate: rate, rateBasis: avg.basis, sampleCount: avg.sampleCount,
@@ -4009,7 +4025,7 @@ function computeTodayStaffingPlan(ctx){
     if(!info || !info.present || info.excluded || info.remainMin<=0 || used[sid] || pendingConfirmedByStaff[sid]) return null;
     if(info.onBreak) return null; // 休憩中で休憩前の作業を担当している人は、別作業の候補にしない
     var cur = info.currentTaskId;
-    if(cur==='BREAK') return null; // 休憩の記録が続いている人(手動の休憩など)は、空いている人として扱わない
+    if(cur==='BREAK') return ctx.afterBreakPreview ? 1 : null; // 休憩の記録が続いている人は空いている人として扱わない(休憩明けの試算では、休憩前の作業に戻らない人=休憩明けの空き人員)
     if(!cur) return 1;
     var curTask = taskMap[cur] || backlog.find(function(t){ return t.id===cur; });
     // 手待ち作業中の人は、その手待ち作業にCSV数量が残っていても「手待ち作業の人」として扱う
@@ -4031,7 +4047,7 @@ function computeTodayStaffingPlan(ctx){
       var best = null;
       Object.keys(staffInfo).forEach(function(sid){
         if(candidateTier(sid)!==tier) return;
-        var cap = capacityFor(sid, calc.taskId, calc.deadlineMs);
+        var cap = capacityFor(sid, calc.taskId, calc.capDeadlineMs);
         if(!cap.rate || cap.capQty<=0) return;
         if(!best || cap.capQty>best.capQty) best = cap;
       });
@@ -6155,6 +6171,8 @@ function renderStaffing(){
   maybeAutoRefreshProductivity();
   var plan = computeTodayStaffingPlanNow();
   if(!plan) return '<div class="mgr-wrap"><div class="empty-note">本日のデータを読み込み中...</div></div>';
+  // 昼休憩中だけ: 休憩明けの配置予定(表示専用。今の配置案とは別に計算し、確定はしない)
+  var afterBreak = plan.breakHold ? computeAfterBreakStaffingPlan(buildTodayStaffingContext(new Date(plan.nowMs))) : null;
   var nowText = fmtClockMs(plan.nowMs);
   var ov = staffingOverview(plan);
   function staffName(sid){ return (plan.staff[sid] && plan.staff[sid].name) || staffById(sid).name; }
@@ -6353,6 +6371,7 @@ function renderStaffing(){
       summaryHtml+
       noneHtml+
       needSection+
+      renderAfterBreakStaffingSection(afterBreak)+
       idleSection+
       resvSection+
       confirmHtml+
@@ -6362,6 +6381,31 @@ function renderStaffing(){
     '</div>'+
     detailHtml+
   '</div>';
+}
+function renderAfterBreakStaffingSection(ab){
+  if(!ab) return '';
+  function nameOf(sid){ return (ab.staff[sid] && ab.staff[sid].name) || staffById(sid).name; }
+  var props = ab.proposals.filter(function(p){ return !!p.taskId; });
+  var resv = ab.reservations || [];
+  var propRows = props.map(function(p){
+    var from = p.tier==='next' ? '手待ち作業' : staffingProposalFromText(p);
+    return '<div class="stf-row" data-staffing-afterbreak="'+esc(p.staffId)+'|'+esc(p.taskId)+'">'+
+      '<span class="stf-row-main">'+esc(nameOf(p.staffId))+'さん → '+esc(taskById(p.taskId).name)+'</span>'+
+      (from ? '<span class="stf-row-meta">'+esc(from)+'</span>' : '')+
+    '</div>';
+  }).join('');
+  var resvRows = resv.map(function(r){
+    return '<div class="stf-row" data-staffing-afterbreak-resv="'+esc(r.staffId)+'|'+esc(r.taskId)+'">'+
+      '<span class="stf-row-main">'+esc(nameOf(r.staffId))+'さん → '+esc(taskById(r.taskId).name)+'</span>'+
+      '<span class="stf-row-meta">'+esc(taskById(r.afterTaskId).name)+'の完了後</span>'+
+    '</div>';
+  }).join('');
+  return '<div class="stf-section-title">🟡 休憩明けの配置予定</div>'+
+    '<div class="stf-card is-idle" id="staffingAfterBreak">'+
+      (propRows || '<div class="pool-hint" style="margin:0;">休憩明けに追加で配置する人はいない見込みです</div>')+
+    '</div>'+
+    (resvRows ? '<div class="stf-section-title">🔵 作業完了後の配置予定</div><div class="stf-card" id="staffingAfterBreakResv" style="border-left-color:#2E90FA;">'+resvRows+'</div>' : '')+
+    '<div class="pool-hint" style="margin:4px 0 12px;">※休憩終了後に配置可能(休憩終了'+esc(fmtClockMs(ab.nowMs))+'時点の見込み。休憩が終わると通常の配置案として計算し直され、そこで確定できます)</div>';
 }
 function bindStaffing(){
   var detailEl = document.getElementById('staffingDetail');
@@ -10941,6 +10985,7 @@ function bindInput(){
   var endDayBtn = document.getElementById('endDayBtn');
   if(endDayBtn) endDayBtn.addEventListener('click', function(){
     var log = currentLog(state.activeStaffId);
+    if((!log || log.taskId==='BREAK') && askPreBreakTaskCompletion(null, true)) return;
     if(log && log.taskId==='BREAK'){
       log.end = new Date().toISOString();
       log.quantity = null;
@@ -10961,10 +11006,60 @@ function bindInput(){
    ・休憩中なら休憩を終えてから開始
    ・別の作業が進行中なら、その作業を終了(数量入力が必要なら入力画面)してから開始
    ・進行中の作業が無ければそのまま開始 */
+/* 自動休憩(checkAutoBreak)で作業記録が閉じられた「休憩前の作業」。休憩のあとにまだ何の作業も始めていない場合だけ返す。
+   (最後の記録が休憩で、その直前の作業記録が休憩の開始と同時に終わっている) */
+function preBreakTaskOf(day, staffId){
+  var logs = ((day && day.logs)||[]).filter(function(l){ return l.staffId===staffId; })
+    .sort(function(a,b){ return new Date(a.start).getTime()-new Date(b.start).getTime(); });
+  var last = logs[logs.length-1];
+  if(!last || last.taskId!=='BREAK') return null;
+  var prev = null;
+  for(var i=logs.length-2; i>=0; i--){ if(logs[i].taskId!=='BREAK'){ prev = logs[i]; break; } }
+  if(!prev || !prev.end) return null;
+  if(Math.abs(new Date(prev.end).getTime()-new Date(last.start).getTime()) > 60000) return null;
+  return prev.taskId;
+}
+/* 休憩前の作業から抜けるときの完了判定(通常の作業終了と同じ decideCompletionOnLeave を使う。完了のルールは変えない)。
+   ・休憩前の作業に戻る・既に完了の記録がある → 何もしない(二重に記録しない)
+   ・同じ作業を休憩前にしていて、まだ休憩前の作業を続けている扱いの人(出勤中)がいる → 最後の作業者ではないので何もしない
+   ・作業者に確認が必要なとき →「終わりましたか?」を出して true を返す(答えたあと resumeAfterPreBreakCheck で続きを行う) */
+function askPreBreakTaskCompletion(nextTaskId, isEndDay){
+  var day = state.day, sid = state.activeStaffId;
+  if(!day || day.date!==todayStr() || !sid) return false;
+  var pre = preBreakTaskOf(day, sid);
+  if(!pre || pre==='BREAK' || pre===nextTaskId) return false;
+  if(taskCompletionFor(day, pre)) return false;
+  var othersContinuing = (state.roster||[]).some(function(s){
+    return s.id!==sid && day.attendance && day.attendance[s.id] && preBreakTaskOf(day, s.id)===pre;
+  });
+  if(othersContinuing) return false;
+  var askDone = decideCompletionOnLeave(day, pre, sid);
+  if(!askDone) return false; // 完了を記録した場合は、このあとの作業開始・終了の保存でいっしょに保存される
+  state.modal = { kind:'taskDoneConfirm', taskId: pre, staffId: sid, nextTaskId: nextTaskId||null, isEndDay: !!isEndDay, remainingText: askDone.remainingText, preBreak: true };
+  state.suppressRender = true;
+  render();
+  return true;
+}
+/* 休憩前の作業の確認に答えたあとの続き(休憩の記録の終了 → 次の作業の開始、または本日の作業の終了) */
+function resumeAfterPreBreakCheck(nextTaskId, isEndDay){
+  var log = currentLog(state.activeStaffId);
+  if(isEndDay){
+    if(log && log.taskId==='BREAK'){
+      log.end = new Date().toISOString();
+      log.quantity = null;
+    }
+    saveDay(state.day).then(function(){ state.summaryStaffId = state.activeStaffId; render(); });
+  }else if(log && log.taskId==='BREAK'){
+    endBreakAndStart(nextTaskId);
+  }else{
+    openQuantityModal(nextTaskId, false);
+  }
+}
 function requestTaskSwitch(taskId){
   if(state.taskActionBusy) return;
   var log = currentLog(state.activeStaffId);
   if(log && log.taskId===taskId){ render(); return; }
+  if((!log || log.taskId==='BREAK') && askPreBreakTaskCompletion(taskId, false)) return;
   if(log && log.taskId==='BREAK'){
     endBreakAndStart(taskId);
     return;
@@ -11556,7 +11651,8 @@ function bindTaskDoneConfirmModal(m){
       await saveDay(state.day);
     }
     state.modal = null; state.suppressRender = false;
-    proceedAfterFinish(m.nextTaskId, m.isEndDay);
+    if(m.preBreak) resumeAfterPreBreakCheck(m.nextTaskId, m.isEndDay);
+    else proceedAfterFinish(m.nextTaskId, m.isEndDay);
   }
   var yes = document.getElementById('taskDoneYesBtn'), no = document.getElementById('taskDoneNoBtn');
   if(yes) yes.addEventListener('click', function(){ answer(true); });

@@ -684,55 +684,6 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .ach-refresh-small{display:block;margin:28px auto 8px;}
 .ach-generated-note{text-align:center;font-size:11px;color:var(--slate-300);}
 
-.rpg-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:14px;}
-.rpg-card{
-  background:linear-gradient(160deg,#1B2340,#232C52);border:1px solid #384080;border-radius:16px;
-  padding:16px 18px;color:#fff;box-shadow:0 4px 14px rgba(35,44,82,.25);
-}
-.rpg-card-top{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
-.rpg-rank{font-size:18px;flex:none;width:28px;text-align:center;}
-
-.rpg-avatar-wrap{position:relative;width:52px;height:58px;flex:none;}
-.rpg-avatar-pixel{
-  width:52px;height:58px;position:relative;z-index:2;display:flex;align-items:center;justify-content:center;
-  background:rgba(255,255,255,.04);border-radius:8px;
-}
-.rpg-avatar-pixel svg{width:44px;height:auto;}
-.avatar-tier-4 .rpg-avatar-pixel svg{filter:drop-shadow(0 0 5px rgba(242,169,59,.85));animation:rpgAvatarGlow 1.8s infinite;}
-@keyframes rpgAvatarGlow{0%,100%{filter:drop-shadow(0 0 3px rgba(242,169,59,.5));}50%{filter:drop-shadow(0 0 9px rgba(242,169,59,1));}}
-.avatar-cape{position:absolute;top:4px;left:50%;transform:translateX(-50%);width:62px;height:66px;background:radial-gradient(circle,rgba(76,111,213,.4),transparent 70%);z-index:1;}
-.avatar-badge{position:absolute;font-size:13px;z-index:3;line-height:1;}
-.avatar-badge-star{top:-3px;right:-3px;}
-.avatar-badge-sword{bottom:-3px;right:-5px;}
-.avatar-badge-shield{bottom:-3px;left:-5px;}
-.avatar-badge-crown{top:-13px;left:50%;transform:translateX(-50%);font-size:15px;}
-
-.rpg-name-block{flex:1;min-width:0;}
-.rpg-name{font-family:var(--font-display);font-weight:700;font-size:16px;}
-.rpg-title{font-size:12px;color:#B9C0E8;margin-top:1px;}
-.rpg-level-badge{
-  background:var(--amber-500);color:#B54708;font-family:var(--font-mono);font-weight:700;font-size:13px;
-  border-radius:10px;padding:4px 10px;flex:none;
-}
-.rpg-xp-bar{height:10px;border-radius:5px;background:#12173080;overflow:hidden;margin-bottom:6px;}
-.rpg-xp-fill{height:100%;background:linear-gradient(90deg,var(--amber-500),#FFD782);border-radius:5px;transition:width .3s;}
-.rpg-xp-label{font-family:var(--font-mono);font-size:11px;color:#9AA3D6;margin-bottom:10px;}
-
-.rpg-stats{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;}
-.rpg-stat-row{display:flex;align-items:center;gap:6px;font-size:11px;}
-.rpg-stat-icon{width:16px;text-align:center;}
-.rpg-stat-label{width:48px;color:#B9C0E8;flex:none;}
-.rpg-stat-bar{flex:1;height:6px;border-radius:3px;background:#12173080;overflow:hidden;}
-.rpg-stat-fill{height:100%;border-radius:3px;transition:width .3s;}
-.rpg-stat-fill.atk{background:linear-gradient(90deg,#F04438,#FF8A50);}
-.rpg-stat-fill.def{background:linear-gradient(90deg,#2E90FA,#84CAFF);}
-.rpg-stat-fill.spd{background:linear-gradient(90deg,#12B76A,#75E0A7);}
-.rpg-stat-val{width:22px;text-align:right;font-family:var(--font-mono);color:#fff;font-size:11px;flex:none;}
-
-.rpg-spec-chips{display:flex;flex-wrap:wrap;gap:6px;}
-.rpg-spec-chip{background:#12173080;border-radius:10px;padding:3px 9px;font-size:11px;color:#DCE1FF;}
-.rpg-spec-chip b{color:var(--amber-500);font-family:var(--font-mono);}
-
 .toast-container{position:fixed;top:74px;right:16px;z-index:300;display:flex;flex-direction:column;gap:8px;max-width:320px;}
 .toast{
   background:var(--ink-900);color:#fff;border-radius:10px;padding:12px 16px;font-size:13px;line-height:1.5;
@@ -1200,6 +1151,24 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-29', items:[
+    '【人員配置】休憩中に確定した配置(休憩中の手動配置など)は「休憩前の作業が終わったら開始」する予定として扱うようにしました。休憩明けに、休憩前の作業を続ける人がその作業の担当から外れて「担当0人の不足」になり、別の人を回す案と、本来の担当者を別作業へ動かす案が続けて出る(入れ替わるだけになる)問題を直しました',
+    '【人員配置】確定から10分たっても元の作業を続けている指示は「⚠ 確定済み・未実施」と表示し、その作業の予定人員に数えないようにしました(来ない人を数え続けて不足が隠れるのを防ぐため)。作業者画面の指示はそのまま表示します',
+    '【完了の記録漏れ】休憩明けに、休憩前の作業を再開せずに別の作業を始める(または本日の作業を終了する)と、「休憩前の作業「○○」は終わりましたか?」と確認するようにしました',
+    '【完了の記録漏れ】人員配置に「休憩・勤務終了で中断したまま完了していない作業」を表示し、管理者が「完了にする」で完了を記録できるようにしました(完了時刻は最後の作業記録の終了時刻)',
+    '【人員配置】生産性の実績が3日分未満の作業には「見込みの精度が低めです」と表示するようにしました',
+    '【配置案の自動確定】空いている人・手待ち作業の人への配置案を、管理者の確定を待たずに自動で確定し、作業者画面の「📋 本日の作業指示」に出すようにしました(管理者が画面を見ていない間に、作業を終えた人へ次の指示が出なかったため)。作業中の人を動かす案・作業完了後の配置予定は、これまでどおり管理者が確定します。人員配置画面でオン・オフを切り替えられます(初期値はオン)。確定済み一覧には「自動確定」と表示し、操作履歴にも残します',
+    '【人員配置】「未実施」の判定を、確定から10分たっても指示と別の作業を続けている場合に広げました(空いていた人が指示と別の作業を自分で始めた場合も含む)。未実施になった指示と同じ配置案は、自動では出し直しません',
+    '【人員配置】手待ち作業への指示(まだ開始していないもの)は人を確保しない扱いにしました。CSV取込より先に始業して全員に手待ち作業の指示が出た場合に、あとから取り込んだ作業へ誰も配置できなくなる問題を直しました',
+    '【自動休憩】休憩を終えるのは休憩終了時刻を過ぎてからだけにしました。端末ごとの時計のずれで、休憩が始まった直後に別の端末が休憩を終わらせてしまい(休憩の記録が1秒で終わる)、休憩明けに休憩前の作業の続きとして扱われない問題を直しました'
+  ]},
+  { date:'2026-09-27', items:[
+    '【数量の手入力を廃止】作業者・管理者が数量(件数・内訳の数量)を入力する欄をなくしました。数量はCSV取込の出荷数量(ピース・ケース・バラ・件数)から集計し、VCはケース数入力(加算・取消の履歴つき)を使います。作業時間(開始・終了・切替・休憩・内訳の時間)の記録は従来どおりです。過去に入力された数量データは削除していません',
+    '実績画面・モニターの出荷実績(本日・今月・過去最高・前年比較・日別グラフ・今月のチームチャレンジ)を、CSV取込の出荷数量(ピース)で集計するようにしました。ケース・バラも表示します。入庫の表示はなくしました',
+    '集計画面の作業別の数量を、CSV取込の出荷数量とVCケース数に変更しました。内訳別の生産性は「内訳の作業量 ÷ 内訳の作業時間」で、内訳の単位のまま表示します(ピッキング=ピース/時、ケース=ケース/時、梱包=件/時、VC=ケース/時)。単位が違う内訳の生産性は合計せず、親作業には親作業総作業時間(内訳時間の合計)を表示します。手入力の件数による生産性ランキングはなくしました',
+    '「🎮 累計実績」(キャラクター・レベル・称号)をなくしました。スタッフの色の設定はそのまま使えます',
+    '画面の数量の単位を「ピース」「ケース」「件」にそろえました。「実績入力」の名前を「作業記録」に変更しました'
+  ]},
   { date:'2026-09-25', items:[
     '【作業指示の一本化】作業者画面の作業指示を「配置計算 → 管理者が確定 → 本日の作業指示」の1本の流れに統一しました。管理者が確定した配置だけを「📋 本日の作業指示/○○を開始してください」として表示し、未確定の配置案や、人手が足りている優先作業を作業者へ指示することはなくなりました',
     '人員不足の作業には ①空いている人 → ②手待ち作業中の人(手待ち作業にCSV数量が残っていても対象)→ ③抜けても今の作業が期限までに終わる人 の順で配置案を作ります。不足がなければ手待ち作業中の人は動かしません',
@@ -2031,10 +2000,8 @@ var state = {
   reportEnd: null,
   reportSingleDay: undefined,
   reportWorkVolume: null,
+  reportCaseLedger: null,
   reportRangeResult: null,
-  reportRpgResult: null,
-  reportRpgLoading: false,
-  reportRpgError: null,
   reportLoading: false,
   reportError: null,
   managerDate: null,
@@ -2088,6 +2055,8 @@ function subcatUnitPrice(sc){
   if(!sc || typeof sc!=='object') return null;
   return (typeof sc.unitPrice==='number') ? sc.unitPrice : null;
 }
+/* 画面表示用の単位。以前「個」で登録された単位は「ピース」と表示する(保存されている値・計算は変えない) */
+function displayUnit(u){ return u==='個' ? 'ピース' : (u||''); }
 function subcatUnitMap(task){
   var map = {};
   (task.subcategories||[]).forEach(function(sc){
@@ -2095,42 +2064,27 @@ function subcatUnitMap(task){
   });
   return map;
 }
-function breakdownLabel(breakdown, task){
-  if(!breakdown) return '';
-  var keys = Object.keys(breakdown).filter(function(k){ return breakdown[k]>0; });
-  if(!keys.length) return '';
-  var unitMap = subcatUnitMap(task);
-  return '('+keys.map(function(k){ return esc(k)+' '+breakdown[k]+esc(unitMap[k]||task.unit); }).join(' / ')+')';
+/* 1件の作業記録の内訳ごとの時間(確定分＋計測中の経過分)。例: 「ピッキング 1:20 / 梱包 0:30」 */
+function logSubTimesMap(l){
+  var out = {};
+  var subTimes = (l && l.subTimes) || {};
+  Object.keys(subTimes).forEach(function(k){ if(subTimes[k]>0) out[k] = subTimes[k]; });
+  if(l && l.activeSubcat && l.activeSubcatStart){
+    out[l.activeSubcat] = (out[l.activeSubcat]||0) + Math.max(0, Date.now()-new Date(l.activeSubcatStart).getTime());
+  }
+  return out;
 }
-function unitGroupedTotals(breakdown, task){
-  if(!breakdown) return [];
-  var keys = Object.keys(breakdown).filter(function(k){ return breakdown[k]>0; });
-  if(!keys.length) return [];
-  var unitMap = subcatUnitMap(task);
-  var totals = {};
-  var order = [];
-  keys.forEach(function(k){
-    var u = unitMap[k]||task.unit;
-    if(!(u in totals)){ totals[u] = 0; order.push(u); }
-    totals[u] += breakdown[k]||0;
-  });
-  return order.map(function(u){ return { unit: u, qty: totals[u] }; });
+function logSubTimesText(l){
+  var m = logSubTimesMap(l);
+  return Object.keys(m).map(function(k){ return k+' '+fmtHM(m[k]); }).join(' / ');
 }
-function formatUnitGroupedTotals(groups, escapeHtml){
-  return groups.map(function(g){ return g.qty+(escapeHtml?esc(g.unit):g.unit); }).join(' / ');
-}
+/* 内訳ごとの時間の行(数量は表示しない。数量はCSV取込から集計する) */
 function breakdownDetailRows(l, t){
-  if(!l.breakdown && !l.activeSubcat) return '';
-  var breakdown = l.breakdown || {};
   var subTimes = l.subTimes || {};
-  var unitMap = subcatUnitMap(t);
-  var keys = Object.keys(breakdown).filter(function(k){ return breakdown[k]>0; });
+  var keys = Object.keys(subTimes).filter(function(k){ return subTimes[k]>0; });
   if(l.activeSubcat && keys.indexOf(l.activeSubcat)===-1) keys.push(l.activeSubcat);
-  Object.keys(subTimes).forEach(function(k){ if(subTimes[k]>0 && keys.indexOf(k)===-1) keys.push(k); });
   if(!keys.length) return '';
   var rows = keys.map(function(k){
-    var qty = breakdown[k]||0;
-    var unit = unitMap[k]||t.unit;
     var base = subTimes[k]||0;
     var timeHtml;
     if(l.activeSubcat===k && l.activeSubcatStart){
@@ -2141,7 +2095,6 @@ function breakdownDetailRows(l, t){
     }
     return '<div class="breakdown-detail-row">'+
       '<span class="breakdown-detail-name">'+esc(k)+'</span>'+
-      '<span class="breakdown-detail-qty">'+qty+esc(unit)+'</span>'+
       '<span class="breakdown-detail-time">⏱ '+timeHtml+'</span>'+
     '</div>';
   }).join('');
@@ -2395,7 +2348,7 @@ function storageKeyLabel(key){
     ['day:', '実績・出勤データ'], ['roster', 'スタッフ一覧'], ['task-backlog', '作業一覧'],
     ['task-templates', '繰り返し作業'], ['work-volume-config', '作業量設定'], ['work-volume:', 'CSV取込データ'],
     ['vc-case-ledger:', 'ケース数'], ['audit-log:', '操作履歴'], ['break-settings', '休憩設定'],
-    ['shift-settings', '勤務時間設定'], ['achievement-settings', '目標設定'], ['jp-holidays', '祝日データ'],
+    ['shift-settings', '勤務時間設定'], ['staffing-settings', '人員配置の設定'], ['achievement-settings', '目標設定'], ['jp-holidays', '祝日データ'],
     ['task-priority:', '作業の優先度'], ['productivity-master', '生産性データ'], ['staffing-suggestion:', '配置案'],
     ['customer-task-mapping', '得意先・作業枠マスター'], ['shipper-no-registry', '荷主出荷番号の取込記録'],
     ['pending-assignment-suggestions:', '次の配置候補'], ['reassignment-alerts:', '配置変更指示'],
@@ -2680,6 +2633,9 @@ function clearFinancialState(){
   state.financialLaborCost = null;
   state.kintoneProductSettings = null;
   state.kintoneSyncStatus = null;
+  state.workPriceMaster = null;
+  state.workPriceSyncResult = null;
+  state.workPriceSyncError = '';
 }
 /* Supabase Auth のイベント。トークン更新・他のタブでのログアウト・セッション失効に追従する。
    (このコールバック内で Supabase の他の処理を await すると固まるため setTimeout で逃がす) */
@@ -2983,6 +2939,16 @@ async function saveBreakSettings(settings){
   try{ return await persistKey('break-settings', settings); }
   finally{ pendingSaves--; }
 }
+/* 人員配置の設定。autoConfirm: 空いている人・手待ち作業の人への配置案を自動で確定する(管理者が常に画面を見ているわけではないため、初期値はオン) */
+async function loadStaffingSettings(){
+  return loadSettingsKey('staffing-settings', state.staffingSettings, function(){ return { autoConfirm: true }; });
+}
+async function saveStaffingSettings(settings){
+  state.staffingSettings = settings;
+  pendingSaves++;
+  try{ return await persistKey('staffing-settings', settings); }
+  finally{ pendingSaves--; }
+}
 async function loadShiftSettings(){
   return loadSettingsKey('shift-settings', state.shiftSettings, function(){ return { enabled:false, start:'09:00', end:'18:00' }; });
 }
@@ -3214,11 +3180,12 @@ function migrateProductivityMasterToTemplateKeys(master){
   return { master: result, changed: changed };
 }
 var PRODUCTIVITY_MIN_SAMPLES = 5; // これ未満は「実績不足」として個人生産性を使わない
+var STAFFING_LOW_SAMPLE_DAYS = 3; // 作業の生産性の実績がこの日数未満なら、人員配置の見込みに「精度が低い」と表示する
 
 /* 生産性マスタへの反映(実測のみを使う。複数人が同じ作業に同時に入っていた日は
    個人ぶんの正確な内訳が分からないため、個人サンプルには使わず、
    作業全体の標準生産性の算出にのみ使う。) */
-function updateProductivityMasterFromDay(master, dateStr, day, workVolume){
+function updateProductivityMasterFromDay(master, dateStr, day, workVolume, caseLedger){
   var agg = aggregateDays([day]);
   Object.keys(agg.perTask).forEach(function(tid){
     if(tid==='BREAK') return;
@@ -3236,12 +3203,12 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume){
     // 自然と集約される。
     var pkey = productivityKeyForTask(task);
 
-    // 内訳(内訳作業)ごとの生産性は、CSV連携の有無に関わらず計算する。
-    // 親作業(タスク)全体のCSV数量とは独立して、内訳ごとの数量(log.breakdown)・
-    // 時間(log.subTimes)から求められるため。
+    // 内訳ごとの生産性(表示専用)は、内訳が処理した作業量(CSV・VCケース数台帳)÷ 内訳の作業時間(log.subTimes)。
+    // 親作業総作業時間(内訳時間の合計)も一緒に持つ。手入力の数量は使わない。
     if(!master[pkey]) master[pkey] = { unit:'個', taskAverage:{ totalQty:0, totalHours:0, sampleCount:0 }, byStaff:{}, bySubcat:{} };
     if(!master[pkey].bySubcat) master[pkey].bySubcat = {};
-    updateSubcatProductivityFromDayLogs(master[pkey].bySubcat, tid, day);
+    var subTotalMs = updateSubcatProductivityFromDayLogs(master[pkey].bySubcat, tid, day, workVolume, caseLedger);
+    if(subTotalMs>0) master[pkey].subcatHoursTotal = (master[pkey].subcatHoursTotal||0) + subTotalMs/3600000;
 
     // 作業全体(親作業)の生産性は、従来通りCSVの出荷数量を使って計算する(変更なし)。
     var wvTotals = wvTotalsForTask(workVolume||emptyWorkVolume(), tid);
@@ -3294,32 +3261,127 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume){
   });
   return master;
 }
-function updateSubcatProductivityFromDayLogs(bySubcat, tid, day){
-  var task = state.backlog.find(function(bt){ return bt.id===tid; });
-  if(!task || task.archived===true) return; // 呼び出し元で既に確認済みだが、単独呼び出しに備えて二重に確認する
-  if(!task.subcategories || !task.subcategories.length) return;
+/* ---------- 親作業(出荷先ごとの作業)の内訳別生産性 ----------
+   親作業(DF・個配・アスクル・VC・生協など)は、次のものを束ねる単位として扱う。
+     ・内訳ごとの作業量・作業時間・生産性(内訳の単位のまま。例: ピッキング 300ピース/時、梱包 75件/時)
+     ・親作業総作業時間 = 内訳の作業時間(subTimes)の合計
+   単位の違う内訳の生産性を足したり平均したりして「親作業の生産性」を作ることはしない。
+   作業量は CSV取込(通常出荷)と VCケース数台帳(VC)だけを使い、作業者の手入力の数量(quantity・breakdown)は使わない。
+   同じ内訳を複数人が担当した場合は、作業量の合計 ÷ 作業時間の合計(各人の生産性の平均ではない)。
+   将来の自動人員配置では「作業量 ÷ 過去の内訳別生産性 = 必要作業時間」として使える(今回は人員配置の計算は変更しない)。 */
+/* 内訳の種類: 'pieces'(ピース) / 'bara'(バラ・ピース) / 'cases'(ケース) / 'count'(件) / null(対応する作業量なし)。
+   内訳の単位で決め、単位が未設定・その他のときは内訳名で判断する(ケース → ケース、バラ → バラ、ピッキング → ピース、梱包 → 件)。 */
+function subcatVolumeKind(unit, name){
+  if(unit==='ピース' || unit==='個') return 'pieces';
+  if(unit==='件') return 'count';
+  if(unit==='ケース') return 'cases';
+  if(unit==='バラ') return 'bara';
+  var n = name || '';
+  if(/ケース/.test(n)) return 'cases';
+  if(/バラ/.test(n)) return 'bara';
+  if(/ピッキング/.test(n)) return 'pieces';
+  if(/梱包/.test(n)) return 'count';
+  return null;
+}
+/* 親作業の作業量(その日・その期間の取込とVCケース数台帳から) */
+function parentTaskVolumes(workVolume, caseLedger, taskId){
+  var wv = workVolume || emptyWorkVolume();
+  var t = wvTotalsForTask(wv, taskId);
+  var sp = outboundSplitForTask(wv, taskId);
+  var entries = caseLedger && caseLedger[taskId] && caseLedger[taskId].entries;
+  return {
+    hasCsv: t.importCount>0,
+    isVc: isVcKindTask(taskId, wv),
+    pieces: t.totalQty,                                  // 出荷数量(ピース) = 出荷引当数の合計
+    count: t.primaryCount,                               // 件数(VCはPO数)
+    caseCount: sp.withData ? sp.caseCount : null,        // ケース(商品台帳の入数で計算。記録の無い取込は含まない)
+    baraCount: sp.withData ? sp.pieceCount : null,       // バラ(ピース)
+    splitPartial: sp.withData>0 && sp.withData<sp.total, // ケース・バラの記録が無い取込を含む
+    vcCases: (entries && entries.length) ? vcCaseCurrentValue(entries) : null
+  };
+}
+/* 内訳が処理した作業量。
+   ピース(ピッキング) → CSV出荷数量。ただし同じ親作業に「ケース」の内訳がある場合は、ケースはそちらで数えるため バラ(ピース) を使う
+   ケース → CSVのケース数(VCは VCケース数台帳) / バラ → CSVのバラ / 件(梱包) → CSVの件数(VCはPO数) */
+function subcatWorkload(kind, vol, hasCaseSubcat){
+  var none = function(unit, reason){ return { qty:null, unit:unit, source:'', partial:false, reason:reason }; };
+  if(kind==='cases'){
+    if(vol.isVc) return vol.vcCases!==null ? { qty:vol.vcCases, unit:'ケース', source:'VCケース数', partial:false } : none('ケース', 'VCケース数の入力がありません');
+    if(!vol.hasCsv) return none('ケース', 'CSV未取込');
+    return vol.caseCount!==null ? { qty:vol.caseCount, unit:'ケース', source:'CSVケース数', partial:vol.splitPartial } : none('ケース', 'ケース・バラのデータなし');
+  }
+  if(kind==='pieces' || kind==='bara'){
+    if(!vol.hasCsv) return none('ピース', 'CSV未取込');
+    var useBara = kind==='bara' || (hasCaseSubcat && !vol.isVc);
+    if(!useBara) return { qty:vol.pieces, unit:'ピース', source:'CSV出荷数量', partial:false };
+    return vol.baraCount!==null ? { qty:vol.baraCount, unit:'ピース', source:'CSVバラ', partial:vol.splitPartial } : none('ピース', 'ケース・バラのデータなし');
+  }
+  if(kind==='count'){
+    if(!vol.hasCsv) return none(vol.isVc ? 'PO' : '件', 'CSV未取込');
+    return { qty:vol.count, unit: vol.isVc ? 'PO' : '件', source: vol.isVc ? 'CSVのPO数' : 'CSV件数', partial:false };
+  }
+  return none('', 'この内訳の単位に対応する作業量がありません');
+}
+/* 親作業1つ分の内訳別生産性。logs は対象期間の作業記録(他の作業・休憩が混ざっていてよい)。
+   内訳の無い作業は、作業全体を1つの内訳(「作業全体」)として扱う(VC → ケース、それ以外は作業の単位・名前で判断)。 */
+function computeParentTaskProductivity(task, logs, workVolume, caseLedger){
+  var tid = task.id;
+  var hasSubcats = !!(task.subcategories && task.subcategories.length);
   var unitMap = subcatUnitMap(task);
-  var perSubcat = {}; // subcatName -> {qty, ms}
-  (day.logs||[]).forEach(function(log){
-    if(log.taskId!==tid || !log.breakdown) return;
-    Object.keys(log.breakdown).forEach(function(scName){
-      var qty = log.breakdown[scName] || 0;
-      var ms = (log.subTimes && log.subTimes[scName]) || 0;
-      if(qty<=0 || ms<=0) return;
-      if(!perSubcat[scName]) perSubcat[scName] = { qty:0, ms:0 };
-      perSubcat[scName].qty += qty;
-      perSubcat[scName].ms += ms;
+  var names = hasSubcats ? task.subcategories.map(function(sc){ return subcatName(sc); }) : [];
+  var subMs = {}, loggedMs = 0, logCount = 0, staff = {};
+  (logs||[]).forEach(function(l){
+    if(l.taskId!==tid) return;
+    logCount++; staff[l.staffId] = true;
+    var dur = Math.max(0, (l.end ? new Date(l.end).getTime() : Date.now()) - new Date(l.start).getTime());
+    loggedMs += dur;
+    if(!hasSubcats){ subMs['作業全体'] = (subMs['作業全体']||0) + dur; return; }
+    var m = logSubTimesMap(l);
+    Object.keys(m).forEach(function(k){
+      subMs[k] = (subMs[k]||0) + m[k];
+      if(names.indexOf(k)===-1) names.push(k); // 作業マスタから消えた内訳の記録も時間は数える
     });
   });
-  Object.keys(perSubcat).forEach(function(scName){
-    var hours = perSubcat[scName].ms/3600000;
-    if(hours<=0) return;
-    if(!bySubcat[scName]) bySubcat[scName] = { unit: unitMap[scName]||task.unit, taskAverage:{ totalQty:0, totalHours:0, sampleCount:0 } };
-    bySubcat[scName].unit = unitMap[scName] || bySubcat[scName].unit; // 単位はマスタの最新設定を優先
-    bySubcat[scName].taskAverage.totalQty += perSubcat[scName].qty;
-    bySubcat[scName].taskAverage.totalHours += hours;
-    bySubcat[scName].taskAverage.sampleCount += 1;
+  if(!hasSubcats) names = ['作業全体'];
+  var vol = parentTaskVolumes(workVolume, caseLedger, tid);
+  var kindOf = function(n){
+    if(!hasSubcats) return vol.isVc ? 'cases' : subcatVolumeKind(task.unit, task.name);
+    return subcatVolumeKind(unitMap[n], n);
+  };
+  var hasCaseSubcat = names.some(function(n){ return kindOf(n)==='cases'; });
+  var totalSubMs = 0;
+  var subcats = names.map(function(n){
+    var ms = subMs[n] || 0;
+    totalSubMs += ms;
+    var kind = kindOf(n);
+    var w = subcatWorkload(kind, vol, hasCaseSubcat);
+    var rate = (w.qty!==null && ms>0) ? w.qty/(ms/3600000) : null;
+    return { name:n, kind:kind, unit:w.unit, qty:w.qty, source:w.source, partial:w.partial, reason:w.reason||'', ms:ms, rate:rate };
   });
+  return {
+    taskId: tid, taskName: task.name, isVc: vol.isVc, hasSubcats: hasSubcats,
+    totalSubMs: totalSubMs,                                      // 親作業総作業時間 = 内訳時間の合計
+    untrackedMs: hasSubcats ? Math.max(0, loggedMs - totalSubMs) : 0, // 内訳の計測が無い作業時間(参考。総作業時間には含めない)
+    staffCount: Object.keys(staff).length, logCount: logCount,
+    subcats: subcats, volumes: vol
+  };
+}
+/* 生産性データ(productivity-master)の内訳別生産性(表示専用。人員配置の計算には使わない)。
+   日ごとに作業量合計・作業時間合計を足し込み、生産性は 作業量合計 ÷ 作業時間合計 で求める(日ごとの生産性の平均ではない)。 */
+function updateSubcatProductivityFromDayLogs(bySubcat, tid, day, workVolume, caseLedger){
+  var task = state.backlog.find(function(bt){ return bt.id===tid; });
+  if(!task || task.archived===true) return 0; // 呼び出し元で既に確認済みだが、単独呼び出しに備えて二重に確認する
+  var pp = computeParentTaskProductivity(task, day.logs||[], workVolume, caseLedger);
+  pp.subcats.forEach(function(sc){
+    if(sc.qty===null || sc.ms<=0) return;
+    if(!bySubcat[sc.name]) bySubcat[sc.name] = { unit: sc.unit, kind: sc.kind, taskAverage:{ totalQty:0, totalHours:0, sampleCount:0 } };
+    bySubcat[sc.name].unit = sc.unit;
+    bySubcat[sc.name].kind = sc.kind;
+    bySubcat[sc.name].taskAverage.totalQty += sc.qty;
+    bySubcat[sc.name].taskAverage.totalHours += sc.ms/3600000;
+    bySubcat[sc.name].taskAverage.sampleCount += 1;
+  });
+  return pp.totalSubMs;
 }
 function resolveProductivityKey(taskId){
   var task = state.backlog.find(function(bt){ return bt.id===taskId; });
@@ -3339,7 +3401,7 @@ function subcatProductivityRateFor(master, taskId, subcatName){
    予定数量・完了数量・生産性・処理能力・不足・必要人数・完了予定を、選んだ基準の数量で統一して計算する。
    ケースはCSVに予定ケース数が無いため対象外(予定ケース数を取得できるようになったら、ここに追加する)。 */
 var STAFFING_BASES = {
-  pieces: { field:'totalQty', label:'ピース', name:'ピース数(出荷引当数の合計)' },
+  pieces: { field:'totalQty', label:'ピース', name:'出荷数量(ピース・出荷引当数の合計)' }, // キー(pieces)・計算は従来どおり
   count:  { field:'primaryCount', label:'件', vcLabel:'PO', name:'件数(荷主出荷NOの数・VCはPO数)' },
   lines:  { field:'lineCount', label:'明細', name:'明細数(CSVの明細行の数)' }
 };
@@ -3855,6 +3917,28 @@ function computeTodayStaffingPlan(ctx){
   var confirmed = normalizeConfirmedInstructions(ctx.staffingSuggestion).map(function(it){
     return Object.assign({}, it, { progress: instructionProgress(it, day) });
   });
+  // 休憩中に確定した配置(休憩中の手動配置など)は、「休憩前の作業が終わったら開始」する予定として扱う(計算の中だけ。保存データは変更しない)。
+  // これが無いと、休憩前の作業を続ける人がその作業の担当から外れ、担当0人の不足として別の人を回す案が出てしまう
+  // (続いて本来の担当者を別作業へ動かす案も出て、入れ替わるだけになる)。
+  confirmed.forEach(function(it){
+    if(it.startAfterTaskId || !it.confirmedAt) return;
+    var atMs = new Date(it.confirmedAt).getTime();
+    var logs = (day.logs||[]).filter(function(l){ return l.staffId===it.staffId && !!l.start; })
+      .sort(function(a,b){ return new Date(a.start).getTime()-new Date(b.start).getTime(); });
+    var bi = -1;
+    for(var i=logs.length-1; i>=0; i--){
+      var l = logs[i];
+      if(l.taskId==='BREAK' && new Date(l.start).getTime()<=atMs && (l.end===null || new Date(l.end).getTime()>=atMs)){ bi = i; break; }
+    }
+    if(bi<=0) return;
+    var prev = null;
+    for(var j=bi-1; j>=0; j--){ if(logs[j].taskId!=='BREAK'){ prev = logs[j]; break; } }
+    // 休憩の開始によって終わった作業記録であること
+    if(!prev || !prev.end || Math.abs(new Date(prev.end).getTime()-new Date(logs[bi].start).getTime()) > 60000) return;
+    if(prev.taskId===it.taskId || !taskMap[prev.taskId]) return;
+    it.startAfterTaskId = prev.taskId;
+    it.afterBreakTask = true;
+  });
   // 未開始のまま、あとから別の配置に変わったもの(同じ人へのあとの確定・手動配置、または確定後に別の作業を開始)は「変更済み」にする。
   // 変更済みを未開始のまま数えると、来ない人をこの作業の予定人員に数え続け(不足が隠れる)、その人を次の配置の候補にも出せなくなる。
   // 確定時点の作業(fromTaskId)・完了後の配置予定の元の作業(startAfterTaskId)・休憩の再開は「別の作業」に含めない。
@@ -3868,6 +3952,17 @@ function computeTodayStaffingPlan(ctx){
         !!l.start && new Date(l.start).getTime() >= sinceMs+SUPERSEDE_GRACE_MS;
     });
     if(newer || otherStarted) it.progress = 'superseded';
+  });
+  // 確定から一定時間たっても、指示と別の作業(確定時点の作業、または確定直後に自分で始めた作業)を続けている指示は「未実施」にする。
+  // 未開始のまま数えると、来ない人をこの作業の予定人員に数え続け、不足が隠れる。
+  // 作業者画面の指示は残す(管理者が取り消したわけではないため)。完了後の配置予定は元の作業を続けるのが正しいので対象外。
+  var NOT_FOLLOWED_MS = 10*60000;
+  confirmed.forEach(function(it){
+    if(it.progress!=='pending' || it.startAfterTaskId || !it.confirmedAt) return;
+    var open = openByStaff[it.staffId];
+    if(!open || open.taskId==='BREAK' || open.taskId===it.taskId) return;
+    if(nowMs-new Date(it.confirmedAt).getTime() < NOT_FOLLOWED_MS) return;
+    it.progress = 'notFollowed';
   });
   var pendingConfirmedByStaff = {};
   confirmed.forEach(function(it){ if(it.progress==='pending' && !pendingConfirmedByStaff[it.staffId]) pendingConfirmedByStaff[it.staffId] = it; });
@@ -4002,6 +4097,7 @@ function computeTodayStaffingPlan(ctx){
       plannedQty: planned, primaryCount: totals.primaryCount, completedQty: completed, completedAt: comp ? comp.at : null,
       remainingQty: remaining, remainingRecordedQty: remainingRecorded, estimatedDoneQty: estimatedDone,
       rate: rate, rateBasis: avg.basis, sampleCount: avg.sampleCount,
+      lowSample: !!rate && (avg.sampleCount||0) < STAFFING_LOW_SAMPLE_DAYS, // 生産性の実績日数が少なく、見込みの精度が低い
       remainTimeMin: remainTimeMin, perPersonQty: perPersonQty,
       workers: workers, plannedWorkers: plannedWorkers, currentCount: workers.length, capacity: capacity, breakCapacity: breakCapacity,
       shortageQty: shortage, neededPeople: neededPeople,
@@ -4012,10 +4108,15 @@ function computeTodayStaffingPlan(ctx){
   var calcByTask = {}; calcs.forEach(function(c){ calcByTask[c.taskId] = c; });
   // 確定済み・未開始の配置のうち、配置先の作業が処理済み(完了・推定で処理済み)または本日の対象外になったものは、
   // 作業者画面にも指示として出ない(nextTaskForStaff)。その指示のためにこの人を次の配置の候補から外し続けないようにする。
+  // 手待ち作業への指示(未開始)は、人を確保しない。まだ始めていない人は、不足のある優先作業の候補に戻す
+  // (CSV取込より先に始業して全員に手待ち作業の指示が出た場合でも、あとから取り込んだ作業へ配置できるように)。
+  // 同じ手待ち作業の指示を何度も出さないよう、手待ち作業への割り当て(下の idleCandidates)からは外す。
+  var pendingIdleByStaff = {};
   Object.keys(pendingConfirmedByStaff).forEach(function(sid){
     var it = pendingConfirmedByStaff[sid];
     var c = calcByTask[it.taskId];
-    if(!taskMap[it.taskId] || (c && c.remainingQty<=0)) delete pendingConfirmedByStaff[sid];
+    if(!taskMap[it.taskId] || (c && c.remainingQty<=0)){ delete pendingConfirmedByStaff[sid]; return; }
+    if(taskMap[it.taskId].idleLikely===true){ pendingIdleByStaff[sid] = it; delete pendingConfirmedByStaff[sid]; }
   });
 
   // ---- 配置候補者 ----
@@ -4122,6 +4223,7 @@ function computeTodayStaffingPlan(ctx){
   idleCandidates.forEach(function(sid){
     if(inBreakWindow) return;
     if(used[sid]) return;
+    if(pendingIdleByStaff[sid]) return; // 手待ち作業の指示を確定済み(まだ開始していない)
     var target = idleWorkTasks.find(function(t){ return idleShortage[t.id]>0.01; });
     if(!target) return;
     var calc = calcByTask[target.id] || null;
@@ -4246,6 +4348,24 @@ function computeTodayStaffingPlan(ctx){
     });
   }
 
+  // 作業記録があるのに完了の記録が無く、今は誰も担当していない作業(休憩で中断したまま・勤務終了で打ち切られたなど)。
+  // 完了の記録が無いと、残作業があるように見え続け(不要な配置案の原因)、生産性データにも反映されない
+  var unattendedUnfinished = calcs.filter(function(c){
+    if(c.completedAt || c.workers.length || c.plannedWorkers.length) return false;
+    var tl = (day.logs||[]).filter(function(l){ return l.taskId===c.taskId && !!l.start; });
+    if(!tl.length || tl.some(function(l){ return l.end===null; })) return false;
+    var last = tl.slice().sort(function(a,b){ return new Date(b.end).getTime()-new Date(a.end).getTime(); })[0];
+    // 作業者が「まだ途中」を選んで離れた作業は対象外。自動休憩の開始・勤務終了で打ち切られた作業だけを出す
+    var endMs = new Date(last.end).getTime();
+    var cutByBreak = (day.logs||[]).some(function(l){ return l.staffId===last.staffId && l.taskId==='BREAK' && !!l.start && Math.abs(new Date(l.start).getTime()-endMs)<=60000; });
+    var info = staffInfo[last.staffId];
+    var cutByShiftEnd = !!(info && info.shiftEndMs && endMs>=info.shiftEndMs-60000);
+    if(!cutByBreak && !cutByShiftEnd) return false;
+    c.lastWorkerId = last.staffId;
+    c.lastWorkedEnd = last.end;
+    return true;
+  }).map(function(c){ return c.taskId; });
+
   // 確定済み配置のうち、作業が終わった・無くなったもの(不要の可能性)
   confirmed.forEach(function(it){
     var c = calcByTask[it.taskId];
@@ -4257,7 +4377,7 @@ function computeTodayStaffingPlan(ctx){
     date: dateStr, nowMs: nowMs, generatedAt: now.toISOString(), breakHold: inBreakWindow,
     tasks: calcs, taskById: calcByTask, idleWorkTasks: idleWorkTasks.map(function(t){ return { taskId: t.id, name: t.name, idlePriorityLevel: t.idlePriorityLevel||3 }; }),
     proposals: proposals, confirmed: confirmed, staff: staffInfo,
-    reservations: reservations, reservationByTask: reservationByTask, staffAvailability: staffAvailability,
+    reservations: reservations, reservationByTask: reservationByTask, staffAvailability: staffAvailability, unattendedUnfinished: unattendedUnfinished,
     productivityMissing: calcs.filter(function(c){ return !c.rate && c.remainingQty>0; }).map(function(c){ return c.taskId; })
   };
 }
@@ -4274,7 +4394,8 @@ function nextTaskForStaff(plan, staffId, day){
     if(c && c.remainingQty<=0) return false;
     return true;
   }
-  var conf = plan.confirmed.filter(function(it){ return it.staffId===staffId && it.progress==='pending' && usable(it.taskId); })
+  // 未実施(元の作業を続けている)の指示も、管理者が取り消すまでは作業者画面に出し続ける
+  var conf = plan.confirmed.filter(function(it){ return it.staffId===staffId && (it.progress==='pending' || it.progress==='notFollowed') && usable(it.taskId); })
     .sort(function(a,b){ return String(a.confirmedAt).localeCompare(String(b.confirmedAt)); })[0];
   // 作業完了後の配置予定(startAfterTaskId)で、元の作業をまだ続けている場合は afterTaskId を付ける(「開始してください」とは出さない)
   if(conf) return { taskId: conf.taskId, source: 'confirmed', expectedQty: conf.expectedQty,
@@ -4418,6 +4539,21 @@ async function reopenTaskCompletion(taskId){
   if(ok) await appendAuditLog({ action:'作業を未完了に戻す', target: taskById(taskId).name, before:'完了', after:'未完了' });
   return ok;
 }
+/* 管理者用: 作業記録があるのに完了の記録が無い(誰も担当していない)作業を完了にする。
+   完了時刻は、その作業の最後の作業記録の終了時刻にする(押した時刻ではなく、実際に作業が終わった時刻)。 */
+async function completeUnattendedTask(taskId){
+  var day = state.day;
+  if(!day || taskCompletionFor(day, taskId)) return false;
+  var tl = (day.logs||[]).filter(function(l){ return l.taskId===taskId && !!l.start; });
+  if(!tl.length || tl.some(function(l){ return l.end===null; })) return false; // 誰かが作業中なら完了にしない
+  var last = tl.slice().sort(function(a,b){ return new Date(b.end).getTime()-new Date(a.end).getTime(); })[0];
+  if(!markTaskCompletedIfLastWorker(day, taskId, last.staffId)) return false;
+  day.taskCompletion[taskId].at = last.end;
+  day.taskCompletion[taskId].byManager = (state.managerSession && state.managerSession.user && state.managerSession.user.email) || '管理者';
+  var ok = await saveDay(day);
+  if(ok) await appendAuditLog({ action:'作業を完了にする', target: taskById(taskId).name, before:'未完了', after:'完了('+fmtClock(last.end)+'終了)' });
+  return ok;
+}
 /* 本日の作業に関わるデータ(CSV・作業マスタ・出勤など)が変わったとき。計算結果は保存しないので、
    最新データで画面を描き直すよう印を付けるだけ。 */
 function onTodayStaffingInputsChanged(dateStr){
@@ -4470,7 +4606,10 @@ async function rebuildProductivityMasterFromRecentDays(){
     if(!day || !day.logs || !day.logs.length) continue;
     var wv = await getWorkVolumeForDate(dStr);
     if(!wv || isUnverified(wv)) continue;
-    updateProductivityMasterFromDay(master, dStr, day, wv);
+    // VCのケース数(内訳別生産性の表示用。人員配置の計算には使わない)
+    var caseLedger = (dStr===todayStr()) ? state.vcCaseLedger : await loadVcCaseLedger(dStr);
+    if(caseLedger && isUnverified(caseLedger)) caseLedger = null;
+    updateProductivityMasterFromDay(master, dStr, day, wv, caseLedger);
     updatedDays++;
   }
   var ok = await saveProductivityMaster(master);
@@ -5341,7 +5480,8 @@ function vcCaseCurrentValue(entries){
 async function addVcCaseEntry(dateStr, taskId, delta, note){
   var data = state.vcCaseLedger || {};
   if(!data[taskId]) data[taskId] = { entries: [] };
-  data[taskId].entries.push({ id: uid(), delta: delta, actor: state.activeStaffId, at: new Date().toISOString(), note: note||'', reversedAt: null, reversedBy: null });
+  // source: 入力元('manual'=作業者・管理者の手入力)。将来API連携で取り込む場合は別の値を入れる。source の無い過去の記録は手入力として扱う
+  data[taskId].entries.push({ id: uid(), delta: delta, actor: state.activeStaffId, at: new Date().toISOString(), note: note||'', reversedAt: null, reversedBy: null, source: 'manual' });
   state.vcCaseLedger = data;
   await saveVcCaseLedger(dateStr, data);
   await appendAuditLog({ action:'ケース数追加', target: taskById(taskId).name, before: null, after: (delta>=0?'+':'')+delta+'(理由: '+(note||'なし')+')' });
@@ -5387,23 +5527,6 @@ async function loadDayByDate(dateStr){
     console.error('[LOGI LINK] 実績データの読み込みに失敗しました: '+dateStr, e);
   }
   return null;
-}
-async function loadAllDayKeys(){
-  try{
-    var r = await window.storage.list('day:', true);
-    return r ? r.keys : [];
-  }catch(e){ return []; }
-}
-async function loadAllDaysForLifetime(){
-  var keys = await loadAllDayKeys();
-  keys = keys.slice(0, 400);
-  var days = [];
-  for(var i=0;i<keys.length;i++){
-    var dateStr = keys[i].replace('day:','');
-    var d = await loadDayByDate(dateStr);
-    if(d) days.push(d);
-  }
-  return days;
 }
 async function loadDay(){
   var d;
@@ -5823,18 +5946,11 @@ function renderLogManagementTab(){
         var s = staffById(log.staffId);
         var inProgress = log.end===null;
         var checked = state.logMgmtSelected[log.id] ? 'checked' : '';
-        // 内訳(内訳作業)がある場合は、内訳ごとの数量・単位で表示する(単位が異なるものを合算しない)
-        var workLabel, qtyLabel;
-        if(log.breakdown && Object.keys(log.breakdown).length){
-          var unitMap = subcatUnitMap(t);
-          workLabel = esc(t.name)+' / '+esc(log.activeSubcat || Object.keys(log.breakdown).join('・'));
-          qtyLabel = Object.keys(log.breakdown).map(function(scName){
-            return formatNum(log.breakdown[scName])+esc(unitMap[scName]||t.unit);
-          }).join('・');
-        }else{
-          workLabel = esc(t.name);
-          qtyLabel = log.quantity!==null && log.quantity!==undefined ? formatNum(log.quantity)+esc(t.unit||'') : '-';
-        }
+        // 数量(手入力)は表示しない。作業時間と内訳ごとの時間を表示する
+        var workLabel = esc(t.name);
+        var subText = logSubTimesText(log);
+        var durMsL = Math.max(0, (log.end ? new Date(log.end).getTime() : Date.now()) - new Date(log.start).getTime());
+        var qtyLabel = fmtHM(durMsL)+(subText ? '<div style="font-size:11px;color:var(--slate-500);">'+esc(subText)+'</div>' : '');
         return '<tr'+(inProgress?' style="opacity:0.55;"':'')+'>'+
           '<td class="num"><input type="checkbox" data-logmgmt-check="'+log.id+'" '+checked+' '+(inProgress?'disabled title="進行中のため対象外です"':'')+'></td>'+
           '<td>'+esc(dateLabelFromStr(e.dateStr))+'</td>'+
@@ -5858,7 +5974,7 @@ function renderLogManagementTab(){
     body = filterBarHtml+
       '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">'+filteredEntries.length+'件の実績</div>'+
       '<div style="overflow-x:auto;"><table class="report-table"><thead><tr>'+
-        '<th><input type="checkbox" id="logMgmtSelectAll" '+(allSelected?'checked':'')+'></th><th>日付</th><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>数量</th>'+
+        '<th><input type="checkbox" id="logMgmtSelectAll" '+(allSelected?'checked':'')+'></th><th>日付</th><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>作業時間(内訳)</th>'+
       '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
       (inProgressCount ? '<div class="pool-hint" style="margin-top:8px;">進行中の実績('+inProgressCount+'件)は、削除・日付変更の対象にできません(選択欄がグレー表示されています)。</div>' : '')+
       '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--paper-line);">'+
@@ -6029,10 +6145,11 @@ function renderProductivityTab(){
     }).join('') || '<div class="checklist-item-action">個人別の実績はまだありません</div>';
     var subcatNames = Object.keys(m.bySubcat||{});
     var subcatRows = subcatNames.length ? '<div class="task-tile-live-counters" style="margin-top:10px;">'+
-      '<div class="task-tile-live-title">内訳ごとの生産性</div>'+
+      '<div class="task-tile-live-title">内訳ごとの生産性(単位が違うため合計しません)'+(m.subcatHoursTotal ? ' ・ 親作業総作業時間(内訳時間の合計) '+m.subcatHoursTotal.toFixed(1)+'時間' : '')+'</div>'+
       subcatNames.map(function(scName){
         var sr = subcatProductivityRateFor(master, key, scName);
-        return '<div class="checklist-item-action">'+esc(scName)+': '+(sr.rate?sr.rate.toFixed(1):'-')+esc(sr.unit||'')+'/h(サンプル'+sr.sampleCount+'日)</div>';
+        var ta = m.bySubcat[scName].taskAverage || {};
+        return '<div class="checklist-item-action">'+esc(scName)+': '+(sr.rate?sr.rate.toFixed(1):'-')+esc(sr.unit||'')+'/時(作業量 '+formatNum(ta.totalQty)+esc(sr.unit||'')+' ÷ 作業時間 '+(ta.totalHours||0).toFixed(1)+'時間・サンプル'+sr.sampleCount+'日)</div>';
       }).join('')+
     '</div>' : '';
     return '<div class="checklist-item">'+
@@ -6099,6 +6216,10 @@ function staffingOverview(plan){
 }
 /* 基準がピース数以外の作業で、残りのピース数を補足として出す(例: 「残り 120件(600ピース)」) */
 /* 推定処理数量を差し引いた残りであることを示す(完了の記録だけの残りと区別する) */
+/* 生産性の実績日数が少ない作業の注意(実績が少ないと生産性が実際と大きくずれ、必要人数を少なく見積もることがある) */
+function staffingLowSampleText(c){
+  return (c && c.lowSample) ? '⚠ 生産性の実績が'+c.sampleCount+'日分しかないため、見込みの精度が低めです(必要人数・完了予定は目安として見てください)' : '';
+}
 function staffingEstMark(c){
   return (c && c.estimatedDoneQty>0.5) ? '(推定)' : '';
 }
@@ -6143,6 +6264,8 @@ function renderTodayPlanSummary(){
   else if(ov.needAction.length) parts.push('<span class="stf-need">対応が必要な作業 '+ov.needAction.length+'件</span>');
   if(ov.idleProposals.length) parts.push('手待ち作業への配置案 '+ov.idleProposals.length+'人');
   if(pendingConfirmed) parts.push('確定済み・未開始 '+pendingConfirmed+'人');
+  var notFollowedConfirmed = plan.confirmed.filter(function(it){ return it.progress==='notFollowed'; }).length;
+  if(notFollowedConfirmed) parts.push('<span class="stf-need">確定済み・未実施 '+notFollowedConfirmed+'人</span>');
   var text = parts.length ? parts.join(' ・ ') : '✅ 現在、追加の配置は必要ありません';
   return '<div class="panel" style="margin-bottom:14px;" id="todayPlanSummary">'+
     '<div class="stf-today-line">'+
@@ -6200,6 +6323,8 @@ function renderStaffing(){
     var planned = c.plannedWorkers.length ? ' <span class="stf-row-meta">(確定済み・未開始 '+c.plannedWorkers.length+'人を含む)</span>' : '';
     var nums = '<div class="stf-card-nums">'+
       '<span>残り <b>'+formatNum(Math.round(c.remainingQty))+'</b>'+esc(c.unit)+staffingPiecesNote(c)+staffingEstMark(c)+'</span>'+
+      // CSVの出荷数量のうちケース・バラ(表示のみ。人員配置の計算には使わない)
+      (outboundSplitForTask(state.workVolume, c.taskId).total ? '<span class="stf-row-meta" data-staffing-split="'+esc(c.taskId)+'">CSV '+formatNum(c.piecesQty)+'ピースのうち '+esc(outboundSplitText(outboundSplitForTask(state.workVolume, c.taskId)))+'</span>' : '')+
       (c.neededPeople!==null ? '<span>現在 <b>'+(c.currentCount+c.plannedWorkers.length)+'</b>人 → 必要 <b>'+c.neededPeople+'</b>人'+planned+'</span>' : '<span>現在 <b>'+(c.currentCount+c.plannedWorkers.length)+'</b>人</span>')+
       (c.additionalNeeded ? '<span class="stf-need">あと'+c.additionalNeeded+'人</span>' : '')+
       // 途中で勤務終了する人がいると「必要人数」は満たしていても処理量が足りないことがあるため、不足数量も出す
@@ -6237,6 +6362,7 @@ function renderStaffing(){
     return '<div class="stf-card'+(danger?' is-danger':'')+'" data-staffing-task="'+esc(c.taskId)+'">'+
       '<div><span class="stf-card-name">'+(danger?'🔴 ':'🟠 ')+esc(c.name)+'</span>'+(c.deadline?'<span class="stf-card-sub">締切 '+esc(c.deadline)+'</span>':'')+'</div>'+
       nums+etaHtml+people+resvPeople+warn+
+      (c.lowSample ? '<div class="stf-warn" style="color:var(--amber-700,#B54708);">'+esc(staffingLowSampleText(c))+'</div>' : '')+
     '</div>';
   }).join('');
   var needSection = ov.needAction.length ? ('<div class="stf-section-title">⚠ 対応が必要な作業</div>'+needHtml) : '';
@@ -6290,9 +6416,10 @@ function renderStaffing(){
     pending: '<span class="stf-badge stf-badge-pending">確定済み・未開始</span>',
     active: '<span class="stf-badge stf-badge-active">確定済み・作業中</span>',
     done: '<span class="stf-badge stf-badge-done">確定済み・終了</span>',
-    superseded: '<span class="stf-badge stf-badge-done">確定済み・別の配置に変更</span>'
+    superseded: '<span class="stf-badge stf-badge-done">確定済み・別の配置に変更</span>',
+    notFollowed: '<span class="stf-badge stf-badge-pending" style="color:var(--rust-600);">⚠ 確定済み・未実施(指示と別の作業を継続中。予定人員に数えていません)</span>'
   };
-  var progressOrder = { pending:0, active:1, done:2, superseded:3 };
+  var progressOrder = { notFollowed:0, pending:1, active:2, done:3, superseded:4 };
   var confirmedRows = plan.confirmed.slice().sort(function(a,b){
     return (progressOrder[a.progress]-progressOrder[b.progress]) || String(b.confirmedAt).localeCompare(String(a.confirmedAt));
   }).map(function(it){
@@ -6301,10 +6428,25 @@ function renderStaffing(){
       (it.startAfterTaskId && it.progress==='pending' && plan.staff[it.staffId] && plan.staff[it.staffId].currentTaskId===it.startAfterTaskId
         ? '<span class="stf-badge stf-badge-pending">確定済み・'+esc(taskById(it.startAfterTaskId).name)+'の完了後に開始</span>'
         : (progressBadge[it.progress]||''))+
-      (it.confirmedAt ? '<span class="stf-row-meta">'+fmtClock(it.confirmedAt)+(it.tier==='manual' ? '手動配置' : '確定')+'</span>' : '')+
+      (it.confirmedAt ? '<span class="stf-row-meta">'+fmtClock(it.confirmedAt)+(it.tier==='manual' ? '手動配置' : (it.auto ? '自動確定' : '確定'))+'</span>' : '')+
       (it.maybeUnneeded ? '<span style="color:var(--rust-600);font-weight:700;font-size:13px;">⚠ 不要の可能性(作業が完了しています)</span>' : '')+
     '</div>';
   }).join('');
+  // ---- 作業記録があるのに完了していない作業(担当者なし) ----
+  var unfinishedRows = (plan.unattendedUnfinished||[]).map(function(tid){
+    var c = plan.taskById[tid];
+    var rest = c.remainingQty>0 ? '残り 約'+formatNum(Math.round(c.remainingQty))+c.unit+staffingEstMark(c) : '推定では処理済み';
+    return '<div class="stf-row" data-staffing-unfinished="'+esc(tid)+'">'+
+      '<span class="stf-row-main">'+esc(c.name)+'</span>'+
+      '<span class="stf-row-meta">'+esc(rest)+'・最後の作業 '+esc(staffName(c.lastWorkerId))+'さん '+fmtClock(c.lastWorkedEnd)+'まで</span>'+
+      '<button type="button" class="vc-manage-toggle-btn" data-complete-task="'+esc(tid)+'" style="padding:2px 8px;font-size:11px;">完了にする</button>'+
+    '</div>';
+  }).join('');
+  var unfinishedSection = unfinishedRows ? ('<div class="stf-section-title">⚠ 休憩・勤務終了で中断したまま完了していない作業</div>'+
+    '<div class="stf-card" style="border-left-color:var(--rust-600);" id="staffingUnfinished">'+
+      '<div class="pool-hint" style="margin:0 0 6px;">休憩の開始・勤務終了で作業記録が打ち切られたまま、再開も完了の記録もありません。終わっている作業は「完了にする」を押してください(残作業量・配置案・生産性データに反映されます)。</div>'+
+      unfinishedRows+
+    '</div>') : '';
   var confirmedSection = confirmedRows ? ('<div class="stf-section-title">✅ 確定済み</div><div class="stf-card" style="border-left-color:#12B76A;" id="staffingConfirmed">'+confirmedRows+'</div>') : '';
 
   // ---- ⑥ 人員が足りている作業・完了した作業(簡易表示) ----
@@ -6318,7 +6460,9 @@ function renderStaffing(){
       return '<div class="stf-row" data-staffing-task="'+esc(c.taskId)+'"><span class="stf-row-main">🟢 '+esc(c.name)+'</span><span class="stf-row-meta">推定では処理済み(完了の記録なし)・'+c.currentCount+'人'+planned+'</span></div>';
     }
     var head = c.rate ? '🟢 ' : '⚪ ';
-    var meta = '残り'+formatNum(Math.round(c.remainingQty))+c.unit+staffingPiecesNote(c)+staffingEstMark(c)+'・'+c.currentCount+'人'+planned;
+    var meta = '残り'+formatNum(Math.round(c.remainingQty))+c.unit+staffingPiecesNote(c)+staffingEstMark(c)+'・'+c.currentCount+'人'+planned+(c.lowSample ? '・⚠ 生産性の実績'+c.sampleCount+'日分(精度低め)' : '');
+    var splitOther = outboundSplitText(outboundSplitForTask(state.workVolume, c.taskId));
+    if(splitOther) meta += '(CSV '+formatNum(c.piecesQty)+'ピースのうち '+splitOther+')';
     var eta = etaLine(c);
     return '<div class="stf-row" data-staffing-task="'+esc(c.taskId)+'">'+
       '<span class="stf-row-main">'+head+esc(c.name)+'</span>'+
@@ -6336,12 +6480,12 @@ function renderStaffing(){
     var limitText = c.limitKind==='deadline' ? ('締切 '+esc(c.deadline)) : ('締切なし → 勤務終了 '+esc(fmtClockMs(c.limitMs)));
     var etaNow = planEtaText(plan, c.taskId), etaAfter = staffingEtaWithProposalsText(plan, c);
     var lines = [
-      '人員配置の基準 '+esc(c.basisName)+'(CSV: 件数'+formatNum(c.primaryCount)+'・明細'+formatNum(c.lineCount)+'・ピース'+formatNum(c.piecesQty)+')',
+      '人員配置の基準 '+esc(c.basisName)+'(CSV: 件数'+formatNum(c.primaryCount)+'・明細'+formatNum(c.lineCount)+'・出荷数量'+formatNum(c.piecesQty)+'ピース'+(outboundSplitText(outboundSplitForTask(state.workVolume, c.taskId)) ? '・'+esc(outboundSplitText(outboundSplitForTask(state.workVolume, c.taskId))) : '')+')',
       'CSV予定数量 '+formatNum(c.plannedQty)+esc(c.unit),
       '完了数量(記録) '+formatNum(c.completedQty)+esc(c.unit)+(c.completedAt?'('+fmtClock(c.completedAt)+'に完了扱い)':''),
       '推定処理数量 '+formatNum(Math.round(c.estimatedDoneQty||0))+esc(c.unit)+'(作業記録の時間 × 生産性から推定。実績の記録ではありません)',
       '残作業量(推定) '+formatNum(Math.round(c.remainingQty))+esc(c.unit)+'(記録上の残り '+formatNum(c.remainingRecordedQty)+esc(c.unit)+')',
-      '生産性 '+(c.rate ? c.rate.toFixed(1)+esc(c.unit)+'/人時('+(c.rateBasis==='taskAverage'?'作業全体の実績':'個人実績')+'・サンプル'+c.sampleCount+'日)' : '未設定(実績不足のため計算できません)'),
+      '生産性 '+(c.rate ? c.rate.toFixed(1)+esc(c.unit)+'/人時('+(c.rateBasis==='taskAverage'?'作業全体の実績':'個人実績')+'・サンプル'+c.sampleCount+'日)'+(c.lowSample ? ' '+esc(staffingLowSampleText(c)) : '') : '未設定(実績不足のため計算できません)'),
       '現在人数 '+c.currentCount+'人'+(workersText?'('+workersText+')':'')+(c.plannedWorkers.length?' + 確定済みで未開始 '+c.plannedWorkers.length+'人('+plannedText+')':''),
       '現在時刻 '+esc(nowText)+' / '+limitText+' / 残り時間 '+fmtMinutesJa(c.remainTimeMin),
       '1人あたり処理可能数量 '+(c.perPersonQty!==null?formatNum(Math.round(c.perPersonQty))+esc(c.unit):'―'),
@@ -6368,6 +6512,10 @@ function renderStaffing(){
   return '<div class="mgr-wrap">'+
     '<div class="panel" id="staffingPanel">'+
       '<div class="stf-head"><div class="panel-title">👥 人員配置</div><div class="stf-asof">'+esc(nowText)+'時点・自動計算'+(plan.breakHold?'・休憩中(配置案は休憩終了後)':'')+'</div></div>'+
+      '<label class="pool-hint" style="display:flex;align-items:center;gap:6px;margin:0 0 10px;cursor:pointer;">'+
+        '<input type="checkbox" id="staffingAutoConfirm"'+((state.staffingSettings && state.staffingSettings.autoConfirm===false) ? '' : ' checked')+' style="margin:0;">'+
+        '空いている人・手待ち作業の人への配置案を自動で確定する(作業中の人を動かす案・作業完了後の配置予定は、管理者が確定します)'+
+      '</label>'+
       summaryHtml+
       noneHtml+
       needSection+
@@ -6375,6 +6523,7 @@ function renderStaffing(){
       idleSection+
       resvSection+
       confirmHtml+
+      unfinishedSection+
       confirmedSection+
       othersSection+
       noTasksNote+
@@ -6410,6 +6559,16 @@ function renderAfterBreakStaffingSection(ab){
 function bindStaffing(){
   var detailEl = document.getElementById('staffingDetail');
   if(detailEl) detailEl.addEventListener('toggle', function(){ state.staffingDetailOpen = detailEl.open; });
+  var autoEl = document.getElementById('staffingAutoConfirm');
+  if(autoEl){
+    autoEl.addEventListener('change', async function(){
+      var on = autoEl.checked;
+      var ok = await saveStaffingSettings(Object.assign({}, state.staffingSettings||{}, { autoConfirm: on }));
+      if(ok) await appendAuditLog({ action:'配置案の自動確定の設定', target:'人員配置', before: on?'オフ':'オン', after: on?'オン':'オフ' });
+      showToast(ok ? ('配置案の自動確定を'+(on?'オン':'オフ')+'にしました') : '⚠️ 保存できませんでした');
+      render();
+    });
+  }
   var confirmBtn = document.getElementById('staffingConfirmBtn');
   if(confirmBtn){
     confirmBtn.addEventListener('click', async function(){
@@ -6422,6 +6581,15 @@ function bindStaffing(){
       render();
     });
   }
+  document.querySelectorAll('[data-complete-task]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var tid = el.getAttribute('data-complete-task');
+      if(!confirm('「'+taskById(tid).name+'」を完了にします。よろしいですか?')) return;
+      var ok = await completeUnattendedTask(tid);
+      showToast(ok ? '完了にしました' : '⚠️ 保存できませんでした');
+      render();
+    });
+  });
   document.querySelectorAll('[data-reopen-task]').forEach(function(el){
     el.addEventListener('click', async function(){
       var tid = el.getAttribute('data-reopen-task');
@@ -6522,7 +6690,7 @@ function renderUnitPricePanel(){
 
   return '<div class="mgr-wrap"><div class="panel">'+
     '<div class="panel-title">💴 単価マスタ・人件費設定</div>'+
-    '<div class="pool-hint" style="margin-bottom:12px;">物流売上・人件費の計算に使用する基準値です。日々の実績入力とは別の、基本設定です。</div>'+
+    '<div class="pool-hint" style="margin-bottom:12px;">物流売上・人件費の計算に使用する基準値です。日々の作業記録とは別の、基本設定です。</div>'+
     priceSourceNote+
     '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">時給(人件費計算に使用)</label>'+
     '<div style="display:flex;gap:8px;margin-bottom:16px;">'+
@@ -6620,20 +6788,24 @@ function renderFinancial(){
       analyticsBody += '<div class="vc-import-status">「'+esc(state.finDrillCustomer)+'」の商品別 <button type="button" class="vc-manage-toggle-btn" id="finDrillBackBtn" style="margin-left:8px;">荷主一覧に戻る</button></div>';
     }
     var isProductAxis = state.finAxis==='product';
+    // 作業種別はケース・バラを表示。荷主別は、商品別内訳が荷主ごとに分かれていないため今回は表示しない(推測しない)
+    var isTaskAxis = state.finAxis==='task';
     var headCols = isProductAxis
-      ? '<th>商品コード</th><th>商品名</th><th>荷主</th><th>出荷件数</th><th>PO数</th><th>明細数</th><th>出荷個数</th><th>ケース数</th><th>端数</th><th>人時(推計)</th><th>売上</th><th>人件費</th><th>粗利</th><th>粗利率</th>'
-      : '<th></th><th>出荷件数</th><th>PO数</th><th>明細数</th><th>出荷個数</th><th>人時(推計)</th><th>売上</th><th>人件費</th><th>粗利</th><th>粗利率</th><th></th>';
-    var colCount = isProductAxis ? 14 : 10;
+      ? '<th>商品コード</th><th>商品名</th><th>荷主</th><th>出荷件数</th><th>PO数</th><th>明細数</th><th>出荷数量(ピース)</th><th>ケース</th><th>バラ(ピース)</th><th>才数</th><th>人時(推計)</th><th>売上</th><th>人件費</th><th>粗利</th><th>粗利率</th>'
+      : '<th></th><th>出荷件数</th><th>PO数</th><th>明細数</th><th>出荷数量(ピース)</th>'+(isTaskAxis ? '<th>ケース</th><th>バラ(ピース)</th>' : '')+'<th>人時(推計)</th><th>売上</th><th>人件費</th><th>粗利</th><th>粗利率</th><th></th>';
+    var colCount = isProductAxis ? 15 : (isTaskAxis ? 12 : 10);
     var finRows2 = state.finAnalyticsRows.map(function(r){
-      var caseCell = '<td class="num" style="color:var(--slate-500);">'+(r.caseQty!==null?formatNum(r.caseQty):'取得不可')+'</td>';
-      var fractionCell = '<td class="num" style="color:var(--slate-500);">'+(r.fractionQty!==null?formatNum(r.fractionQty):'取得不可')+'</td>';
+      var partialMark = r.splitPartial ? '<span title="ケース・バラのデータが無い取込を含みます">※</span>' : '';
+      var caseCell = '<td class="num"'+(r.caseQty===null?' style="color:var(--slate-500);"':'')+'>'+(r.caseQty!==null?formatNum(r.caseQty)+partialMark:'データなし')+'</td>';
+      var fractionCell = '<td class="num"'+(r.fractionQty===null?' style="color:var(--slate-500);"':'')+'>'+(r.fractionQty!==null?formatNum(r.fractionQty)+partialMark:'データなし')+'</td>';
+      var cubicCell = '<td class="num"'+(r.cubicVolume===null||r.cubicVolume===undefined?' style="color:var(--slate-500);"':'')+'>'+(typeof r.cubicVolume==='number' ? r.cubicVolume : '―')+'</td>';
       if(isProductAxis){
         return '<tr><td>'+esc(r.productCode||r.key)+'</td><td>'+esc(r.productName||r.label)+'</td><td>'+esc(r.customerName||'')+'</td>'+
           '<td class="num">'+formatNum(r.shipmentCount)+'</td>'+
           '<td class="num">'+formatNum(r.poCount)+'</td>'+
           '<td class="num">'+formatNum(r.lineCount)+'</td>'+
           '<td class="num">'+formatNum(r.totalQty)+'</td>'+
-          caseCell+fractionCell+
+          caseCell+fractionCell+cubicCell+
           '<td class="num">'+r.personHours.toFixed(1)+'h</td>'+
           '<td class="num">¥'+formatNum(Math.round(r.sales))+'</td>'+
           '<td class="num">¥'+formatNum(Math.round(r.laborCost))+'</td>'+
@@ -6647,6 +6819,7 @@ function renderFinancial(){
         '<td class="num">'+formatNum(r.poCount)+'</td>'+
         '<td class="num">'+formatNum(r.lineCount)+'</td>'+
         '<td class="num">'+formatNum(r.totalQty)+'</td>'+
+        (isTaskAxis ? caseCell+fractionCell : '')+
         '<td class="num">'+r.personHours.toFixed(1)+'h</td>'+
         '<td class="num">¥'+formatNum(Math.round(r.sales))+'</td>'+
         '<td class="num">¥'+formatNum(Math.round(r.laborCost))+'</td>'+
@@ -6656,7 +6829,8 @@ function renderFinancial(){
       '</tr>';
     }).join('') || '<tr><td colspan="'+colCount+'" style="color:var(--slate-500);">該当するデータがありません(単価が未設定の可能性があります)</td></tr>';
     analyticsBody += '<div style="overflow-x:auto;"><table class="report-table" style="margin-top:10px;"><thead><tr>'+headCols+'</tr></thead><tbody>'+finRows2+'</tbody></table></div>'+
-      '<div class="pool-hint" style="margin-top:8px;">※「人時(推計)」は、作業枠全体の実測人時を、荷主/商品ごとの出荷個数の割合で配分した推計値です(実測ではありません)。「ケース数」「端数」は、現在お使いのCSVに該当する列が無いため取得できません。</div>';
+      '<div class="pool-hint" style="margin-top:8px;">※「人時(推計)」は、作業枠全体の実測人時を、荷主/商品ごとの出荷数量の割合で配分した推計値です(実測ではありません)。「出荷数量(ピース)」はCSVの出荷引当数の合計、「ケース」「バラ」は取込時に商品台帳の入数で1明細ごとに計算した値です(入数が無い商品はすべてバラ)。ケース・バラの記録が無い取込(機能追加前)は「データなし」、一部に無い場合は※を付けています。'+
+      (state.finAxis==='customer' ? '荷主別のケース・バラは、取込時の商品別の記録が荷主ごとに分かれていないため表示していません。' : '')+'</div>';
   }else{
     analyticsBody = '<div class="empty-note">期間を選び「集計する」を押してください。</div>';
   }
@@ -7175,6 +7349,13 @@ async function computeAnalytics(days, volumes, axis, filterCustomer){
         addToGroup(code, (p.productName||code), imp.taskId, imp.taskKind, p.customerName, p.primaryCount, p.lineCount, p.totalQty);
         groups[code].productCode = code;
         groups[code].productName = p.productName||'';
+        // ケース・バラ・才数(保存済みの商品別内訳の値だけを使う。無い取込は推測しない)
+        var gs = groups[code];
+        gs.splitTotal = (gs.splitTotal||0) + 1;
+        if(typeof p.caseCount==='number' && typeof p.pieceCount==='number'){
+          gs.splitWith = (gs.splitWith||0) + 1; gs.caseSum = (gs.caseSum||0) + p.caseCount; gs.pieceSum = (gs.pieceSum||0) + p.pieceCount;
+        }
+        if(typeof p.cubicVolume==='number') gs.cubicVolume = p.cubicVolume;
       });
     });
   }else{
@@ -7182,6 +7363,9 @@ async function computeAnalytics(days, volumes, axis, filterCustomer){
       var v = taskVolumeTotals[tid];
       var kindForTask = allImports.find(function(imp){ return imp.taskId===tid; });
       addToGroup(tid, taskById(tid).name, tid, kindForTask ? kindForTask.taskKind : 'normal', null, v.primaryCount, v.lineCount, v.totalQty);
+      // ケース・バラ(取込ごとの商品別内訳から。無い取込は推測しない)
+      var st = outboundSplitOfImports(allImports.filter(function(imp){ return imp.taskId===tid; }));
+      groups[tid].splitTotal = st.total; groups[tid].splitWith = st.withData; groups[tid].caseSum = st.caseCount; groups[tid].pieceSum = st.pieceCount;
     });
   }
 
@@ -7193,25 +7377,13 @@ async function computeAnalytics(days, volumes, axis, filterCustomer){
     return {
       key:g.key, label:g.label, productCode:g.productCode, productName:g.productName,
       shipmentCount:g.shipmentCount, poCount:g.poCount, lineCount:g.lineCount, totalQty:g.totalQty,
-      caseQty:null, fractionQty:null, // 下でまとめて商品マスタ情報を取得し、あれば上書きする
+      // ケース・バラは取込時に保存した商品別内訳の合計。保存値が無い(機能追加前の取込だけ)場合は null =「データなし」
+      caseQty: g.splitWith ? g.caseSum : null, fractionQty: g.splitWith ? g.pieceSum : null,
+      splitPartial: !!(g.splitWith && g.splitWith < g.splitTotal), cubicVolume: (typeof g.cubicVolume==='number') ? g.cubicVolume : null,
       personHours:g.personHours, sales:g.sales, laborCost:laborCost, grossProfit:grossProfit, margin:margin,
       customerName:g.customerName
     };
   });
-
-  if(axis==='product' && rows.length){
-    // 商品コードをまとめて集め、1回のバッチ呼び出しで商品マスタ情報を取得する
-    // (商品ごとに1件ずつ問い合わせない。getProductMasterInfoBatch側でキャッシュも効く)
-    var codes = rows.map(function(r){ return r.productCode; }).filter(Boolean);
-    var masterInfo = await getProductMasterInfoBatch(codes);
-    rows.forEach(function(r){
-      var info = r.productCode ? masterInfo[r.productCode] : null;
-      if(info){
-        r.caseQty = (typeof info.caseQty==='number') ? info.caseQty : null;
-        r.fractionQty = (typeof info.fractionQty==='number') ? info.fractionQty : null;
-      }
-    });
-  }
 
   rows.sort(function(a,b){ return b.sales-a.sales; });
   return rows;
@@ -7297,7 +7469,7 @@ function render(){
     html += renderTopbar();
   }
   if(state.role==='report') html += renderReport();
-  else if(state.role==='input') html += isRoleBlockedForAccount('input') ? renderReadOnlyBlockedScreen('実績入力') : renderInput();
+  else if(state.role==='input') html += isRoleBlockedForAccount('input') ? renderReadOnlyBlockedScreen('作業記録') : renderInput();
   else if(state.role==='monitor') html += renderMonitor();
   else if(state.role==='achievements') html += renderAchievements();
   else if(state.role==='calendar') html += renderCalendar();
@@ -7329,8 +7501,8 @@ function renderGate(){
     '<div class="gate-grid">'+
       '<button class="gate-card" data-role="input"'+readOnlyBlockedAttrs('input')+(isRoleBlockedForAccount('input')?' title="'+READONLY_BLOCKED_TITLE+'"':'')+'>'+
         '<div class="gate-icon" style="background:#FFFAEB;color:#4338CA;">&#9997;</div>'+
-        '<div class="gate-card-title">実績入力</div>'+
-        '<div class="gate-card-desc">'+(isRoleBlockedForAccount('input') ? '閲覧専用アカウントでは使用できません' : 'タップだけで作業の開始・切り替え・件数入力')+'</div>'+
+        '<div class="gate-card-title">作業記録</div>'+
+        '<div class="gate-card-desc">'+(isRoleBlockedForAccount('input') ? '閲覧専用アカウントでは使用できません' : 'タップだけで作業の開始・切り替え・終了を記録(VCはケース数も入力)')+'</div>'+
       '</button>'+
       '<button class="gate-card" data-role="report">'+
         '<div class="gate-icon" style="background:#EEF0FB;color:#4C5FD5;">&#128202;</div>'+
@@ -7444,7 +7616,7 @@ function bindChangelogModal(){
 
 /* ---------- TOPBAR ---------- */
 var COMMON_NAV_ITEMS = [
-  { role:'input', label:'実績入力', icon:'📋' },
+  { role:'input', label:'作業記録', icon:'📋' },
   { role:'report', label:'集計', icon:'📊' },
   { role:'monitor', label:'モニター', icon:'🖥' },
   { role:'calendar', label:'カレンダー', icon:'📅' }
@@ -7454,7 +7626,7 @@ var ADMIN_NAV_ITEMS = [
   { role:'settingsHub', label:'設定', icon:'⚙️' }
 ];
 function renderTopbar(){
-  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'実績入力', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定'}[state.role];
+  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定'}[state.role];
   var lockBtn = (hasManagerSession() && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="ログアウトする">🔓 ログアウト</button>' : '';
   // 共通ナビゲーション: どのページからでも他の主要ページへ直接移動できるようにする。
   // 管理者専用項目(管理者/設定)は、実際にログイン済みの場合のみ表示する
@@ -7703,7 +7875,89 @@ function renderKintoneProductSettingsPanel(){
       '<button type="button" class="add-btn" id="kintoneSyncBtn" '+(syncing?'disabled':'')+'>🔄 kintoneから商品マスタを取得</button>'+
       '<div style="margin-top:10px;">'+statusHtml+'</div>'+
     '</div>'+
-  '</div></div>';
+  '</div>'+renderWorkPriceMasterPanel()+'</div>';
+}
+/* 単価は小数もあり得るため、formatNum(整数に丸める)ではなくそのまま表示する */
+function formatWorkPrice(n){
+  return (typeof n==='number' && isFinite(n)) ? n.toLocaleString('ja-JP', { maximumFractionDigits: 4 })+'円' : '―';
+}
+function countLabelText(counts){
+  return Object.keys(counts||{}).map(function(k){ return k+' '+formatNum(counts[k])+'件'; }).join(' ・ ');
+}
+function renderWorkPriceMasterPanel(){
+  var wp = state.workPriceMaster;
+  if(!wp && !state.workPriceMasterLoading){
+    state.workPriceMasterLoading = true;
+    fetchWorkPriceMaster().then(function(r){ state.workPriceMaster = r; state.workPriceMasterLoading = false; render(); });
+  }
+  var syncing = !!state.workPriceSyncing;
+  var statusHtml = '';
+  if(syncing){
+    statusHtml = '<div class="empty-note">kintoneから取得しています。しばらくお待ちください...</div>';
+  }else if(state.workPriceSyncError){
+    statusHtml = '<div class="vc-warning-box">⚠️ '+esc(state.workPriceSyncError)+'</div>';
+  }else if(state.workPriceSyncResult){
+    var sr = state.workPriceSyncResult;
+    statusHtml = '<div class="vc-import-status">'+
+      'kintone作業単価マスタ同期完了<br>'+
+      '取得件数: '+formatNum(sr.fetchedCount)+'件 ・ 保存件数: '+formatNum(sr.savedCount)+'件 ・ kintoneで削除済みのため削除: '+formatNum(sr.deletedCount)+'件'+
+      (sr.missingFields && sr.missingFields.length ? '<br><span style="color:#B54708;">kintoneの応答に見つからないフィールド: '+esc(sr.missingFields.join('・'))+'</span>' : '')+
+    '</div>';
+  }
+  var body;
+  if(!wp){
+    body = '<div class="empty-note">読み込み中...</div>';
+  }else if(!wp.ok){
+    body = '<div class="vc-warning-box">'+esc(wp.reason)+'</div>';
+  }else if(!wp.prices.length){
+    body = '<div class="empty-note">まだ同期されていません。「kintoneから作業単価マスタを取得」を押してください。</div>';
+  }else{
+    var statusCounts = {};
+    wp.prices.forEach(function(p){ var k = p.status||'(なし)'; statusCounts[k] = (statusCounts[k]||0)+1; });
+    var rows = wp.prices.map(function(p){
+      return '<tr>'+
+        '<td>'+esc(p.workName||'(品名なし)')+'</td>'+
+        '<td>'+(p.categories.length ? esc(p.categories.join(' / ')) : '<span style="color:var(--slate-500);">―</span>')+'</td>'+
+        '<td class="num">'+formatWorkPrice(p.unitPrice)+'</td>'+
+        '<td>'+esc(p.unitDefinition||'―')+'</td>'+
+        '<td>'+esc(p.division||'―')+'</td>'+
+        '<td>'+esc(p.status||'―')+'</td>'+
+      '</tr>';
+    }).join('');
+    body = '<div class="pool-hint" style="margin-bottom:6px;">最終同期日時: '+esc(wp.lastSyncedAt ? fmtDateTime(wp.lastSyncedAt) : '―')+' ・ '+formatNum(wp.prices.length)+'件('+esc(countLabelText(statusCounts))+')</div>'+
+      '<div style="overflow-x:auto;max-height:480px;overflow-y:auto;"><table class="report-table" id="workPriceMasterTable" style="font-size:12px;"><thead><tr>'+
+        '<th>作業項目(品名)</th><th>カテゴリー</th><th>単価</th><th>単位(単価定義)</th><th>区分</th><th>ステータス</th>'+
+      '</tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+  return '<div class="panel" id="workPriceMasterPanel" style="margin-top:16px;">'+
+    '<div class="panel-title">💴 作業単価マスタ(kintone 作業単価アプリ)</div>'+
+    '<div class="pool-hint" style="margin-bottom:12px;">kintoneの作業単価アプリ(アプリID 501)の内容を取り込んで表示します。アプリIDと項目の対応はSupabase側で固定しており、APIトークンなどの秘密情報はここには入力しません。現在の収支計算は「単価・人件費設定」の単価のままで、ここの単価はまだ使いません。</div>'+
+    '<button type="button" class="add-btn" id="workPriceSyncBtn" '+(syncing?'disabled':'')+'>🔄 kintoneから作業単価マスタを取得</button>'+
+    '<div style="margin-top:10px;">'+statusHtml+'</div>'+
+    '<div style="margin-top:12px;">'+body+'</div>'+
+  '</div>';
+}
+function bindWorkPriceMasterPanel(){
+  var btn = document.getElementById('workPriceSyncBtn');
+  if(!btn) return;
+  btn.addEventListener('click', async function(){
+    state.workPriceSyncing = true;
+    state.workPriceSyncError = '';
+    render();
+    var result = await syncWorkPriceMasterFromKintone();
+    state.workPriceSyncing = false;
+    if(result.ok){
+      state.workPriceSyncResult = result.result;
+      state.workPriceSyncError = '';
+      await appendAuditLog({ action:'kintone作業単価マスタ同期', target:'work_price_master', before:null, after: '取得'+result.result.fetchedCount+'件・保存'+result.result.savedCount+'件・削除'+result.result.deletedCount+'件' });
+      showToast('作業単価マスタを取得しました('+result.result.savedCount+'件)');
+    }else{
+      state.workPriceSyncError = result.error;
+      showToast('取得に失敗しました');
+    }
+    state.workPriceMaster = await fetchWorkPriceMaster();
+    render();
+  });
 }
 function kintoneFieldRow(label, id, value, placeholder){
   return '<div style="margin-bottom:8px;">'+
@@ -7756,6 +8010,7 @@ function bindKintoneProductSettingsPanel(){
       render();
     });
   }
+  bindWorkPriceMasterPanel();
 }
 function renderCustomerMappingPanel(){
   if(state.customerTaskMapping===null){
@@ -8136,7 +8391,7 @@ function renderStaffEditModal(m){
       '<div class="modal-task-name" style="text-align:center;margin-bottom:12px;">スタッフを編集</div>'+
       '<div class="ll-form-group"><div class="ll-form-group-title">基本</div>'+
         lbl('名前')+'<input type="text" id="staffEditName" value="'+esc(m.name)+'" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:9px;font-size:14px;margin-bottom:8px;">'+
-        lbl('色(累計実績画面のキャラクターの色)')+'<div class="avatar-swatch-row">'+swatches+'</div>'+
+        lbl('スタッフの色')+'<div class="avatar-swatch-row">'+swatches+'</div>'+
       '</div>'+
       '<div class="ll-form-group"><div class="ll-form-group-title">本日</div>'+
         '<div class="ll-radio-row">'+
@@ -8430,6 +8685,8 @@ function renderTodayStatusBoard(tasks){
       lines.push('<span>'+formatNum(c.plannedQty)+' / '+formatNum(c.plannedQty)+esc(c.unit)+'</span><span>完了'+(c.completedAt?'('+fmtClock(c.completedAt)+')':'')+'</span>');
     }else if(c){
       lines.push('<span>残り <b>'+formatNum(Math.round(c.remainingQty))+'</b>'+esc(c.unit)+unitNote(c)+staffingEstMark(c)+'</span>'+(t.deadline?'<span class="muted">締切 '+esc(t.deadline)+'</span>':''));
+      var tSplit = outboundSplitForTask(state.workVolume, t.id);
+      if(tSplit.total) lines.push('<span class="muted" data-today-split="'+esc(t.id)+'">CSV '+formatNum(c.piecesQty)+'ピースのうち '+esc(outboundSplitText(tSplit))+'</span>');
       lines.push('<span>現在 '+(c.currentCount+c.plannedWorkers.length)+'人'+(c.neededPeople!==null && color==='red' ? ' / 必要 '+c.neededPeople+'人' : '')+'</span>'+
         (planEtaText(plan, t.id) ? '<span class="muted">完了予定 '+esc(planEtaText(plan, t.id))+'</span>' : ''));
     }else{
@@ -8518,7 +8775,7 @@ function renderManager(){
   // ---- ① 今日の全体サマリー(既存データから動的に算出。固定値は使わない) ----
   var summary = computeTodaySummary(day, roster, managerActiveWorkVolume());
   var summaryCardsHtml = '<div class="dash-summary-grid">'+
-    '<div class="dash-card"><div class="dash-card-icon">📦</div><div class="dash-card-label">今日の作業量</div><div class="dash-card-value">'+formatNum(summary.totalPrimary)+'件</div><div class="dash-card-sub">'+formatNum(summary.totalQty)+'個</div></div>'+
+    '<div class="dash-card"><div class="dash-card-icon">📦</div><div class="dash-card-label">今日の作業量</div><div class="dash-card-value">'+formatNum(summary.totalPrimary)+'件</div><div class="dash-card-sub">'+formatNum(summary.totalQty)+'ピース</div></div>'+
     '<div class="dash-card"><div class="dash-card-icon">👥</div><div class="dash-card-label">出勤</div><div class="dash-card-value">'+summary.presentCount+'人</div></div>'+
     '<div class="dash-card"><div class="dash-card-icon">🔵</div><div class="dash-card-label">作業中</div><div class="dash-card-value">'+summary.workingCount+'人</div></div>'+
     '<div class="dash-card"><div class="dash-card-icon">🟠</div><div class="dash-card-label">要確認</div><div class="dash-card-value">'+summary.checkingCount+'人</div></div>'+
@@ -8598,7 +8855,7 @@ function renderManager(){
   var brokenBanner = brokenAssignStaff.length ? (
     '<div class="warn-banner warn-banner-danger">🛑 データの不整合があります。以下のスタッフの割り当てが、存在しない作業を指しています(データ消失の影響の可能性):<br>'+
     brokenAssignStaff.map(function(x){ return esc(x.staff.name)+'('+x.count+'件)'; }).join('、')+
-    '<br>この状態だと、該当のスタッフは作業実績入力画面でその作業がタップできません。下のボタンで、壊れた割り当てを外したうえで、本日の有効な作業に自動で割り当て直せます。<button type="button" class="warn-fix-btn" id="clearBrokenAssignBtn">壊れた割り当てを修復する(本日の作業に再割り当て)</button>'+
+    '<br>この状態だと、該当のスタッフは作業記録の画面でその作業がタップできません。下のボタンで、壊れた割り当てを外したうえで、本日の有効な作業に自動で割り当て直せます。<button type="button" class="warn-fix-btn" id="clearBrokenAssignBtn">壊れた割り当てを修復する(本日の作業に再割り当て)</button>'+
     '</div>'
   ) : '';
 
@@ -8615,8 +8872,9 @@ function renderManager(){
         '<div class="csv-imported-label">📄 CSV取込済み</div>'+
         '<div class="task-col-csv-volume">'+
           '<div class="csv-volume-stat"><div class="csv-volume-num">'+formatNum(wvTotals.primaryCount)+'<span class="csv-volume-unit">件</span></div><div class="csv-volume-label">出荷件数</div></div>'+
-          '<div class="csv-volume-stat"><div class="csv-volume-num">'+formatNum(wvTotals.totalQty)+'<span class="csv-volume-unit">ピース</span></div><div class="csv-volume-label">ピース数</div></div>'+
+          '<div class="csv-volume-stat"><div class="csv-volume-num">'+formatNum(wvTotals.totalQty)+'<span class="csv-volume-unit">ピース</span></div><div class="csv-volume-label">出荷数量</div></div>'+
         '</div>'+
+        (outboundSplitForTask(managerActiveWorkVolume(), t.id).total ? '<div class="pool-hint" style="margin:4px 0 0;" data-col-split="'+esc(t.id)+'">うち '+esc(outboundSplitText(outboundSplitForTask(managerActiveWorkVolume(), t.id)))+'</div>' : '')+
       '</div>'
     ) : '';
     var subcatListHtml = (t.subcategories && t.subcategories.length) ?
@@ -8631,7 +8889,7 @@ function renderManager(){
         '<button class="task-col-edit" data-edit-task-col="'+t.id+'" title="編集">✎</button>'+
         '<button class="task-col-del" data-del-task="'+t.id+'" title="'+esc(t.name)+'を削除" aria-label="'+esc(t.name)+'を削除">&times;</button>'+
       '</div>'+
-      '<div class="task-col-unit">単位: '+esc(t.unit)+'</div>'+
+      '<div class="task-col-unit">単位: '+esc(displayUnit(t.unit))+'</div>'+
       csvVolumeHtml+
       subcatListHtml+
       '<button class="assign-all-btn" data-assign-all="'+t.id+'">出勤者'+present.length+'人を全員割り当て</button>'+
@@ -8676,36 +8934,17 @@ function renderManager(){
     var s = staffById(l.staffId);
     var t = taskById(l.taskId);
     var endLabel = l.end ? fmtClock(l.end) : '<span style="color:var(--green-500);font-weight:700;">作業中</span>';
-    var hasSubcats = t.subcategories && t.subcategories.length;
-    var qtyLabel;
-    if(l.taskId==='BREAK'){
-      qtyLabel = '-';
-    }else if(hasSubcats){
-      var unitGroups = unitGroupedTotals(l.breakdown, t);
-      var totalStr = formatUnitGroupedTotals(unitGroups, true);
-      if(l.end){
-        qtyLabel = totalStr;
-      }else{
-        qtyLabel = '<span style="color:var(--rust-600);font-size:12px;font-weight:700;">進行中'+(totalStr?' '+totalStr:'')+'</span>';
-      }
-    }else if(l.end){
-      qtyLabel = (l.quantity||0)+esc(t.unit);
-    }else if(l.quantity){
-      qtyLabel = '<span style="color:var(--rust-600);">'+(l.quantity||0)+esc(t.unit)+' (進行中)</span>';
-    }else{
-      qtyLabel = '-';
-    }
-    var detailHtml = breakdownDetailRows(l, t);
-    var hasBreakdownQty = l.breakdown && Object.keys(l.breakdown).some(function(k){ return l.breakdown[k]>0; });
-    var hasSubTimes = l.subTimes && Object.keys(l.subTimes).some(function(k){ return l.subTimes[k]>0; });
-    var missingTimeWarning = (l.end && hasBreakdownQty && !hasSubTimes) ? '<div class="missing-subtime-warning" title="内訳の計測時間が記録されていません(手動追加・編集・修正前のデータの可能性)">⚠️ 内訳の時間未計測</div>' : '';
+    // 数量(手入力)は表示しない。作業時間と内訳ごとの時間を表示する
+    var durMs = Math.max(0, (l.end ? new Date(l.end).getTime() : Date.now()) - new Date(l.start).getTime());
+    var durLabel = l.end ? fmtHM(durMs) : '<span style="color:var(--rust-600);font-size:12px;font-weight:700;">進行中 '+fmtHM(durMs)+'</span>';
+    var detailHtml = l.taskId==='BREAK' ? '' : breakdownDetailRows(l, t);
     var stopBtn = l.end ? '' : '<button class="log-stop-btn" data-stop-log="'+l.id+'">■ ストップ</button>';
     return '<tr>'+
       '<td>'+esc(s.name)+'</td>'+
       '<td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td>'+
       '<td class="num">'+fmtClock(l.start)+'</td>'+
       '<td class="num">'+endLabel+'</td>'+
-      '<td class="num">'+qtyLabel+detailHtml+missingTimeWarning+'</td>'+
+      '<td class="num" data-log-dur="'+l.id+'">'+durLabel+detailHtml+'</td>'+
       '<td class="num">'+stopBtn+'<button class="log-edit-btn" data-edit-log="'+l.id+'">編集</button></td>'+
     '</tr>';
   }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">この日の記録はまだありません</td></tr>';
@@ -8780,7 +9019,7 @@ function renderManager(){
       '<div class="panel-title">作業実績(この日の記録) <span class="count-badge">'+logsSorted.length+'件</span></div>'+
       '<div class="pool-hint" style="margin-bottom:10px;">パートさんが入力した内容に誤りがあれば「編集」から修正できます。パートさんが入力し忘れた実績は「+ 実績を手動で追加」から入力できます。</div>'+
       '<button class="add-btn" id="openAddLogBtn" style="margin-bottom:12px;">+ 実績を手動で追加</button>'+
-      '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>件数</th><th></th></tr></thead><tbody>'+logRows+'</tbody></table></div>'+
+      '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>作業時間(内訳)</th><th></th></tr></thead><tbody>'+logRows+'</tbody></table></div>'+
     '</div>'+
     '</details>'+
     '<div class="pool-hint" style="margin-top:16px;text-align:center;">スタッフ・作業マスタ・勤務時間と休憩・実績目標は、上部メニューの「⚙️ 設定」から変更できます。</div>'+
@@ -8825,10 +9064,11 @@ function renderCsvImportPanel(){
       '<td><span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span> '+esc(t.name)+'</td>'+
       '<td class="num">'+lbl+' '+formatNum(imp.primaryCount)+'</td>'+
       '<td class="num">明細'+formatNum(imp.lineCount)+'</td>'+
-      '<td class="num">ピース'+formatNum(imp.totalQty)+'</td>'+
+      '<td class="num">'+formatNum(imp.totalQty)+'ピース</td>'+
+      '<td class="num" data-wv-split="'+imp.id+'">'+(outboundSplitOfImport(imp) ? formatNum(outboundSplitOfImport(imp).caseCount)+'ケース / バラ'+formatNum(outboundSplitOfImport(imp).pieceCount)+'ピース' : '<span style="color:var(--slate-500);">データなし</span>')+'</td>'+
       '<td class="num">'+todayBtn+'<button type="button" class="vc-manage-toggle-btn" data-wv-import-edit="'+imp.id+'">編集</button> <button type="button" class="vc-manage-toggle-btn" data-wv-import-move="'+imp.id+'">日付変更</button> <button type="button" class="log-stop-btn" data-wv-import-delete="'+imp.id+'">削除</button></td>'+
     '</tr>';
-  }).join('') || '<tr><td colspan="7" style="color:var(--slate-500);">この日付の取込履歴はまだありません</td></tr>';
+  }).join('') || '<tr><td colspan="8" style="color:var(--slate-500);">この日付の取込履歴はまだありません</td></tr>';
   var wvDeletedImports = (wvViewData.imports||[]).filter(function(i){ return i.deletedAt; });
   var wvDeletedHtml = wvDeletedImports.map(function(imp){
     var t = taskById(imp.taskId);
@@ -8837,7 +9077,7 @@ function renderCsvImportPanel(){
 
   var wvHistoryHtml = pastDatesHtml+
     '<div class="panel-title" style="font-size:15px;margin-top:18px;">📜 取込履歴('+esc(dateLabelFromStr(wvTargetDate))+')</div>'+
-    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>作業</th><th>合計</th><th>明細</th><th>ピース</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
+    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>作業</th><th>合計</th><th>明細</th><th>出荷数量</th><th>ケース / バラ</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
     '<details class="vc-manage-details" id="wvDeletedDetails" '+(state.wvDeletedOpen?'open':'')+' style="margin-top:12px;">'+
       '<summary>🗑 削除済み'+(wvDeletedImports.length?'('+wvDeletedImports.length+'件)':'')+'</summary>'+
       '<div class="vc-slip-list" style="margin-top:8px;">'+wvDeletedHtml+'</div>'+
@@ -8845,7 +9085,7 @@ function renderCsvImportPanel(){
 
   workVolumePanel = '<div class="panel" style="margin-top:14px;">'+
     '<div class="panel-title">📋 作業量CSV取込</div>'+
-    '<div class="pool-hint" style="margin-bottom:14px;">CSVから件数(VCはPO数)・明細数・ピース数を自動集計します。得意先・作業枠マスターに基づいて自動振り分けします。時間の計測とは別のデータとして扱われ、パートさんへの数字入力は求めません。取込は履歴として積み上がり、既存の取込を上書きすることはありません。</div>'+
+    '<div class="pool-hint" style="margin-bottom:14px;">CSVから件数(VCはPO数)・明細数・出荷数量(ピース)を自動集計し、商品台帳の入数からケース・バラも計算します。得意先・作業枠マスターに基づいて自動振り分けします。時間の計測とは別のデータとして扱われ、パートさんへの数字入力は求めません。取込は履歴として積み上がり、既存の取込を上書きすることはありません。</div>'+
     '<div style="display:flex;gap:10px;">'+
       '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">対象日付</label><input type="date" id="autoMapTargetDate" value="'+(state.wvTargetDate||todayStr())+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
       '<div style="flex:2;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="autoMapCsvInput" accept=".csv" style="display:block;"></div>'+
@@ -8880,8 +9120,8 @@ function renderSettingsPanels(){
 
   var achievementPanel = '<div class="panel" style="margin-top:14px;">'+
     '<div class="panel-title">🏆 実績画面の目標設定</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">「実績」画面のチームチャレンジで使う、今月の出荷ピース数の目標値です。</div>'+
-    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">月間目標(出荷ピース数)</label>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">「実績」画面のチームチャレンジで使う、今月の出荷数量(CSV取込の出荷引当数の合計・ピース)の目標値です。</div>'+
+    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">月間目標(出荷数量・ピース)</label>'+
     '<input type="number" id="achievementTargetInput" min="0" step="100" value="'+((state.achievementSettings&&state.achievementSettings.monthlyTargetPieces)||25000)+'" style="width:200px;border:1px solid var(--paper-line);border-radius:8px;padding:8px 10px;font-size:14px;font-family:var(--font-mono);">'+
   '</div>';
 
@@ -9489,7 +9729,7 @@ function renderRegister(){
     var lvl = item.priorityLevel || 4;
     var stars = '★★★★'.slice(0, 5-lvl);
     var basis = staffingBasisOf(item);
-    var basisShort = { pieces:'ピース数', count:'件数', lines:'明細数' }[basis];
+    var basisShort = { pieces:'出荷数量', count:'件数', lines:'明細数' }[basis];
     var pattern = item.pattern || defaultPattern();
     var days = isTemplate ? (pattern.map(function(v,i){ return v ? WD[i] : ''; }).join('') || 'なし') : '';
     var csv = csvLinked(item, isTemplate);
@@ -9534,7 +9774,7 @@ function renderRegister(){
       '<input type="date" id="regDate" value="'+state.regNewDate+'" min="'+todayStr()+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
       '<input type="text" id="regName" placeholder="例: 検品" value="'+esc(state.regDraftName)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">区分(実績画面の出荷/入庫集計に使われます)</label>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">区分(分類用。実績画面の出荷実績はCSV取込の出荷数量で集計します)</label>'+
       renderCategoryToggle('reg', state.regDraftCategory)+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">内訳(任意。例: 出荷作業ならピッキング・梱包。使う場合は単位はここで内訳ごとに設定)</label>'+
       renderSubcatTagInput(state.regDraftSubcats,'reg','regSubcatText',state.regDraftUnit)+
@@ -9548,7 +9788,7 @@ function renderRegister(){
       '<div class="pool-hint" style="margin-bottom:10px;">該当する曜日になると、自動でその日の作業として登録されます。</div>'+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">作業名</label>'+
       '<input type="text" id="tmplName" placeholder="例: 入荷検品" value="'+esc(state.tmplDraftName)+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:13px;margin-bottom:10px;">'+
-      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">区分(実績画面の出荷/入庫集計に使われます)</label>'+
+      '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">区分(分類用。実績画面の出荷実績はCSV取込の出荷数量で集計します)</label>'+
       renderCategoryToggle('tmpl', state.tmplDraftCategory)+
       '<label style="font-size:11px;color:var(--slate-500);display:block;margin:10px 0 4px;">内訳(任意。使う場合は単位はここで内訳ごとに設定)</label>'+
       renderSubcatTagInput(state.tmplDraftSubcats,'tmpl','tmplSubcatText',state.tmplDraftUnit)+
@@ -9800,10 +10040,10 @@ function renderReport(){
     d.setDate(d.getDate()-6);
     state.reportStart = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   }
+  if(state.reportMode!=='single' && state.reportMode!=='range') state.reportMode = 'single';
   var toggles = '<div class="report-mode-toggle">'+
     '<button class="report-mode-btn '+(state.reportMode==='single'?'active':'')+'" data-report-mode="single">特定の1日</button>'+
     '<button class="report-mode-btn '+(state.reportMode==='range'?'active':'')+'" data-report-mode="range">期間で合計</button>'+
-    '<button class="report-mode-btn '+(state.reportMode==='rpg'?'active':'')+'" data-report-mode="rpg">🎮 累計実績</button>'+
   '</div>'+
   '<button type="button" class="pill-btn" id="goToAchievementsBtn" style="margin-bottom:14px;">🏆 実績(今月のチーム記録・過去最高)を見る</button>';
 
@@ -9814,18 +10054,13 @@ function renderReport(){
       '<button class="report-go-btn" id="reportSingleGo">この日を集計</button>'+
     '</div>';
     body = renderReportSingleBody();
-  }else if(state.reportMode==='range'){
+  }else{
     controls = '<div class="report-controls">'+
       '<div class="report-field"><label>開始日</label><input type="date" id="reportStartInput" value="'+state.reportStart+'"></div>'+
       '<div class="report-field"><label>終了日</label><input type="date" id="reportEndInput" value="'+state.reportEnd+'"></div>'+
       '<button class="report-go-btn" id="reportRangeGo">この期間を集計</button>'+
     '</div>';
     body = renderReportRangeBody();
-  }else{
-    controls = '<div class="report-controls">'+
-      '<button class="report-go-btn" id="reportRpgGo">'+(state.reportRpgResult?'更新する':'これまでの累計を集計する')+'</button>'+
-    '</div>';
-    body = renderReportRpgBody();
   }
 
   return '<div class="mgr-wrap"><div style="max-width:1000px;margin:0 auto;">'+
@@ -9842,58 +10077,77 @@ function taskSubMsRows(info, task){
   }).join('');
   return '<div class="breakdown-detail-list">'+rows+'</div>';
 }
-function renderSubcatProductivity(agg, workVolume){
-  var taskIds = Object.keys(agg.perTask).filter(function(tid){
-    var info = agg.perTask[tid];
-    return info.subMs && Object.keys(info.subMs).some(function(k){ return info.subMs[k]>0; });
-  });
-  if(!taskIds.length) return '';
-  var rows = [];
-  taskIds.forEach(function(tid){
-    var t = taskById(tid);
-    var info = agg.perTask[tid];
-    var wvTotals = workVolume ? wvTotalsForTask(workVolume, tid) : null;
-    var cfg = taskById(tid);
-    var primaryLabel = (cfg && cfg.taskKind==='vc') ? 'PO' : '件数';
-    Object.keys(info.subMs).filter(function(k){ return info.subMs[k]>0; }).forEach(function(scName){
-      var hours = info.subMs[scName]/3600000;
-      var ratioCells = '';
-      if(wvTotals && hours>0){
-        ratioCells = '<td class="num">'+(wvTotals.lineCount/hours).toFixed(1)+' 明細/時</td>'+
-          '<td class="num">'+(wvTotals.totalQty/hours).toFixed(1)+' ピース/時</td>'+
-          '<td class="num">'+(wvTotals.primaryCount/hours).toFixed(1)+' '+primaryLabel+'/時</td>';
-      }else{
-        ratioCells = '<td class="num" colspan="3" style="color:var(--slate-500);">CSV作業量が未取込のため計算できません</td>';
-      }
-      rows.push('<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td>'+esc(scName)+'</td><td class="num">'+fmtHM(info.subMs[scName])+'</td>'+ratioCells+'</tr>');
+/* 集計画面の作業別「出荷数量(CSV)」欄。数量は作業者の手入力ではなく、CSV取込の出荷数量とVCケース数(台帳)だけを使う。 */
+function reportCsvVolumeLines(workVolume, caseLedger, tid){
+  var wv = workVolume || emptyWorkVolume();
+  var wvt = wvTotalsForTask(wv, tid);
+  var isVc = isVcKindTask(tid, wv);
+  var vcEntries = caseLedger && caseLedger[tid] && caseLedger[tid].entries;
+  var lines = [];
+  if(wvt.importCount){
+    lines.push(isVc ? 'PO数 '+formatNum(wvt.primaryCount) : '出荷件数 '+formatNum(wvt.primaryCount)+'件');
+    lines.push('出荷数量 '+formatNum(wvt.totalQty)+'ピース');
+    var sp = outboundSplitForTask(wv, tid);
+    if(sp.total) lines.push(outboundSplitText(sp));
+  }
+  if(vcEntries && vcEntries.length) lines.push('VCケース数 '+formatNum(vcCaseCurrentValue(vcEntries))+'ケース');
+  return lines;
+}
+function reportCsvVolumeCell(workVolume, caseLedger, tid){
+  var lines = reportCsvVolumeLines(workVolume, caseLedger, tid);
+  if(!lines.length) return '<span style="color:var(--slate-500);" data-report-vol="'+esc(tid)+'">CSVなし(時間のみ)</span>';
+  return '<div data-report-vol="'+esc(tid)+'">'+lines.map(esc).join('<br>')+'</div>';
+}
+/* 複数日の取込・VCケース数台帳を1つにまとめる(期間集計用。作業IDは日ごとに別なので、そのまま合算できる) */
+function mergeWorkVolumes(list){
+  var out = emptyWorkVolume();
+  (list||[]).forEach(function(wv){ if(wv){ out.imports = out.imports.concat(wv.imports||[]); out.batches = out.batches.concat(wv.batches||[]); } });
+  return out;
+}
+function mergeCaseLedgers(list){
+  var out = {};
+  (list||[]).forEach(function(led){
+    Object.keys(led||{}).forEach(function(tid){
+      if(!led[tid] || !led[tid].entries) return;
+      if(!out[tid]) out[tid] = { entries: [] };
+      out[tid].entries = out[tid].entries.concat(led[tid].entries);
     });
   });
-  return '<div class="report-section-title">内訳別 人時・生産性</div>'+
-    '<div class="report-range-note">内訳(ピッキング・梱包など)ごとの人時と、CSVで取り込んだ作業量(明細・ピース・件数/PO)を組み合わせた生産性です。同じ作業量を各内訳の工程が処理したものとして計算しています。</div>'+
-    '<table class="report-table"><thead><tr><th>作業</th><th>内訳</th><th>人時</th><th colspan="3">1時間あたり</th></tr></thead><tbody>'+rows.join('')+'</tbody></table>';
+  return out;
 }
-function renderProductivityRanking(agg){
-  var staffIds = Object.keys(agg.perStaff).filter(function(sid){
-    var info = agg.perStaff[sid];
-    var workMs = info.ms - (info.breakMs||0);
-    return workMs > 0;
-  }).sort(function(a,b){
-    var infoA = agg.perStaff[a], infoB = agg.perStaff[b];
-    var rateA = infoA.qty / ((infoA.ms - (infoA.breakMs||0))/3600000);
-    var rateB = infoB.qty / ((infoB.ms - (infoB.breakMs||0))/3600000);
-    return rateB - rateA;
+/* 集計対象の作業記録から、親作業ごとの内訳別生産性を求める(休憩・内訳時間の無い作業は除く) */
+function reportParentProductivities(logs, workVolume, caseLedger){
+  var seen = {}, out = [];
+  (logs||[]).forEach(function(l){
+    if(l.taskId==='BREAK' || seen[l.taskId]) return;
+    seen[l.taskId] = true;
+    var pp = computeParentTaskProductivity(taskById(l.taskId), logs, workVolume, caseLedger);
+    if(pp.totalSubMs>0) out.push(pp);
   });
-  if(!staffIds.length) return '';
-  var rows = staffIds.map(function(sid, idx){
-    var s = staffById(sid);
-    var info = agg.perStaff[sid];
-    var workMs = info.ms - (info.breakMs||0);
-    var rate = info.qty / (workMs/3600000);
-    return '<tr><td class="num">'+(idx+1)+'</td><td>'+esc(s.name)+'</td><td class="num"><b style="color:var(--rust-600);font-family:var(--font-mono);">'+rate.toFixed(1)+'</b> 件/時</td><td class="num">'+info.qty+'件</td><td class="num">'+fmtHM(workMs)+'</td></tr>';
-  }).join('');
-  return '<div class="report-section-title">生産性ランキング(実働1時間あたりの件数)</div>'+
-    '<div class="report-range-note">休憩時間は除いた実働時間で計算しています。作業に内訳(件数)がある場合のみ対象です。</div>'+
-    '<table class="report-table"><thead><tr><th>順位</th><th>名前</th><th>1時間あたり</th><th>合計件数</th><th>実働時間</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  return out.sort(byTaskColor(function(pp){ return taskById(pp.taskId).color; }));
+}
+/* 内訳別の作業量・作業時間・生産性。親作業の行には親作業総作業時間(内訳時間の合計)を出し、
+   単位の違う内訳の生産性を合計した「親作業の生産性」は作らない。 */
+function renderSubcatProductivity(logs, workVolume, caseLedger){
+  var list = reportParentProductivities(logs, workVolume, caseLedger);
+  if(!list.length) return '';
+  var rows = [];
+  list.forEach(function(pp){
+    var t = taskById(pp.taskId);
+    rows.push('<tr class="logmgmt-group-header" data-parent-prod="'+esc(pp.taskId)+'"><td colspan="4"><span class="task-color-dot" style="background:'+t.color+'"></span> <strong>'+esc(pp.taskName)+'</strong>'+
+      ' ・ 親作業総作業時間 <b>'+fmtHM(pp.totalSubMs)+'</b>(内訳時間の合計)'+
+      (pp.untrackedMs>0 ? ' <span style="color:var(--slate-500);font-size:11px;">※ 内訳の計測が無い作業時間 '+fmtHM(pp.untrackedMs)+' は含みません</span>' : '')+'</td></tr>');
+    pp.subcats.forEach(function(sc){
+      var qtyCell = sc.qty!==null
+        ? formatNum(sc.qty)+esc(sc.unit)+(sc.partial ? '※' : '')+' <span style="color:var(--slate-500);font-size:11px;">('+esc(sc.source)+')</span>'
+        : '<span style="color:var(--slate-500);">'+esc(sc.reason)+'</span>';
+      var rateCell = sc.rate!==null ? sc.rate.toFixed(1)+' '+esc(sc.unit)+'/時'+(sc.partial ? '※' : '') : '<span style="color:var(--slate-500);">-</span>';
+      rows.push('<tr data-subcat-prod="'+esc(pp.taskId)+':'+esc(sc.name)+'"><td style="padding-left:24px;">'+esc(sc.name)+'</td><td class="num">'+qtyCell+'</td><td class="num">'+fmtHM(sc.ms)+'</td><td class="num">'+rateCell+'</td></tr>');
+    });
+  });
+  return '<div class="report-section-title">内訳別 作業量・作業時間・生産性</div>'+
+    '<div class="report-range-note">親作業(出荷先ごとの作業)ごとに、内訳の作業量 ÷ 内訳の作業時間 で生産性を出しています(ピッキング=ピース、ケース=ケース、梱包=件、VC=ケース)。単位が違うため内訳の生産性は合計しません。親作業総作業時間は内訳時間の合計です。複数人で担当した内訳は、作業量の合計 ÷ 作業時間の合計です。作業量はCSV取込とVCケース数だけを使います。※ = ケース・バラの記録が無い取込を含みます。</div>'+
+    '<table class="report-table"><thead><tr><th>親作業 / 内訳</th><th>作業量</th><th>作業時間</th><th>生産性</th></tr></thead><tbody>'+rows.join('')+'</tbody></table>';
 }
 function csvEscape(v){
   var s = String(v==null?'':v);
@@ -9924,9 +10178,11 @@ async function downloadBackupForDate(dateStr){
   });
   downloadCSV(dateStr+'_作業時間実績.csv', logRows);
 
-  var wvRows = [['取込日時','ファイル名','作業','件数またはPO数','明細数','ピース数','状態']];
+  // 既存の列はそのまま(「ピース数」列は従来どおり出荷数量=出荷引当数の合計)。ケース数・バラ数は末尾に追加(記録が無い取込は空欄)
+  var wvRows = [['取込日時','ファイル名','作業','件数またはPO数','明細数','ピース数','状態','ケース数','バラ数']];
   (wv.imports||[]).forEach(function(imp){
-    wvRows.push([imp.importedAt, imp.fileName, taskById(imp.taskId).name, imp.primaryCount, imp.lineCount, imp.totalQty, imp.deletedAt?'削除済み':'有効']);
+    var sp = outboundSplitOfImport(imp);
+    wvRows.push([imp.importedAt, imp.fileName, taskById(imp.taskId).name, imp.primaryCount, imp.lineCount, imp.totalQty, imp.deletedAt?'削除済み':'有効', sp ? sp.caseCount : '', sp ? sp.pieceCount : '']);
   });
   downloadCSV(dateStr+'_CSV取込履歴と作業量.csv', wvRows);
 
@@ -9950,132 +10206,135 @@ function downloadCSV(filename, rows){
   a.click();
   setTimeout(function(){ if(a.parentNode) a.parentNode.removeChild(a); URL.revokeObjectURL(url); }, 200);
 }
-function exportAggCSV(agg, label){
+function exportAggCSV(agg, label, workVolume, caseLedger, logs){
+  var wv = workVolume || emptyWorkVolume();
   var rows = [];
   rows.push(['スタッフ別']);
-  rows.push(['名前','合計時間(分)','実働時間(分)','合計件数','時間あたり件数']);
+  rows.push(['名前','合計時間(分)','休憩(分)','実働時間(分)']);
   Object.keys(agg.perStaff).forEach(function(sid){
     var s = staffById(sid);
     var info = agg.perStaff[sid];
     var workMs = info.ms - (info.breakMs||0);
-    var rate = workMs>0 ? (info.qty/(workMs/3600000)).toFixed(1) : '';
-    rows.push([s.name, Math.round(info.ms/60000), Math.round(workMs/60000), info.qty, rate]);
+    rows.push([s.name, Math.round(info.ms/60000), Math.round((info.breakMs||0)/60000), Math.round(workMs/60000)]);
   });
   rows.push([]);
-  rows.push(['作業別']);
-  rows.push(['作業名','合計時間(分)','合計件数','稼働人数','内訳']);
+  rows.push(['作業別(数量はCSV取込の出荷数量。手入力の数量は使いません)']);
+  rows.push(['作業名','合計時間(分)','稼働人数','出荷件数(VCはPO数)','出荷数量(ピース)','ケース','バラ(ピース)','VCケース数','内訳の人時(分)']);
   Object.keys(agg.perTask).forEach(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
-    var unitMap = subcatUnitMap(t);
-    var bdKeys = Object.keys(info.breakdown||{}).filter(function(k){ return info.breakdown[k]>0; });
-    var bdStr = bdKeys.map(function(k){ return k+':'+info.breakdown[k]+(unitMap[k]||t.unit); }).join(' / ');
-    var hasSubcats = t.subcategories && t.subcategories.length;
-    var unitGroups = hasSubcats ? unitGroupedTotals(info.breakdown, t) : [];
-    var qtyForCsv = hasSubcats ? formatUnitGroupedTotals(unitGroups, false) : info.qty;
-    rows.push([t.name, Math.round(info.ms/60000), qtyForCsv, Object.keys(info.staff).length, bdStr]);
+    var wvt = wvTotalsForTask(wv, tid);
+    var sp = outboundSplitForTask(wv, tid);
+    var vcEntries = caseLedger && caseLedger[tid] && caseLedger[tid].entries;
+    var subStr = Object.keys(info.subMs||{}).filter(function(k){ return info.subMs[k]>0; }).map(function(k){ return k+':'+Math.round(info.subMs[k]/60000); }).join(' / ');
+    rows.push([t.name, Math.round(info.ms/60000), Object.keys(info.staff).length,
+      wvt.importCount ? wvt.primaryCount : '', wvt.importCount ? wvt.totalQty : '',
+      sp.withData ? sp.caseCount : '', sp.withData ? sp.pieceCount : '',
+      (vcEntries && vcEntries.length) ? vcCaseCurrentValue(vcEntries) : '', subStr]);
+  });
+  rows.push([]);
+  rows.push(['内訳別生産性(内訳の作業量 ÷ 内訳の作業時間。単位が違うため合計しません)']);
+  rows.push(['親作業','親作業総作業時間(分)','内訳','作業量','単位','作業量の取得元','作業時間(分)','生産性(/時)']);
+  reportParentProductivities(logs, wv, caseLedger).forEach(function(pp){
+    pp.subcats.forEach(function(sc){
+      rows.push([pp.taskName, Math.round(pp.totalSubMs/60000), sc.name, sc.qty!==null ? sc.qty : '', sc.unit, sc.qty!==null ? sc.source : sc.reason, Math.round(sc.ms/60000), sc.rate!==null ? sc.rate.toFixed(1) : '']);
+    });
   });
   downloadCSV('集計_'+label+'.csv', rows);
 }
 
-/* ---------- RPG-style lifetime achievements ---------- */
 /* ---------- Achievements (実績) data helpers ---------- */
-function isPieceUnit(unit){
-  return unit==='ピース' || unit==='個';
+/* 出荷実績は CSV取込(work-volume)の出荷数量だけから集計する(作業者の手入力の数量は使わない。
+   過去の手入力の数量データは削除せずに残す)。
+   ピース = 出荷引当数の合計(totalQty) / ケース・バラ = 取込時に商品台帳の入数で計算した値(記録の無い取込は推測しない)/
+   件 = 出荷件数(primaryCount。VCの primaryCount は PO数のため件数に含めない)。入庫は表示しない。 */
+function freshShipStats(){
+  return { pieces:0, count:0, caseCount:0, baraCount:0, splitWith:0, splitTotal:0, importCount:0 };
 }
-function isCountUnit(unit){
-  return unit==='件';
-}
-function freshCategoryBucket(){
-  return { pieces:0, count:0, other:{}, logCount:0 };
-}
-function addQtyToBucket(bucket, unit, v){
-  if(v<=0) return;
-  if(isPieceUnit(unit)) bucket.pieces += v;
-  else if(isCountUnit(unit)) bucket.count += v;
-  else bucket.other[unit] = (bucket.other[unit]||0) + v;
-}
-function classifyDayIntoBuckets(day, buckets){
-  if(!day) return;
-  day.logs.forEach(function(l){
-    if(l.taskId==='BREAK') return;
-    var task = taskById(l.taskId);
-    var cat = taskCategory(task);
-    if(!buckets[cat]) buckets[cat] = freshCategoryBucket();
-    buckets[cat].logCount++;
-    if(l.breakdown){
-      var unitMap = subcatUnitMap(task);
-      Object.keys(l.breakdown).forEach(function(k){
-        addQtyToBucket(buckets[cat], unitMap[k]||task.unit, l.breakdown[k]||0);
-      });
-    }else if(l.quantity){
-      addQtyToBucket(buckets[cat], task.unit, l.quantity);
-    }
+function addImportsToShipStats(stats, imports){
+  (imports||[]).forEach(function(imp){
+    stats.importCount++;
+    stats.pieces += imp.totalQty||0;
+    if(imp.taskKind!=='vc') stats.count += imp.primaryCount||0;
   });
+  var sp = outboundSplitOfImports(imports);
+  stats.caseCount += sp.caseCount; stats.baraCount += sp.pieceCount;
+  stats.splitWith += sp.withData; stats.splitTotal += sp.total;
+  return stats;
 }
-function aggregateBucketsForDays(days){
-  var buckets = {};
-  (days||[]).forEach(function(day){ classifyDayIntoBuckets(day, buckets); });
-  return buckets;
+function shipStatsOfWorkVolume(wv){
+  return addImportsToShipStats(freshShipStats(), wvActiveImports(wv||emptyWorkVolume()));
+}
+function mergeShipStats(a, b){
+  Object.keys(a).forEach(function(k){ a[k] += (b && b[k]) || 0; });
+  return a;
+}
+/* 例: 「ケース 2ケース・バラ 7ピース」(記録の無い取込を含む場合は「(一部データなし)」) */
+function shipStatsSplitText(st){
+  return outboundSplitText({ caseCount: st.caseCount, pieceCount: st.baraCount, withData: st.splitWith, total: st.splitTotal });
 }
 function monthKeyOf(dateStr){ return dateStr.slice(0,7); }
-function aggregateByMonth(days){
-  var byMonth = {};
-  (days||[]).forEach(function(day){
-    if(!day) return;
-    var mk = monthKeyOf(day.date);
-    if(!byMonth[mk]) byMonth[mk] = {};
-    classifyDayIntoBuckets(day, byMonth[mk]);
-  });
-  return byMonth;
+/* 今日の出荷実績(画面を開いている間も最新の取込を反映するため、読み込み済みの本日分を使う) */
+function todaysShipStats(){
+  return shipStatsOfWorkVolume(state.workVolume);
 }
-function shipmentPieces(buckets){
-  return (buckets && buckets['出荷']) ? buckets['出荷'].pieces : 0;
+/* 本日のVCケース数(台帳の加算・取消を反映した合計) */
+function todaysVcCaseTotal(){
+  var ledger = state.vcCaseLedger || {};
+  return Object.keys(ledger).reduce(function(a, tid){ return a + vcCaseCurrentValue(ledger[tid] && ledger[tid].entries); }, 0);
+}
+/* 集計結果の日別実績に、本日分だけ最新の値を重ねる(集計ボタンを押した後の取込も反映する) */
+function achievementsDailyStats(result){
+  var byDate = {};
+  Object.keys(result.byDate||{}).forEach(function(d){ byDate[d] = result.byDate[d]; });
+  if(state.workVolume && !isUnverified(state.workVolume)){
+    var live = todaysShipStats();
+    if(live.importCount || byDate[todayStr()]) byDate[todayStr()] = live;
+  }
+  return byDate;
+}
+function achievementsMonthStats(result, monthKey){
+  var byDate = achievementsDailyStats(result), m = freshShipStats();
+  Object.keys(byDate).forEach(function(d){ if(monthKeyOf(d)===monthKey) mergeShipStats(m, byDate[d]); });
+  return m;
 }
 async function runAchievementsReport(){
   state.achievementsLoading = true;
   state.achievementsError = null;
   render();
   try{
-    var allDays = await loadAllDaysForLifetime();
-    var byMonth = aggregateByMonth(allDays);
+    var dates = (await listWorkVolumeDates()).slice(0, 400);
+    var byDate = {}, failedDates = [];
+    for(var i=0;i<dates.length;i++){
+      var wv = await getWorkVolumeForDate(dates[i]);
+      if(!wv || isUnverified(wv)){ failedDates.push(dates[i]); continue; }
+      byDate[dates[i]] = shipStatsOfWorkVolume(wv);
+    }
     var now = new Date();
     var curMonthKey = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-    var curBuckets = byMonth[curMonthKey] || {};
-
+    var lastYearKey = (now.getFullYear()-1)+'-'+String(now.getMonth()+1).padStart(2,'0');
+    // 月別(今月以外)の出荷数量(ピース)。過去最高・前年比較に使う
+    var byMonth = {};
+    Object.keys(byDate).forEach(function(d){
+      var mk = monthKeyOf(d);
+      if(!byMonth[mk]) byMonth[mk] = freshShipStats();
+      mergeShipStats(byMonth[mk], byDate[d]);
+    });
     var bestMonthKey = null, bestPieces = 0;
     Object.keys(byMonth).forEach(function(mk){
       if(mk===curMonthKey) return;
-      var p = shipmentPieces(byMonth[mk]);
-      if(p>bestPieces){ bestPieces=p; bestMonthKey=mk; }
+      if(byMonth[mk].pieces>bestPieces){ bestPieces = byMonth[mk].pieces; bestMonthKey = mk; }
     });
-
-    var lastYearKey = (now.getFullYear()-1)+'-'+String(now.getMonth()+1).padStart(2,'0');
-    var lastYearBuckets = byMonth[lastYearKey] || null;
-
-    var dailyPieces = {};
-    var bestDay = null, bestDayPieces = 0;
-    allDays.forEach(function(day){
-      if(!day || monthKeyOf(day.date)!==curMonthKey) return;
-      var b = {};
-      classifyDayIntoBuckets(day, b);
-      var p = shipmentPieces(b);
-      dailyPieces[day.date] = p;
-      if(p>bestDayPieces){ bestDayPieces=p; bestDay=day.date; }
-    });
-
     state.achievementsResult = {
       generatedAt: Date.now(),
       curMonthKey: curMonthKey,
-      curBuckets: curBuckets,
+      byDate: byDate,
       bestMonthKey: bestMonthKey,
       bestPieces: bestPieces,
       lastYearKey: lastYearKey,
-      lastYearBuckets: lastYearBuckets,
-      dailyPieces: dailyPieces,
-      bestDay: bestDay,
-      bestDayPieces: bestDayPieces,
-      dayCount: allDays.length
+      lastYearStats: byMonth[lastYearKey] || null,
+      dayCount: Object.keys(byDate).length,
+      failedDates: failedDates
     };
   }catch(e){
     state.achievementsError = 'データの読み込みに失敗しました。もう一度お試しください。';
@@ -10096,32 +10355,26 @@ function dateLabelShort(dateStr){
   var d = new Date(dateStr+'T00:00:00');
   return (d.getMonth()+1)+'月'+d.getDate()+'日';
 }
-function todaysBuckets(){
-  var b = {};
-  if(state.day) classifyDayIntoBuckets(state.day, b);
-  return b;
-}
+/* 本日の作業ごとの内訳: CSVの出荷数量(件・ピース・ケース・バラ)と作業時間・人数。
+   CSVの無い作業(返品・検品など)は作業時間だけを表示する。 */
 function todaysTaskDetail(){
   var details = {};
-  if(!state.day) return details;
-  state.day.logs.forEach(function(l){
+  function ensure(tid){
+    if(!details[tid]){
+      var task = taskById(tid);
+      details[tid] = { name: task.name, isVc: isVcKindTask(tid), ship: freshShipStats(), ms: 0, sessions: 0, staffIds: {} };
+    }
+    return details[tid];
+  }
+  var imports = wvActiveImports(state.workVolume||emptyWorkVolume());
+  imports.forEach(function(imp){ addImportsToShipStats(ensure(imp.taskId).ship, [imp]); });
+  if(state.day) state.day.logs.forEach(function(l){
     if(l.taskId==='BREAK') return;
-    var task = taskById(l.taskId);
-    var cat = taskCategory(task);
-    if(!details[l.taskId]) details[l.taskId] = { name: task.name, category: cat, pieces:0, count:0, other:{}, sessions:0, staffIds:{} };
-    var d = details[l.taskId];
+    var d = ensure(l.taskId);
+    var end = l.end ? new Date(l.end).getTime() : Date.now();
+    d.ms += Math.max(0, end - new Date(l.start).getTime());
     d.sessions++;
     d.staffIds[l.staffId] = true;
-    if(l.breakdown){
-      var unitMap = subcatUnitMap(task);
-      Object.keys(l.breakdown).forEach(function(k){
-        var v = l.breakdown[k]||0;
-        if(v<=0) return;
-        addQtyToBucket(d, unitMap[k]||task.unit, v);
-      });
-    }else if(l.quantity){
-      addQtyToBucket(d, task.unit, l.quantity);
-    }
   });
   return details;
 }
@@ -10137,41 +10390,45 @@ function renderAchStatCard(icon, label, value, unit){
   return '<div class="ach-stat-card"><div class="ach-stat-icon">'+icon+'</div><div class="ach-stat-label">'+esc(label)+'</div><div class="ach-stat-value">'+value+'<span class="ach-stat-unit">'+esc(unit)+'</span></div></div>';
 }
 function renderAchievements(){
-  var todayB = todaysBuckets();
-  var shipToday = todayB['出荷'] || freshCategoryBucket();
-  var inboundToday = todayB['入庫'] || freshCategoryBucket();
-  var totalLogsToday = Object.keys(todayB).reduce(function(a,k){ return a+todayB[k].logCount; }, 0);
+  var shipToday = todaysShipStats();
+  var vcCasesToday = todaysVcCaseTotal();
 
   var detailHtml = '';
   if(state.showTodayDetail){
     var detail = todaysTaskDetail();
-    var tids = Object.keys(detail).sort(function(a,b){ return (detail[b].pieces+detail[b].count) - (detail[a].pieces+detail[a].count); });
+    var tids = Object.keys(detail).sort(function(a,b){ return (detail[b].ship.pieces - detail[a].ship.pieces) || (detail[b].ms - detail[a].ms); });
     var detailRows = tids.map(function(tid){
-      var d = detail[tid];
-      return '<tr>'+
+      var d = detail[tid], sh = d.ship;
+      var hasCsv = sh.importCount>0, hasSplit = sh.splitWith>0, partial = hasSplit && sh.splitWith<sh.splitTotal;
+      return '<tr data-ach-detail="'+esc(tid)+'">'+
         '<td>'+esc(d.name)+'</td>'+
-        '<td class="num">'+esc(d.category)+'</td>'+
-        '<td class="num">'+d.pieces+'</td>'+
-        '<td class="num">'+d.count+'</td>'+
-        '<td class="num">'+d.sessions+'回</td>'+
+        (hasCsv
+          ? '<td class="num">'+(d.isVc ? 'PO数 '+formatNum(wvTotalsForTask(state.workVolume, tid).primaryCount) : formatNum(sh.count)+'件')+'</td>'+
+            '<td class="num">'+formatNum(sh.pieces)+'ピース</td>'+
+            '<td class="num">'+(hasSplit ? formatNum(sh.caseCount)+'ケース'+(partial?'※':'') : 'データなし')+'</td>'+
+            '<td class="num">'+(hasSplit ? formatNum(sh.baraCount)+'ピース'+(partial?'※':'') : 'データなし')+'</td>'
+          : '<td colspan="4" style="color:var(--slate-500);">CSVなし(作業時間のみ記録)</td>')+
+        '<td class="num">'+fmtHM(d.ms)+'</td>'+
         '<td class="num">'+Object.keys(d.staffIds).length+'人</td>'+
       '</tr>';
-    }).join('') || '<tr><td colspan="6" style="color:var(--slate-500);">本日の記録はまだありません</td></tr>';
+    }).join('') || '<tr><td colspan="7" style="color:var(--slate-500);">本日の記録はまだありません</td></tr>';
     detailHtml = '<div class="ach-detail-panel">'+
-      '<div class="ach-detail-note">作業ごとの内訳(区分・個数・件数・セッション回数・人数)。同じ作業を1日に複数回行った場合はセッションごとに合算されます。「区分」が意図と違う場合は、作業登録・管理者画面の「編集」から区分を直せます。</div>'+
-      '<table class="report-table"><thead><tr><th>作業</th><th>区分</th><th>個数</th><th>件数</th><th>セッション</th><th>人数</th></tr></thead><tbody>'+detailRows+'</tbody></table>'+
+      '<div class="ach-detail-note">作業ごとの内訳。数量はCSV取込の出荷数量(ピース=出荷引当数の合計、ケース・バラ=商品台帳の入数で計算)です。作業者の手入力の数量は使いません。※ = ケース・バラの記録が無い取込を含みます。</div>'+
+      '<table class="report-table"><thead><tr><th>作業</th><th>出荷件数</th><th>出荷数量</th><th>ケース</th><th>バラ</th><th>作業時間</th><th>人数</th></tr></thead><tbody>'+detailRows+'</tbody></table>'+
     '</div>';
   }
 
+  var splitNoteToday = shipToday.splitTotal>shipToday.splitWith ? (shipToday.splitWith ? '(一部データなし)' : '(データなし)') : '';
   var todaySection =
-    '<div class="ach-section-title">📅 今日の実績</div>'+
-    '<div class="ach-stat-grid">'+
+    '<div class="ach-section-title">📅 今日の出荷実績(CSV取込)</div>'+
+    '<div class="ach-stat-grid" data-ach-today="1">'+
       renderAchStatCard('🚚','出荷件数', formatNum(shipToday.count), '件')+
-      renderAchStatCard('📦','出荷ピース数', formatNum(shipToday.pieces), 'ピース')+
-      renderAchStatCard('📥','入庫件数', formatNum(inboundToday.count), '件')+
-      renderAchStatCard('📥','入庫ピース数', formatNum(inboundToday.pieces), 'ピース')+
+      renderAchStatCard('📦','出荷数量', formatNum(shipToday.pieces), 'ピース')+
+      renderAchStatCard('🧱','ケース'+splitNoteToday, formatNum(shipToday.caseCount), 'ケース')+
+      renderAchStatCard('🧩','バラ'+splitNoteToday, formatNum(shipToday.baraCount), 'ピース')+
+      (vcCasesToday ? renderAchStatCard('📦','VCケース数', formatNum(vcCasesToday), 'ケース') : '')+
     '</div>'+
-    '<div class="ach-today-sub">本日の作業件数(全体): '+totalLogsToday+'件 '+
+    '<div class="ach-today-sub">本日のCSV取込: '+shipToday.importCount+'件 '+
       '<button type="button" class="ach-detail-toggle" id="toggleTodayDetailBtn">'+(state.showTodayDetail?'内訳を閉じる':'作業ごとの内訳を見る')+'</button>'+
     '</div>'+
     detailHtml;
@@ -10188,7 +10445,8 @@ function renderAchievements(){
       '<button class="report-go-btn" id="achRefreshBtn">更新する</button>'+
     '</div>';
   }else{
-    var curPieces = shipmentPieces(result.curBuckets);
+    var monthStats = achievementsMonthStats(result, result.curMonthKey);
+    var curPieces = monthStats.pieces;
     var target = (state.achievementSettings && state.achievementSettings.monthlyTargetPieces) || 25000;
     var rate = target>0 ? curPieces/target : 0;
     var remaining = Math.max(0, target-curPieces);
@@ -10196,69 +10454,72 @@ function renderAchievements(){
     var toRecord = Math.max(0, result.bestPieces - curPieces);
 
     var challengeSection =
-      '<div class="ach-section-title">🚚 今月のチームチャレンジ</div>'+
-      '<div class="ach-challenge-card">'+
+      '<div class="ach-section-title">🚚 今月のチームチャレンジ(出荷数量)</div>'+
+      '<div class="ach-challenge-card" data-ach-month="1">'+
         '<div class="ach-challenge-nums"><b>'+formatNum(curPieces)+'</b> / '+formatNum(target)+'ピース</div>'+
         '<div class="ach-progress-bar"><div class="ach-progress-fill" style="width:'+Math.min(100,rate*100).toFixed(1)+'%"></div></div>'+
         '<div class="ach-challenge-sub">達成率 '+(rate*100).toFixed(1)+'%'+(remaining>0 ? ' ・ 残り '+formatNum(remaining)+'ピース' : '')+'</div>'+
-      '</div>';
+      '</div>'+
+      '<div class="ach-mini-stats" data-ach-month-split="1"><span>今月の出荷件数 <b>'+formatNum(monthStats.count)+'</b>件</span>'+
+        (monthStats.splitTotal ? '<span>'+esc(shipStatsSplitText(monthStats))+'</span>' : '')+'</div>';
 
     var recordSection;
     if(isNewRecord){
       recordSection = '<div class="ach-record-banner ach-new-record">'+
         '<div class="ach-new-record-title">🎉 NEW RECORD!</div>'+
-        '<div class="ach-new-record-sub">月間出荷ピース数 <b>'+formatNum(curPieces)+'ピース</b></div>'+
+        '<div class="ach-new-record-sub">月間出荷数量 <b>'+formatNum(curPieces)+'ピース</b></div>'+
         '<div class="ach-new-record-note">過去最高記録'+(result.bestMonthKey ? '('+monthLabel(result.bestMonthKey)+' '+formatNum(result.bestPieces)+'ピース)' : '')+'を更新しました！</div>'+
       '</div>';
     }else if(result.bestMonthKey){
-      recordSection = '<div class="ach-section-title">🏆 過去最高記録</div>'+
+      recordSection = '<div class="ach-section-title">🏆 過去最高記録(月間出荷数量)</div>'+
         '<div class="ach-record-card">'+
           '<div class="ach-record-value">'+formatNum(result.bestPieces)+'ピース</div>'+
           '<div class="ach-record-month">'+monthLabel(result.bestMonthKey)+'</div>'+
           (toRecord>0 ? '<div class="ach-record-remaining">🔥 過去最高まであと '+formatNum(toRecord)+'ピース！</div>' : '<div class="ach-record-remaining">🔥 記録が見えてきました！</div>')+
         '</div>';
     }else{
-      recordSection = '<div class="ach-section-title">🏆 過去最高記録</div>'+
+      recordSection = '<div class="ach-section-title">🏆 過去最高記録(月間出荷数量)</div>'+
         '<div class="empty-note">まだ比較できる過去の月のデータがありません。今月が最初の記録になります!</div>';
     }
 
     var yoySection;
-    if(result.lastYearBuckets){
-      var lastYearPieces = shipmentPieces(result.lastYearBuckets);
+    if(result.lastYearStats){
+      var lastYearPieces = result.lastYearStats.pieces;
       var diffPct = lastYearPieces>0 ? ((curPieces-lastYearPieces)/lastYearPieces*100) : null;
-      yoySection = '<div class="ach-section-title">📈 前年同月比較</div>'+
+      yoySection = '<div class="ach-section-title">📈 前年同月比較(出荷数量)</div>'+
         '<div class="ach-yoy-card">'+
           '<div class="ach-yoy-row"><span>'+result.lastYearKey.split('-')[0]+'年</span><b>'+formatNum(lastYearPieces)+'ピース</b></div>'+
           '<div class="ach-yoy-row"><span>'+result.curMonthKey.split('-')[0]+'年</span><b>'+formatNum(curPieces)+'ピース</b></div>'+
           (diffPct!==null ? '<div class="ach-yoy-pct '+(diffPct>=0?'up':'down')+'">前年比 '+(diffPct>=0?'+':'')+diffPct.toFixed(1)+'%'+(diffPct>=0?' 前年よりアップ！':'')+'</div>' : '')+
         '</div>';
     }else{
-      yoySection = '<div class="ach-section-title">📈 前年同月比較</div>'+
-        '<div class="empty-note">昨年同時期のデータがまだありません。</div>';
+      yoySection = '<div class="ach-section-title">📈 前年同月比較(出荷数量)</div>'+
+        '<div class="empty-note">昨年同時期のCSV取込データがまだありません。</div>';
     }
 
-    var dayNums = Object.keys(result.dailyPieces).sort();
-    var maxDay = dayNums.reduce(function(a,d){ return Math.max(a, result.dailyPieces[d]); }, 1);
+    var daily = achievementsDailyStats(result);
+    var dayNums = Object.keys(daily).filter(function(d){ return monthKeyOf(d)===result.curMonthKey; }).sort();
+    var maxDay = dayNums.reduce(function(a,d){ return Math.max(a, daily[d].pieces); }, 1);
+    var bestDay = null, bestDayPieces = 0;
+    dayNums.forEach(function(d){ if(daily[d].pieces>bestDayPieces){ bestDayPieces = daily[d].pieces; bestDay = d; } });
     var bars = dayNums.map(function(d){
-      var v = result.dailyPieces[d];
+      var st = daily[d], v = st.pieces;
       var h = Math.max(2, Math.round(v/maxDay*60));
       var dayNum = parseInt(d.split('-')[2],10);
-      return '<div class="ach-bar-col" title="'+dayNum+'日: '+formatNum(v)+'ピース"><div class="ach-bar" style="height:'+h+'px;"></div><div class="ach-bar-label">'+dayNum+'</div></div>';
+      var tip = dayNum+'日: '+formatNum(v)+'ピース'+(st.splitTotal ? ' / '+shipStatsSplitText(st) : '');
+      return '<div class="ach-bar-col" data-ach-day="'+d+'" title="'+esc(tip)+'"><div class="ach-bar" style="height:'+h+'px;"></div><div class="ach-bar-label">'+dayNum+'</div></div>';
     }).join('');
-    var dailySection = '<div class="ach-section-title">📊 今月の日別実績(出荷ピース数)</div>'+
+    var dailySection = '<div class="ach-section-title">📊 今月の日別実績(出荷数量・ピース)</div>'+
       '<div class="ach-daily-chart">'+(bars||'<div class="empty-note">まだ記録がありません</div>')+'</div>'+
-      (result.bestDay ? '<div class="ach-bestday">🔥 今月最高日: <b>'+dateLabelShort(result.bestDay)+'</b> '+formatNum(result.bestDayPieces)+'ピース</div>' : '');
+      (bestDay ? '<div class="ach-bestday">🔥 今月最高日: <b>'+dateLabelShort(bestDay)+'</b> '+formatNum(bestDayPieces)+'ピース</div>' : '');
 
     var msg = achievementMessage(rate, isNewRecord);
     var msgSection = '<div class="ach-message">'+esc(msg)+'</div>';
 
-    var inboundB = result.curBuckets['入庫'] || freshCategoryBucket();
-    var inboundSection = '<div class="ach-section-title">📥 今月の入庫実績</div>'+
-      '<div class="ach-mini-stats"><span>件数 <b>'+formatNum(inboundB.count)+'</b>件</span><span>個数 <b>'+formatNum(inboundB.pieces)+'</b>個</span></div>';
-
-    bodyRest = challengeSection + recordSection + msgSection + yoySection + dailySection + inboundSection +
+    bodyRest = challengeSection + recordSection + msgSection + yoySection + dailySection +
       '<button class="report-go-btn ach-refresh-small" id="achRefreshBtn">最新の状態に更新する</button>'+
-      '<div class="ach-generated-note">対象'+result.dayCount+'日分のデータから算出(最大400日分)</div>';
+      '<div class="ach-generated-note">CSV取込のある'+result.dayCount+'日分から算出(最大400日分)。出荷数量はCSVの出荷引当数の合計です'+
+        ((result.failedDates && result.failedDates.length) ? '。'+result.failedDates.length+'日分は読み込めなかったため含めていません' : '')+'</div>';
   }
 
   return '<div class="mgr-wrap"><div class="ach-wrap">'+
@@ -10276,74 +10537,6 @@ function bindAchievements(){
     render();
   });
 }
-function aggregateLifetime(days){
-  var perStaff = {};
-  days.forEach(function(day){
-    if(!day) return;
-    day.logs.forEach(function(l){
-      if(!perStaff[l.staffId]) perStaff[l.staffId] = { xp:0, bySpec:{}, workMs:0, workDays:{} };
-      if(l.taskId==='BREAK') return;
-      var end = l.end ? new Date(l.end).getTime() : Date.now();
-      var dur = Math.max(0, end - new Date(l.start).getTime());
-      perStaff[l.staffId].workMs += dur;
-      perStaff[l.staffId].workDays[day.date] = true;
-      if(l.breakdown){
-        Object.keys(l.breakdown).forEach(function(k){
-          var v = l.breakdown[k]||0;
-          if(v<=0) return;
-          perStaff[l.staffId].xp += v;
-          perStaff[l.staffId].bySpec[k] = (perStaff[l.staffId].bySpec[k]||0) + v;
-        });
-      }else if(l.quantity){
-        var q = l.quantity||0;
-        if(q<=0) return;
-        perStaff[l.staffId].xp += q;
-        var t = taskById(l.taskId);
-        perStaff[l.staffId].bySpec[t.name] = (perStaff[l.staffId].bySpec[t.name]||0) + q;
-      }
-    });
-  });
-  return perStaff;
-}
-function rpgXpForLevel(lv){ return 25*Math.pow(lv-1,2); }
-function rpgLevelInfo(xp){
-  var level = Math.floor(Math.sqrt(xp/25)) + 1;
-  var curFloor = rpgXpForLevel(level);
-  var nextFloor = rpgXpForLevel(level+1);
-  var progress = nextFloor>curFloor ? (xp-curFloor)/(nextFloor-curFloor) : 1;
-  return { level:level, xp:xp, curFloor:curFloor, nextFloor:nextFloor, progress:Math.min(1,Math.max(0,progress)) };
-}
-function rpgTitleForLevel(level){
-  if(level>=21) return 'マスター';
-  if(level>=11) return 'エキスパート';
-  if(level>=6) return 'ベテラン';
-  if(level>=3) return '一人前';
-  return '見習い';
-}
-function rpgAvatarTier(level){
-  if(level>=21) return 4;
-  if(level>=11) return 3;
-  if(level>=6) return 2;
-  if(level>=3) return 1;
-  return 0;
-}
-function rpgStats(info){
-  var workDaysCount = Object.keys(info.workDays||{}).length;
-  var workHours = (info.workMs||0)/3600000;
-  var rate = workHours>0 ? info.xp/workHours : 0;
-  return {
-    atk: Math.min(99, Math.round(Math.sqrt(info.xp)*2)),
-    def: Math.min(99, Math.round(workDaysCount*2.5)),
-    spd: Math.min(99, Math.round(rate*3))
-  };
-}
-var RPG_TIER_PALETTE = [
-  { hair:'#8A94A6', body:'#667085' },
-  { hair:'#4C5FD5', body:'#4C5FD5' },
-  { hair:'#2E90FA', body:'#2E90FA' },
-  { hair:'#F04438', body:'#F04438' },
-  { hair:'#F2A93B', body:'#F2A93B' }
-];
 function defaultAvatarColor(staffId){
   var sum = 0;
   for(var i=0;i<staffId.length;i++) sum += staffId.charCodeAt(i);
@@ -10351,112 +10544,6 @@ function defaultAvatarColor(staffId){
 }
 function avatarColorForStaff(s){
   return (s && s.avatarColor) || defaultAvatarColor(s ? s.id : 'x');
-}
-function renderFlatSprite(tier, accentColor){
-  var pal = RPG_TIER_PALETTE[tier] || RPG_TIER_PALETTE[0];
-  var skin = '#F2C9A0';
-  var outline = '#12173A';
-  var accent = accentColor || '#F2A93B';
-  var sw = 1.5;
-  return '<svg viewBox="0 0 60 76">'+
-    '<rect x="17" y="55" width="10" height="17" rx="4" fill="'+pal.body+'" stroke="'+outline+'" stroke-width="'+sw+'"/>'+
-    '<rect x="33" y="55" width="10" height="17" rx="4" fill="'+pal.body+'" stroke="'+outline+'" stroke-width="'+sw+'"/>'+
-    '<rect x="11" y="28" width="38" height="31" rx="13" fill="'+pal.body+'" stroke="'+outline+'" stroke-width="'+sw+'"/>'+
-    '<circle cx="30" cy="43" r="6" fill="'+accent+'" stroke="'+outline+'" stroke-width="1"/>'+
-    '<rect x="22" y="23" width="16" height="9" fill="'+skin+'"/>'+
-    '<circle cx="30" cy="16" r="17" fill="'+pal.hair+'" stroke="'+outline+'" stroke-width="'+sw+'"/>'+
-    '<circle cx="30" cy="20" r="13" fill="'+skin+'" stroke="'+outline+'" stroke-width="1.2"/>'+
-    '<circle cx="25" cy="21" r="1.8" fill="'+outline+'"/>'+
-    '<circle cx="35" cy="21" r="1.8" fill="'+outline+'"/>'+
-  '</svg>';
-}
-function renderRpgAvatar(s, tier){
-  var html = '<div class="rpg-avatar-wrap avatar-tier-'+tier+'">';
-  if(tier>=2) html += '<span class="avatar-cape"></span>';
-  html += '<div class="rpg-avatar-pixel">'+renderFlatSprite(tier, avatarColorForStaff(s))+'</div>';
-  if(tier>=1) html += '<span class="avatar-badge avatar-badge-star">⭐</span>';
-  if(tier>=2) html += '<span class="avatar-badge avatar-badge-sword">⚔️</span>';
-  if(tier>=3) html += '<span class="avatar-badge avatar-badge-shield">🛡️</span>';
-  if(tier>=4) html += '<span class="avatar-badge avatar-badge-crown">👑</span>';
-  html += '</div>';
-  return html;
-}
-function rpgStatRow(icon, label, val, cls){
-  return '<div class="rpg-stat-row">'+
-    '<span class="rpg-stat-icon">'+icon+'</span>'+
-    '<span class="rpg-stat-label">'+label+'</span>'+
-    '<div class="rpg-stat-bar"><div class="rpg-stat-fill '+cls+'" style="width:'+val+'%"></div></div>'+
-    '<span class="rpg-stat-val">'+val+'</span>'+
-  '</div>';
-}
-async function runRpgReport(){
-  state.reportRpgLoading = true;
-  state.reportRpgError = null;
-  render();
-  var days = await loadAllDaysForLifetime();
-  var perStaff = aggregateLifetime(days);
-  state.reportRpgResult = { perStaff: perStaff, dayCount: days.length };
-  state.reportRpgLoading = false;
-  render();
-}
-function renderReportRpgBody(){
-  if(state.reportRpgLoading) return '<div class="empty-note">これまでの記録をすべて読み込み中...(データ量によっては少し時間がかかります)</div>';
-  if(state.reportRpgError) return '<div class="empty-note">'+esc(state.reportRpgError)+'</div>';
-  var result = state.reportRpgResult;
-  if(!result) return '<div class="empty-note">「これまでの累計を集計する」を押すと、記録のあるすべての日からスタッフごとの累計件数・レベル・ステータスを計算します。</div>';
-
-  var staffIds = Object.keys(result.perStaff).sort(function(a,b){ return result.perStaff[b].xp - result.perStaff[a].xp; });
-  if(!staffIds.length) return '<div class="empty-note">まだ件数の記録がありません。</div>';
-
-  var medals = ['🥇','🥈','🥉'];
-  var cards = staffIds.map(function(sid, idx){
-    var s = staffById(sid);
-    var info = result.perStaff[sid];
-    var lv = rpgLevelInfo(info.xp);
-    var tier = rpgAvatarTier(lv.level);
-    var title = rpgTitleForLevel(lv.level);
-    var stats = rpgStats(info);
-    var specKeys = Object.keys(info.bySpec).sort(function(a,b){ return info.bySpec[b]-info.bySpec[a]; });
-    var topSpec = specKeys[0];
-    var specLabel = topSpec ? esc(topSpec)+'の'+title : title;
-    var specBadges = specKeys.slice(0,4).map(function(k){
-      return '<span class="rpg-spec-chip">'+esc(k)+' <b>'+info.bySpec[k]+'</b></span>';
-    }).join('');
-    var medal = medals[idx] || '#'+(idx+1);
-    return '<div class="rpg-card">'+
-      '<div class="rpg-card-top">'+
-        '<div class="rpg-rank">'+medal+'</div>'+
-        renderRpgAvatar(s, tier)+
-        '<div class="rpg-name-block">'+
-          '<div class="rpg-name">'+esc(s.name)+'</div>'+
-          '<div class="rpg-title">'+specLabel+'</div>'+
-        '</div>'+
-        '<div class="rpg-level-badge">Lv.'+lv.level+'</div>'+
-      '</div>'+
-      '<div class="rpg-xp-bar"><div class="rpg-xp-fill" style="width:'+(lv.progress*100).toFixed(0)+'%"></div></div>'+
-      '<div class="rpg-xp-label">次のレベルまで '+(lv.nextFloor-lv.xp)+' / 累計 '+lv.xp+'</div>'+
-      '<div class="rpg-stats">'+
-        rpgStatRow('⚔️','攻撃',stats.atk,'atk')+
-        rpgStatRow('🛡️','防御',stats.def,'def')+
-        rpgStatRow('💨','すばやさ',stats.spd,'spd')+
-      '</div>'+
-      (specBadges ? '<div class="rpg-spec-chips">'+specBadges+'</div>' : '')+
-    '</div>';
-  }).join('');
-
-  return '<div class="panel-title">🎮 累計実績</div>'+
-    '<div class="report-range-note">記録がある全'+result.dayCount+'日分から集計(休憩は対象外)。数量入力(内訳・件数)がある作業のみカウントされます。レベルが上がるとキャラクターの見た目も変化します。攻撃=累計処理量、防御=出勤日数、すばやさ=時間あたりの処理効率から算出した目安です。</div>'+
-    '<div class="rpg-card-grid">'+cards+'</div>';
-}
-function taskBreakdownRows(info, task){
-  var breakdown = info.breakdown || {};
-  var keys = Object.keys(breakdown).filter(function(k){ return breakdown[k]>0; });
-  if(!keys.length) return '';
-  var unitMap = subcatUnitMap(task);
-  var rows = keys.map(function(k){
-    return '<div class="breakdown-detail-row"><span class="breakdown-detail-name">'+esc(k)+'</span><span class="breakdown-detail-qty">'+breakdown[k]+esc(unitMap[k]||task.unit)+'</span></div>';
-  }).join('');
-  return '<div class="breakdown-detail-list">'+rows+'</div>';
 }
 function renderReportSingleBody(){
   if(state.reportLoading) return '<div class="empty-note">読み込み中...</div>';
@@ -10483,20 +10570,15 @@ function renderReportSingleBody(){
   var taskRows = taskIds.map(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
-    var hasSubcats = t.subcategories && t.subcategories.length;
-    var bdRows = taskBreakdownRows(info, t);
-    var unitGroups = hasSubcats ? unitGroupedTotals(info.breakdown, t) : [];
-    var qtyCell = hasSubcats ? formatUnitGroupedTotals(unitGroups, true) : (info.qty+esc(t.unit));
-    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+qtyCell+bdRows+taskSubMsRows(info, t)+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
+    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+taskSubMsRows(info, t)+'</td><td class="num">'+reportCsvVolumeCell(state.reportWorkVolume, state.reportCaseLedger, tid)+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
   return '<div class="panel-title">'+esc(dateLabelFromStr(state.reportDate))+' の集計 <button class="csv-export-btn" id="csvExportSingle">CSVダウンロード</button></div>'+
     '<div class="report-section-title">スタッフ別</div>'+
     '<table class="report-table"><thead><tr><th>名前</th><th>合計時間</th><th>作業内訳</th></tr></thead><tbody>'+staffRows+'</tbody></table>'+
     '<div class="report-section-title">作業別</div>'+
-    '<table class="report-table"><thead><tr><th>作業</th><th>合計時間</th><th>合計件数</th><th>稼働人数</th></tr></thead><tbody>'+taskRows+'</tbody></table>'+
-    renderSubcatProductivity(agg, state.reportWorkVolume)+
-    renderProductivityRanking(agg);
+    '<table class="report-table"><thead><tr><th>作業</th><th>合計時間(内訳の人時)</th><th>出荷数量(CSV)</th><th>稼働人数</th></tr></thead><tbody>'+taskRows+'</tbody></table>'+
+    renderSubcatProductivity(day.logs, state.reportWorkVolume, state.reportCaseLedger);
 }
 function renderReportRangeBody(){
   if(state.reportLoading) return '<div class="empty-note">読み込み中...(日数が多いと少し時間がかかります)</div>';
@@ -10520,20 +10602,17 @@ function renderReportRangeBody(){
   var taskRows = taskIds.map(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
-    var hasSubcats = t.subcategories && t.subcategories.length;
-    var bdRows = taskBreakdownRows(info, t);
-    var unitGroups = hasSubcats ? unitGroupedTotals(info.breakdown, t) : [];
-    var qtyCell = hasSubcats ? formatUnitGroupedTotals(unitGroups, true) : (info.qty+esc(t.unit));
-    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td class="num">'+qtyCell+bdRows+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
+    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+taskSubMsRows(info, t)+'</td><td class="num">'+reportCsvVolumeCell(result.workVolume, result.caseLedger, tid)+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
   return '<div class="panel-title">'+esc(dateLabelFromStr(result.start))+' 〜 '+esc(dateLabelFromStr(result.end))+' の合計 <button class="csv-export-btn" id="csvExportRange">CSVダウンロード</button></div>'+
-    '<div class="report-range-note">対象'+result.dayCount+'日間のうち、記録があった日: '+result.daysWithData+'日</div>'+
+    '<div class="report-range-note">対象'+result.dayCount+'日間のうち、記録があった日: '+result.daysWithData+'日'+
+      ((result.volumeFailedDates && result.volumeFailedDates.length) ? '。CSV取込データを読み込めなかった日('+result.volumeFailedDates.length+'日)の数量は含めていません' : '')+'</div>'+
     '<div class="report-section-title">スタッフ別合計</div>'+
     '<table class="report-table"><thead><tr><th>名前</th><th>合計時間</th><th>作業内訳</th></tr></thead><tbody>'+staffRows+'</tbody></table>'+
     '<div class="report-section-title">作業別合計</div>'+
-    '<table class="report-table"><thead><tr><th>作業</th><th>合計時間</th><th>合計件数</th><th>稼働人数</th></tr></thead><tbody>'+taskRows+'</tbody></table>'+
-    renderProductivityRanking(agg);
+    '<table class="report-table"><thead><tr><th>作業</th><th>合計時間(内訳の人時)</th><th>出荷数量(CSV)</th><th>稼働人数</th></tr></thead><tbody>'+taskRows+'</tbody></table>'+
+    renderSubcatProductivity(result.logs, result.workVolume, result.caseLedger);
 }
 async function runSingleReport(dateStr){
   state.reportDate = dateStr;
@@ -10543,6 +10622,7 @@ async function runSingleReport(dateStr){
   var day = await loadDayByDate(dateStr);
   state.reportSingleDay = day;
   state.reportWorkVolume = await loadWorkVolume(dateStr);
+  state.reportCaseLedger = await loadVcCaseLedger(dateStr);
   state.reportLoading = false;
   render();
 }
@@ -10563,13 +10643,21 @@ async function runRangeReport(startStr, endStr){
   state.reportLoading = true;
   state.reportError = null;
   render();
-  var days = [];
+  var days = [], wvList = [], ledgerList = [], volumeFailedDates = [];
   for(var i=0;i<dates.length;i++){
     var d = await loadDayByDate(dates[i]);
     if(d) days.push(d);
+    // 数量はCSV取込の出荷数量とVCケース数(台帳)から集計する
+    var wv = await loadWorkVolumeOrEmpty(dates[i]);
+    if(wv && isUnverified(wv)) volumeFailedDates.push(dates[i]);
+    else if(wv) wvList.push(wv);
+    var led = await loadVcCaseLedger(dates[i]);
+    if(led && !isUnverified(led)) ledgerList.push(led);
   }
   var agg = aggregateDays(days);
-  state.reportRangeResult = { start: startStr, end: endStr, dayCount: dates.length, daysWithData: days.length, agg: agg };
+  var allLogs = []; days.forEach(function(dd){ allLogs = allLogs.concat(dd.logs||[]); });
+  state.reportRangeResult = { start: startStr, end: endStr, dayCount: dates.length, daysWithData: days.length, agg: agg, logs: allLogs,
+    workVolume: mergeWorkVolumes(wvList), caseLedger: mergeCaseLedgers(ledgerList), volumeFailedDates: volumeFailedDates };
   state.reportLoading = false;
   render();
 }
@@ -10606,16 +10694,12 @@ function bindReport(){
   var csvSingle = document.getElementById('csvExportSingle');
   if(csvSingle) csvSingle.addEventListener('click', function(){
     if(!state.reportSingleDay) return;
-    exportAggCSV(aggregateDays([state.reportSingleDay]), state.reportDate);
+    exportAggCSV(aggregateDays([state.reportSingleDay]), state.reportDate, state.reportWorkVolume, state.reportCaseLedger, state.reportSingleDay.logs);
   });
   var csvRange = document.getElementById('csvExportRange');
   if(csvRange) csvRange.addEventListener('click', function(){
     if(!state.reportRangeResult) return;
-    exportAggCSV(state.reportRangeResult.agg, state.reportRangeResult.start+'_'+state.reportRangeResult.end);
-  });
-  var rpgGo = document.getElementById('reportRpgGo');
-  if(rpgGo) rpgGo.addEventListener('click', function(){
-    runRpgReport();
+    exportAggCSV(state.reportRangeResult.agg, state.reportRangeResult.start+'_'+state.reportRangeResult.end, state.reportRangeResult.workVolume, state.reportRangeResult.caseLedger, state.reportRangeResult.logs);
   });
 }
 
@@ -10738,7 +10822,7 @@ function renderInput(){
               '<button type="button" class="qty-btn qty-btn-sm" data-live-count="'+esc(tid)+'|'+esc(sc.name)+'|1">+1</button>'+
             '</div>';
           return '<div class="qty-break-row live-count-row">'+
-            '<div class="qty-break-label">'+esc(sc.name)+' <span style="font-weight:400;color:var(--slate-500);">('+esc(sc.unit)+')</span></div>'+
+            '<div class="qty-break-label">'+esc(sc.name)+' <span style="font-weight:400;color:var(--slate-500);">('+esc(displayUnit(sc.unit))+')</span></div>'+
             '<div class="sub-timer-row">'+
               '<button type="button" class="sub-timer-btn '+(subActive?'active':'')+'" data-sub-timer="'+esc(tid)+'|'+esc(sc.name)+'">'+(subActive?'■ 計測終了':'▶ 計測開始')+'</button>'+
               '<span class="sub-timer-display'+(subActive?' active':'')+'"'+timerAttrs+'>'+timerText+'</span>'+
@@ -10760,7 +10844,7 @@ function renderInput(){
         if(estCompletion3) completionTimeHtml = '<div class="task-tile-unit">完了予定 '+esc(estCompletion3)+'</div>';
       }
       return '<div class="task-tile '+(isActive?'active-task':'')+'" data-tap-task="'+tid+'" style="border-left:6px solid '+t.color+'">'+
-        '<div><div class="task-tile-name">'+esc(t.name)+' '+csvLinkBadge(tid)+'</div><div class="task-tile-unit">単位: '+esc(t.unit)+'</div>'+completionTimeHtml+'</div>'+
+        '<div><div class="task-tile-name">'+esc(t.name)+' '+csvLinkBadge(tid)+'</div><div class="task-tile-unit">単位: '+esc(displayUnit(t.unit))+'</div>'+completionTimeHtml+'</div>'+
         '<div>'+
           '<div class="task-tile-status"><span class="status-dot '+(isActive?'working':'idle')+'"></span>'+(isActive?'作業中':'タップして開始')+'</div>'+
           (isActive && !(t.subcategories && t.subcategories.length) ? '<div class="task-tile-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsed)+'</div>' : '')+
@@ -10803,20 +10887,18 @@ function renderSummary(staff){
   var totals = totalsByTask(staff.id);
   var rows = Object.keys(totals).sort(byTaskColor(function(tid){ return taskById(tid).color; })).map(function(tid){
     var t = taskById(tid);
-    var qty = 0;
-    var breakdown = {};
+    // 数量(手入力)は表示しない。作業時間と内訳ごとの時間を表示する
+    var subMs = {};
     state.day.logs.forEach(function(l){
       if(l.staffId===staff.id && l.taskId===tid){
-        qty += (l.quantity||0);
-        if(l.breakdown){
-          Object.keys(l.breakdown).forEach(function(k){ breakdown[k] = (breakdown[k]||0) + (l.breakdown[k]||0); });
-        }
+        var m = logSubTimesMap(l);
+        Object.keys(m).forEach(function(k){ subMs[k] = (subMs[k]||0) + m[k]; });
       }
     });
-    var bd = breakdownLabel(breakdown, t);
+    var subText = Object.keys(subMs).map(function(k){ return k+' '+fmtHM(subMs[k]); }).join(' / ');
     return '<div class="summary-row">'+
       '<div class="summary-task"><span class="task-color-dot" style="background:'+t.color+'"></span>'+esc(t.name)+'</div>'+
-      '<div class="summary-vals">'+fmtHM(totals[tid])+' ・ '+qty+esc(t.unit)+(bd?' '+bd:'')+'</div>'+
+      '<div class="summary-vals">'+fmtHM(totals[tid])+(subText ? '('+esc(subText)+')' : '')+'</div>'+
     '</div>';
   }).join('') || '<div class="empty-note">本日の記録はありません。</div>';
   return '<div class="input-wrap"><div class="summary-wrap">'+
@@ -11330,30 +11412,93 @@ function attachOutboundBreakdown(byProduct, masterMap){
   });
   return out;
 }
-/* ---------- 作業単価マスター(別の kintone アプリ。将来の収支計算用) ----------
-   アプリID・フィールドコードが確定したら、ここを設定する。今回はAPI通信を実装しない(呼び出しても通信しない)。
-   重要: APIトークンはこのファイル(公開されるページ)には絶対に書かない。商品台帳と同じく、
-   Supabase Edge Function の Secrets(例: KINTONE_WORK_PRICE_API_TOKEN)に登録し、サーバー側だけで使う。 */
-var WORK_PRICE_MASTER_CONFIG = {
-  appId: '',
-  apiTokenSecretName: 'KINTONE_WORK_PRICE_API_TOKEN', // トークンそのものではなく、Secrets に登録する名前
-  fields: {
-    workItem: '',   // 作業項目(例: 出庫)
-    category: '',   // 区分(例: ケース / ピース)
-    unitPrice: '',  // 単価(円)
-    unit: ''        // 単位
-  },
-  // 出庫荷役料の計算で使う行の見分け方(作業項目・区分の値)
-  outboundCase: { workItem: '出庫', category: 'ケース' },
-  outboundPiece: { workItem: '出庫', category: 'ピース' }
-};
-function workPriceMasterConfigured(){
-  var c = WORK_PRICE_MASTER_CONFIG;
-  return !!(c.appId && c.fields.workItem && c.fields.unitPrice);
+/* ---------- ケース数・バラ数の表示・分析用の集計 ----------
+   出荷数量(ピース) = CSVの出荷引当数の合計(totalQty) / ケース = caseCount / バラ = pieceCount(端数・ピース)。
+   取込ごとの商品別内訳(byProduct)に保存された値だけを合計する。ケース数・バラ数を持たない取込
+   (機能追加前の取込など)は推測で計算せず「データなし」として数える。表示専用(人員配置・生産性には使わない)。 */
+function outboundSplitOfImport(imp){
+  var bp = imp && imp.byProduct;
+  var codes = bp ? Object.keys(bp) : [];
+  if(!codes.length) return null;
+  var c = 0, p = 0;
+  for(var i=0; i<codes.length; i++){
+    var e = bp[codes[i]];
+    if(!e || typeof e.caseCount!=='number' || typeof e.pieceCount!=='number') return null;
+    c += e.caseCount; p += e.pieceCount;
+  }
+  return { caseCount: c, pieceCount: p };
 }
+function outboundSplitOfImports(imports){
+  var r = { caseCount: 0, pieceCount: 0, withData: 0, total: 0 };
+  (imports||[]).forEach(function(imp){
+    r.total++;
+    var s = outboundSplitOfImport(imp);
+    if(s){ r.withData++; r.caseCount += s.caseCount; r.pieceCount += s.pieceCount; }
+  });
+  return r;
+}
+function outboundSplitForTask(wv, taskId){
+  return outboundSplitOfImports(wvActiveImports(wv||emptyWorkVolume()).filter(function(i){ return i.taskId===taskId; }));
+}
+/* 例: 「ケース 2ケース・バラ 7ピース」/ 一部の取込に無い場合は「(一部データなし)」/ 全く無い場合は「ケース・バラ: データなし」 */
+function outboundSplitText(s){
+  if(!s || !s.total) return '';
+  if(!s.withData) return 'ケース・バラ: データなし';
+  return 'ケース '+formatNum(s.caseCount)+'ケース・バラ '+formatNum(s.pieceCount)+'ピース'+(s.withData<s.total ? '(一部データなし)' : '');
+}
+/* ---------- 作業単価マスタ(kintone 作業単価アプリ 501 の写し。将来の収支計算用) ----------
+   kintone → Edge Function「sync-work-price-master」→ Supabase の work_price_master → ここで読む。
+   APIトークンは Supabase の Secrets(KINTONE_WORK_PRICE_API_TOKEN)にだけあり、このファイルには書かない。
+   アプリID(501)・フィールドコードは Edge Function 側で固定しており、ブラウザからは何も送らない。
+   今回は読み込み・表示まで。収支計算はこれまでどおり unit_prices を使い、ここの単価はまだ使わない。 */
+var WORK_PRICE_SYNC_FUNCTION_NAME = 'sync-work-price-master';
+/* 戻り値: { ok, reason, lastSyncedAt, prices:[{ recordId, workName, categories[], unitPrice, unitDefinition, division, status, kintoneUpdatedAt }] }
+   workName=品名(作業項目) / categories=カテゴリー(複数あり得る) / unitPrice=単価(空欄は null) / unitDefinition=単価定義(単位) / division=区分 / status=kintoneのステータス */
 async function fetchWorkPriceMaster(){
-  // 今回はAPI通信を行わない(設定・Edge Function が用意できてから実装する)
-  return { ok:false, reason: workPriceMasterConfigured() ? '作業単価マスターの取得はまだ実装されていません' : '作業単価マスターの設定(アプリID・フィールドコード)が未入力です', prices: null };
+  var c = window.__supabaseClient;
+  if(!hasManagerSession() || !c || typeof c.from!=='function') return { ok:false, reason:'管理者としてログインしてください。', prices:null, lastSyncedAt:null };
+  try{
+    var res = await c.from('work_price_master').select('kintone_record_id,work_name,categories,unit_price,unit_definition,division,kintone_status,kintone_updated_at,updated_at');
+    if(res.error) return { ok:false, reason:'作業単価マスタを読み込めませんでした(権限をご確認ください)。', prices:null, lastSyncedAt:null };
+    var last = null;
+    var prices = (res.data||[]).map(function(r){
+      if(r.updated_at && (!last || r.updated_at > last)) last = r.updated_at;
+      return {
+        recordId: String(r.kintone_record_id), workName: r.work_name||'', categories: Array.isArray(r.categories) ? r.categories : [],
+        unitPrice: (r.unit_price===null || r.unit_price===undefined) ? null : Number(r.unit_price),
+        unitDefinition: r.unit_definition||'', division: r.division||'', status: r.kintone_status||'', kintoneUpdatedAt: r.kintone_updated_at||null
+      };
+    });
+    prices.sort(function(a,b){ return Number(a.recordId)-Number(b.recordId); });
+    return { ok:true, reason:'', prices: prices, lastSyncedAt: last };
+  }catch(e){
+    return { ok:false, reason:'作業単価マスタを読み込めませんでした。', prices:null, lastSyncedAt:null };
+  }
+}
+/* kintone → work_price_master の同期を Edge Function に依頼する。全件取得に成功したときだけ Edge Function 側で更新される */
+async function syncWorkPriceMasterFromKintone(){
+  if(!hasManagerSession()) return { ok:false, error:'管理者としてログインしてください。' };
+  await refreshAuthState(); // 実行直前にもロールを確認し直す
+  if(!hasManagerSession()) return { ok:false, error:'管理者としてログインしてください。' };
+  var c = window.__supabaseClient;
+  if(!c || !c.functions || typeof c.functions.invoke!=='function') return { ok:false, error:'Supabaseの関数呼び出しが利用できません。' };
+  try{
+    var res = await c.functions.invoke(WORK_PRICE_SYNC_FUNCTION_NAME, { body: {} });
+    if(res.error){
+      console.error('[LOGI LINK] 作業単価マスタ同期(Edge Function)でエラー', res.error);
+      return { ok:false, error: await describeFunctionsError(res.error) };
+    }
+    var data = res.data;
+    if(typeof data==='string'){ try{ data = JSON.parse(data); }catch(e){ data = null; } }
+    if(!data || !data.ok) return { ok:false, error: (data && data.error) ? data.error : 'Edge Functionから想定外の応答がありました。' };
+    return { ok:true, result: {
+      fetchedCount: data.fetchedCount, savedCount: data.savedCount, deletedCount: data.deletedCount,
+      statusCounts: data.statusCounts || {}, divisionCounts: data.divisionCounts || {}, missingFields: data.missingFields || [], syncedAt: data.syncedAt
+    } };
+  }catch(e){
+    console.error('[LOGI LINK] 作業単価マスタ同期(Edge Function)への接続に失敗しました', e);
+    return { ok:false, error:'Edge Functionへの接続に失敗しました。' };
+  }
 }
 /* 将来の収支計算用: 出庫荷役料 = ケース数 × 才数 × ケース出庫単価 + ピース数 × ピース出庫単価。
    line: { caseCount, pieceCount, cubicVolume } / prices: { casePrice, piecePrice }。
@@ -11595,6 +11740,7 @@ function openQuantityModal(nextTaskId, isEndDay){
       state.modal = {kind:'qty', closingTaskId: log.taskId, closingTaskName: t.name, closingUnit: t.unit, value:0, nextTaskId: nextTaskId, isEndDay: isEndDay};
     }
   }else{
+    // 休憩前の作業の完了確認は、作業の切り替え・本日の作業の終了の入口(askPreBreakTaskCompletion)で行う
     state.suppressRender = false;
     startTaskWithSubcatCheck(nextTaskId);
     return;
@@ -11633,7 +11779,7 @@ function renderTaskDoneConfirmModal(m){
   var t = taskById(m.taskId);
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" id="taskDoneConfirm">'+
-      '<div class="modal-task-name">「'+esc(t.name)+'」は終わりましたか?</div>'+
+      '<div class="modal-task-name">'+(m.preBreak ? '休憩前の作業' : '')+'「'+esc(t.name)+'」は終わりましたか?</div>'+
       '<div class="pool-hint" style="margin:6px 0 14px;">'+(m.remainingText ? esc(m.remainingText)+'と見込まれます。' : '')+'途中で別の作業へ移る場合は「まだ途中」を選んでください。</div>'+
       '<div style="display:flex;flex-direction:column;gap:8px;">'+
         '<button type="button" class="modal-confirm" id="taskDoneYesBtn" style="width:100%;">✅ 終わった(完了にする)</button>'+
@@ -11780,6 +11926,9 @@ async function checkAutoBreak(){
   var now = new Date();
   var nowStr = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
   var inBreak = nowStr >= state.breakSettings.start && nowStr < state.breakSettings.end;
+  // 休憩を終えるのは休憩終了時刻を過ぎてからだけ。端末の時計が少し遅れていて「まだ休憩開始前」と判断した端末が、
+  // 時計の進んだ別の端末が始めた休憩をすぐに終わらせてしまう(休憩の記録が1秒で終わる)ことを防ぐ
+  var afterBreak = nowStr >= state.breakSettings.end;
   if(!day.autoBreakStarted) day.autoBreakStarted = {};
   if(!day.autoBreakEnded) day.autoBreakEnded = {};
   var changed = false;
@@ -11803,7 +11952,7 @@ async function checkAutoBreak(){
         day.autoBreakStarted[s.id] = true;
         changed = true;
       }
-    }else{
+    }else if(afterBreak){
       if(!day.autoBreakEnded[s.id] && breakLogs.length){
         breakLogs.forEach(function(log){
           log.end = new Date().toISOString();
@@ -11816,6 +11965,86 @@ async function checkAutoBreak(){
   });
   if(changed){
     await saveDay(day);
+  }
+}
+/* 配置案の自動確定。管理者が常に画面を見ているわけではないため、空いている人・手待ち作業の人への配置案は
+   管理者の確定を待たずに確定し、作業者画面の「📋 本日の作業指示」に出す。
+   通常の作業中の人を動かす案(余力のある作業の人から)と、作業完了後の配置予定は、これまでどおり管理者が確定する。 */
+var AUTO_CONFIRM_TIERS = { 1:true, 2:true, next:true, noprod:true };
+var AUTO_CONFIRM_MIN_INTERVAL_MS = 20000; // 同じ端末で読み直し・確定を行う最短間隔(定期更新のたびに通信しないため)
+var AUTO_CONFIRM_MIN_WORK_MIN = 15;         // 勤務終了までの実働がこれより短い人には、自動で新しい作業を指示しない
+var AUTO_CONFIRM_IGNORED_HOLD_MS = 30*60000; // 自動確定の指示を実施しなかった人には、この間は別の指示を自動で出さない(指示が次々に変わらないように)
+var autoConfirmBusy = false, autoConfirmLastAt = 0;
+function autoConfirmTargets(plan){
+  var nowMs = plan.nowMs;
+  return plan.proposals.filter(function(p){
+    if(!p.taskId || !AUTO_CONFIRM_TIERS[p.tier]) return false;
+    var info = plan.staff[p.staffId];
+    if(!info) return false;
+    // 手待ち作業への配置は、今は何も作業していない人だけ(推定で処理済みの作業を続けている人は、まだ作業中の可能性がある)
+    if(p.tier==='next' && info.currentTaskId) return false;
+    // 勤務終了間際の人には、新しい作業を自動で指示しない
+    var availMin = (p.availMin!==null && p.availMin!==undefined) ? p.availMin : info.remainMin;
+    if(!(availMin>=AUTO_CONFIRM_MIN_WORK_MIN)) return false;
+    return !plan.confirmed.some(function(it){
+      if(it.staffId!==p.staffId) return false;
+      // 同じ作業の指示が確定済み・未開始なら、二重に確定しない
+      if(it.progress==='pending' && it.taskId===p.taskId) return true;
+      if(it.progress!=='notFollowed') return false;
+      // 同じ作業の指示が「未実施」になっている場合は、自動で出し直さない
+      if(it.taskId===p.taskId) return true;
+      // 自動確定の指示を実施しなかった人には、しばらく別の指示も自動で出さない(管理者の判断に任せる)
+      return !!it.auto && nowMs-new Date(it.confirmedAt).getTime() < AUTO_CONFIRM_IGNORED_HOLD_MS;
+    });
+  });
+}
+async function checkAutoConfirmStaffing(){
+  if(autoConfirmBusy || !canAutoWrite()) return;
+  if(!state.staffingSettings || state.staffingSettings.autoConfirm===false) return;
+  if(!state.day || state.day.date!==todayStr() || isUnverified(state.day)) return;
+  var plan = computeTodayStaffingPlanNow();
+  if(!plan || !autoConfirmTargets(plan).length) return;
+  if(Date.now()-autoConfirmLastAt < AUTO_CONFIRM_MIN_INTERVAL_MS) return;
+  autoConfirmBusy = true;
+  autoConfirmLastAt = Date.now();
+  try{
+    var dateStr = todayStr();
+    // 他の端末での確定を消さない・二重に確定しないよう、保存の直前に最新の確定内容を読み直して計算し直す
+    var prev = await loadKeyJson('staffing-suggestion:'+dateStr, function(){ return {}; });
+    if(isUnverified(prev) || dateStr!==todayStr()) return;
+    state.staffingSuggestion = prev;
+    state.staffingSuggestionLoaded = true;
+    plan = computeTodayStaffingPlanNow();
+    var targets = plan ? autoConfirmTargets(plan) : [];
+    if(!targets.length) return;
+    var nowIso = new Date().toISOString();
+    var items = normalizeConfirmedInstructions(prev);
+    targets.forEach(function(p){
+      items.push({ id: uid(), staffId: p.staffId, taskId: p.taskId, tier: p.tier, fromTaskId: p.fromTaskId||null,
+        expectedQty: p.capQty!==null && p.capQty!==undefined ? Math.round(p.capQty) : null, reason: p.reason||'', confirmedAt: nowIso, auto: true });
+    });
+    var sug = Object.assign({}, prev, {
+      version: 2, date: dateStr, status: 'confirmed', confirmedAt: nowIso,
+      confirmedBy: prev.confirmedBy || '自動確定',
+      confirmedItems: items,
+      assignments: items.map(function(it){ return { staffId: it.staffId, taskId: it.taskId, expectedQty: it.expectedQty, reassignFrom: it.fromTaskId||null }; }),
+      taskSummaries: plan.tasks.map(function(c){ return { taskId: c.taskId, qty: c.plannedQty, unit: c.unit }; }),
+      unassignedStaffIds: []
+    });
+    var day = state.day;
+    targets.forEach(function(p){
+      var arr = day.assignments[p.staffId] || [];
+      if(arr.indexOf(p.taskId)===-1) arr.push(p.taskId);
+      day.assignments[p.staffId] = arr;
+    });
+    if(!(await saveDay(day))) return;
+    if((await saveStaffingSuggestion(dateStr, sug))===false) return;
+    state.staffingSuggestion = sug;
+    await appendAuditLog({ action:'配置案を自動確定', target: dateStr, before: null,
+      after: targets.map(function(p){ return staffById(p.staffId).name+'→'+taskById(p.taskId).name; }).join('、')+'(確定済み合計'+items.length+'件)' });
+    state.forceRenderAfterResync = true;
+  }finally{
+    autoConfirmBusy = false;
   }
 }
 async function checkAutoShift(){
@@ -11952,33 +12181,12 @@ async function saveAddLog(){
     showToast('終了時刻は開始時刻より後にしてください');
     return;
   }
-  var task = taskById(taskId);
-  var hasSubcats = task.subcategories && task.subcategories.length;
-  var quantity = null, breakdown = null;
-  if(end){
-    if(hasSubcats){
-      var subcatObjs = task.subcategories.map(function(sc){ return subcatName(sc); });
-      breakdown = {};
-      var total = 0;
-      subcatObjs.forEach(function(name, idx){
-        var input = document.getElementById('addLogBreakdown-'+idx);
-        var v = input ? parseInt(input.value,10) : 0;
-        if(isNaN(v)) v = 0;
-        breakdown[name] = v;
-        total += v;
-      });
-      quantity = total;
-    }else{
-      var qtyInput = document.getElementById('addLogQty');
-      var q = qtyInput ? parseInt(qtyInput.value,10) : 0;
-      quantity = isNaN(q) ? 0 : q;
-    }
-  }
+  // 数量は入力しない(CSV取込から集計する)
+  var quantity = null;
   var day = managerActiveDay();
   var entry = { id: uid(), staffId: staffId, taskId: taskId, start: start, end: end, quantity: quantity };
   var addLogName = taskNameSnapshot(taskId);
   if(addLogName) entry.taskName = addLogName;
-  if(breakdown) entry.breakdown = breakdown;
   day.logs.push(entry);
   state.modal = null;
   state.suppressRender = false;
@@ -11997,9 +12205,8 @@ function openEditLogModal(log){
     taskId: log.taskId,
     startTime: isoToLocalTimeInput(log.start),
     endTime: isoToLocalTimeInput(log.end),
-    quantity: log.quantity || 0,
     subcategories: subcatObjs,
-    breakdownValues: hasSubcats ? Object.assign({}, subcatObjs.reduce(function(acc,sc){ acc[sc.name]=0; return acc; }, {}), log.breakdown||{}) : null
+    subTimesText: logSubTimesText(log)
   };
   state.suppressRender = true;
   render();
@@ -12023,29 +12230,10 @@ async function saveEditLog(){
       return;
     }
     log.end = newEnd;
-    if(m.subcategories){
-      var breakdown = {};
-      var total = 0;
-      m.subcategories.forEach(function(sc, idx){
-        var input = document.getElementById('editBreakdown-'+idx);
-        var v = input ? parseInt(input.value,10) : 0;
-        if(isNaN(v)) v = 0;
-        breakdown[sc.name] = v;
-        total += v;
-      });
-      log.quantity = total;
-      log.breakdown = breakdown;
-    }else{
-      var qtyInput = document.getElementById('editQtyInput');
-      var q = parseInt(qtyInput.value,10);
-      log.quantity = isNaN(q) ? 0 : q;
-      delete log.breakdown;
-    }
   }else{
     log.end = null;
-    log.quantity = null;
-    delete log.breakdown;
   }
+  // 数量(quantity・breakdown)は編集しない。過去に入力された数量データはそのまま残す
   var staffSelect = document.getElementById('editStaffSelect');
   if(log.taskId!==taskSelect.value){
     // 作業を付け替えた場合は、記録している作業名も付け替え先に合わせる
@@ -12538,19 +12726,10 @@ function renderEditLogModal(m){
   var options = taskOptionsForEdit(managerActiveDate(), m.taskId).map(function(t){
     return '<option value="'+t.id+'" '+(t.id===m.taskId?'selected':'')+'>'+esc(t.name)+'</option>';
   }).join('');
-  var qtySection;
-  if(m.subcategories){
-    var rows = m.subcategories.map(function(sc, idx){
-      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;">'+
-        '<label style="font-size:13px;color:var(--ink-900);">'+esc(sc.name)+' <span style="color:var(--slate-500);font-weight:400;">('+esc(sc.unit)+')</span></label>'+
-        '<input type="number" id="editBreakdown-'+idx+'" value="'+(m.breakdownValues[sc.name]||0)+'" min="0" style="width:100px;border:2px solid var(--paper-line);border-radius:10px;padding:8px;font-size:14px;text-align:right;">'+
-      '</div>';
-    }).join('');
-    qtySection = '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:6px;">内訳</label>'+rows;
-  }else{
-    qtySection = '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">件数</label>'+
-      '<input type="number" id="editQtyInput" value="'+m.quantity+'" min="0" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:18px;">';
-  }
+  // 数量は入力しない(CSV取込から集計する)。内訳ごとの時間は確認用に表示する
+  var qtySection = '<div class="pool-hint" style="margin-bottom:14px;">'+
+    (m.subTimesText ? '内訳の時間: '+esc(m.subTimesText)+'<br>' : '')+
+    '数量は入力しません(出荷数量はCSV取込、VCのケース数はケース数入力から集計します)。</div>';
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" style="max-width:400px;text-align:left;">'+
       '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">実績を編集</div>'+
@@ -12581,22 +12760,8 @@ function renderAddLogModal(m){
   var taskOptions = tasks.map(function(t){
     return '<option value="'+t.id+'" '+(t.id===m.taskId?'selected':'')+'>'+esc(t.name)+'</option>';
   }).join('') || '<option value="">この日の作業がありません</option>';
-  var task = taskById(m.taskId);
-  var hasSubcats = task.subcategories && task.subcategories.length;
-  var qtySection;
-  if(hasSubcats){
-    var subcatObjs = task.subcategories.map(function(sc){ return { name: subcatName(sc), unit: subcatUnit(sc, task.unit) }; });
-    var rows = subcatObjs.map(function(sc, idx){
-      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;">'+
-        '<label style="font-size:13px;color:var(--ink-900);">'+esc(sc.name)+' <span style="color:var(--slate-500);font-weight:400;">('+esc(sc.unit)+')</span></label>'+
-        '<input type="number" id="addLogBreakdown-'+idx+'" value="0" min="0" style="width:100px;border:2px solid var(--paper-line);border-radius:10px;padding:8px;font-size:14px;text-align:right;">'+
-      '</div>';
-    }).join('');
-    qtySection = '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:6px;">内訳</label>'+rows;
-  }else{
-    qtySection = '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">件数</label>'+
-      '<input type="number" id="addLogQty" value="0" min="0" style="width:100%;border:2px solid var(--paper-line);border-radius:10px;padding:10px;font-size:14px;margin-bottom:14px;">';
-  }
+  // 数量は入力しない(CSV取込から集計する)。作業時間だけを登録する
+  var qtySection = '<div class="pool-hint" style="margin-bottom:14px;">作業時間だけを登録します。数量は入力しません(出荷数量はCSV取込、VCのケース数はケース数入力から集計します)。</div>';
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" style="max-width:400px;text-align:left;">'+
       '<div class="modal-task-name" style="text-align:center;margin-bottom:16px;">実績を手動で追加('+esc(dateLabelFromStr(managerActiveDate()))+')</div>'+
@@ -12649,7 +12814,7 @@ function criteriaLabel(c){
 }
 function renderPickSubcatModal(m){
   var buttons = m.subcategories.map(function(sc){
-    return '<button type="button" class="pick-subcat-btn" data-pick-subcat="'+esc(sc.name)+'">'+esc(sc.name)+'<span class="pick-subcat-unit">('+esc(sc.unit)+')</span></button>';
+    return '<button type="button" class="pick-subcat-btn" data-pick-subcat="'+esc(sc.name)+'">'+esc(sc.name)+'<span class="pick-subcat-unit">('+esc(displayUnit(sc.unit))+')</span></button>';
   }).join('');
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" style="max-width:380px;">'+
@@ -12701,15 +12866,15 @@ function renderAutoMapPreviewModal(m){
   var bpCodes = Object.keys(bp);
   var bpOk = bpCodes.filter(function(k){ return bp[k].packQtyStatus==='ok'; });
   var bpNg = bpCodes.filter(function(k){ return bp[k].packQtyStatus && bp[k].packQtyStatus!=='ok'; });
-  var caseLine = bpCodes.length ? '<div class="checklist-item-action" id="autoMapCaseSummary">ケース数・ピース数: ケース '+
-    formatNum(bpCodes.reduce(function(a,k){ return a+(bp[k].caseCount||0); },0))+'・ピース '+formatNum(bpCodes.reduce(function(a,k){ return a+(bp[k].pieceCount||0); },0))+
+  var caseLine = bpCodes.length ? '<div class="checklist-item-action" id="autoMapCaseSummary">ケース・バラ: ケース '+
+    formatNum(bpCodes.reduce(function(a,k){ return a+(bp[k].caseCount||0); },0))+'ケース・バラ '+formatNum(bpCodes.reduce(function(a,k){ return a+(bp[k].pieceCount||0); },0))+'ピース'+
     '(入数あり '+formatNum(bpOk.length)+'商品)'+
-    (bpNg.length ? ' / <span style="color:#B54708;">入数なし '+formatNum(bpNg.length)+'商品はすべてピースとして計算('+bpNg.slice(0,5).map(esc).join('・')+(bpNg.length>5?' ほか':'')+')</span>' : '')+
+    (bpNg.length ? ' / <span style="color:#B54708;">入数なし '+formatNum(bpNg.length)+'商品はすべてバラとして計算('+bpNg.slice(0,5).map(esc).join('・')+(bpNg.length>5?' ほか':'')+')</span>' : '')+
     '</div>' : '';
 
   var summaryHtml = '<div class="checklist-item" style="margin-bottom:10px;">'+
     '<div class="checklist-item-title">✅ 正常</div>'+
-    '<div class="checklist-item-action">CSV行数: '+formatNum(d.rowCount)+'行 ・ 新規登録: '+formatNum(newPrimaryCount)+'件(出荷番号) ・ ピース数: '+formatNum(newTotalQty)+'</div>'+
+    '<div class="checklist-item-action">CSV行数: '+formatNum(d.rowCount)+'行 ・ 新規登録: '+formatNum(newPrimaryCount)+'件(出荷番号) ・ 出荷数量: '+formatNum(newTotalQty)+'ピース</div>'+
     caseLine+
     (d.dummyExcluded && d.dummyExcluded.lineCount ? '<div class="checklist-item-action" id="autoMapDummySummary" style="color:var(--slate-500);">ダミー商品(集計対象外): '+formatNum(d.dummyExcluded.lineCount)+'行 ・ '+formatNum(d.dummyExcluded.totalQty)+'ピース(件数・出荷数量・ケース/バラには含めていません)</div>' : '')+
     (dupCount>0 || unmappedCount>0 || warningRows.length>0 ? (
@@ -12739,7 +12904,7 @@ function renderAutoMapPreviewModal(m){
     var t = taskById(p.taskId);
     return '<div class="checklist-item">'+
       '<div class="checklist-item-title">✓ '+esc(t.name)+'</div>'+
-      '<div class="checklist-item-action">件数/PO数 '+formatNum(p.primaryCount)+' ・ 明細 '+formatNum(p.lineCount)+' ・ ピース '+formatNum(p.totalQty)+'('+Object.keys(p.byCustomer).length+'得意先)</div>'+
+      '<div class="checklist-item-action">件数/PO数 '+formatNum(p.primaryCount)+' ・ 明細 '+formatNum(p.lineCount)+' ・ 出荷数量 '+formatNum(p.totalQty)+'ピース'+(outboundSplitOfImport(p) ? '(ケース '+formatNum(outboundSplitOfImport(p).caseCount)+'ケース・バラ '+formatNum(outboundSplitOfImport(p).pieceCount)+'ピース)' : '')+'('+Object.keys(p.byCustomer).length+'得意先)</div>'+
     '</div>';
   }).join('') || '<div class="empty-note">自動紐付けできた作業枠はありません</div>';
 
@@ -12747,7 +12912,7 @@ function renderAutoMapPreviewModal(m){
     var taskOpts = todayTasks.map(function(t){ return '<option value="'+t.id+'">'+esc(t.name)+'</option>'; }).join('');
     return '<div class="checklist-item">'+
       '<div class="checklist-item-title">⚠️ '+esc(u.customerName)+'</div>'+
-      '<div class="checklist-item-action">件数 '+formatNum(u.primaryCount)+' ・ 明細 '+formatNum(u.lineCount)+' ・ ピース '+formatNum(u.totalQty)+' — マスター未登録のため、この内容は取り込まれません</div>'+
+      '<div class="checklist-item-action">件数 '+formatNum(u.primaryCount)+' ・ 明細 '+formatNum(u.lineCount)+' ・ 出荷数量 '+formatNum(u.totalQty)+'ピース — マスター未登録のため、この内容は取り込まれません</div>'+
       '<div class="checklist-item-actions">'+
         '<select data-unmapped-task-select="'+esc(u.customerName)+'" style="border:1px solid var(--paper-line);border-radius:8px;padding:4px 6px;font-size:12px;">'+taskOpts+'</select>'+
         '<button type="button" class="vc-manage-toggle-btn" data-unmapped-add="'+esc(u.customerName)+'">マスターに追加</button>'+
@@ -13267,7 +13432,7 @@ function renderEditTaskModal(m){
         '</div>'+
         '<div>'+
           '<div class="ll-form-group"><div class="ll-form-group-title">その他</div>'+
-            lbl('区分(実績画面の出荷/入庫集計に使われます)')+
+            lbl('区分(分類用。実績画面の出荷実績はCSV取込の出荷数量で集計します)')+
             renderCategoryToggle('editTask', m.category)+
             lbl('CSV作業量の種類(CSVを取り込む場合の件数/PO数の表記)', 10)+
             '<div class="ll-radio-row">'+
@@ -13313,7 +13478,7 @@ function renderEditTemplateModal(m){
           '<div class="ll-form-group"><div class="ll-form-group-title">その他</div>'+
             lbl('発生する曜日(該当する曜日に、自動でその日の作業が作られます)')+
             '<div class="pattern-row" style="margin-bottom:6px;">'+dayToggles+'</div>'+
-            lbl('区分(実績画面の出荷/入庫集計に使われます)', 8)+
+            lbl('区分(分類用。実績画面の出荷実績はCSV取込の出荷数量で集計します)', 8)+
             renderCategoryToggle('editTmpl', m.category)+
             lbl('内訳(任意。使う場合は単位はここで内訳ごとに設定)', 10)+
             renderSubcatTagInput(m.subcatsList,'editTmpl','editTmplSubcatText',m.unit)+
@@ -13409,7 +13574,8 @@ function renderMonitor(){
         csvVolumeMonHtml = '<div class="mon-csv-volume">'+
           '<span class="mon-csv-label">📄 CSV取込済み</span>'+
           '<span class="mon-csv-stat">出荷件数 '+formatNum(wvTotalsMon.primaryCount)+'件</span>'+
-          '<span class="mon-csv-stat">ピース数 '+formatNum(wvTotalsMon.totalQty)+'ピース</span>'+
+          '<span class="mon-csv-stat">出荷数量 '+formatNum(wvTotalsMon.totalQty)+'ピース</span>'+
+          (outboundSplitForTask(state.workVolume, log.taskId).total ? '<span class="mon-csv-stat" data-mon-split="1">'+esc(outboundSplitText(outboundSplitForTask(state.workVolume, log.taskId)))+'</span>' : '')+
         '</div>';
       }
     }
@@ -13435,24 +13601,31 @@ function renderMonitor(){
 
   var sideCards = tasks.map(function(t){
     var agg = taskAggregate(t.id);
-    var bd = breakdownLabel(agg.breakdown, t);
-    return '<div class="mon-task-card" style="border-left-color:'+t.color+'">'+
+    // 数量は手入力ではなくCSV取込の出荷数量を表示する(CSVの無い作業は作業時間のみ)
+    var wvt = wvTotalsForTask(state.workVolume, t.id);
+    var sp = outboundSplitForTask(state.workVolume, t.id);
+    var vcCases = isVcKindTask(t.id) ? vcCaseCurrentValue(((state.vcCaseLedger||{})[t.id]||{}).entries) : null;
+    var volHtml = wvt.importCount
+      ? '<span>'+formatNum(wvt.totalQty)+'ピース</span>'
+      : '';
+    var subLine = wvt.importCount
+      ? (isVcKindTask(t.id) ? 'PO数 '+formatNum(wvt.primaryCount) : '出荷件数 '+formatNum(wvt.primaryCount)+'件')+(sp.total ? ' / '+outboundSplitText(sp) : '')+(vcCases!==null ? ' / VCケース数 '+formatNum(vcCases)+'ケース' : '')
+      : (vcCases ? 'VCケース数 '+formatNum(vcCases)+'ケース' : 'CSVなし(作業時間のみ)');
+    return '<div class="mon-task-card" style="border-left-color:'+t.color+'" data-mon-task="'+esc(t.id)+'">'+
       '<div class="mon-task-name">'+esc(t.name)+'</div>'+
-      '<div class="mon-task-stats"><span>稼働 <b>'+agg.activeCount+'</b>人</span><span>計 <b>'+fmtHM(agg.ms)+'</b></span><span>'+agg.qty+esc(t.unit)+'</span></div>'+
-      (bd ? '<div style="font-size:11px;color:var(--slate-300);margin-top:6px;font-family:var(--font-mono);">'+bd+'</div>' : '')+
+      '<div class="mon-task-stats"><span>稼働 <b>'+agg.activeCount+'</b>人</span><span>計 <b>'+fmtHM(agg.ms)+'</b></span>'+volHtml+'</div>'+
+      '<div style="font-size:11px;color:var(--slate-300);margin-top:6px;font-family:var(--font-mono);">'+esc(subLine)+'</div>'+
     '</div>';
   }).join('') || '<div class="empty-note" style="color:var(--slate-300)">本日の作業が未登録です</div>';
 
   var now = new Date();
   var clock = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
 
-  var todayB = todaysBuckets();
-  var shipToday = todayB['出荷'] || freshCategoryBucket();
-  var inboundToday = todayB['入庫'] || freshCategoryBucket();
+  var shipToday = todaysShipStats();
 
   var challengeHtml;
   if(state.achievementsResult){
-    var curPieces = shipmentPieces(state.achievementsResult.curBuckets);
+    var curPieces = achievementsMonthStats(state.achievementsResult, state.achievementsResult.curMonthKey).pieces;
     var target = (state.achievementSettings && state.achievementSettings.monthlyTargetPieces) || 25000;
     var rate = target>0 ? curPieces/target : 0;
     challengeHtml = '<div class="mon-challenge-nums">'+formatNum(curPieces)+' <span>/ '+formatNum(target)+'ピース</span></div>'+
@@ -13489,12 +13662,12 @@ function renderMonitor(){
     '</div>'+
     '<div class="mon-footer">'+
       '<div class="mon-footer-col">'+
-        '<div class="mon-footer-title">📅 本日の実績</div>'+
-        '<div class="mon-footer-stats">'+
+        '<div class="mon-footer-title">📅 本日の出荷実績(CSV取込)</div>'+
+        '<div class="mon-footer-stats" data-mon-today="1">'+
           '<div><span>出荷件数</span><b>'+formatNum(shipToday.count)+'件</b></div>'+
-          '<div><span>出荷ピース数</span><b>'+formatNum(shipToday.pieces)+'ピース</b></div>'+
-          '<div><span>入庫件数</span><b>'+formatNum(inboundToday.count)+'件</b></div>'+
-          '<div><span>入庫ピース数</span><b>'+formatNum(inboundToday.pieces)+'ピース</b></div>'+
+          '<div><span>出荷数量</span><b>'+formatNum(shipToday.pieces)+'ピース</b></div>'+
+          '<div><span>ケース</span><b>'+(shipToday.splitWith ? formatNum(shipToday.caseCount)+'ケース'+(shipToday.splitWith<shipToday.splitTotal?'※':'') : 'データなし')+'</b></div>'+
+          '<div><span>バラ</span><b>'+(shipToday.splitWith ? formatNum(shipToday.baraCount)+'ピース'+(shipToday.splitWith<shipToday.splitTotal?'※':'') : 'データなし')+'</b></div>'+
         '</div>'+
       '</div>'+
       '<div class="mon-footer-col">'+
@@ -13663,7 +13836,7 @@ function notifyChanges(oldRoster, oldBacklog, oldDay, newRoster, newBacklog, new
     if(!old){
       msgs.push(sName+'さんが「'+tName+'」を開始しました');
     }else if(old.end===null && l.end!==null){
-      msgs.push(sName+'さんが「'+tName+'」を終了しました('+(l.quantity||0)+(t?t.unit:'')+')');
+      msgs.push(sName+'さんが「'+tName+'」を終了しました');
     }
   });
 
@@ -13738,6 +13911,7 @@ async function pollTick(){
     }catch(e){}
     var breakSettings = await loadBreakSettings();
     var shiftSettings = await loadShiftSettings();
+    var staffingSettings = await loadStaffingSettings();
     var achievementSettings = await loadAchievementSettings();
     if(pendingSaves>0 || window.storage.writeSeq!==seqAtStart) return;
     // 取得に成功した種類は「読み込みが確実」に戻す(起動時の一時的な失敗から回復する)
@@ -13757,6 +13931,7 @@ async function pollTick(){
     }
     state.breakSettings = breakSettings;
     state.shiftSettings = shiftSettings;
+    state.staffingSettings = staffingSettings;
     state.achievementSettings = achievementSettings;
     await ensureTemplateTasksForToday();
     seqAtStart = window.storage.writeSeq; // 直前の自動生成による自分の書き込みは除外して判定する
@@ -13791,6 +13966,7 @@ async function pollTick(){
     notifyChanges(oldRoster, oldBacklog, oldDay, state.roster, state.backlog, state.day);
     await checkAutoBreak();
     await checkAutoShift();
+    await checkAutoConfirmStaffing();
     var newSnapshot = safeSnapshotForChangeDetection();
     var dataChanged = newSnapshot !== state.lastSnapshotStr;
     state.lastSnapshotStr = newSnapshot;
@@ -14092,6 +14268,7 @@ async function loadAppData(){
     await migrateSubcatIdsIfNeeded();
     state.breakSettings = await loadBreakSettings();
     state.shiftSettings = await loadShiftSettings();
+    state.staffingSettings = await loadStaffingSettings();
     state.achievementSettings = await loadAchievementSettings();
     state.jpHolidays = await loadJpHolidays();
     await ensureTemplateTasksForToday();
@@ -14106,6 +14283,7 @@ async function loadAppData(){
     await checkAutoBreak();
     await checkAutoShift();
     state.appDataLoaded = true;
+    await checkAutoConfirmStaffing();
   }finally{
     state.appDataLoading = false;
   }

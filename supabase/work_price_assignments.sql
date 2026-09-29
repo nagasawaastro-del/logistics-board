@@ -12,10 +12,15 @@ create table if not exists public.work_price_assignments (
   kintone_record_id text primary key,                          -- work_price_master.kintone_record_id
   all_customers     boolean not null default false,            -- true: 全得意先共通
   customer_names    text[]  not null default '{}',             -- 当てはめる得意先名(得意先・作業枠マスターの得意先名)
-  calc_unit         text check (calc_unit in ('ピース','ケース','件','明細')), -- 計算単位(未設定は null)
+  calc_unit         text,                                      -- 計算単位(未設定は null)。下の制約で値を限定する
   updated_at        timestamptz not null default now(),
   updated_by        uuid default auth.uid()
 );
+
+-- 計算単位: 才 = ケースで出荷した数 × 商品台帳の才数(2026-09-30 追加)。既に作成済みのテーブルもこの制約に置き換える
+alter table public.work_price_assignments drop constraint if exists work_price_assignments_calc_unit_check;
+alter table public.work_price_assignments add constraint work_price_assignments_calc_unit_check
+  check (calc_unit is null or calc_unit in ('ピース','ケース','件','明細','才'));
 
 alter table public.work_price_assignments enable row level security;
 

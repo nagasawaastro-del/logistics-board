@@ -1162,7 +1162,8 @@ var CHANGELOG = [
     '【人員配置】手待ち作業への指示(まだ開始していないもの)は人を確保しない扱いにしました。CSV取込より先に始業して全員に手待ち作業の指示が出た場合に、あとから取り込んだ作業へ誰も配置できなくなる問題を直しました',
     '【自動休憩】休憩を終えるのは休憩終了時刻を過ぎてからだけにしました。端末ごとの時計のずれで、休憩が始まった直後に別の端末が休憩を終わらせてしまい(休憩の記録が1秒で終わる)、休憩明けに休憩前の作業の続きとして扱われない問題を直しました',
     '【休憩明けの配置予定】休憩中に表示する「休憩明けの配置予定」で、休憩前に手待ち作業をしていた人も休憩明けに動かせる人として数えるようにしました(これまでは「追加で配置する人はいない見込み」と表示され、休憩明けの実際の配置と違っていました)',
-    '【作業単価マスタ】kintoneから取り込んだ作業単価の項目ごとに、当てはめる得意先(複数選択・全得意先共通)と計算単位(ピース・ケース・件・明細)を設定できるようにしました。変更できるのは admin のアカウントだけで、変更は操作履歴に残ります。設定は kintone との同期とは別に保存するため、同期しても消えません(収支計算への反映はまだです)'
+    '【作業単価マスタ】kintoneから取り込んだ作業単価の項目ごとに、当てはめる得意先(複数選択・全得意先共通)と計算単位(ピース・ケース・件・明細)を設定できるようにしました。変更できるのは admin のアカウントだけで、変更は操作履歴に残ります。設定は kintone との同期とは別に保存するため、同期しても消えません(収支計算への反映はまだです)',
+    '【作業単価マスタ】計算単位に「才」(ケースで出荷した数 × 商品台帳の才数)を追加しました。出庫荷役料(1才)などに使います。バラ(ピース)は含みません。才数が商品台帳に無い商品のケースは0才にせず、別に数えます'
   ]},
   { date:'2026-09-27', items:[
     '【数量の手入力を廃止】作業者・管理者が数量(件数・内訳の数量)を入力する欄をなくしました。数量はCSV取込の出荷数量(ピース・ケース・バラ・件数)から集計し、VCはケース数入力(加算・取消の履歴つき)を使います。作業時間(開始・終了・切替・休憩・内訳の時間)の記録は従来どおりです。過去に入力された数量データは削除していません',
@@ -7961,7 +7962,7 @@ function renderWorkPriceMasterPanel(){
           '<label style="display:inline-flex;align-items:center;gap:4px;margin-bottom:6px;"><input type="checkbox" id="workPriceAllCustomers"'+(edit.allCustomers?' checked':'')+' style="margin:0;">全得意先共通</label>'+
           '<div style="margin-bottom:8px;">'+(custChecks || '<span class="pool-hint">得意先・作業枠マスターに得意先が登録されていません</span>')+'</div>'+
           '<div style="margin-bottom:8px;">計算単位: <select id="workPriceCalcUnit"><option value="">未設定</option>'+
-            WORK_PRICE_CALC_UNITS.map(function(u){ return '<option value="'+esc(u)+'"'+(edit.calcUnit===u?' selected':'')+'>'+esc(u)+'</option>'; }).join('')+
+            WORK_PRICE_CALC_UNITS.map(function(u){ return '<option value="'+esc(u)+'"'+(edit.calcUnit===u?' selected':'')+'>'+esc(workPriceCalcUnitLabel(u))+'</option>'; }).join('')+
           '</select> <span class="pool-hint" style="margin:0;">(kintoneの単価定義: '+esc(p.unitDefinition||'―')+')</span></div>'+
           (edit.error ? '<div class="vc-warning-box" style="margin-bottom:8px;">⚠️ '+esc(edit.error)+'</div>' : '')+
           '<button type="button" class="add-btn" id="workPriceEditSave"'+(edit.saving?' disabled':'')+'>'+(edit.saving?'保存中...':'保存')+'</button> '+
@@ -11598,7 +11599,32 @@ async function syncWorkPriceMasterFromKintone(){
 /* ---------- 作業単価マスタの「得意先・計算単位」の設定(work_price_assignments。参照は manager 以上、変更は admin のみ) ----------
    kintoneから取り込んだ項目ごとに、どの得意先に当てはめ、どの単位で計算するかを保存する。
    work_price_master は同期で作り直されるため、設定は別テーブルに持つ(同期しても消えない)。 */
-var WORK_PRICE_CALC_UNITS = ['ピース','ケース','件','明細'];
+var WORK_PRICE_CALC_UNITS = ['ピース','ケース','件','明細','才'];
+// 計算単位の説明(選択欄・一覧の補足)。才 = ケースで出荷した数 × 商品台帳の才数(バラ・ピースは含まない)
+var WORK_PRICE_CALC_UNIT_LABELS = { '才':'才(ケース数×商品台帳の才数)' };
+function workPriceCalcUnitLabel(u){ return WORK_PRICE_CALC_UNIT_LABELS[u] || u; }
+/* CSV取込の商品別内訳から、得意先ごとの才(ケース数 × 商品台帳の才数)を集計する(収支計算の「才」単位用)。
+   才数が無い商品のケースは推測で0才にせず、casesWithoutCubic として数えて返す(金額計算側で「才数なし」を知らせるため)。
+   戻り値: { 得意先名: { cubic, cases, casesWithoutCubic, productsWithoutCubic[] } } */
+function workVolumeCubicByCustomer(wv){
+  var out = {};
+  wvActiveImports(wv||emptyWorkVolume()).forEach(function(imp){
+    Object.keys(imp.byProduct||{}).forEach(function(code){
+      var p = imp.byProduct[code];
+      var cust = p.customerName || '';
+      var o = out[cust] || (out[cust] = { cubic:0, cases:0, casesWithoutCubic:0, productsWithoutCubic:[] });
+      var cc = (typeof p.caseCount==='number') ? p.caseCount : 0;
+      o.cases += cc;
+      if(!cc) return;
+      if(typeof p.cubicVolume==='number') o.cubic += cc*p.cubicVolume;
+      else{
+        o.casesWithoutCubic += cc;
+        if(o.productsWithoutCubic.indexOf(code)===-1) o.productsWithoutCubic.push(code);
+      }
+    });
+  });
+  return out;
+}
 function canEditWorkPriceAssignments(){ return hasManagerSession() && state.authRole==='admin'; }
 /* 戻り値: { ok, reason, missingTable, byRecordId: { recordId: { allCustomers, customerNames[], calcUnit, updatedAt } } } */
 async function fetchWorkPriceAssignments(){
@@ -11644,7 +11670,7 @@ async function loadWorkPriceCustomerNames(){
 }
 function workPriceAssignmentText(a){
   if(!a) return { customers:'未設定', unit:'未設定' };
-  return { customers: a.allCustomers ? '全得意先共通' : (a.customerNames.length ? a.customerNames.join('・') : '未設定'), unit: a.calcUnit || '未設定' };
+  return { customers: a.allCustomers ? '全得意先共通' : (a.customerNames.length ? a.customerNames.join('・') : '未設定'), unit: a.calcUnit ? workPriceCalcUnitLabel(a.calcUnit) : '未設定' };
 }
 /* 将来の収支計算用: 出庫荷役料 = ケース数 × 才数 × ケース出庫単価 + ピース数 × ピース出庫単価。
    line: { caseCount, pieceCount, cubicVolume } / prices: { casePrice, piecePrice }。

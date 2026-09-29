@@ -1163,7 +1163,8 @@ var CHANGELOG = [
     '【自動休憩】休憩を終えるのは休憩終了時刻を過ぎてからだけにしました。端末ごとの時計のずれで、休憩が始まった直後に別の端末が休憩を終わらせてしまい(休憩の記録が1秒で終わる)、休憩明けに休憩前の作業の続きとして扱われない問題を直しました',
     '【休憩明けの配置予定】休憩中に表示する「休憩明けの配置予定」で、休憩前に手待ち作業をしていた人も休憩明けに動かせる人として数えるようにしました(これまでは「追加で配置する人はいない見込み」と表示され、休憩明けの実際の配置と違っていました)',
     '【作業単価マスタ】kintoneから取り込んだ作業単価の項目ごとに、当てはめる得意先(複数選択・全得意先共通)と計算単位(ピース・ケース・件・明細)を設定できるようにしました。変更できるのは admin のアカウントだけで、変更は操作履歴に残ります。設定は kintone との同期とは別に保存するため、同期しても消えません(収支計算への反映はまだです)',
-    '【作業単価マスタ】計算単位に「才」(ケースで出荷した数 × 商品台帳の才数)を追加しました。出庫荷役料(1才)などに使います。バラ(ピース)は含みません。才数が商品台帳に無い商品のケースは0才にせず、別に数えます'
+    '【作業単価マスタ】計算単位に「才」(ケースで出荷した数 × 商品台帳の才数)を追加しました。出庫荷役料(1才)などに使います。バラ(ピース)は含みません。才数が商品台帳に無い商品のケースは0才にせず、別に数えます',
+    '【作業単価マスタ】得意先・計算単位を設定するとき、操作するたびに表が先頭まで戻ってしまい設定しにくかった問題を直しました(表の枠のスクロール位置を保つようにしました)'
   ]},
   { date:'2026-09-27', items:[
     '【数量の手入力を廃止】作業者・管理者が数量(件数・内訳の数量)を入力する欄をなくしました。数量はCSV取込の出荷数量(ピース・ケース・バラ・件数)から集計し、VCはケース数入力(加算・取消の履歴つき)を使います。作業時間(開始・終了・切替・休憩・内訳の時間)の記録は従来どおりです。過去に入力された数量データは削除していません',
@@ -7456,12 +7457,22 @@ function render(){
   var savedScrollY = window.scrollY;
   var vcListElBefore = document.querySelector('.vc-slip-list');
   var savedVcScrollTop = vcListElBefore ? vcListElBefore.scrollTop : null;
+  // 枠の中だけスクロールする部分(data-keep-scroll="名前" を付けたもの)も、描き直しの前後で位置を保つ
+  // (保たないと、表の中で操作するたびに表の先頭へ戻ってしまう)
+  var savedBoxScroll = {};
+  document.querySelectorAll('[data-keep-scroll]').forEach(function(el){
+    savedBoxScroll[el.getAttribute('data-keep-scroll')] = { top: el.scrollTop, left: el.scrollLeft };
+  });
   function restoreScroll(){
     window.scrollTo(0, savedScrollY);
     if(savedVcScrollTop !== null){
       var el = document.querySelector('.vc-slip-list');
       if(el) el.scrollTop = savedVcScrollTop;
     }
+    document.querySelectorAll('[data-keep-scroll]').forEach(function(el){
+      var s = savedBoxScroll[el.getAttribute('data-keep-scroll')];
+      if(s){ el.scrollTop = s.top; el.scrollLeft = s.left; }
+    });
   }
   if(!state.role){
     var gateHtml = renderGate();
@@ -7976,7 +7987,7 @@ function renderWorkPriceMasterPanel(){
     else if(wa && !canEditWorkPriceAssignments()) assignNote = '<div class="pool-hint" style="margin-bottom:6px;">得意先・計算単位を変更できるのは admin のアカウントだけです。</div>';
     body = '<div class="pool-hint" style="margin-bottom:6px;">最終同期日時: '+esc(wp.lastSyncedAt ? fmtDateTime(wp.lastSyncedAt) : '―')+' ・ '+formatNum(wp.prices.length)+'件('+esc(countLabelText(statusCounts))+')</div>'+
       assignNote+
-      '<div style="overflow-x:auto;max-height:480px;overflow-y:auto;"><table class="report-table" id="workPriceMasterTable" style="font-size:12px;"><thead><tr>'+
+      '<div data-keep-scroll="workPriceMasterTable" style="overflow-x:auto;max-height:480px;overflow-y:auto;"><table class="report-table" id="workPriceMasterTable" style="font-size:12px;"><thead><tr>'+
         '<th>作業項目(品名)</th><th>カテゴリー</th><th>単価</th><th>単位(単価定義)</th><th>区分</th><th>ステータス</th><th>得意先</th><th>計算単位</th>'+(canEdit?'<th></th>':'')+
       '</tr></thead><tbody>'+rows+'</tbody></table></div>';
   }

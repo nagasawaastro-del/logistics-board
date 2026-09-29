@@ -1164,7 +1164,10 @@ var CHANGELOG = [
     '【休憩明けの配置予定】休憩中に表示する「休憩明けの配置予定」で、休憩前に手待ち作業をしていた人も休憩明けに動かせる人として数えるようにしました(これまでは「追加で配置する人はいない見込み」と表示され、休憩明けの実際の配置と違っていました)',
     '【作業単価マスタ】kintoneから取り込んだ作業単価の項目ごとに、当てはめる得意先(複数選択・全得意先共通)と計算単位(ピース・ケース・件・明細)を設定できるようにしました。変更できるのは admin のアカウントだけで、変更は操作履歴に残ります。設定は kintone との同期とは別に保存するため、同期しても消えません(収支計算への反映はまだです)',
     '【作業単価マスタ】計算単位に「才」(ケースで出荷した数 × 商品台帳の才数)を追加しました。出庫荷役料(1才)などに使います。バラ(ピース)は含みません。才数が商品台帳に無い商品のケースは0才にせず、別に数えます',
-    '【作業単価マスタ】得意先・計算単位を設定するとき、操作するたびに表が先頭まで戻ってしまい設定しにくかった問題を直しました(表の枠のスクロール位置を保つようにしました)'
+    '【作業単価マスタ】得意先・計算単位を設定するとき、操作するたびに表が先頭まで戻ってしまい設定しにくかった問題を直しました(表の枠のスクロール位置を保つようにしました)',
+    '【収支・分析】売上を、kintoneの作業単価(作業単価マスタで設定した得意先・計算単位)× 得意先ごとの数量で計算するようにしました。本日の収支に得意先ごとの内訳(作業単価 数量×単価)と作業ごとの売上を表示します。作業ごとの売上は、その作業で扱った得意先ごとの数量から計算します。得意先・計算単位が未設定の項目、当てはまる単価が無い得意先、才数の無いケースは画面でお知らせします',
+    '【人件費】人件費を「スタッフごとの作業時間 × 時給」で計算するようにしました。時給は「設定 → スタッフ設定」の「時給」欄で、スタッフごとと標準時給(時給を設定していない人に使う)を設定します。表示は管理者のみ、変更は admin のみで、時給はスタッフ一覧とは別の、管理者だけが読める場所に保存します(操作履歴にも金額は残しません)。標準時給が未設定の間は、以前の共通時給を使います',
+    '【設定】「単価・人件費設定」をなくしました(単価はkintoneの作業単価マスタ、時給はスタッフ設定へ)。これまでに入力した単価・時給のデータは消していません'
   ]},
   { date:'2026-09-27', items:[
     '【数量の手入力を廃止】作業者・管理者が数量(件数・内訳の数量)を入力する欄をなくしました。数量はCSV取込の出荷数量(ピース・ケース・バラ・件数)から集計し、VCはケース数入力(加算・取消の履歴つき)を使います。作業時間(開始・終了・切替・休憩・内訳の時間)の記録は従来どおりです。過去に入力された数量データは削除していません',
@@ -1886,8 +1889,8 @@ var state = {
   forceRenderAfterResync: false,
   managerLoginError: '',
   managerLoginBusy: false,
-  financialUnitPrices: null,
-  financialLaborCost: null,
+  financialPriceModel: null, // 収支計算の単価(kintone 作業単価マスタ+得意先・計算単位)
+  financialWages: null,      // 時給(スタッフごと・標準時給)
   financialLoadError: '',
   finPriceOpen: false,
   taskPriority: null,
@@ -2633,8 +2636,11 @@ function stopPolling(){
   if(pollHandle){ clearInterval(pollHandle); pollHandle = null; }
 }
 function clearFinancialState(){
-  state.financialUnitPrices = null;
-  state.financialLaborCost = null;
+  state.financialPriceModel = null;
+  state.financialWages = null;
+  state.financialLoadError = '';
+  state.staffWagesEdit = null;
+  state.staffWagesData = null;
   state.kintoneProductSettings = null;
   state.kintoneSyncStatus = null;
   state.workPriceMaster = null;
@@ -6667,92 +6673,33 @@ function ensureManagerSessionChecked(){
     refreshManagerSession().then(function(){ render(); });
   }
 }
-function renderUnitPricePanel(){
-  ensureManagerSessionChecked();
-  if(!hasManagerSession()){
-    return renderManagerLoginForm('💴 単価・人件費設定', 'この画面は物流売上の計算に使う単価と、人件費計算に使う時給を設定します。閲覧・変更には管理者アカウントでのログインが必要です。');
+/* 収支の注意(単価の設定漏れ・当てはまる単価が無い得意先・才数の無いケース・時給の分からないスタッフ) */
+function renderFinancialNotices(n){
+  if(!n) return '';
+  var items = [];
+  if(n.unsetItems && n.unsetItems.length){
+    items.push('作業単価マスタのうち '+n.unsetItems.length+'項目は売上に入っていません(得意先・計算単位が未設定、または単価が空欄)。「設定 → kintone連携設定 → 作業単価マスタ」で設定してください。');
   }
-  if(state.financialUnitPrices===null){
-    fetchFinancialData().then(render);
-    return '<div class="mgr-wrap"><div class="empty-note">読み込み中...</div></div>';
+  if(n.unpricedCustomers && n.unpricedCustomers.length){
+    items.push('当てはまる作業単価が1つも無い得意先: '+n.unpricedCustomers.join('・')+'(この得意先の出荷は売上0円です)');
   }
-  var dateStr = todayStr();
-  var priceMap = {};
-  (state.financialUnitPrices||[]).forEach(function(p){ priceMap[p.task_id] = p; });
-  var todayTasks = tasksForDate(dateStr);
-  var isPriceEditable = (UNIT_PRICE_SOURCE==='supabase');
-  var priceRows = todayTasks.map(function(t){
-    var p = priceMap[t.id] || { price_per_unit:0, unit_label:'件' };
-    if(!isPriceEditable){
-      return '<div class="fin-price-row"><span class="fin-price-taskname">'+esc(t.name)+'</span><span class="pool-hint" style="margin:0;">'+formatNum(p.price_per_unit)+'円/'+esc(p.unit_label)+'</span></div>';
-    }
-    return '<div class="fin-price-row">'+
-      '<span class="fin-price-taskname">'+esc(t.name)+'</span>'+
-      '<input type="number" step="0.01" class="fin-price-input" data-fin-price-id="'+t.id+'" value="'+p.price_per_unit+'" placeholder="単価">'+
-      '<select class="fin-price-unit" data-fin-unit-id="'+t.id+'">'+
-        ['件','明細','ピース','ケース'].map(function(u){ return '<option value="'+u+'" '+(p.unit_label===u?'selected':'')+'>'+u+'あたり</option>'; }).join('')+
-      '</select>'+
-      '<button type="button" class="vc-manage-toggle-btn" data-fin-price-save="'+t.id+'">保存</button>'+
-    '</div>';
-  }).join('') || '<div class="empty-note">本日の作業がありません</div>';
-  var priceSourceNote = isPriceEditable ? '' : '<div class="vc-warning-box">単価はkintoneのマスタで管理されています。LOGI LINKからは変更できません。単価の変更はkintone側で行ってください。</div>';
-
-  return '<div class="mgr-wrap"><div class="panel">'+
-    '<div class="panel-title">💴 単価マスタ・人件費設定</div>'+
-    '<div class="pool-hint" style="margin-bottom:12px;">物流売上・人件費の計算に使用する基準値です。日々の作業記録とは別の、基本設定です。</div>'+
-    priceSourceNote+
-    '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">時給(人件費計算に使用)</label>'+
-    '<div style="display:flex;gap:8px;margin-bottom:16px;">'+
-      '<input type="number" id="finHourlyWage" value="'+((state.financialLaborCost&&state.financialLaborCost.hourly_wage)||0)+'" style="flex:1;border:1px solid var(--paper-line);border-radius:8px;padding:8px;">'+
-      '<button type="button" class="vc-manage-toggle-btn" id="finWageSaveBtn">保存</button>'+
-    '</div>'+
-    '<div class="pool-hint" style="margin-bottom:8px;">作業ごとの標準単価(荷主別単価は収支・分析画面の商品別分析結果から個別に設定できます)</div>'+
-    priceRows+
-  '</div></div>';
+  if(n.cubicMissingCases>0){
+    items.push('「才」で計算する単価のうち、商品台帳に才数が無い商品のケース '+formatNum(Math.round(n.cubicMissingCases))+'ケースは売上に入っていません(商品台帳に才数を登録してください)。');
+  }
+  if(n.missingWageStaffIds && n.missingWageStaffIds.length){
+    items.push('時給が分からないスタッフ: '+n.missingWageStaffIds.map(function(sid){ return staffById(sid).name; }).join('・')+'(この人の作業時間は人件費に入っていません。「設定 → スタッフ設定」で時給か標準時給を設定してください)');
+  }
+  if(!items.length) return '';
+  return '<div class="vc-warning-box" style="margin-top:10px;">'+items.map(function(t){ return '<div>⚠️ '+esc(t)+'</div>'; }).join('')+'</div>';
 }
-function bindUnitPricePanel(){
-  if(!hasManagerSession()){
-    bindManagerLoginForm();
-    return;
-  }
-  document.querySelectorAll('[data-fin-price-save]').forEach(function(el){
-    el.addEventListener('click', async function(){
-      var taskId = el.getAttribute('data-fin-price-save');
-      var priceInput = document.querySelector('[data-fin-price-id="'+taskId+'"]');
-      var unitSelect = document.querySelector('[data-fin-unit-id="'+taskId+'"]');
-      var price = parseFloat(priceInput.value) || 0;
-      var unitLabel = unitSelect.value;
-      var ok = await saveUnitPrice(taskId, taskById(taskId).name, price, unitLabel);
-      if(ok){
-        await appendAuditLog({ action:'単価設定変更', target: taskById(taskId).name, before:null, after: price+'円/'+unitLabel });
-        showToast('「'+taskById(taskId).name+'」の単価を保存しました');
-        await fetchFinancialData();
-        render();
-      }else{
-        showToast('保存に失敗しました(権限をご確認ください)');
-      }
-    });
-  });
-  var finWageSaveBtn = document.getElementById('finWageSaveBtn');
-  if(finWageSaveBtn){
-    finWageSaveBtn.addEventListener('click', async function(){
-      var wage = parseFloat(document.getElementById('finHourlyWage').value) || 0;
-      var ok = await saveLaborCost(wage);
-      if(ok){
-        await appendAuditLog({ action:'時給設定変更', target:'labor_costs', before:null, after: wage+'円/時' });
-        showToast('時給を保存しました');
-        await fetchFinancialData();
-        render();
-      }else{
-        showToast('保存に失敗しました(権限をご確認ください)');
-      }
-    });
-  }
+function formatPriceQty(u, q){
+  return (u==='才' ? (Math.round(q*100)/100).toLocaleString('ja-JP') : formatNum(Math.round(q)))+u;
 }
 function renderFinancial(){
   ensureManagerSessionChecked();
-  if(hasManagerSession() && state.financialUnitPrices===null){
-    fetchFinancialData().then(render);
+  if(hasManagerSession() && !state.financialPriceModel && !state.financialLoading && !state.financialLoadError){
+    state.financialLoading = true;
+    fetchFinancialData().then(function(){ state.financialLoading = false; render(); });
   }
   if(!hasManagerSession()){
     return renderManagerLoginForm('💰 収支・分析', 'この画面は売上・原価・人件費・粗利などの経営情報を扱います。閲覧には管理者アカウントでのログインが必要です。');
@@ -6763,22 +6710,29 @@ function renderFinancial(){
   var loadingOrError = '';
   if(state.financialLoadError){
     loadingOrError = '<div class="vc-warning-box">'+esc(state.financialLoadError)+'</div>';
-  }else if(!state.financialUnitPrices){
+  }else if(!state.financialPriceModel){
     loadingOrError = '<div class="empty-note">読み込み中...</div>';
   }
   var summaryHtml = '';
   if(summary){
     var finRowsHtml = summary.rows.map(function(r){
-      return '<tr><td>'+esc(r.taskName)+'</td><td class="num">'+formatNum(r.qty)+esc(r.unitLabel)+'</td><td class="num">¥'+formatNum(r.pricePerUnit)+'</td><td class="num">¥'+formatNum(Math.round(r.sales))+'</td></tr>';
-    }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">単価が設定された作業がありません</td></tr>';
+      return '<tr><td>'+esc(r.taskName)+'</td><td class="num">'+formatNum(r.pieces)+'ピース</td><td class="num">¥'+formatNum(Math.round(r.sales))+'</td></tr>';
+    }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">本日のCSV取込がありません</td></tr>';
+    var custRowsHtml = summary.customerRows.map(function(c){
+      var detail = c.lines.map(function(l){ return esc(l.workName)+' '+esc(formatPriceQty(l.unit, l.qty))+'×¥'+formatNum(l.unitPrice)+'=¥'+formatNum(Math.round(l.amount)); }).join('<br>') ||
+        '<span style="color:var(--slate-500);">当てはまる単価なし</span>';
+      return '<tr><td>'+esc(c.customerName||'(得意先なし)')+'</td><td style="font-size:11px;">'+detail+'</td><td class="num">¥'+formatNum(Math.round(c.sales))+'</td></tr>';
+    }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">本日のCSV取込がありません</td></tr>';
     summaryHtml = '<div class="fin-summary-grid">'+
       '<div class="fin-summary-card"><div class="fin-summary-label">売上</div><div class="fin-summary-value">¥'+formatNum(Math.round(summary.totalSales))+'</div></div>'+
       '<div class="fin-summary-card"><div class="fin-summary-label">人件費</div><div class="fin-summary-value">¥'+formatNum(Math.round(summary.laborCost))+'</div></div>'+
       '<div class="fin-summary-card"><div class="fin-summary-label">粗利</div><div class="fin-summary-value">¥'+formatNum(Math.round(summary.grossProfit))+'</div></div>'+
       '<div class="fin-summary-card"><div class="fin-summary-label">利益率</div><div class="fin-summary-value">'+summary.margin.toFixed(1)+'%</div></div>'+
     '</div>'+
-    '<table class="report-table" style="margin-top:14px;"><thead><tr><th>作業</th><th>数量</th><th>単価</th><th>売上</th></tr></thead><tbody>'+finRowsHtml+'</tbody></table>'+
-    '<div class="pool-hint" style="margin-top:8px;">総稼働'+summary.totalHours.toFixed(1)+'時間 ・ 本日('+esc(dateLabelFromStr(dateStr))+')分</div>';
+    renderFinancialNotices(summary)+
+    '<div style="overflow-x:auto;"><table class="report-table" style="margin-top:14px;"><thead><tr><th>得意先</th><th>内訳(作業単価 数量×単価)</th><th>売上</th></tr></thead><tbody>'+custRowsHtml+'</tbody></table></div>'+
+    '<table class="report-table" style="margin-top:14px;"><thead><tr><th>作業</th><th>出荷数量</th><th>売上</th></tr></thead><tbody>'+finRowsHtml+'</tbody></table>'+
+    '<div class="pool-hint" style="margin-top:8px;">総稼働'+summary.totalHours.toFixed(1)+'時間 ・ 本日('+esc(dateLabelFromStr(dateStr))+')分 ・ 売上はkintoneの作業単価 × 得意先ごとの数量、人件費はスタッフごとの(作業時間 × 時給)です。作業ごとの売上は、その作業で扱った得意先ごとの数量から計算しています。</div>';
   }
 
   if(!state.finStartDate) state.finStartDate = dateStr;
@@ -6837,8 +6791,9 @@ function renderFinancial(){
         '<td class="num">'+drillBtn+'</td>'+
       '</tr>';
     }).join('') || '<tr><td colspan="'+colCount+'" style="color:var(--slate-500);">該当するデータがありません(単価が未設定の可能性があります)</td></tr>';
-    analyticsBody += '<div style="overflow-x:auto;"><table class="report-table" style="margin-top:10px;"><thead><tr>'+headCols+'</tr></thead><tbody>'+finRows2+'</tbody></table></div>'+
-      '<div class="pool-hint" style="margin-top:8px;">※「人時(推計)」は、作業枠全体の実測人時を、荷主/商品ごとの出荷数量の割合で配分した推計値です(実測ではありません)。「出荷数量(ピース)」はCSVの出荷引当数の合計、「ケース」「バラ」は取込時に商品台帳の入数で1明細ごとに計算した値です(入数が無い商品はすべてバラ)。ケース・バラの記録が無い取込(機能追加前)は「データなし」、一部に無い場合は※を付けています。'+
+    analyticsBody += renderFinancialNotices(state.finAnalyticsRows.meta)+
+      '<div style="overflow-x:auto;"><table class="report-table" style="margin-top:10px;"><thead><tr>'+headCols+'</tr></thead><tbody>'+finRows2+'</tbody></table></div>'+
+      '<div class="pool-hint" style="margin-top:8px;">※売上はkintoneの作業単価 × 得意先ごとの数量です(商品別の「件」単位の売上は、得意先の件数を明細数の割合で商品に按分しています)。「人時(推計)」「人件費」は、作業枠全体の実測(人件費はスタッフごとの作業時間 × 時給)を、荷主/商品ごとの出荷数量の割合で配分した推計値です(実測ではありません)。「出荷数量(ピース)」はCSVの出荷引当数の合計、「ケース」「バラ」は取込時に商品台帳の入数で1明細ごとに計算した値です(入数が無い商品はすべてバラ)。ケース・バラの記録が無い取込(機能追加前)は「データなし」、一部に無い場合は※を付けています。'+
       (state.finAxis==='customer' ? '荷主別のケース・バラは、取込時の商品別の記録が荷主ごとに分かれていないため表示していません。' : '')+'</div>';
   }else{
     analyticsBody = '<div class="empty-note">期間を選び「集計する」を押してください。</div>';
@@ -6863,7 +6818,7 @@ function renderFinancial(){
       summaryHtml+
     '</div>'+
     analyticsPanel+
-    '<div class="pool-hint" style="margin-top:14px;">単価・人件費の設定は「設定→単価・人件費設定」に移動しました。</div>'+
+    '<div class="pool-hint" style="margin-top:14px;">単価は「設定 → kintone連携設定 → 作業単価マスタ」(kintoneから取得・得意先と計算単位を設定)、時給は「設定 → スタッフ設定」で設定します。</div>'+
   '</div>';
 }
 function bindFinancial(){
@@ -7271,14 +7226,7 @@ function aggregateDays(days){
   });
   return { perStaff: perStaff, perTask: perTask };
 }
-function priceLookup(priceRows, taskId, customerName){
-  if(!priceRows) return null;
-  if(customerName){
-    var exact = priceRows.find(function(p){ return p.task_id===taskId && p.customer_name===customerName; });
-    if(exact) return exact;
-  }
-  return priceRows.find(function(p){ return p.task_id===taskId && !p.customer_name; }) || null;
-}async function collectDaysAndVolumeForRange(startDate, endDate){
+async function collectDaysAndVolumeForRange(startDate, endDate){
   var dates = [];
   var d = new Date(startDate+'T00:00:00');
   var end = new Date(endDate+'T00:00:00');
@@ -7299,8 +7247,17 @@ function priceLookup(priceRows, taskId, customerName){
 }
 async function computeAnalytics(days, volumes, axis, filterCustomer){
   if(!hasManagerSession()) return null;
-  if(!state.financialUnitPrices || !state.financialLaborCost) return null;
+  var model = state.financialPriceModel, wages = state.financialWages;
+  if(!model || !wages) return null;
   var agg = aggregateDays(days);
+  var labor = laborCostFromAgg(agg, wages);
+  var unpricedCustomers = {}, cubicMissingCases = 0;
+  // 得意先1件分の売上(当てはまる単価が無い得意先・才数が無いケースは記録して画面に知らせる)
+  function salesOf(cust, q){
+    if(q['件']+q['明細']+q['ピース']+q['ケース']>0 && !customerHasWorkPrice(model, cust)) unpricedCustomers[cust||'(得意先なし)'] = true;
+    if(q.casesWithoutCubic && model.items.some(function(it){ return it.unit==='才' && (it.allCustomers || it.customers[cust]); })) cubicMissingCases += q.casesWithoutCubic;
+    return salesForCustomerQty(model, cust, q).sales;
+  }
   var allImports = [];
   volumes.forEach(function(wv){ allImports = allImports.concat(wvActiveImports(wv)); });
 
@@ -7318,44 +7275,47 @@ async function computeAnalytics(days, volumes, axis, filterCustomer){
   });
 
   var groups = {};
-  var hourlyWage = (state.financialLaborCost && state.financialLaborCost.hourly_wage)||0;
 
   // 出荷件数(通常出荷)とPO数(VC)は意味が異なるため、別々の集計値として保持する。
   // 明細数・出荷個数はもともと別項目として扱っていたため変更なし。
-  function addToGroup(key, label, taskId, taskKind, customerName, primaryCount, lineCount, totalQty){
-    if(!groups[key]) groups[key] = { key:key, label:label, shipmentCount:0, poCount:0, lineCount:0, totalQty:0, personHours:0, sales:0, customerName:customerName, taskIds:{} };
+  // sales はこのグループの売上(kintone 作業単価 × 得意先ごとの数量。呼び出し側で計算して渡す)
+  function addToGroup(key, label, taskId, taskKind, customerName, primaryCount, lineCount, totalQty, sales){
+    if(!groups[key]) groups[key] = { key:key, label:label, shipmentCount:0, poCount:0, lineCount:0, totalQty:0, personHours:0, laborCost:0, sales:0, customerName:customerName, taskIds:{} };
     var g = groups[key];
     if(taskKind==='vc') g.poCount += primaryCount;
     else g.shipmentCount += primaryCount;
     g.lineCount += lineCount;
     g.totalQty += totalQty;
     g.taskIds[taskId] = true;
-    // 推計: このグループの、作業枠全体の出荷個数に対する割合ぶんだけ人時を配分する。
+    // 推計: このグループの、作業枠全体の出荷個数に対する割合ぶんだけ人時・人件費を配分する。
     // 実測ではなく推計値。将来、荷主・商品単位で実測できるようになった場合は、
     // ここをその実測値に置き換えられるよう、personHoursは常にこの1関数だけで算出する。
     var taskTotalQty = (taskVolumeTotals[taskId] && taskVolumeTotals[taskId].totalQty) || 0;
     var share = taskTotalQty>0 ? (totalQty/taskTotalQty) : 0;
     g.personHours += (taskHours[taskId]||0) * share;
-    var price = priceLookup(state.financialUnitPrices, taskId, customerName);
-    if(price){
-      var qtyForPrice = price.unit_label==='ピース' ? totalQty : (price.unit_label==='明細' ? lineCount : primaryCount);
-      g.sales += qtyForPrice * (price.price_per_unit||0);
-    }
+    g.laborCost += (labor.byTask[taskId]||0) * share; // 人件費 = その作業のスタッフごとの(時間 × 時給)の合計を配分
+    g.sales += sales||0;
   }
 
   if(axis==='customer'){
     allImports.forEach(function(imp){
-      Object.keys(imp.byCustomer||{}).forEach(function(cust){
-        var c = imp.byCustomer[cust];
-        addToGroup(cust, cust, imp.taskId, imp.taskKind, cust, c.primaryCount, c.lineCount, c.totalQty);
+      var cq = importCustomerPriceQty(imp);
+      Object.keys(cq).forEach(function(cust){
+        var q = cq[cust];
+        addToGroup(cust, cust, imp.taskId, imp.taskKind, cust, q['件'], q['明細'], q['ピース'], salesOf(cust, q));
       });
     });
   }else if(axis==='product'){
     allImports.forEach(function(imp){
+      var cq = importCustomerPriceQty(imp);
       Object.keys(imp.byProduct||{}).forEach(function(code){
         var p = imp.byProduct[code];
         if(filterCustomer && p.customerName!==filterCustomer) return;
-        addToGroup(code, (p.productName||code), imp.taskId, imp.taskKind, p.customerName, p.primaryCount, p.lineCount, p.totalQty);
+        // 件は同じ出荷に複数の商品があると商品ごとに重複するため、得意先の件数を明細数の割合で商品に按分する
+        var q = productPriceQty(p);
+        var cTot = cq[p.customerName||''];
+        q['件'] = (cTot && cTot['明細']>0) ? cTot['件']*(p.lineCount||0)/cTot['明細'] : 0;
+        addToGroup(code, (p.productName||code), imp.taskId, imp.taskKind, p.customerName, p.primaryCount, p.lineCount, p.totalQty, salesOf(p.customerName||'', q));
         groups[code].productCode = code;
         groups[code].productName = p.productName||'';
         // ケース・バラ・才数(保存済みの商品別内訳の値だけを使う。無い取込は推測しない)
@@ -7371,7 +7331,14 @@ async function computeAnalytics(days, volumes, axis, filterCustomer){
     Object.keys(taskVolumeTotals).forEach(function(tid){
       var v = taskVolumeTotals[tid];
       var kindForTask = allImports.find(function(imp){ return imp.taskId===tid; });
-      addToGroup(tid, taskById(tid).name, tid, kindForTask ? kindForTask.taskKind : 'normal', null, v.primaryCount, v.lineCount, v.totalQty);
+      // 作業ごとの売上 = この作業の取込に含まれる得意先ごとの数量 × 単価(按分ではなく、この作業で扱った数量そのもの)
+      var taskSales = 0;
+      allImports.forEach(function(imp){
+        if(imp.taskId!==tid) return;
+        var cq = importCustomerPriceQty(imp);
+        Object.keys(cq).forEach(function(cust){ taskSales += salesOf(cust, cq[cust]); });
+      });
+      addToGroup(tid, taskById(tid).name, tid, kindForTask ? kindForTask.taskKind : 'normal', null, v.primaryCount, v.lineCount, v.totalQty, taskSales);
       // ケース・バラ(取込ごとの商品別内訳から。無い取込は推測しない)
       var st = outboundSplitOfImports(allImports.filter(function(imp){ return imp.taskId===tid; }));
       groups[tid].splitTotal = st.total; groups[tid].splitWith = st.withData; groups[tid].caseSum = st.caseCount; groups[tid].pieceSum = st.pieceCount;
@@ -7380,7 +7347,7 @@ async function computeAnalytics(days, volumes, axis, filterCustomer){
 
   var rows = Object.keys(groups).map(function(k){
     var g = groups[k];
-    var laborCost = g.personHours * hourlyWage;
+    var laborCost = g.laborCost;
     var grossProfit = g.sales - laborCost;
     var margin = g.sales>0 ? (grossProfit/g.sales*100) : 0;
     return {
@@ -7395,44 +7362,51 @@ async function computeAnalytics(days, volumes, axis, filterCustomer){
   });
 
   rows.sort(function(a,b){ return b.sales-a.sales; });
+  // 画面で知らせる注意(単価が当てはまらない得意先・才数の無いケース・時給の分からないスタッフ)
+  rows.meta = { unpricedCustomers: Object.keys(unpricedCustomers), cubicMissingCases: cubicMissingCases,
+    missingWageStaffIds: labor.missingStaffIds, unsetItems: model.unsetItems };
   return rows;
 }
+/* 1日分の収支。売上は kintone 作業単価 × その日のCSVの得意先ごとの数量、人件費はスタッフごとの(作業時間 × 時給)。
+   戻り値: { rows(作業ごと), customerRows(得意先ごと。単価の項目ごとの内訳つき), totalSales, laborCost, totalHours, grossProfit, margin,
+             unpricedCustomers[], cubicMissingCases, missingWageStaffIds[], unsetItems[] } */
 function computeFinancialSummary(dateStr, day, workVolume){
   if(!hasManagerSession()) return null;
-  if(!state.financialUnitPrices || !state.financialLaborCost) return null;
+  var model = state.financialPriceModel, wages = state.financialWages;
+  if(!model || !wages) return null;
   var agg = aggregateDays([day]);
+  var labor = laborCostFromAgg(agg, wages);
   var wv = workVolume || emptyWorkVolume();
-  var priceMap = {};
-  state.financialUnitPrices.forEach(function(p){ priceMap[p.task_id] = p; });
-  var rows = [];
-  var totalSales = 0;
-  Object.keys(agg.perTask).forEach(function(tid){
-    if(tid==='BREAK') return;
-    var price = priceMap[tid];
-    if(!price) return;
-    var wvTotals = wvTotalsForTask(wv, tid);
-    var qty = 0;
-    if(price.unit_label==='ピース') qty = wvTotals.totalQty;
-    else if(price.unit_label==='明細') qty = wvTotals.lineCount;
-    else if(price.unit_label==='ケース'){
-      var ledger = (state.vcCaseLedger && state.vcCaseLedger[tid]) || { entries: [] };
-      qty = vcCaseCurrentValue(ledger.entries);
-    }else{
-      qty = wvTotals.primaryCount;
-    }
-    var sales = qty * (price.price_per_unit||0);
-    totalSales += sales;
-    rows.push({ taskId: tid, taskName: taskById(tid).name, qty: qty, unitLabel: price.unit_label, pricePerUnit: price.price_per_unit, sales: sales });
+  var byTask = {}, byCustomer = {}, unpriced = {}, cubicMissingCases = 0;
+  wvActiveImports(wv).forEach(function(imp){
+    var cq = importCustomerPriceQty(imp);
+    var t = byTask[imp.taskId] || (byTask[imp.taskId] = { taskId: imp.taskId, taskName: taskById(imp.taskId).name, pieces:0, sales:0 });
+    Object.keys(cq).forEach(function(cust){
+      var q = cq[cust];
+      var s = salesForCustomerQty(model, cust, q);
+      t.pieces += q['ピース']; t.sales += s.sales;
+      var c = byCustomer[cust] || (byCustomer[cust] = { customerName: cust, qty: emptyPriceQty(), sales:0, lines:{} });
+      addPriceQty(c.qty, q);
+      c.sales += s.sales;
+      s.lines.forEach(function(l){
+        var e = c.lines[l.recordId] || (c.lines[l.recordId] = { workName: l.workName, unit: l.unit, unitPrice: l.unitPrice, qty:0, amount:0 });
+        e.qty += l.qty; e.amount += l.amount;
+      });
+      if(q['件']+q['明細']+q['ピース']+q['ケース']>0 && !customerHasWorkPrice(model, cust)) unpriced[cust||'(得意先なし)'] = true;
+      if(q.casesWithoutCubic && model.items.some(function(it){ return it.unit==='才' && (it.allCustomers || it.customers[cust]); })) cubicMissingCases += q.casesWithoutCubic;
+    });
   });
-  var totalMs = 0;
-  Object.keys(agg.perStaff).forEach(function(sid){
-    totalMs += Math.max(0, (agg.perStaff[sid].ms||0) - (agg.perStaff[sid].breakMs||0));
-  });
-  var totalHours = totalMs/3600000;
-  var laborCost = totalHours * ((state.financialLaborCost && state.financialLaborCost.hourly_wage)||0);
-  var grossProfit = totalSales - laborCost;
+  var rows = Object.keys(byTask).map(function(k){ return byTask[k]; }).sort(function(a,b){ return b.sales-a.sales; });
+  var customerRows = Object.keys(byCustomer).map(function(k){
+    var c = byCustomer[k];
+    return { customerName: c.customerName, qty: c.qty, sales: c.sales, lines: Object.keys(c.lines).map(function(r){ return c.lines[r]; }) };
+  }).sort(function(a,b){ return b.sales-a.sales; });
+  var totalSales = rows.reduce(function(a,r){ return a+r.sales; }, 0);
+  var grossProfit = totalSales - labor.total;
   var margin = totalSales>0 ? (grossProfit/totalSales*100) : 0;
-  return { rows: rows, totalSales: totalSales, laborCost: laborCost, totalHours: totalHours, grossProfit: grossProfit, margin: margin };
+  return { rows: rows, customerRows: customerRows, totalSales: totalSales, laborCost: labor.total, totalHours: labor.hours,
+    grossProfit: grossProfit, margin: margin, unpricedCustomers: Object.keys(unpriced), cubicMissingCases: cubicMissingCases,
+    missingWageStaffIds: labor.missingStaffIds, unsetItems: model.unsetItems };
 }
 
 /* ---------- render root ---------- */
@@ -7993,7 +7967,7 @@ function renderWorkPriceMasterPanel(){
   }
   return '<div class="panel" id="workPriceMasterPanel" style="margin-top:16px;">'+
     '<div class="panel-title">💴 作業単価マスタ(kintone 作業単価アプリ)</div>'+
-    '<div class="pool-hint" style="margin-bottom:12px;">kintoneの作業単価アプリ(アプリID 501)の内容を取り込んで表示します。アプリIDと項目の対応はSupabase側で固定しており、APIトークンなどの秘密情報はここには入力しません。現在の収支計算は「単価・人件費設定」の単価のままで、ここの単価はまだ使いません。</div>'+
+    '<div class="pool-hint" style="margin-bottom:12px;">kintoneの作業単価アプリ(アプリID 501)の内容を取り込んで表示します。アプリIDと項目の対応はSupabase側で固定しており、APIトークンなどの秘密情報はここには入力しません。収支・分析の売上は、ここの単価と、項目ごとに設定した得意先・計算単位で計算します(得意先・計算単位が未設定の項目は売上に入りません)。</div>'+
     '<button type="button" class="add-btn" id="workPriceSyncBtn" '+(syncing?'disabled':'')+'>🔄 kintoneから作業単価マスタを取得</button>'+
     '<div style="margin-top:10px;">'+statusHtml+'</div>'+
     '<div style="margin-top:12px;">'+body+'</div>'+
@@ -8039,6 +8013,7 @@ function bindWorkPriceAssignmentEditor(){
       before: before.customers+' / '+before.unit, after: after.customers+' / '+after.unit });
     state.workPriceEdit = null;
     state.workPriceAssignments = await fetchWorkPriceAssignments();
+    state.financialPriceModel = null; // 収支は次に開いたときに新しい設定で読み直す
     showToast('得意先・計算単位を保存しました');
     render();
   });
@@ -8063,6 +8038,7 @@ function bindWorkPriceMasterPanel(){
       showToast('取得に失敗しました');
     }
     state.workPriceMaster = await fetchWorkPriceMaster();
+    state.financialPriceModel = null; // 単価が変わった可能性があるため、収支は次に開いたときに読み直す
     render();
   });
 }
@@ -8601,6 +8577,84 @@ function bindStaffEditModal(m){
     if(beforeExcluded!==d.autoAssignExcluded) await appendAuditLog({ action:'自動配置の対象設定', target: s.name, before: beforeExcluded?'対象外':'対象', after: d.autoAssignExcluded?'対象外':'対象' });
     render();
     if(ok && (rosterChanged || dayChanged)) showToast('「'+s.name+'」の設定を保存しました');
+  });
+}
+/* スタッフ設定の「時給」欄(人件費の計算用)。表示は manager 以上、変更は admin のみ。
+   時給は staff_wages(管理者だけが読めるテーブル)に保存し、スタッフ一覧(誰でも読める kv_store)には入れない。
+   操作履歴(kv_store)にも金額は残さない(誰の時給を変えたかだけ)。 */
+function renderStaffWagesPanel(){
+  if(!hasManagerSession()){
+    return '<div class="panel" style="margin-top:16px;" id="staffWagesPanel"><div class="panel-title">💴 時給(人件費の計算用)</div>'+
+      '<div class="pool-hint" style="margin:0;">時給の表示・変更には、管理者アカウントでのログインが必要です(「管理者」画面からログインしてください)。</div></div>';
+  }
+  var w = state.staffWagesData;
+  if(!w && !state.staffWagesLoading){
+    state.staffWagesLoading = true;
+    fetchStaffWages().then(function(r){ state.staffWagesData = r; state.staffWagesLoading = false; render(); });
+  }
+  var body;
+  if(!w){
+    body = '<div class="empty-note">読み込み中...</div>';
+  }else if(!w.ok){
+    body = '<div class="vc-warning-box">'+esc(w.reason)+'</div>';
+  }else{
+    var canEdit = state.authRole==='admin';
+    var drafts = state.staffWagesEdit || (state.staffWagesEdit = {});
+    var yen = function(v){ return (typeof v==='number') ? '¥'+formatNum(v)+'/時' : '未設定'; };
+    var fallback = (typeof w.defaultWage==='number') ? w.defaultWage : w.legacyWage;
+    var fallbackText = (typeof w.defaultWage==='number') ? '標準時給 '+yen(w.defaultWage)
+      : (typeof w.legacyWage==='number' ? '従来の共通時給 '+yen(w.legacyWage)+'(標準時給が未設定のため)' : '時給不明(人件費に入りません)');
+    function inputFor(key, current){
+      var v = Object.prototype.hasOwnProperty.call(drafts, key) ? drafts[key] : (typeof current==='number' ? String(current) : '');
+      return '<input type="number" min="0" step="1" data-staff-wage-input="'+esc(key)+'" value="'+esc(v)+'" placeholder="未設定" style="width:110px;border:1px solid var(--paper-line);border-radius:8px;padding:5px;">'+
+        ' <button type="button" class="vc-manage-toggle-btn" data-staff-wage-save="'+esc(key)+'" style="padding:2px 8px;font-size:11px;">保存</button>';
+    }
+    var roster = state.roster.filter(function(s){ return !s.archived; });
+    var rows = roster.map(function(s){
+      var own = w.byStaff[s.id];
+      var effective = (typeof own==='number') ? '' : '<span class="pool-hint" style="margin:0;">→ '+esc(fallbackText)+'を使用</span>';
+      return '<tr><td>'+esc(s.name)+'</td><td>'+(canEdit ? inputFor(s.id, own) : esc(yen(own)))+'</td><td>'+effective+'</td></tr>';
+    }).join('') || '<tr><td colspan="3" class="empty-note">スタッフがいません</td></tr>';
+    var legacyNote = (typeof w.defaultWage!=='number' && typeof w.legacyWage==='number')
+      ? '<div class="pool-hint" style="margin:4px 0 8px;">標準時給が未設定のため、以前の「単価・人件費設定」の共通時給('+esc(yen(w.legacyWage))+')を代わりに使っています。</div>' : '';
+    body = '<div style="margin-bottom:8px;"><b>標準時給</b>(時給を設定していないスタッフに使う): '+(canEdit ? inputFor(DEFAULT_WAGE_KEY, w.defaultWage) : esc(yen(w.defaultWage)))+'</div>'+
+      legacyNote+
+      '<table class="report-table" style="font-size:13px;"><thead><tr><th>スタッフ</th><th>時給</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>'+
+      (canEdit ? '<div class="pool-hint" style="margin-top:6px;">空欄にして保存すると、そのスタッフには標準時給を使います。</div>' : '<div class="pool-hint" style="margin-top:6px;">時給を変更できるのは admin のアカウントだけです。</div>');
+    if(typeof fallback!=='number' && roster.some(function(s){ return typeof w.byStaff[s.id]!=='number'; })){
+      body = '<div class="vc-warning-box" style="margin-bottom:8px;">⚠️ 時給も標準時給も無いスタッフがいます。その人の作業時間は人件費に入りません。</div>'+body;
+    }
+  }
+  return '<div class="panel" style="margin-top:16px;" id="staffWagesPanel"><div class="panel-title">💴 時給(人件費の計算用・管理者のみ表示)</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">収支・分析の人件費は「スタッフごとの作業時間 × 時給」で計算します。時給は管理者だけが見られる場所に保存し、作業者の画面には表示しません。</div>'+
+    body+'</div>';
+}
+function bindStaffWagesPanel(){
+  document.querySelectorAll('[data-staff-wage-input]').forEach(function(el){
+    el.addEventListener('input', function(){
+      if(!state.staffWagesEdit) state.staffWagesEdit = {};
+      state.staffWagesEdit[el.getAttribute('data-staff-wage-input')] = el.value;
+    });
+  });
+  document.querySelectorAll('[data-staff-wage-save]').forEach(function(btn){
+    btn.addEventListener('click', async function(){
+      var key = btn.getAttribute('data-staff-wage-save');
+      var input = document.querySelector('[data-staff-wage-input="'+key+'"]');
+      var raw = input ? String(input.value).trim() : '';
+      var wage = raw==='' ? null : Number(raw);
+      if(wage!==null && !(isFinite(wage) && wage>=0)){ showToast('⚠️ 時給は0以上の数字で入力してください'); return; }
+      btn.disabled = true;
+      var r = await saveStaffWage(key, wage);
+      if(!r.ok){ btn.disabled = false; showToast('⚠️ '+r.error); return; }
+      var who = key===DEFAULT_WAGE_KEY ? '標準時給' : staffById(key).name;
+      // 操作履歴は誰でも読める場所にあるため、金額は残さない
+      await appendAuditLog({ action:'時給設定変更', target: who, before:null, after: wage===null ? '個別の時給を解除(標準時給を使用)' : '変更' });
+      if(state.staffWagesEdit) delete state.staffWagesEdit[key];
+      state.staffWagesData = await fetchStaffWages();
+      state.financialPriceModel = null; state.financialWages = null; // 収支は次に開いたときに読み直す
+      showToast(who+'の時給を保存しました');
+      render();
+    });
   });
 }
 function bindStaffSettingsPanel(){
@@ -9253,7 +9307,6 @@ var SETTINGS_HUB_TABS = [
   { key:'staff', label:'スタッフ設定', icon:'🧑' },
   { key:'task', label:'作業マスタ', icon:'📦' },
   { key:'shift', label:'勤務時間設定', icon:'⏰' },
-  { key:'pricing', label:'単価・人件費設定', icon:'💴' },
   { key:'customerMapping', label:'得意先・作業枠マスター', icon:'🔗' },
   { key:'kintoneProduct', label:'kintone連携設定', icon:'🔌' },
   { key:'history', label:'操作履歴', icon:'📜' },
@@ -9277,15 +9330,13 @@ function renderSettingsHub(){
     body = renderRegister();
   }else if(state.settingsHubTab==='history'){
     body = renderHistory();
-  }else if(state.settingsHubTab==='pricing'){
-    body = renderUnitPricePanel();
   }else if(state.settingsHubTab==='kintoneProduct'){
     body = renderKintoneProductSettingsPanel();
   }else{
     var panels = renderSettingsPanels();
     var content;
     if(state.settingsHubTab==='staff'){
-      content = renderStaffSettingsPanel();
+      content = renderStaffSettingsPanel() + renderStaffWagesPanel();
     }else if(state.settingsHubTab==='customerMapping'){
       content = renderCustomerMappingPanel();
     }else if(state.settingsHubTab==='shift'){
@@ -9312,9 +9363,8 @@ function bindSettingsHub(){
   });
   if(state.settingsHubTab==='task') bindRegister();
   else if(state.settingsHubTab==='history') bindHistory();
-  else if(state.settingsHubTab==='staff') bindStaffSettingsPanel();
+  else if(state.settingsHubTab==='staff'){ bindStaffSettingsPanel(); bindStaffWagesPanel(); }
   else if(state.settingsHubTab==='customerMapping') bindCustomerMappingPanel();
-  else if(state.settingsHubTab==='pricing') bindUnitPricePanel();
   else if(state.settingsHubTab==='kintoneProduct') bindKintoneProductSettingsPanel();
   else bindSettings();
 }
@@ -11385,23 +11435,154 @@ async function managerSignOut(){
 function hasManagerSession(){
   return !!(state.managerSession && state.managerSession.user && isManagerRole(state.authRole));
 }
-/* ---------- 単価データの取得元(将来kintoneへの切替ポイント) ----------
-   現在はSupabaseのunit_pricesテーブルから取得・編集している。
-   将来kintoneの単価マスタを正本にする場合は、UNIT_PRICE_SOURCE を
-   'kintone' に切り替え、getUnitPriceSource() の中身をkintone APIコールに
-   差し替える。物流ボード側からの編集(saveUnitPrice)は二重管理を避けるため
-   行わなくなり、「単価マスタ・人件費設定」画面は自動的に読み取り専用表示
-   (「kintoneで管理してください」)に切り替わる(renderFinancial参照)。
-   呼び出し側(fetchFinancialData等)や集計エンジン(computeAnalytics)は
-   一切変更不要。
-   ※今回はkintone API連携そのものは実装していません(Supabaseから取得・
-   編集する現行の実装のまま。UNIT_PRICE_SOURCE も 'supabase' のままです)。 */
-var UNIT_PRICE_SOURCE = 'supabase'; // 将来: 'kintone' に切り替えると単価編集UIが読み取り専用になる
-async function getUnitPriceSource(){
-  if(!window.__supabaseClient) return { ok:false, rows:[] };
-  var res = await window.__supabaseClient.from('unit_prices').select('*');
-  if(res.error) return { ok:false, rows:[] };
-  return { ok:true, rows: res.data || [] };
+/* ---------- 収支計算の単価・時給(単価は kintone 作業単価マスタ、時給はスタッフ設定) ----------
+   売上: 作業単価マスタ(work_price_master)の項目ごとに、得意先・計算単位の設定(work_price_assignments)を使い、
+         得意先ごとの数量 × 単価 で計算する。単価・計算単位・得意先のどれかが未設定の項目は売上に入れない(未設定として数える)。
+   人件費: 各スタッフの作業時間 × そのスタッフの時給(staff_wages)。時給が未設定の人には標準時給(staff_id='__default__')、
+         標準時給も未設定なら従来の全員共通の時給(labor_costs)を使う。どれも無い人は人件費に入れず、画面に知らせる。
+   以前の「単価・人件費設定」(unit_prices の作業ごとの単価)は使わない(データは消さない)。 */
+var DEFAULT_WAGE_KEY = '__default__';
+/* 単価の計算モデルを作る。prices: fetchWorkPriceMaster().prices / assignments: fetchWorkPriceAssignments().byRecordId
+   戻り値: { items:[{ recordId, workName, unitPrice, unit, allCustomers, customers:{名前:true} }], unsetItems:[{ recordId, workName, reason }] } */
+function buildWorkPriceModel(prices, assignments){
+  var items = [], unsetItems = [];
+  (prices||[]).forEach(function(p){
+    var a = assignments ? assignments[p.recordId] : null;
+    var reason = '';
+    if(typeof p.unitPrice!=='number' || !isFinite(p.unitPrice)) reason = '単価が空欄';
+    else if(!a || !a.calcUnit) reason = '計算単位が未設定';
+    else if(!a.allCustomers && !(a.customerNames||[]).length) reason = '得意先が未設定';
+    if(reason){ unsetItems.push({ recordId: p.recordId, workName: p.workName, reason: reason }); return; }
+    var customers = {};
+    (a.customerNames||[]).forEach(function(n){ customers[n] = true; });
+    items.push({ recordId: p.recordId, workName: p.workName, unitPrice: p.unitPrice, unit: a.calcUnit, allCustomers: !!a.allCustomers, customers: customers });
+  });
+  return { items: items, unsetItems: unsetItems };
+}
+/* 数量ベクトル(計算単位ごとの数量): { ピース, ケース, 件, 明細, 才, casesWithoutCubic } */
+function emptyPriceQty(){ return { 'ピース':0, 'ケース':0, '件':0, '明細':0, '才':0, casesWithoutCubic:0 }; }
+function addPriceQty(to, q, ratio){
+  var r = (ratio===undefined) ? 1 : ratio;
+  ['ピース','ケース','件','明細','才','casesWithoutCubic'].forEach(function(k){ to[k] += (q[k]||0)*r; });
+  return to;
+}
+/* 商品1件(取込の商品別内訳)の数量。件は同じ出荷に複数商品があると商品ごとに重複するため、ここでは入れない(呼び出し側で按分する) */
+function productPriceQty(p){
+  var q = emptyPriceQty();
+  q['ピース'] = p.totalQty||0;
+  q['明細'] = p.lineCount||0;
+  var cc = (typeof p.caseCount==='number') ? p.caseCount : 0;
+  q['ケース'] = cc;
+  if(cc){
+    if(typeof p.cubicVolume==='number') q['才'] = cc*p.cubicVolume;
+    else q.casesWithoutCubic = cc;
+  }
+  return q;
+}
+/* 取込1件の、得意先ごとの数量。件・明細・ピースは得意先別の集計(byCustomer)、ケース・才は商品別内訳(byProduct)から。 */
+function importCustomerPriceQty(imp){
+  var out = {};
+  function get(c){ return out[c] || (out[c] = emptyPriceQty()); }
+  var byCust = imp.byCustomer || {};
+  Object.keys(byCust).forEach(function(c){
+    var v = byCust[c], q = get(c);
+    q['件'] += v.primaryCount||0; q['明細'] += v.lineCount||0; q['ピース'] += v.totalQty||0;
+  });
+  var hasByCust = Object.keys(byCust).length>0;
+  Object.keys(imp.byProduct||{}).forEach(function(code){
+    var p = imp.byProduct[code], q = get(p.customerName||'');
+    var pq = productPriceQty(p);
+    q['ケース'] += pq['ケース']; q['才'] += pq['才']; q.casesWithoutCubic += pq.casesWithoutCubic;
+    if(!hasByCust){ q['ピース'] += pq['ピース']; q['明細'] += pq['明細']; q['件'] += p.primaryCount||0; }
+  });
+  return out;
+}
+/* 得意先1件・数量ベクトルに当てはまる単価の項目ごとの売上。戻り値: { sales, lines:[{ recordId, workName, unit, qty, unitPrice, amount }] } */
+function salesForCustomerQty(model, customerName, q){
+  var res = { sales:0, lines:[] };
+  if(!model) return res;
+  model.items.forEach(function(it){
+    if(!it.allCustomers && !it.customers[customerName]) return;
+    var qty = q[it.unit]||0;
+    if(!qty) return;
+    var amount = qty*it.unitPrice;
+    res.sales += amount;
+    res.lines.push({ recordId: it.recordId, workName: it.workName, unit: it.unit, qty: qty, unitPrice: it.unitPrice, amount: amount });
+  });
+  return res;
+}
+/* 得意先に当てはまる単価の項目が1つも無いか */
+function customerHasWorkPrice(model, customerName){
+  return !!(model && model.items.some(function(it){ return it.allCustomers || it.customers[customerName]; }));
+}
+/* スタッフの時給。個別の時給 → 標準時給 → 従来の全員共通の時給(labor_costs)の順。どれも無ければ null */
+function wageForStaff(wages, staffId){
+  if(!wages) return null;
+  if(typeof wages.byStaff[staffId]==='number') return wages.byStaff[staffId];
+  if(typeof wages.defaultWage==='number') return wages.defaultWage;
+  if(typeof wages.legacyWage==='number') return wages.legacyWage;
+  return null;
+}
+/* 時給の読み込み。戻り値: { ok, reason, missingTable, byStaff:{ staffId: 時給 }, defaultWage, legacyWage } */
+async function fetchStaffWages(){
+  var c = window.__supabaseClient;
+  if(!hasManagerSession() || !c || typeof c.from!=='function') return { ok:false, reason:'管理者としてログインしてください。', byStaff:{}, defaultWage:null, legacyWage:null };
+  var legacy = null;
+  try{
+    var lc = await c.from('labor_costs').select('hourly_wage').eq('id','default').maybeSingle();
+    var lw = (!lc.error && lc.data) ? Number(lc.data.hourly_wage) : NaN;
+    if(isFinite(lw) && lw>0) legacy = lw;
+  }catch(e){ /* 従来の時給が読めなくても続ける */ }
+  try{
+    var res = await c.from('staff_wages').select('staff_id,hourly_wage');
+    if(res.error){
+      var code = String(res.error.code||'');
+      var missing = code==='42P01' || code==='PGRST205' || /does not exist|Could not find the table/i.test(String(res.error.message||''));
+      return { ok:false, missingTable: missing, reason: missing ? '時給を保存するテーブルがまだありません(supabase/staff_wages.sql を実行してください)。' : '時給を読み込めませんでした(権限をご確認ください)。', byStaff:{}, defaultWage:null, legacyWage: legacy };
+    }
+    var byStaff = {}, def = null;
+    (res.data||[]).forEach(function(r){
+      var w = Number(r.hourly_wage);
+      if(!isFinite(w)) return;
+      if(r.staff_id===DEFAULT_WAGE_KEY) def = w; else byStaff[String(r.staff_id)] = w;
+    });
+    return { ok:true, byStaff: byStaff, defaultWage: def, legacyWage: legacy };
+  }catch(e){
+    return { ok:false, reason:'時給を読み込めませんでした。', byStaff:{}, defaultWage:null, legacyWage: legacy };
+  }
+}
+/* 時給の保存(admin のみ)。hourlyWage が null なら削除(標準時給を使う) */
+async function saveStaffWage(staffId, hourlyWage){
+  if(!hasManagerSession() || state.authRole!=='admin') return { ok:false, error:'変更できるのは admin のアカウントだけです。' };
+  var c = window.__supabaseClient;
+  if(!c || typeof c.from!=='function') return { ok:false, error:'Supabaseに接続できません。' };
+  var res;
+  if(hourlyWage===null) res = await c.from('staff_wages').delete().eq('staff_id', String(staffId));
+  else{
+    if(!(typeof hourlyWage==='number' && isFinite(hourlyWage) && hourlyWage>=0)) return { ok:false, error:'時給は0以上の数字で入力してください。' };
+    res = await c.from('staff_wages').upsert({ staff_id: String(staffId), hourly_wage: hourlyWage, updated_at: new Date().toISOString() }, { onConflict: 'staff_id' });
+  }
+  if(res.error) return { ok:false, error:'保存できませんでした(権限をご確認ください)。' };
+  return { ok:true };
+}
+/* 期間の作業時間から人件費を出す。戻り値: { total, byTask:{ taskId: 円 }, hours, missingStaffIds[] }
+   人件費 = スタッフごとの(作業時間 × 時給)。休憩は含めない。時給が分からない人の時間は人件費に入れず missingStaffIds に入れる */
+function laborCostFromAgg(agg, wages){
+  var out = { total:0, byTask:{}, hours:0, missingStaffIds:[] };
+  Object.keys(agg.perStaff).forEach(function(sid){
+    var ps = agg.perStaff[sid];
+    var w = wageForStaff(wages, sid);
+    Object.keys(ps.byTask||{}).forEach(function(tid){
+      if(tid==='BREAK') return;
+      var h = Math.max(0, ps.byTask[tid].ms||0)/3600000;
+      out.hours += h;
+      if(w===null){ if(h>0 && out.missingStaffIds.indexOf(sid)===-1) out.missingStaffIds.push(sid); return; }
+      var cost = h*w;
+      out.total += cost;
+      out.byTask[tid] = (out.byTask[tid]||0) + cost;
+    });
+  });
+  return out;
 }
 /* ---------- 商品マスタ情報の取得(将来kintone連携用。バッチ取得+キャッシュ設計) ----------
    商品コードをキーに、ケース入数・才数などをkintoneの商品マスタから
@@ -11824,49 +12005,31 @@ async function getProductMasterInfoBatch(productCodes){
   productCodes.forEach(function(code){ result[code] = productMasterCache[code] || null; });
   return result;
 }
+/* 収支計算用の単価(kintone 作業単価マスタ+得意先・計算単位の設定)と時給を読み込む */
 async function fetchFinancialData(){
   state.financialLoadError = '';
   if(!hasManagerSession() || !window.__supabaseClient){
-    state.financialUnitPrices = null;
-    state.financialLaborCost = null;
+    state.financialPriceModel = null;
+    state.financialWages = null;
     return;
   }
   try{
-    var upResult = await getUnitPriceSource();
-    var lcRes = await window.__supabaseClient.from('labor_costs').select('*').eq('id','default').maybeSingle();
-    if(!upResult.ok || lcRes.error){
-      state.financialLoadError = 'このアカウントには収支データの閲覧権限がありません';
-      state.financialUnitPrices = null;
-      state.financialLaborCost = null;
+    var r = await Promise.all([fetchWorkPriceMaster(), fetchWorkPriceAssignments(), fetchStaffWages()]);
+    if(!r[0].ok){
+      state.financialLoadError = '作業単価マスタを読み込めませんでした: '+r[0].reason;
+      state.financialPriceModel = null;
+      state.financialWages = null;
       return;
     }
-    state.financialUnitPrices = upResult.rows;
-    state.financialLaborCost = lcRes.data || { id:'default', hourly_wage:0 };
+    // 得意先・計算単位の設定が読めない場合は、すべての項目を「未設定」として扱う(売上0円の理由が分かるように)
+    state.financialPriceModel = buildWorkPriceModel(r[0].prices, r[1].ok ? r[1].byRecordId : {});
+    state.financialPriceModel.assignmentsError = r[1].ok ? '' : r[1].reason;
+    state.financialWages = r[2];
   }catch(e){
     state.financialLoadError = '収支データの取得に失敗しました';
-    state.financialUnitPrices = null;
-    state.financialLaborCost = null;
+    state.financialPriceModel = null;
+    state.financialWages = null;
   }
-}
-async function saveUnitPrice(taskId, taskName, pricePerUnit, unitLabel, customerName){
-  if(!hasManagerSession() || !window.__supabaseClient) return false;
-  try{
-    var res = await window.__supabaseClient.from('unit_prices').upsert({
-      task_id: taskId, task_name: taskName, price_per_unit: pricePerUnit, unit_label: unitLabel,
-      customer_name: customerName || '',
-      updated_by: state.managerSession.user.id, updated_at: new Date().toISOString()
-    }, { onConflict: 'task_id,customer_name' });
-    return !res.error;
-  }catch(e){ return false; }
-}
-async function saveLaborCost(hourlyWage){
-  if(!hasManagerSession() || !window.__supabaseClient) return false;
-  try{
-    var res = await window.__supabaseClient.from('labor_costs').upsert({
-      id:'default', hourly_wage: hourlyWage, updated_by: state.managerSession.user.id, updated_at: new Date().toISOString()
-    }, { onConflict: 'id' });
-    return !res.error;
-  }catch(e){ return false; }
 }
 function isCsvLinkedTask(taskId, wvDataOverride){
   var wv = wvDataOverride || state.workVolume;

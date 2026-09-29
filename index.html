@@ -1161,7 +1161,8 @@ var CHANGELOG = [
     '【人員配置】「未実施」の判定を、確定から10分たっても指示と別の作業を続けている場合に広げました(空いていた人が指示と別の作業を自分で始めた場合も含む)。未実施になった指示と同じ配置案は、自動では出し直しません',
     '【人員配置】手待ち作業への指示(まだ開始していないもの)は人を確保しない扱いにしました。CSV取込より先に始業して全員に手待ち作業の指示が出た場合に、あとから取り込んだ作業へ誰も配置できなくなる問題を直しました',
     '【自動休憩】休憩を終えるのは休憩終了時刻を過ぎてからだけにしました。端末ごとの時計のずれで、休憩が始まった直後に別の端末が休憩を終わらせてしまい(休憩の記録が1秒で終わる)、休憩明けに休憩前の作業の続きとして扱われない問題を直しました',
-    '【休憩明けの配置予定】休憩中に表示する「休憩明けの配置予定」で、休憩前に手待ち作業をしていた人も休憩明けに動かせる人として数えるようにしました(これまでは「追加で配置する人はいない見込み」と表示され、休憩明けの実際の配置と違っていました)'
+    '【休憩明けの配置予定】休憩中に表示する「休憩明けの配置予定」で、休憩前に手待ち作業をしていた人も休憩明けに動かせる人として数えるようにしました(これまでは「追加で配置する人はいない見込み」と表示され、休憩明けの実際の配置と違っていました)',
+    '【作業単価マスタ】kintoneから取り込んだ作業単価の項目ごとに、当てはめる得意先(複数選択・全得意先共通)と計算単位(ピース・ケース・件・明細)を設定できるようにしました。変更できるのは admin のアカウントだけで、変更は操作履歴に残ります。設定は kintone との同期とは別に保存するため、同期しても消えません(収支計算への反映はまだです)'
   ]},
   { date:'2026-09-27', items:[
     '【数量の手入力を廃止】作業者・管理者が数量(件数・内訳の数量)を入力する欄をなくしました。数量はCSV取込の出荷数量(ピース・ケース・バラ・件数)から集計し、VCはケース数入力(加算・取消の履歴つき)を使います。作業時間(開始・終了・切替・休憩・内訳の時間)の記録は従来どおりです。過去に入力された数量データは削除していません',
@@ -2637,6 +2638,9 @@ function clearFinancialState(){
   state.workPriceMaster = null;
   state.workPriceSyncResult = null;
   state.workPriceSyncError = '';
+  state.workPriceAssignments = null;
+  state.workPriceCustomerNames = null;
+  state.workPriceEdit = null;
 }
 /* Supabase Auth のイベント。トークン更新・他のタブでのログアウト・セッション失効に追従する。
    (このコールバック内で Supabase の他の処理を await すると固まるため setTimeout で逃がす) */
@@ -7917,19 +7921,62 @@ function renderWorkPriceMasterPanel(){
   }else{
     var statusCounts = {};
     wp.prices.forEach(function(p){ var k = p.status||'(なし)'; statusCounts[k] = (statusCounts[k]||0)+1; });
+    // 得意先・計算単位の設定(別テーブル)と、得意先の選択肢を読み込む
+    var wa = state.workPriceAssignments;
+    if(!wa && !state.workPriceAssignmentsLoading){
+      state.workPriceAssignmentsLoading = true;
+      Promise.all([fetchWorkPriceAssignments(), loadWorkPriceCustomerNames()]).then(function(r){
+        state.workPriceAssignments = r[0]; state.workPriceCustomerNames = r[1]; state.workPriceAssignmentsLoading = false; render();
+      });
+    }
+    var canEdit = canEditWorkPriceAssignments() && !!(wa && wa.ok);
+    var edit = state.workPriceEdit;
+    var customers = state.workPriceCustomerNames || [];
     var rows = wp.prices.map(function(p){
-      return '<tr>'+
+      var a = wa && wa.byRecordId ? wa.byRecordId[p.recordId] : null;
+      var t = workPriceAssignmentText(a);
+      var row = '<tr data-work-price-row="'+esc(p.recordId)+'">'+
         '<td>'+esc(p.workName||'(品名なし)')+'</td>'+
         '<td>'+(p.categories.length ? esc(p.categories.join(' / ')) : '<span style="color:var(--slate-500);">―</span>')+'</td>'+
         '<td class="num">'+formatWorkPrice(p.unitPrice)+'</td>'+
         '<td>'+esc(p.unitDefinition||'―')+'</td>'+
         '<td>'+esc(p.division||'―')+'</td>'+
         '<td>'+esc(p.status||'―')+'</td>'+
+        '<td'+(t.customers==='未設定'?' style="color:var(--slate-500);"':'')+'>'+esc(t.customers)+'</td>'+
+        '<td'+(t.unit==='未設定'?' style="color:var(--slate-500);"':'')+'>'+esc(t.unit)+'</td>'+
+        (canEdit ? '<td><button type="button" class="vc-manage-toggle-btn" data-work-price-edit="'+esc(p.recordId)+'" style="padding:2px 8px;font-size:11px;">編集</button></td>' : '')+
       '</tr>';
+      if(canEdit && edit && edit.recordId===p.recordId){
+        var custChecks = customers.map(function(n){
+          return '<label style="display:inline-flex;align-items:center;gap:4px;margin:2px 10px 2px 0;'+(edit.allCustomers?'opacity:.5;':'')+'">'+
+            '<input type="checkbox" data-work-price-customer="'+esc(n)+'"'+(edit.customerNames.indexOf(n)!==-1?' checked':'')+(edit.allCustomers?' disabled':'')+' style="margin:0;">'+esc(n)+'</label>';
+        }).join('');
+        // 得意先・作業枠マスターに無くなった得意先が設定に残っている場合も、外せるように表示する
+        edit.customerNames.forEach(function(n){
+          if(customers.indexOf(n)!==-1) return;
+          custChecks += '<label style="display:inline-flex;align-items:center;gap:4px;margin:2px 10px 2px 0;color:#B54708;"><input type="checkbox" data-work-price-customer="'+esc(n)+'" checked'+(edit.allCustomers?' disabled':'')+' style="margin:0;">'+esc(n)+'(マスターに無し)</label>';
+        });
+        row += '<tr><td colspan="9" style="background:var(--paper-2,#F8F7F4);">'+
+          '<div style="font-weight:700;margin-bottom:6px;">「'+esc(p.workName||'(品名なし)')+'」の得意先・計算単位</div>'+
+          '<label style="display:inline-flex;align-items:center;gap:4px;margin-bottom:6px;"><input type="checkbox" id="workPriceAllCustomers"'+(edit.allCustomers?' checked':'')+' style="margin:0;">全得意先共通</label>'+
+          '<div style="margin-bottom:8px;">'+(custChecks || '<span class="pool-hint">得意先・作業枠マスターに得意先が登録されていません</span>')+'</div>'+
+          '<div style="margin-bottom:8px;">計算単位: <select id="workPriceCalcUnit"><option value="">未設定</option>'+
+            WORK_PRICE_CALC_UNITS.map(function(u){ return '<option value="'+esc(u)+'"'+(edit.calcUnit===u?' selected':'')+'>'+esc(u)+'</option>'; }).join('')+
+          '</select> <span class="pool-hint" style="margin:0;">(kintoneの単価定義: '+esc(p.unitDefinition||'―')+')</span></div>'+
+          (edit.error ? '<div class="vc-warning-box" style="margin-bottom:8px;">⚠️ '+esc(edit.error)+'</div>' : '')+
+          '<button type="button" class="add-btn" id="workPriceEditSave"'+(edit.saving?' disabled':'')+'>'+(edit.saving?'保存中...':'保存')+'</button> '+
+          '<button type="button" class="vc-manage-toggle-btn" id="workPriceEditCancel">キャンセル</button>'+
+        '</td></tr>';
+      }
+      return row;
     }).join('');
+    var assignNote = '';
+    if(wa && !wa.ok) assignNote = '<div class="vc-warning-box" style="margin-bottom:8px;">'+esc(wa.reason)+'</div>';
+    else if(wa && !canEditWorkPriceAssignments()) assignNote = '<div class="pool-hint" style="margin-bottom:6px;">得意先・計算単位を変更できるのは admin のアカウントだけです。</div>';
     body = '<div class="pool-hint" style="margin-bottom:6px;">最終同期日時: '+esc(wp.lastSyncedAt ? fmtDateTime(wp.lastSyncedAt) : '―')+' ・ '+formatNum(wp.prices.length)+'件('+esc(countLabelText(statusCounts))+')</div>'+
+      assignNote+
       '<div style="overflow-x:auto;max-height:480px;overflow-y:auto;"><table class="report-table" id="workPriceMasterTable" style="font-size:12px;"><thead><tr>'+
-        '<th>作業項目(品名)</th><th>カテゴリー</th><th>単価</th><th>単位(単価定義)</th><th>区分</th><th>ステータス</th>'+
+        '<th>作業項目(品名)</th><th>カテゴリー</th><th>単価</th><th>単位(単価定義)</th><th>区分</th><th>ステータス</th><th>得意先</th><th>計算単位</th>'+(canEdit?'<th></th>':'')+
       '</tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
   return '<div class="panel" id="workPriceMasterPanel" style="margin-top:16px;">'+
@@ -7940,7 +7987,52 @@ function renderWorkPriceMasterPanel(){
     '<div style="margin-top:12px;">'+body+'</div>'+
   '</div>';
 }
+function bindWorkPriceAssignmentEditor(){
+  document.querySelectorAll('[data-work-price-edit]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var rid = el.getAttribute('data-work-price-edit');
+      var wa = state.workPriceAssignments;
+      var a = wa && wa.byRecordId ? wa.byRecordId[rid] : null;
+      state.workPriceEdit = { recordId: rid, allCustomers: !!(a && a.allCustomers), customerNames: a ? a.customerNames.slice() : [], calcUnit: a ? a.calcUnit : null, saving:false, error:'' };
+      render();
+    });
+  });
+  var edit = state.workPriceEdit;
+  if(!edit) return;
+  var all = document.getElementById('workPriceAllCustomers');
+  if(all) all.addEventListener('change', function(){ edit.allCustomers = all.checked; render(); });
+  document.querySelectorAll('[data-work-price-customer]').forEach(function(el){
+    el.addEventListener('change', function(){
+      var n = el.getAttribute('data-work-price-customer');
+      var i = edit.customerNames.indexOf(n);
+      if(el.checked && i===-1) edit.customerNames.push(n);
+      if(!el.checked && i!==-1) edit.customerNames.splice(i,1);
+    });
+  });
+  var unit = document.getElementById('workPriceCalcUnit');
+  if(unit) unit.addEventListener('change', function(){ edit.calcUnit = unit.value || null; });
+  var cancel = document.getElementById('workPriceEditCancel');
+  if(cancel) cancel.addEventListener('click', function(){ state.workPriceEdit = null; render(); });
+  var save = document.getElementById('workPriceEditSave');
+  if(save) save.addEventListener('click', async function(){
+    if(edit.saving) return;
+    edit.saving = true; edit.error = ''; render();
+    var wa = state.workPriceAssignments;
+    var before = workPriceAssignmentText(wa && wa.byRecordId ? wa.byRecordId[edit.recordId] : null);
+    var r = await saveWorkPriceAssignment(edit.recordId, edit);
+    if(!r.ok){ edit.saving = false; edit.error = r.error; render(); return; }
+    var price = (state.workPriceMaster && state.workPriceMaster.prices || []).find(function(p){ return p.recordId===edit.recordId; });
+    var after = workPriceAssignmentText({ allCustomers: edit.allCustomers, customerNames: edit.customerNames, calcUnit: edit.calcUnit });
+    await appendAuditLog({ action:'作業単価の得意先・計算単位を変更', target: (price && price.workName) || edit.recordId,
+      before: before.customers+' / '+before.unit, after: after.customers+' / '+after.unit });
+    state.workPriceEdit = null;
+    state.workPriceAssignments = await fetchWorkPriceAssignments();
+    showToast('得意先・計算単位を保存しました');
+    render();
+  });
+}
 function bindWorkPriceMasterPanel(){
+  bindWorkPriceAssignmentEditor();
   var btn = document.getElementById('workPriceSyncBtn');
   if(!btn) return;
   btn.addEventListener('click', async function(){
@@ -11502,6 +11594,57 @@ async function syncWorkPriceMasterFromKintone(){
     console.error('[LOGI LINK] 作業単価マスタ同期(Edge Function)への接続に失敗しました', e);
     return { ok:false, error:'Edge Functionへの接続に失敗しました。' };
   }
+}
+/* ---------- 作業単価マスタの「得意先・計算単位」の設定(work_price_assignments。参照は manager 以上、変更は admin のみ) ----------
+   kintoneから取り込んだ項目ごとに、どの得意先に当てはめ、どの単位で計算するかを保存する。
+   work_price_master は同期で作り直されるため、設定は別テーブルに持つ(同期しても消えない)。 */
+var WORK_PRICE_CALC_UNITS = ['ピース','ケース','件','明細'];
+function canEditWorkPriceAssignments(){ return hasManagerSession() && state.authRole==='admin'; }
+/* 戻り値: { ok, reason, missingTable, byRecordId: { recordId: { allCustomers, customerNames[], calcUnit, updatedAt } } } */
+async function fetchWorkPriceAssignments(){
+  var c = window.__supabaseClient;
+  if(!hasManagerSession() || !c || typeof c.from!=='function') return { ok:false, reason:'管理者としてログインしてください。', byRecordId:{} };
+  try{
+    var res = await c.from('work_price_assignments').select('kintone_record_id,all_customers,customer_names,calc_unit,updated_at');
+    if(res.error){
+      var code = String(res.error.code||'');
+      var missing = code==='42P01' || code==='PGRST205' || /does not exist|Could not find the table/i.test(String(res.error.message||''));
+      return { ok:false, missingTable: missing, reason: missing ? '得意先・計算単位を保存するテーブルがまだありません(supabase/work_price_assignments.sql を実行してください)。' : '得意先・計算単位の設定を読み込めませんでした(権限をご確認ください)。', byRecordId:{} };
+    }
+    var map = {};
+    (res.data||[]).forEach(function(r){
+      map[String(r.kintone_record_id)] = { allCustomers: r.all_customers===true, customerNames: Array.isArray(r.customer_names) ? r.customer_names : [], calcUnit: r.calc_unit||null, updatedAt: r.updated_at||null };
+    });
+    return { ok:true, byRecordId: map };
+  }catch(e){
+    return { ok:false, reason:'得意先・計算単位の設定を読み込めませんでした。', byRecordId:{} };
+  }
+}
+async function saveWorkPriceAssignment(recordId, a){
+  if(!canEditWorkPriceAssignments()) return { ok:false, error:'変更できるのは admin のアカウントだけです。' };
+  var c = window.__supabaseClient;
+  if(!c || typeof c.from!=='function') return { ok:false, error:'Supabaseに接続できません。' };
+  if(a.calcUnit!==null && WORK_PRICE_CALC_UNITS.indexOf(a.calcUnit)===-1) return { ok:false, error:'計算単位が正しくありません。' };
+  var res = await c.from('work_price_assignments').upsert({
+    kintone_record_id: String(recordId), all_customers: !!a.allCustomers,
+    customer_names: a.allCustomers ? [] : (a.customerNames||[]), calc_unit: a.calcUnit||null, updated_at: new Date().toISOString()
+  }, { onConflict: 'kintone_record_id' });
+  if(res.error) return { ok:false, error:'保存できませんでした(権限をご確認ください)。' };
+  return { ok:true };
+}
+/* 得意先の選択肢: 得意先・作業枠マスターに登録されている得意先名(有効なもの・重複なし) */
+async function loadWorkPriceCustomerNames(){
+  var d = await loadKeyJson('customer-task-mapping', function(){ return { entries: [] }; });
+  var names = [];
+  ((d && d.entries)||[]).forEach(function(e){
+    var n = String((e && e.customerName)||'').trim();
+    if(n && e.enabled!==false && names.indexOf(n)===-1) names.push(n);
+  });
+  return names.sort(function(a,b){ return a.localeCompare(b,'ja'); });
+}
+function workPriceAssignmentText(a){
+  if(!a) return { customers:'未設定', unit:'未設定' };
+  return { customers: a.allCustomers ? '全得意先共通' : (a.customerNames.length ? a.customerNames.join('・') : '未設定'), unit: a.calcUnit || '未設定' };
 }
 /* 将来の収支計算用: 出庫荷役料 = ケース数 × 才数 × ケース出庫単価 + ピース数 × ピース出庫単価。
    line: { caseCount, pieceCount, cubicVolume } / prices: { casePrice, piecePrice }。

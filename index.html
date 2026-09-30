@@ -685,6 +685,21 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .ach-generated-note{text-align:center;font-size:11px;color:var(--slate-300);}
 
 .print-only{display:none;}
+.instr-alert{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:400;background:#FFFAEB;border:3px solid var(--amber-500);border-radius:16px;
+  padding:16px 22px;box-shadow:0 10px 30px rgba(0,0,0,.25);min-width:300px;max-width:92vw;text-align:center;animation:instrPulse 1.2s ease-in-out 3;}
+.instr-alert-title{font-size:15px;font-weight:700;color:#B54708;margin-bottom:8px;}
+.instr-alert-line{font-size:20px;margin:4px 0;}
+.instr-alert-close{margin-top:10px;background:var(--amber-500);color:#fff;border:none;border-radius:10px;padding:10px 22px;font-size:15px;font-weight:700;cursor:pointer;}
+@keyframes instrPulse{0%,100%{transform:translateX(-50%) scale(1);}50%{transform:translateX(-50%) scale(1.04);}}
+.name-tile.has-instr{border-color:var(--amber-500);background:#FFFAEB;}
+.name-tile-instr{display:block;font-size:11px;color:#B54708;margin-top:4px;font-weight:700;}
+.mon-instr{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 12px;padding:10px 14px;border-radius:12px;background:rgba(242,169,59,.14);border:1px solid rgba(242,169,59,.5);}
+.mon-instr-title{font-weight:700;font-size:18px;}
+.mon-instr-item{font-size:20px;padding:4px 12px;border-radius:10px;background:rgba(255,255,255,.08);}
+.mon-instr-item.is-new{background:#F2A93B;color:#111827;animation:instrBlink 1s ease-in-out 6;}
+.mon-instr-item small{font-size:12px;opacity:.75;margin-left:4px;}
+.mon-instr-sound{font-size:12px;opacity:.8;}
+@keyframes instrBlink{0%,100%{opacity:1;}50%{opacity:.45;}}
 .shukei-table th,.shukei-table td{white-space:nowrap;}
 .shukei-table .shukei-in{border:1px solid var(--paper-line);border-radius:6px;padding:4px 6px;font-size:13px;}
 .shukei-barcode{height:28px;width:auto;max-width:200px;display:block;}
@@ -1183,7 +1198,8 @@ var CHANGELOG = [
     '【収支・分析】売上を、kintoneの作業単価(作業単価マスタで設定した得意先・計算単位)× 得意先ごとの数量で計算するようにしました。本日の収支に得意先ごとの内訳(作業単価 数量×単価)と作業ごとの売上を表示します。作業ごとの売上は、その作業で扱った得意先ごとの数量から計算します。得意先・計算単位が未設定の項目、当てはまる単価が無い得意先、才数の無いケースは画面でお知らせします',
     '【人件費】人件費を「スタッフごとの作業時間 × 時給」で計算するようにしました。時給は「設定 → スタッフ設定」の「時給」欄で、スタッフごとと標準時給(時給を設定していない人に使う)を設定します。表示は管理者のみ、変更は admin のみで、時給はスタッフ一覧とは別の、管理者だけが読める場所に保存します(操作履歴にも金額は残しません)。標準時給が未設定の間は、以前の共通時給を使います',
     '【設定】「単価・人件費設定」をなくしました(単価はkintoneの作業単価マスタ、時給はスタッフ設定へ)。これまでに入力した単価・時給のデータは消していません',
-    '【集計表(高屋・丹南)】Excelの「高屋集計表」「丹南集計表」をロジリンクに移し、トップページに追加しました。VC番号・品番・数量を入れると、入数・ケース(高屋は端数も)・区画ごとの棚番・弥生の在庫・ロジザードの在庫・才数(丹南はJANのバーコードも)を出し、棚番順の並び替え・印刷ができます。「在庫差異」タブで弥生とロジザードの在庫の差も確認できます。元データ(ロジザードの在庫・弥生の在庫・ロジザードの商品マスタ)は、Excelと同じ範囲を貼り付けて登録します。ログインなしで使えます'
+    '【集計表(高屋・丹南)】Excelの「高屋集計表」「丹南集計表」をロジリンクに移し、トップページに追加しました。VC番号・品番・数量を入れると、入数・ケース(高屋は端数も)・区画ごとの棚番・弥生の在庫・ロジザードの在庫・才数(丹南はJANのバーコードも)を出し、棚番順の並び替え・印刷ができます。「在庫差異」タブで弥生とロジザードの在庫の差も確認できます。元データ(ロジザードの在庫・弥生の在庫・ロジザードの商品マスタ)は、Excelと同じ範囲を貼り付けて登録します。ログインなしで使えます',
+    '【作業指示の通知】新しい作業指示(自動確定・管理者の確定)が出たら、現場のタブレットとモニターでチャイムを鳴らして大きく表示するようにしました。タブレットの名前を選ぶ画面では、指示がある人に「📋 指示あり」を表示します。モニターには「📋 作業指示」の欄を出します。ブラウザの仕組みで、画面を一度タップ(クリック)するまでは音が鳴りません'
   ]},
   { date:'2026-09-27', items:[
     '【数量の手入力を廃止】作業者・管理者が数量(件数・内訳の数量)を入力する欄をなくしました。数量はCSV取込の出荷数量(ピース・ケース・バラ・件数)から集計し、VCはケース数入力(加算・取消の履歴つき)を使います。作業時間(開始・終了・切替・休憩・内訳の時間)の記録は従来どおりです。過去に入力された数量データは削除していません',
@@ -3509,7 +3525,7 @@ async function fetchOptionalJson(key){
    (実績入力でスタッフを選択中/管理者の人員配置タブ)を開いている間だけ取得する。 */
 async function refreshDailyInstructionsForPoll(){
   resetDailyInstructionsIfDateChanged();
-  var needed = (state.role==='input' && !!state.activeStaffId) ||
+  var needed = state.role==='input' || state.role==='monitor' ||
     (state.role==='adminHub' && (state.adminHubTab==='staffing' || state.adminHubTab==='today' || !state.adminHubTab));
   if(!needed) return;
   var dateStr = todayStr();
@@ -4454,6 +4470,100 @@ function shiftBasedEtaMs(remainingQty, crew, nowMs, breakSettings, dateStr){
     cursor = segEnd;
   }
   return { ms: ends[ends.length-1], beyondShift: true };
+}
+/* ---------- 作業指示の通知(現場のタブレット・モニター) ----------
+   確定済みで、今すぐ始める作業指示(作業完了後の予定で元の作業を続けている間は除く)を一覧にし、
+   新しく出た指示をチャイムと大きな表示で知らせる。どの指示を知らせたかは端末ごと・日付ごとに覚える(同じ指示で何度も鳴らさない)。 */
+function currentWorkInstructions(){
+  var plan = computeTodayStaffingPlanNow();
+  if(!plan) return [];
+  var out = [];
+  presentStaff().forEach(function(s){
+    var r = nextTaskForStaff(plan, s.id, state.day);
+    if(!r || r.afterTaskId) return;
+    var it = plan.confirmed.filter(function(c){ return c.staffId===s.id && c.taskId===r.taskId && (c.progress==='pending' || c.progress==='notFollowed'); })
+      .sort(function(a,b){ return String(b.confirmedAt).localeCompare(String(a.confirmedAt)); })[0];
+    out.push({ key: s.id+'|'+r.taskId+'|'+((it && it.confirmedAt) || ''), staffId: s.id, name: s.name, taskId: r.taskId, taskName: taskById(r.taskId).name, confirmedAt: it ? it.confirmedAt : null });
+  });
+  return out;
+}
+var instructionChimeCtx = null;
+function instructionAudioCtx(){
+  if(instructionChimeCtx) return instructionChimeCtx;
+  var Ctx = window.AudioContext || window.webkitAudioContext;
+  if(!Ctx) return null;
+  try{ instructionChimeCtx = new Ctx(); }catch(e){ instructionChimeCtx = null; }
+  return instructionChimeCtx;
+}
+/* ブラウザは、画面を一度も触っていないと音を出せない。最初のタップで音を出せる状態にする */
+function unlockInstructionChime(){
+  var ctx = instructionAudioCtx();
+  if(ctx && ctx.state==='suspended' && ctx.resume) ctx.resume().then(function(){ render(); }).catch(function(){});
+}
+function instructionChimeBlocked(){
+  var ctx = instructionAudioCtx();
+  return !!(ctx && ctx.state==='suspended');
+}
+function playInstructionChime(){
+  var ctx = instructionAudioCtx();
+  if(!ctx || ctx.state!=='running') return;
+  var t0 = ctx.currentTime;
+  [[880,0],[660,0.28],[880,0.56]].forEach(function(n){
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine'; o.frequency.value = n[0];
+    g.gain.setValueAtTime(0.0001, t0+n[1]);
+    g.gain.exponentialRampToValueAtTime(0.35, t0+n[1]+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+n[1]+0.25);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(t0+n[1]); o.stop(t0+n[1]+0.27);
+  });
+}
+function loadNotifiedInstructionKeys(){
+  var k = 'notified-instructions:'+todayStr();
+  if(state.notifiedInstructionDate!==todayStr()){
+    state.notifiedInstructionDate = todayStr();
+    state.notifiedInstructionKeys = null;
+    try{ state.notifiedInstructionKeys = JSON.parse(localStorage.getItem(k)||'null'); }catch(e){}
+  }
+  return state.notifiedInstructionKeys;
+}
+function saveNotifiedInstructionKeys(keys){
+  state.notifiedInstructionKeys = keys;
+  try{ localStorage.setItem('notified-instructions:'+todayStr(), JSON.stringify(keys)); }catch(e){}
+}
+/* 定期更新のたびに呼ぶ。現場のタブレット(作業記録)とモニターだけで通知する */
+function checkInstructionNotifications(){
+  if(state.role!=='input' && state.role!=='monitor') return;
+  if(!state.staffingSuggestionLoaded || !state.day || state.day.date!==todayStr()) return;
+  var list = currentWorkInstructions();
+  var seen = loadNotifiedInstructionKeys();
+  if(!seen){
+    // この端末で初めて確認するとき: 出ている指示は「知らせ済み」にする(開いた瞬間に古い指示で鳴らさない)
+    saveNotifiedInstructionKeys(list.map(function(i){ return i.key; }));
+    return;
+  }
+  var fresh = list.filter(function(i){ return seen.indexOf(i.key)===-1; });
+  if(!fresh.length) return;
+  saveNotifiedInstructionKeys(seen.concat(fresh.map(function(i){ return i.key; })).slice(-300));
+  var now = Date.now();
+  state.instructionAlert = { items: fresh, at: now };
+  state.recentInstructionKeys = (state.recentInstructionKeys||[]).concat(fresh.map(function(i){ return { key:i.key, at: now }; }));
+  playInstructionChime();
+  state.forceRenderAfterResync = true;
+}
+/* 新しい作業指示の大きな表示(タブレット)。閉じるか2分たつと消える */
+function renderInstructionAlert(){
+  var a = state.instructionAlert;
+  if(!a || state.role!=='input') return '';
+  if(Date.now()-a.at > 120000){ state.instructionAlert = null; return ''; }
+  return '<div class="instr-alert" id="instrAlert">'+
+    '<div class="instr-alert-title">📣 新しい作業指示</div>'+
+    a.items.map(function(i){ return '<div class="instr-alert-line"><b>'+esc(i.name)+'さん</b>:'+esc(i.taskName)+'を開始してください</div>'; }).join('')+
+    '<button type="button" class="instr-alert-close" id="instrAlertClose">確認しました</button>'+
+  '</div>';
+}
+function isRecentInstruction(key){
+  return (state.recentInstructionKeys||[]).some(function(r){ return r.key===key && Date.now()-r.at < 180000; });
 }
 /* 作業者向けの完了予定時刻(現在の配置+確定済みの配置・勤務終了時刻基準。締切・余裕時間は出さない) */
 function planEtaText(plan, taskId){
@@ -7862,6 +7972,7 @@ function render(){
   else if(state.role==='settingsHub') html += renderSettingsHub();
   else if(state.role==='shukei') html += renderShukei();
   if(state.modal) html += renderModal();
+  html += renderInstructionAlert();
   root.innerHTML = html;
   bindCommon();
   if(state.role==='report') bindReport();
@@ -7874,6 +7985,8 @@ function render(){
   if(state.role==='settingsHub') bindSettingsHub();
   if(state.role==='shukei') bindShukei();
   if(state.modal) bindModal();
+  var instrClose = document.getElementById('instrAlertClose');
+  if(instrClose) instrClose.addEventListener('click', function(){ state.instructionAlert = null; render(); });
   restoreScroll();
 }
 
@@ -11263,8 +11376,12 @@ function bindReport(){
 function renderInput(){
   if(!state.activeStaffId){
     var present = presentStaff();
+    var instrByStaff = {};
+    currentWorkInstructions().forEach(function(i){ instrByStaff[i.staffId] = i; });
     var tiles = present.map(function(s){
-      return '<button class="name-tile" data-pick-staff="'+s.id+'">'+esc(s.name)+'</button>';
+      var ins = instrByStaff[s.id];
+      return '<button class="name-tile'+(ins?' has-instr':'')+'" data-pick-staff="'+s.id+'">'+esc(s.name)+
+        (ins ? '<span class="name-tile-instr">📋 指示あり: '+esc(ins.taskName)+'</span>' : '')+'</button>';
     }).join('');
     return '<div class="input-wrap"><div class="name-grid-wrap">'+
       '<div class="name-grid-title">あなたの名前をタップしてください</div>'+
@@ -14288,6 +14405,16 @@ function bindModal(){
 }
 
 /* ---------- MONITOR ---------- */
+/* モニターの「作業指示」欄。出ている指示を常に表示し、新しい指示(3分以内)は目立たせる */
+function renderMonitorInstructions(){
+  var list = currentWorkInstructions();
+  var soundHint = instructionChimeBlocked() ? '<span class="mon-instr-sound">🔇 画面を一度クリック(タップ)すると、指示が出たときに音が鳴ります</span>' : '';
+  if(!list.length) return soundHint ? '<div class="mon-instr">'+soundHint+'</div>' : '';
+  return '<div class="mon-instr"><span class="mon-instr-title">📋 作業指示</span>'+
+    list.map(function(i){
+      return '<span class="mon-instr-item'+(isRecentInstruction(i.key)?' is-new':'')+'"><b>'+esc(i.name)+'</b> → '+esc(i.taskName)+(i.confirmedAt?' <small>'+fmtClock(i.confirmedAt)+'</small>':'')+'</span>';
+    }).join('')+soundHint+'</div>';
+}
 function renderMonitor(){
   var present = presentStaff();
   var tasks = tasksForToday().slice().sort(byTaskColor(function(t){ return t.color; }));
@@ -14401,6 +14528,7 @@ function renderMonitor(){
         '<button class="mon-exit" id="switchRoleBtn">役割を変更</button>'+
       '</div>'+
     '</div>'+
+    renderMonitorInstructions()+
     '<div class="mon-body">'+
       '<div class="mon-staff-list">'+rows+'</div>'+
       '<div class="mon-side"><div class="mon-side-title">作業別サマリー</div>'+sideCards+'</div>'+
@@ -14712,6 +14840,7 @@ async function pollTick(){
     await checkAutoBreak();
     await checkAutoShift();
     await checkAutoConfirmStaffing();
+    checkInstructionNotifications();
     var newSnapshot = safeSnapshotForChangeDetection();
     var dataChanged = newSnapshot !== state.lastSnapshotStr;
     state.lastSnapshotStr = newSnapshot;
@@ -15033,6 +15162,8 @@ async function loadAppData(){
     state.appDataLoading = false;
   }
 }
+document.addEventListener('pointerdown', unlockInstructionChime, { passive:true });
+document.addEventListener('keydown', unlockInstructionChime);
 async function init(){
   if(!window.SUPABASE_CONFIG || !window.SUPABASE_CONFIG.url || window.SUPABASE_CONFIG.url.indexOf('YOUR-PROJECT')!==-1){
     document.getElementById('app').innerHTML = renderSupabaseWarning();

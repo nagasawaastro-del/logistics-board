@@ -1185,6 +1185,7 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-10-01', items:[
+    '【再読み込み】どの画面でも、再読み込みするとトップ画面に戻っていた問題を直しました。開いている画面(管理者・設定・集計のタブ、集計表の拠点とタブ、作業記録で選んでいる人を含む)をアドレスの「#」のあとに残し、再読み込みしても同じ画面を開き直します。モニターの「← 戻る」は、再読み込み後などで直前の画面が分からないときはトップに戻ります(アプリの外に出ないようにしました)',
     '【モニター表示】右側の「作業別サマリー」と、下の「今月のチームチャレンジ」を廃止しました。スタッフのカード(今の作業・次の作業)を画面の横幅いっぱいに表示し、下は「本日の出荷実績」だけにしました'
   ]},
   { date:'2026-09-30', items:[
@@ -8130,6 +8131,44 @@ function isUserBusy(){
   if(state.showOtherTasks) return true;
   return false;
 }
+/* ---------- 開いている画面をアドレス(#のあと)に残す ----------
+   再読み込みしてもトップ画面に戻らず、同じ画面(と画面内のタブ・作業記録で選んでいる人)を開き直すため。
+   例: #role=adminHub&tab=financial / #role=input&staff=<スタッフID> / #role=shukei&site=tannan&tab=diff */
+var VIEW_URL_ROLES = ['input','report','monitor','achievements','calendar','history','adminHub','settingsHub','shukei'];
+function viewStateToHash(){
+  if(!state.role) return '';
+  var q = { role: state.role };
+  if(state.role==='adminHub' && state.adminHubTab) q.tab = state.adminHubTab;
+  if(state.role==='settingsHub' && state.settingsHubTab) q.tab = state.settingsHubTab;
+  if(state.role==='report' && state.reportMode) q.mode = state.reportMode;
+  if(state.role==='shukei'){ if(state.shukeiSite) q.site = state.shukeiSite; if(state.shukeiTab) q.tab = state.shukeiTab; }
+  if(state.role==='input' && state.activeStaffId) q.staff = state.activeStaffId;
+  return '#'+Object.keys(q).map(function(k){ return k+'='+encodeURIComponent(q[k]); }).join('&');
+}
+function syncViewToUrl(){
+  try{
+    var h = viewStateToHash();
+    if((location.hash||'')===h) return;
+    history.replaceState(null, '', location.pathname+location.search+h);
+  }catch(e){}
+}
+/* 起動時: アドレスの画面を開き直す。知らない画面・閲覧専用で開けない画面・いなくなったスタッフは無視する */
+function restoreViewFromUrl(){
+  try{
+    var h = String(location.hash||'').replace(/^#/, '');
+    if(!h) return false;
+    var q = {};
+    h.split('&').forEach(function(kv){ var i = kv.indexOf('='); if(i>0) q[kv.slice(0,i)] = decodeURIComponent(kv.slice(i+1)); });
+    if(VIEW_URL_ROLES.indexOf(q.role)===-1 || isRoleBlockedForAccount(q.role)) return false;
+    state.role = q.role;
+    if(q.role==='adminHub' && q.tab) state.adminHubTab = q.tab;
+    if(q.role==='settingsHub' && q.tab) state.settingsHubTab = q.tab;
+    if(q.role==='report' && q.mode) state.reportMode = q.mode;
+    if(q.role==='shukei'){ if(q.site && SHUKEI_SITES[q.site]) state.shukeiSite = q.site; if(q.tab) state.shukeiTab = q.tab; }
+    if(q.role==='input' && q.staff && (state.roster||[]).some(function(s){ return s.id===q.staff && !s.archived; })) state.activeStaffId = q.staff;
+    return true;
+  }catch(e){ return false; }
+}
 function render(){
   var root = document.getElementById('app');
   // ログイン(と利用権限)を確認し、データを読み込むまでは、アプリの画面を出さない
@@ -8165,6 +8204,7 @@ function render(){
     bindGate();
     if(state.showChangelog) bindChangelogModal();
     restoreScroll();
+    syncViewToUrl();
     return;
   }
   var html = '';
@@ -8197,6 +8237,7 @@ function render(){
   var instrClose = document.getElementById('instrAlertClose');
   if(instrClose) instrClose.addEventListener('click', function(){ state.instructionAlert = null; render(); });
   restoreScroll();
+  syncViewToUrl();
 }
 
 /* ---------- GATE ---------- */
@@ -14759,17 +14800,10 @@ function bindMonitor(){
   var backBtn = document.getElementById('monBackBtn');
   if(backBtn){
     backBtn.addEventListener('click', function(){
-      // 直前の画面に戻る。直接URLを開いた場合など戻る履歴が無いケースでは、
-      // 安全な既定の画面(トップ)へ戻す。既存のナビゲーション自体は変更しない。
-      if(state.monitorEntryRole!==undefined && state.monitorEntryRole!==null){
-        state.role = state.monitorEntryRole;
-        render();
-      }else if(window.history.length>1){
-        window.history.back();
-      }else{
-        state.role = '';
-        render();
-      }
+      // 直前の画面に戻る。再読み込み・直接URLを開いた場合など直前の画面が分からないときはトップへ戻す
+      // (ブラウザの「戻る」は使わない。アプリの外の前のページへ出てしまうため)
+      state.role = state.monitorEntryRole || null;
+      render();
     });
   }
 }
@@ -15377,6 +15411,8 @@ async function init(){
     render(); // 「データを読み込んでいます...」
     try{ await loadAppData(); }
     catch(e){ console.error('[LOGI LINK] データの読み込みに失敗しました', e); }
+    // 再読み込みの前に開いていた画面(アドレスの#のあと)を開き直す
+    if(state.appDataLoaded && restoreViewFromUrl()) startPolling();
   }
   render();
   startTicker();

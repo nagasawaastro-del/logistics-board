@@ -246,6 +246,7 @@ input,select{font-family:inherit;}
 .csv-link-badge{display:inline-block;font-size:10px;font-weight:700;border-radius:10px;padding:2px 8px;margin-left:4px;vertical-align:middle;}
 .csv-link-badge-on{background:#EFF8FF;color:#175CD3;}
 .csv-link-badge-off{background:var(--paper-100);color:var(--slate-500);}
+.fin-total-row td{font-weight:700;border-top:2px solid var(--ink-900);}
 .fin-summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:10px;}
 .fin-summary-card{background:var(--paper-100);border-radius:12px;padding:14px;text-align:center;}
 .fin-summary-label{font-size:11px;color:var(--slate-500);margin-bottom:4px;}
@@ -706,6 +707,13 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .shukei-loc-qty{font-size:0.82em;color:var(--slate-500);}
 .shukei-table .shukei-in{border:1px solid var(--paper-line);border-radius:6px;padding:4px 6px;font-size:13px;}
 .shukei-print-head{margin:6px 0;font-size:14px;}
+.shukei-site-panel{border-top:8px solid var(--site);}
+.shukei-site-tabs{display:flex;gap:10px;flex-wrap:wrap;}
+.shukei-site-btn{border:2px solid var(--site);background:#fff;color:var(--site);border-radius:12px;padding:10px 22px;font-size:17px;font-weight:700;cursor:pointer;}
+.shukei-site-btn.active{background:var(--site);color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.18);}
+.shukei-site-banner{margin:10px 0 4px;padding:8px 14px;border-radius:10px;background:var(--site-tint);border-left:6px solid var(--site);color:var(--site);font-weight:700;font-size:15px;}
+.shukei-site-badge{display:inline-block;background:var(--site);color:#fff;font-weight:800;font-size:18px;padding:2px 14px;border-radius:8px;margin-right:10px;vertical-align:middle;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+.sk-pick thead th{border-bottom:3px solid var(--site) !important;}
 .sk-pick tbody tr:nth-child(even) td{background:rgba(15,23,42,.035);}
 .sk-pick td{vertical-align:middle;}
 .sk-pick .sk-no{color:var(--slate-500);font-size:11px;text-align:right;width:1%;}
@@ -723,10 +731,13 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
   .no-print,.topbar,.toast-container,.shukei-in{display:none !important;}
   .print-only{display:inline !important;}
   .shukei-wrap .panel{box-shadow:none !important;border:none !important;padding:0 !important;}
+  .shukei-site-panel{border-top:none !important;}
+  .shukei-print-head{border-left:10px solid var(--site);padding-left:8px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .sk-pick thead th{border-bottom:3px solid var(--site) !important;}
   .shukei-wrap [data-keep-scroll]{max-height:none !important;overflow:visible !important;}
   .shukei-table{font-size:11px;border-collapse:collapse;}
   .shukei-table th,.shukei-table td{padding:4px 5px !important;border-bottom:1px solid #999 !important;}
-  .shukei-table thead th{border-bottom:2px solid #000 !important;background:#eee !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .shukei-table thead th{border-bottom:3px solid var(--site,#000) !important;background:#eee !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
   .sk-pick tbody tr{page-break-inside:avoid;break-inside:avoid;}
   .sk-pick tbody tr:nth-child(even) td{background:#f2f2f2 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
   .sk-pick .sk-key,.sk-pick .sk-code,.sk-pick .sk-zone .shukei-loc-name{font-size:13px;}
@@ -1205,6 +1216,8 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-10-01', items:[
+    '【集計表: 高屋・丹南の区別】拠点を色で区別するようにしました(高屋=青・丹南=緑)。拠点の切り替えボタンを大きくして選んでいる方を塗りつぶし、画面の上の帯と「〇〇の集計表を表示中」の表示、表の見出しの線を拠点の色にしました。印刷では見出しに拠点名を色付きの札で大きく入れます(集計表・在庫差異とも)',
+    '【収支・分析: 日付別・期間】上の「売上・人件費・粗利・利益率」を、日付を選んで見られるようにしました(◀前日・翌日▶・今日)。下の「収支・分析」は「集計する」で期間の合計(売上・人件費・粗利・利益率・総稼働・出荷数量)を出し、集計軸に「日付別」(1日ごとの売上・人件費・粗利。「この日の内訳」で上の欄にその日の得意先ごとの内訳)を追加しました。荷主別・商品別・作業種別別にも合計行を付けました。集計軸を切り替えても、同じ期間なら「集計する」を押し直さずに出し直します',
     '【才数の表示】才数は小数第2位まで(四捨五入)で表示するようにしました(集計表・在庫差異・収支の商品別・収支の内訳)。売上の計算には元の値をそのまま使います',
     '【人員配置: まだ始めていない指示の入れ替え】CSVが届いた順に人が埋まり、あとから取り込まれた優先度の高い作業(例: ゆうパック・JOD)に誰も回らない問題を直しました。空いている人・手待ち作業の人で足りないときは、まだ作業を始めていない人の未開始の指示のうち、優先度が低い作業(例: VC)の指示を入れ替える配置案を出します(自動確定の対象)。優先度が同じ作業同士では入れ替えません。元の作業は不足に戻り、残りの人で埋められるか計算し直します',
     '【集計表をピッキングリスト向けに】行番号を付け、品番の下に商品名を表示しました。数量・ケース・端数と棚番を太く大きく、弥生・ロジ・才数は控えめな表示にしました。棚番のある区画の列だけを出し、棚番のない所は「-」ではなく空欄にしました。1行おきに色を付け、最後に合計(品目数・数量・ケース・端数)の行を付けました。印刷では右端にチェック欄(□)を付け、1行がページの境目で分かれないようにしました',
@@ -6946,9 +6959,31 @@ function renderFinancial(){
   if(!hasManagerSession()){
     return renderManagerLoginForm('💰 収支・分析', 'この画面は売上・原価・人件費・粗利などの経営情報を扱います。閲覧には管理者アカウントでのログインが必要です。');
   }
-  var dateStr = todayStr();
-  var day = state.day;
-  var summary = computeFinancialSummary(dateStr, day, state.workVolume);
+  var todayDate = todayStr();
+  // 上の1日分の収支は、日付を選んで見られる(既定は今日)。今日以外はその日のデータを読み込む
+  var dateStr = state.finSummaryDate || todayDate;
+  var day = null, sumWv = null, sumLoading = false;
+  if(dateStr===todayDate){ day = state.day; sumWv = state.workVolume; }
+  else if(state.finSummaryData && state.finSummaryData.date===dateStr){ day = state.finSummaryData.day || { logs: [] }; sumWv = state.finSummaryData.wv; }
+  else{
+    sumLoading = true;
+    if(!state.finSummaryLoading){
+      state.finSummaryLoading = true;
+      var wantDate = dateStr;
+      Promise.all([loadDayByDate(wantDate), getWorkVolumeForDate(wantDate)]).then(function(r){
+        state.finSummaryData = { date: wantDate, day: r[0], wv: r[1] };
+      }).catch(function(){ state.finSummaryData = { date: wantDate, day: null, wv: null }; })
+        .then(function(){ state.finSummaryLoading = false; render(); });
+    }
+  }
+  var summary = sumLoading ? null : computeFinancialSummary(dateStr, day, sumWv);
+  var dayNav = '<div class="fin-day-nav" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
+    '<button type="button" class="vc-manage-toggle-btn" data-fin-day-step="-1">◀ 前日</button>'+
+    '<input type="date" id="finSummaryDateInput" value="'+esc(dateStr)+'">'+
+    '<button type="button" class="vc-manage-toggle-btn" data-fin-day-step="1"'+(dateStr>=todayDate?' disabled':'')+'>翌日 ▶</button>'+
+    (dateStr!==todayDate ? '<button type="button" class="vc-manage-toggle-btn" id="finDayTodayBtn">今日</button>' : '')+
+    '<span class="pool-hint" style="margin:0;">'+esc(dateLabelFromStr(dateStr))+(dateStr===todayDate?'(今日・途中経過)':'')+'の収支</span>'+
+  '</div>'+(sumLoading ? '<div class="empty-note">'+esc(dateLabelFromStr(dateStr))+'のデータを読み込み中...</div>' : '');
   var loadingOrError = '';
   if(state.financialLoadError){
     loadingOrError = '<div class="vc-warning-box">'+esc(state.financialLoadError)+'</div>';
@@ -6959,12 +6994,12 @@ function renderFinancial(){
   if(summary){
     var finRowsHtml = summary.rows.map(function(r){
       return '<tr><td>'+esc(r.taskName)+'</td><td class="num">'+formatNum(r.pieces)+'ピース</td><td class="num">¥'+formatNum(Math.round(r.sales))+'</td></tr>';
-    }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">本日のCSV取込がありません</td></tr>';
+    }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">この日のCSV取込がありません</td></tr>';
     var custRowsHtml = summary.customerRows.map(function(c){
       var detail = c.lines.map(function(l){ return esc(l.workName)+' '+esc(formatPriceQty(l.unit, l.qty))+'×¥'+formatNum(l.unitPrice)+'=¥'+formatNum(Math.round(l.amount)); }).join('<br>') ||
         '<span style="color:var(--slate-500);">当てはまる単価なし</span>';
       return '<tr><td>'+esc(c.customerName||'(得意先なし)')+'</td><td style="font-size:11px;">'+detail+'</td><td class="num">¥'+formatNum(Math.round(c.sales))+'</td></tr>';
-    }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">本日のCSV取込がありません</td></tr>';
+    }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">この日のCSV取込がありません</td></tr>';
     summaryHtml = '<div class="fin-summary-grid">'+
       '<div class="fin-summary-card"><div class="fin-summary-label">売上</div><div class="fin-summary-value">¥'+formatNum(Math.round(summary.totalSales))+'</div></div>'+
       '<div class="fin-summary-card"><div class="fin-summary-label">人件費</div><div class="fin-summary-value">¥'+formatNum(Math.round(summary.laborCost))+'</div></div>'+
@@ -6974,20 +7009,48 @@ function renderFinancial(){
     renderFinancialNotices(summary)+
     '<div style="overflow-x:auto;"><table class="report-table" style="margin-top:14px;"><thead><tr><th>得意先</th><th>内訳(作業単価 数量×単価)</th><th>売上</th></tr></thead><tbody>'+custRowsHtml+'</tbody></table></div>'+
     '<table class="report-table" style="margin-top:14px;"><thead><tr><th>作業</th><th>出荷数量</th><th>売上</th></tr></thead><tbody>'+finRowsHtml+'</tbody></table>'+
-    '<div class="pool-hint" style="margin-top:8px;">総稼働'+summary.totalHours.toFixed(1)+'時間 ・ 本日('+esc(dateLabelFromStr(dateStr))+')分 ・ 売上はkintoneの作業単価 × 得意先ごとの数量、人件費はスタッフごとの(作業時間 × 時給)です。作業ごとの売上は、その作業で扱った得意先ごとの数量から計算しています。</div>';
+    '<div class="pool-hint" style="margin-top:8px;">総稼働'+summary.totalHours.toFixed(1)+'時間 ・ '+esc(dateLabelFromStr(dateStr))+'分 ・ 売上はkintoneの作業単価 × 得意先ごとの数量、人件費はスタッフごとの(作業時間 × 時給)です。作業ごとの売上は、その作業で扱った得意先ごとの数量から計算しています。</div>';
   }
 
-  if(!state.finStartDate) state.finStartDate = dateStr;
-  if(!state.finEndDate) state.finEndDate = dateStr;
-  if(!state.finAxis) state.finAxis = 'customer';
-  var axisLabels = { customer:'荷主別', product:'商品別', task:'作業種別別' };
+  if(!state.finStartDate) state.finStartDate = todayDate;
+  if(!state.finEndDate) state.finEndDate = todayDate;
+  if(!state.finAxis) state.finAxis = 'date';
+  var axisLabels = { date:'日付別', customer:'荷主別', product:'商品別', task:'作業種別別' };
   var axisTabs = Object.keys(axisLabels).map(function(a){
     return '<button type="button" class="vc-tab-btn'+(state.finAxis===a?' active':'')+'" data-fin-axis="'+a+'">'+axisLabels[a]+'</button>';
   }).join('');
 
   var analyticsBody = '';
+  var periodHtml = '';
+  if(!state.finAnalyticsLoading && state.finPeriodRows){
+    var pt = sumFinancialRows(state.finPeriodRows);
+    periodHtml = '<div class="pool-hint" style="margin:0 0 6px;">期間 '+esc(dateLabelFromStr(state.finPeriodRange[0]))+' 〜 '+esc(dateLabelFromStr(state.finPeriodRange[1]))+' の合計('+state.finPeriodRows.length+'日分)</div>'+
+      '<div class="fin-summary-grid" style="margin-bottom:10px;">'+
+        '<div class="fin-summary-card"><div class="fin-summary-label">売上</div><div class="fin-summary-value">¥'+formatNum(Math.round(pt.sales))+'</div></div>'+
+        '<div class="fin-summary-card"><div class="fin-summary-label">人件費</div><div class="fin-summary-value">¥'+formatNum(Math.round(pt.laborCost))+'</div></div>'+
+        '<div class="fin-summary-card"><div class="fin-summary-label">粗利</div><div class="fin-summary-value">¥'+formatNum(Math.round(pt.grossProfit))+'</div></div>'+
+        '<div class="fin-summary-card"><div class="fin-summary-label">利益率</div><div class="fin-summary-value">'+pt.margin.toFixed(1)+'%</div></div>'+
+      '</div>'+
+      '<div class="pool-hint" style="margin:0 0 10px;">総稼働 '+pt.personHours.toFixed(1)+'時間 ・ 出荷数量 '+formatNum(pt.totalQty)+'ピース</div>';
+  }
   if(state.finAnalyticsLoading){
     analyticsBody = '<div class="empty-note">集計中...</div>';
+  }else if(state.finAnalyticsRows && state.finAxis==='date'){
+    var dRows = state.finAnalyticsRows;
+    var dt = sumFinancialRows(dRows);
+    function dateRowHtml(label, r, isTotal){
+      return '<tr'+(isTotal?' class="fin-total-row"':'')+'><td>'+label+'</td>'+
+        '<td class="num">'+formatNum(r.shipmentCount)+'</td><td class="num">'+formatNum(r.poCount)+'</td><td class="num">'+formatNum(r.lineCount)+'</td><td class="num">'+formatNum(r.totalQty)+'</td>'+
+        '<td class="num">'+r.personHours.toFixed(1)+'h</td><td class="num">¥'+formatNum(Math.round(r.sales))+'</td><td class="num">¥'+formatNum(Math.round(r.laborCost))+'</td>'+
+        '<td class="num">¥'+formatNum(Math.round(r.grossProfit))+'</td><td class="num">'+r.margin.toFixed(1)+'%</td>'+
+        '<td class="num">'+(isTotal ? '' : '<button type="button" class="vc-manage-toggle-btn" data-fin-show-day="'+esc(r.date)+'">この日の内訳</button>')+'</td></tr>';
+    }
+    analyticsBody = renderFinancialNotices(dRows.meta)+
+      '<div style="overflow-x:auto;"><table class="report-table" style="margin-top:10px;"><thead><tr><th>日付</th><th>出荷件数</th><th>PO数</th><th>明細数</th><th>出荷数量(ピース)</th><th>人時(実測)</th><th>売上</th><th>人件費</th><th>粗利</th><th>粗利率</th><th></th></tr></thead><tbody>'+
+        (dRows.map(function(r){ return dateRowHtml(esc(r.label), r, false); }).join('') || '<tr><td colspan="11" style="color:var(--slate-500);">この期間に記録のある日がありません</td></tr>')+
+        (dRows.length ? dateRowHtml('合計('+dRows.length+'日)', dt, true) : '')+
+      '</tbody></table></div>'+
+      '<div class="pool-hint" style="margin-top:8px;">1日ごとの売上(kintoneの作業単価 × その日のCSVの得意先ごとの数量)と人件費(スタッフごとの作業時間 × 時給)です。作業記録もCSVも無い日は出していません。「この日の内訳」で、上の欄にその日の得意先ごとの内訳を出します。</div>';
   }else if(state.finAnalyticsRows){
     if(state.finDrillCustomer){
       analyticsBody += '<div class="vc-import-status">「'+esc(state.finDrillCustomer)+'」の商品別 <button type="button" class="vc-manage-toggle-btn" id="finDrillBackBtn" style="margin-left:8px;">荷主一覧に戻る</button></div>';
@@ -7033,8 +7096,15 @@ function renderFinancial(){
         '<td class="num">'+drillBtn+'</td>'+
       '</tr>';
     }).join('') || '<tr><td colspan="'+colCount+'" style="color:var(--slate-500);">該当するデータがありません(単価が未設定の可能性があります)</td></tr>';
+    // 合計行(配分した人時・人件費は、CSVのある作業の分だけの合計)
+    var at = sumFinancialRows(state.finAnalyticsRows);
+    var totalRow = state.finAnalyticsRows.length ? (isProductAxis
+      ? '<tr class="fin-total-row"><td colspan="3">合計</td><td class="num">'+formatNum(at.shipmentCount)+'</td><td class="num">'+formatNum(at.poCount)+'</td><td class="num">'+formatNum(at.lineCount)+'</td><td class="num">'+formatNum(at.totalQty)+'</td><td></td><td></td><td></td>'+
+        '<td class="num">'+at.personHours.toFixed(1)+'h</td><td class="num">¥'+formatNum(Math.round(at.sales))+'</td><td class="num">¥'+formatNum(Math.round(at.laborCost))+'</td><td class="num">¥'+formatNum(Math.round(at.grossProfit))+'</td><td class="num">'+at.margin.toFixed(1)+'%</td></tr>'
+      : '<tr class="fin-total-row"><td>合計</td><td class="num">'+formatNum(at.shipmentCount)+'</td><td class="num">'+formatNum(at.poCount)+'</td><td class="num">'+formatNum(at.lineCount)+'</td><td class="num">'+formatNum(at.totalQty)+'</td>'+(isTaskAxis ? '<td></td><td></td>' : '')+
+        '<td class="num">'+at.personHours.toFixed(1)+'h</td><td class="num">¥'+formatNum(Math.round(at.sales))+'</td><td class="num">¥'+formatNum(Math.round(at.laborCost))+'</td><td class="num">¥'+formatNum(Math.round(at.grossProfit))+'</td><td class="num">'+at.margin.toFixed(1)+'%</td><td></td></tr>') : '';
     analyticsBody += renderFinancialNotices(state.finAnalyticsRows.meta)+
-      '<div style="overflow-x:auto;"><table class="report-table" style="margin-top:10px;"><thead><tr>'+headCols+'</tr></thead><tbody>'+finRows2+'</tbody></table></div>'+
+      '<div style="overflow-x:auto;"><table class="report-table" style="margin-top:10px;"><thead><tr>'+headCols+'</tr></thead><tbody>'+finRows2+totalRow+'</tbody></table></div>'+
       '<div class="pool-hint" style="margin-top:8px;">※売上はkintoneの作業単価 × 得意先ごとの数量です(商品別の「件」単位の売上は、得意先の件数を明細数の割合で商品に按分しています)。「人時(推計)」「人件費」は、作業枠全体の実測(人件費はスタッフごとの作業時間 × 時給)を、荷主/商品ごとの出荷数量の割合で配分した推計値です(実測ではありません)。「出荷数量(ピース)」はCSVの出荷引当数の合計、「ケース」「バラ」は取込時に商品台帳の入数で1明細ごとに計算した値です(入数が無い商品はすべてバラ)。ケース・バラの記録が無い取込(機能追加前)は「データなし」、一部に無い場合は※を付けています。'+
       (state.finAxis==='customer' ? '荷主別のケース・バラは、取込時の商品別の記録が荷主ごとに分かれていないため表示していません。' : '')+'</div>';
   }else{
@@ -7049,6 +7119,7 @@ function renderFinancial(){
       '<div><label style="font-size:11px;color:var(--slate-500);display:block;">終了日</label><input type="date" id="finEndDateInput" value="'+state.finEndDate+'"></div>'+
       '<button type="button" class="add-btn" id="finRunAnalyticsBtn">集計する</button>'+
     '</div>'+
+    periodHtml+
     '<div class="vc-tabs">'+axisTabs+'</div>'+
     '<div class="vc-tab-body">'+analyticsBody+'</div>'+
   '</div>';
@@ -7056,6 +7127,7 @@ function renderFinancial(){
   return '<div class="mgr-wrap">'+
     '<div class="panel">'+
       '<div class="panel-title">💰 収支・分析 <button class="pill-btn" id="mgrLogoutBtn" style="margin-left:10px;">ログアウト</button></div>'+
+      dayNav+
       loadingOrError+
       summaryHtml+
     '</div>'+
@@ -7084,21 +7156,54 @@ function bindFinancial(){
   var finEndDateInput = document.getElementById('finEndDateInput');
   if(finEndDateInput) finEndDateInput.addEventListener('change', function(){ state.finEndDate = finEndDateInput.value; });
   document.querySelectorAll('[data-fin-axis]').forEach(function(el){
-    el.addEventListener('click', function(){
+    el.addEventListener('click', async function(){
       state.finAxis = el.getAttribute('data-fin-axis');
       state.finDrillCustomer = null;
       state.finAnalyticsRows = null;
+      var c = state.finPeriodCollected;
+      if(c && state.finPeriodRange && state.finPeriodRange[0]===state.finStartDate && state.finPeriodRange[1]===state.finEndDate){
+        if(state.finAxis==='date'){ state.finAnalyticsRows = state.finPeriodRows; render(); return; }
+        state.finAnalyticsLoading = true; render();
+        state.finAnalyticsRows = await computeAnalytics(c.days, c.volumes, state.finAxis, null);
+        state.finAnalyticsLoading = false;
+      }
       render();
     });
+  });
+  // 上の1日分の収支の日付
+  function showSummaryDay(d){
+    var t = todayStr();
+    if(!d || d>t) d = t;
+    state.finSummaryDate = d;
+    render();
+  }
+  var sumDateInput = document.getElementById('finSummaryDateInput');
+  if(sumDateInput) sumDateInput.addEventListener('change', function(){ showSummaryDay(sumDateInput.value); });
+  document.querySelectorAll('[data-fin-day-step]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var d = new Date((state.finSummaryDate || todayStr())+'T00:00:00');
+      d.setDate(d.getDate()+Number(el.getAttribute('data-fin-day-step')));
+      showSummaryDay(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
+    });
+  });
+  var dayTodayBtn = document.getElementById('finDayTodayBtn');
+  if(dayTodayBtn) dayTodayBtn.addEventListener('click', function(){ showSummaryDay(todayStr()); });
+  document.querySelectorAll('[data-fin-show-day]').forEach(function(el){
+    el.addEventListener('click', function(){ showSummaryDay(el.getAttribute('data-fin-show-day')); window.scrollTo(0, 0); });
   });
   var finRunAnalyticsBtn = document.getElementById('finRunAnalyticsBtn');
   if(finRunAnalyticsBtn){
     finRunAnalyticsBtn.addEventListener('click', async function(){
+      if(state.finStartDate > state.finEndDate){ showToast('開始日が終了日より後になっています'); return; }
       state.finAnalyticsLoading = true;
       state.finDrillCustomer = null;
       render();
       var collected = await collectDaysAndVolumeForRange(state.finStartDate, state.finEndDate);
-      state.finAnalyticsRows = await computeAnalytics(collected.days, collected.volumes, state.finAxis, null);
+      // 期間の合計・日付別は、日ごとの収支(上の欄と同じ計算)から出す
+      state.finPeriodRows = computeFinancialByDate(collected.byDate);
+      state.finPeriodRange = [state.finStartDate, state.finEndDate];
+      state.finPeriodCollected = collected;
+      state.finAnalyticsRows = state.finAxis==='date' ? state.finPeriodRows : await computeAnalytics(collected.days, collected.volumes, state.finAxis, null);
       state.finAnalyticsLoading = false;
       render();
     });
@@ -7478,14 +7583,47 @@ async function collectDaysAndVolumeForRange(startDate, endDate){
   }
   var days = [];
   var volumes = [];
+  var byDate = []; // [{ date, day, wv }](日付別の収支用)
   for(var i=0;i<dates.length;i++){
     var dt = dates[i];
     var day = (dt===todayStr()) ? state.day : await loadDayByDate(dt);
     if(day) days.push(day);
     var wv = await getWorkVolumeForDate(dt);
     if(wv) volumes.push(wv);
+    byDate.push({ date: dt, day: day || null, wv: wv || null });
   }
-  return { days: days, volumes: volumes };
+  return { days: days, volumes: volumes, byDate: byDate };
+}
+/* 日付別の収支(1日ごとに computeFinancialSummary と同じ計算)。期間の合計にも使う。
+   行: { key(日付), label, date, shipmentCount, poCount, lineCount, totalQty, personHours, sales, laborCost, grossProfit, margin } */
+function computeFinancialByDate(byDate){
+  var unpriced = {}, cubicMissing = 0, missingWage = {}, unsetItems = null;
+  var rows = [];
+  (byDate||[]).forEach(function(x){
+    var sm = computeFinancialSummary(x.date, x.day || { logs: [] }, x.wv || emptyWorkVolume());
+    if(!sm) return;
+    var ship = 0, po = 0, lines = 0, qty = 0;
+    wvActiveImports(x.wv || emptyWorkVolume()).forEach(function(imp){
+      if(imp.taskKind==='vc') po += imp.primaryCount||0; else ship += imp.primaryCount||0;
+      lines += imp.lineCount||0; qty += imp.totalQty||0;
+    });
+    (sm.unpricedCustomers||[]).forEach(function(c){ unpriced[c] = true; });
+    cubicMissing += sm.cubicMissingCases||0;
+    (sm.missingWageStaffIds||[]).forEach(function(id){ missingWage[id] = true; });
+    unsetItems = sm.unsetItems;
+    if(!(sm.totalSales || sm.laborCost || qty || sm.totalHours)) return; // 記録の無い日(休日など)は出さない
+    rows.push({ key: x.date, label: dateLabelFromStr(x.date), date: x.date, shipmentCount: ship, poCount: po, lineCount: lines, totalQty: qty,
+      personHours: sm.totalHours||0, sales: sm.totalSales, laborCost: sm.laborCost, grossProfit: sm.grossProfit, margin: sm.margin });
+  });
+  rows.meta = { unpricedCustomers: Object.keys(unpriced), cubicMissingCases: cubicMissing, missingWageStaffIds: Object.keys(missingWage), unsetItems: unsetItems || [] };
+  return rows;
+}
+/* 表の合計行用 */
+function sumFinancialRows(rows){
+  var t = { shipmentCount:0, poCount:0, lineCount:0, totalQty:0, personHours:0, sales:0, laborCost:0, grossProfit:0 };
+  (rows||[]).forEach(function(r){ Object.keys(t).forEach(function(k){ t[k] += r[k]||0; }); });
+  t.margin = t.sales>0 ? t.grossProfit/t.sales*100 : 0;
+  return t;
 }
 async function computeAnalytics(days, volumes, axis, filterCustomer){
   if(!hasManagerSession()) return null;
@@ -7659,9 +7797,9 @@ function computeFinancialSummary(dateStr, day, workVolume){
      入数は弥生の値(無ければ商品台帳)、才数は kintone 商品台帳(product_master)の値を使う。 */
 var SHUKEI_SITES = {
   takaya: { name:'高屋', zones:['S','AA','A','B','C','D','E'], stockBlocks:['A','B','C','D','E','S','AA','SET','ZZZ','XXX'],
-            sortZones:['A','B','C','D'], caseMode:'down', showFraction:true, yayoiWarehouse:'0018' },
+            sortZones:['A','B','C','D'], caseMode:'down', showFraction:true, yayoiWarehouse:'0018', color:'#1D4ED8', tint:'#EFF4FF' },
   tannan: { name:'丹南', zones:['F','G','H','I','J','K','HOME'], stockBlocks:['F','G','H','I','J','K','HOME'],
-            sortZones:['F','G','H','I','J','K'], caseMode:'up', showFraction:false, yayoiWarehouse:'0000' }
+            sortZones:['F','G','H','I','J','K'], caseMode:'up', showFraction:false, yayoiWarehouse:'0000', color:'#15803D', tint:'#ECFDF3' }
 };
 var SHUKEI_KEYS = { logizard:'shukei-logizard-stock', yayoi: function(site){ return 'shukei-yayoi-stock:'+site; } };
 /* ロジザードのロケーション番号(8桁: 棚3桁+段3桁+位置2桁)を Excel のロケ表記(棚 / 棚-段 / 棚-段-位置)にする。数字以外はそのまま */
@@ -7907,8 +8045,10 @@ function renderShukei(){
   }
   var data = (state.shukeiData && state.shukeiData.site===siteKey) ? state.shukeiData : { logizard:null, yayoi:null, yayoiBySite:{} };
   var draft = state.shukeiDraft;
+  // 拠点は色で区別する(高屋=青・丹南=緑)。選んでいる拠点のボタンを塗りつぶす
   var siteTabs = Object.keys(SHUKEI_SITES).map(function(k){
-    return '<button type="button" class="vc-tab-btn'+(k===siteKey?' active':'')+'" data-shukei-site="'+k+'">'+esc(SHUKEI_SITES[k].name)+'</button>';
+    var st = SHUKEI_SITES[k];
+    return '<button type="button" class="shukei-site-btn'+(k===siteKey?' active':'')+'" data-shukei-site="'+k+'" style="--site:'+st.color+';--site-tint:'+st.tint+';">🏭 '+esc(st.name)+'</button>';
   }).join('');
   var tabs = [['sheet','📋 集計表'],['diff','📦 在庫差異'],['data','📥 元データの登録']].map(function(t){
     return '<button type="button" class="vc-tab-btn'+(tab===t[0]?' active':'')+'" data-shukei-tab="'+t[0]+'">'+t[1]+'</button>';
@@ -7919,9 +8059,10 @@ function renderShukei(){
   if(tab==='sheet') body = renderShukeiSheet(siteKey, site, data, draft);
   else if(tab==='diff') body = renderShukeiDiff(siteKey, site, data);
   else body = renderShukeiDataPanel(siteKey, site, data);
-  return '<div class="mgr-wrap shukei-wrap"><div class="panel">'+
-    '<div class="panel-title">🧾 集計表(高屋・丹南)</div>'+
-    '<div class="vc-tabs no-print">'+siteTabs+'</div>'+
+  return '<div class="mgr-wrap shukei-wrap"><div class="panel shukei-site-panel" style="--site:'+site.color+';--site-tint:'+site.tint+';">'+
+    '<div class="panel-title no-print">🧾 集計表(高屋・丹南)</div>'+
+    '<div class="shukei-site-tabs no-print">'+siteTabs+'</div>'+
+    (tab!=='data' ? '<div class="shukei-site-banner no-print">'+esc(site.name)+'の'+(tab==='diff'?'在庫差異':'集計表')+'を表示中</div>' : '')+
     '<div class="vc-tabs no-print" style="margin-top:6px;">'+tabs+'</div>'+
     '<div class="no-print">'+status+'</div>'+
     body+
@@ -7989,7 +8130,7 @@ function renderShukeiSheet(siteKey, site, data, draft){
   var needData = oldLogi ? '<div class="vc-warning-box no-print">棚番の下にロケーションごとの在庫数を出し、引当済みで在庫の残らないロケーションを除くには、ロジザードの在庫のCSVをもう一度取り込んでください(「📥 元データの登録」)。</div>' : '';
   needData += (!data.logizard || !data.yayoi) ? '<div class="vc-warning-box no-print">元データが未登録です(ロジザードの在庫・弥生の在庫)。「📥 元データの登録」からCSVを取り込んでください。未登録の間は、棚番・在庫が空欄になります。</div>' : '';
   return needData+
-    '<div class="shukei-print-head"><b>'+esc(site.name)+' 集計表(ピッキングリスト)</b> ・ 日付 '+esc(dateLabelFromStr(todayStr()))+
+    '<div class="shukei-print-head"><span class="shukei-site-badge">'+esc(site.name)+'</span><b>集計表(ピッキングリスト)</b> ・ 日付 '+esc(dateLabelFromStr(todayStr()))+
       ' ・ 依頼者 <input type="text" id="shukeiRequester" class="no-print" value="'+esc(draft.requester||'')+'" style="width:140px;"><span class="print-only">'+esc(draft.requester||'')+'</span>'+
       (tot.n ? ' ・ '+formatNum(tot.n)+'品目・数量 '+formatNum(tot.qty)+'・ケース '+formatNum(tot.cases)+(site.showFraction ? '・端数 '+formatNum(tot.fraction) : '') : '')+'</div>'+
     '<div class="no-print" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;">'+
@@ -8031,7 +8172,7 @@ function renderShukeiDiff(siteKey, site, data){
       '<span class="pool-hint" style="margin:0;">'+formatNum(all.filter(function(r){ return r.diff!==0; }).length)+'件に差異 / 全'+formatNum(all.length)+'件</span>'+
       '<button type="button" class="vc-manage-toggle-btn" id="shukeiPrint">🖨 印刷</button>'+
     '</div>'+
-    '<div class="shukei-print-head"><b>'+esc(site.name)+' 在庫差異</b> ・ '+esc(dateLabelFromStr(todayStr()))+'</div>'+
+    '<div class="shukei-print-head"><span class="shukei-site-badge">'+esc(site.name)+'</span><b>在庫差異</b> ・ '+esc(dateLabelFromStr(todayStr()))+'</div>'+
     '<div style="overflow-x:auto;max-height:560px;overflow-y:auto;" data-keep-scroll="shukeiDiff"><table class="report-table shukei-table"><thead><tr>'+dh('商品コード','code')+dh('商品名','name')+dh('弥生('+site.name+')','yayoi')+dh('ロジザード','logi')+dh('差異(弥生−ロジ)','diff')+dh('ケース数(ロジ)','cases')+dh('才数','cubic')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div class="pool-hint no-print" style="margin-top:6px;">ロジザードは'+esc(site.name)+'の区画('+esc(site.stockBlocks.join('・'))+')の在庫の合計、ケース数はロジザードの在庫 ÷ 入数 の切り上げ、才数はkintoneの商品台帳の値です。</div>';
 }

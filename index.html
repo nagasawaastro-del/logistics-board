@@ -825,6 +825,10 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .next-suggest-task{font-size:22px;font-weight:700;color:var(--ink-900);margin-bottom:4px;}
 .next-suggest-meta{font-size:12px;color:var(--slate-500);margin-bottom:10px;}
 .next-suggest-actions{display:flex;gap:8px;flex-wrap:wrap;}
+.idle-alt-box{margin-top:12px;padding-top:10px;border-top:1px dashed #9DB5D8;}
+.idle-alt-title{font-size:12px;font-weight:700;color:var(--slate-500);margin-bottom:6px;}
+.idle-alt-btn{background:#fff;border:2px solid #2E5FA3;color:#2E5FA3;border-radius:10px;padding:10px 14px;font-size:14px;font-weight:700;cursor:pointer;}
+.idle-alt-btn:disabled{border-color:var(--paper-line);color:var(--slate-300);}
 
 .summary-wrap{max-width:680px;margin:60px auto;padding:0 22px;text-align:center;}
 .summary-title{font-family:var(--font-display);font-weight:700;font-size:28px;margin-bottom:6px;}
@@ -1181,6 +1185,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-09-30', items:[
+    '【手待ち作業のほかの候補】手待ち作業(返品など)への作業指示に、ほかの手待ち作業(検品・セットなど)も選べるボタンを出すようにしました。現場の状況に合わせて、作業者が選んで始められます。通知・モニター・人員配置画面にも「ほかの候補」を表示します。ほかの手待ち作業を選んで始めた場合、元の指示は「変更済み」になり、「未実施」として残りません'
+  ]},
   { date:'2026-09-29', items:[
     '【人員配置】休憩中に確定した配置(休憩中の手動配置など)は「休憩前の作業が終わったら開始」する予定として扱うようにしました。休憩明けに、休憩前の作業を続ける人がその作業の担当から外れて「担当0人の不足」になり、別の人を回す案と、本来の担当者を別作業へ動かす案が続けて出る(入れ替わるだけになる)問題を直しました',
     '【人員配置】確定から10分たっても元の作業を続けている指示は「⚠ 確定済み・未実施」と表示し、その作業の予定人員に数えないようにしました(来ない人を数え続けて不足が隠れるのを防ぐため)。作業者画面の指示はそのまま表示します',
@@ -3996,7 +4003,12 @@ function computeTodayStaffingPlan(ctx){
       return l.staffId===it.staffId && l.taskId!=='BREAK' && l.taskId!==it.taskId && l.taskId!==it.fromTaskId && l.taskId!==it.startAfterTaskId &&
         !!l.start && new Date(l.start).getTime() >= sinceMs+SUPERSEDE_GRACE_MS;
     });
-    if(newer || otherStarted) it.progress = 'superseded';
+    // 手待ち作業への指示で、作業者がほかの手待ち作業を選んで始めた場合も「変更済み」(指示どおり手待ち作業をしている)。
+    // 指示の直後(時計のずれの余裕の内)に選んでも「未実施」にしない
+    var open = openByStaff[it.staffId];
+    var choseOtherIdle = !!(open && open.taskId!==it.taskId && taskMap[it.taskId] && taskMap[it.taskId].idleLikely===true &&
+      taskMap[open.taskId] && taskMap[open.taskId].idleLikely===true && open.start && new Date(open.start).getTime() >= sinceMs-SUPERSEDE_GRACE_MS);
+    if(newer || otherStarted || choseOtherIdle) it.progress = 'superseded';
   });
   // 確定から一定時間たっても、指示と別の作業(確定時点の作業、または確定直後に自分で始めた作業)を続けている指示は「未実施」にする。
   // 未開始のまま数えると、来ない人をこの作業の予定人員に数え続け、不足が隠れる。
@@ -4449,6 +4461,14 @@ function nextTaskForStaff(plan, staffId, day){
     afterTaskId: (conf.startAfterTaskId && current===conf.startAfterTaskId) ? conf.startAfterTaskId : null };
   return null;
 }
+/* 手待ち作業への指示のとき、ほかに選べる手待ち作業(手待ち優先度順)。指示先・今の作業は除く。
+   手待ち作業の指示は「優先作業が無い間の予備作業」なので、現場の状況に合わせてほかの手待ち作業を選んでもよい。 */
+function idleAlternativesFor(plan, taskId, currentTaskId){
+  if(!plan || !plan.idleWorkTasks) return [];
+  var t = taskById(taskId);
+  if(!t || t.idleLikely!==true) return [];
+  return plan.idleWorkTasks.filter(function(w){ return w.taskId!==taskId && w.taskId!==currentTaskId; });
+}
 /* 作業者画面用の予定完了時刻。締切は使わず、各作業者が自分の勤務終了時刻まで
    生産性どおりに処理する前提で、休憩を除きながら残作業量を消化し終える時刻を返す。
    crew: [{ rate, shiftEndMs }]。勤務終了までに終わらない場合は { ms: 最後の勤務終了, beyondShift: true }。 */
@@ -4483,7 +4503,9 @@ function currentWorkInstructions(){
     if(!r || r.afterTaskId) return;
     var it = plan.confirmed.filter(function(c){ return c.staffId===s.id && c.taskId===r.taskId && (c.progress==='pending' || c.progress==='notFollowed'); })
       .sort(function(a,b){ return String(b.confirmedAt).localeCompare(String(a.confirmedAt)); })[0];
-    out.push({ key: s.id+'|'+r.taskId+'|'+((it && it.confirmedAt) || ''), staffId: s.id, name: s.name, taskId: r.taskId, taskName: taskById(r.taskId).name, confirmedAt: it ? it.confirmedAt : null });
+    var cur = plan.staff[s.id] ? plan.staff[s.id].currentTaskId : null;
+    var alts = idleAlternativesFor(plan, r.taskId, cur).map(function(w){ return w.name; });
+    out.push({ key: s.id+'|'+r.taskId+'|'+((it && it.confirmedAt) || ''), staffId: s.id, name: s.name, taskId: r.taskId, taskName: taskById(r.taskId).name, confirmedAt: it ? it.confirmedAt : null, altNames: alts });
   });
   return out;
 }
@@ -4558,7 +4580,10 @@ function renderInstructionAlert(){
   if(Date.now()-a.at > 120000){ state.instructionAlert = null; return ''; }
   return '<div class="instr-alert" id="instrAlert">'+
     '<div class="instr-alert-title">📣 新しい作業指示</div>'+
-    a.items.map(function(i){ return '<div class="instr-alert-line"><b>'+esc(i.name)+'さん</b>:'+esc(i.taskName)+'を開始してください</div>'; }).join('')+
+    a.items.map(function(i){
+      return '<div class="instr-alert-line"><b>'+esc(i.name)+'さん</b>:'+esc(i.taskName)+'を開始してください'+
+        ((i.altNames && i.altNames.length) ? '<div style="font-size:0.8em;opacity:0.85;">(ほかの手待ち作業: '+i.altNames.map(esc).join('・')+' も選べます)</div>' : '')+'</div>';
+    }).join('')+
     '<button type="button" class="instr-alert-close" id="instrAlertClose">確認しました</button>'+
   '</div>';
 }
@@ -6514,9 +6539,11 @@ function renderStaffing(){
     '<div class="stf-card is-idle">'+
       ov.idleProposals.map(function(p){
         var t = taskById(p.taskId);
-        return '<div class="stf-row" data-staffing-proposal="'+esc(p.staffId)+'|'+esc(p.taskId)+'">'+
+        var alts = idleAlternativesFor(plan, p.taskId, null);
+        return '<div class="stf-row" data-staffing-proposal="'+esc(p.staffId)+'|'+esc(p.taskId)+'" style="flex-wrap:wrap;">'+
           '<span class="stf-row-main">＋ '+esc(p.name)+'さん → '+esc(t.name)+'</span>'+
           '<span class="stf-row-meta">手待ち優先度'+esc(String(t.idlePriorityLevel||3))+'</span>'+
+          (alts.length ? '<span class="stf-row-meta">ほかの候補: '+alts.map(function(w){ return esc(w.name); }).join('・')+'(作業者が選べます)</span>' : '')+
         '</div>';
       }).join('')+
     '</div>'
@@ -11424,6 +11451,8 @@ function renderInput(){
       var nextT = taskById(myNext.taskId);
       var nextEta = planEtaText(workerPlan, myNext.taskId);
       var hasCurrent = !!(log && log.taskId!=='BREAK');
+      // 手待ち作業への指示なら、ほかの手待ち作業も選べるようにする
+      var idleAlts = idleAlternativesFor(workerPlan, myNext.taskId, log ? log.taskId : null);
       workInstructionBanner = '<div class="next-suggest-banner" id="workerNextTask" style="border-color:var(--amber-500);">'+
         '<div class="next-suggest-title">📋 本日の作業指示</div>'+
         '<div class="next-suggest-task">'+esc(nextT.name)+'を開始してください</div>'+
@@ -11431,6 +11460,12 @@ function renderInput(){
         '<div class="next-suggest-actions">'+
           '<button type="button" class="add-btn" data-suggest-start="'+esc(myNext.taskId)+'">次の作業を開始</button>'+
         '</div>'+
+        (idleAlts.length ? '<div class="idle-alt-box">'+
+          '<div class="idle-alt-title">ほかの手待ち作業からも選べます</div>'+
+          '<div class="next-suggest-actions">'+idleAlts.map(function(w){
+            return '<button type="button" class="idle-alt-btn" data-suggest-start="'+esc(w.taskId)+'">'+esc(w.name)+'を開始</button>';
+          }).join('')+'</div>'+
+        '</div>' : '')+
         (hasCurrent ? '<div class="pool-hint" style="margin-top:6px;">次の作業を開始すると、今の作業は完了になります。</div>' : '')+
       '</div>';
     }
@@ -14412,7 +14447,7 @@ function renderMonitorInstructions(){
   if(!list.length) return soundHint ? '<div class="mon-instr">'+soundHint+'</div>' : '';
   return '<div class="mon-instr"><span class="mon-instr-title">📋 作業指示</span>'+
     list.map(function(i){
-      return '<span class="mon-instr-item'+(isRecentInstruction(i.key)?' is-new':'')+'"><b>'+esc(i.name)+'</b> → '+esc(i.taskName)+(i.confirmedAt?' <small>'+fmtClock(i.confirmedAt)+'</small>':'')+'</span>';
+      return '<span class="mon-instr-item'+(isRecentInstruction(i.key)?' is-new':'')+'"><b>'+esc(i.name)+'</b> → '+esc(i.taskName)+((i.altNames && i.altNames.length) ? ' <small>(または '+i.altNames.map(esc).join('・')+')</small>' : '')+(i.confirmedAt?' <small>'+fmtClock(i.confirmedAt)+'</small>':'')+'</span>';
     }).join('')+soundHint+'</div>';
 }
 function renderMonitor(){

@@ -701,6 +701,9 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .mon-instr-sound{font-size:12px;opacity:.8;}
 @keyframes instrBlink{0%,100%{opacity:1;}50%{opacity:.45;}}
 .shukei-table th,.shukei-table td{white-space:nowrap;}
+.shukei-loc{display:inline-flex;flex-direction:column;align-items:center;line-height:1.15;margin-right:6px;vertical-align:top;}
+.shukei-loc:last-child{margin-right:0;}
+.shukei-loc-qty{font-size:0.82em;color:var(--slate-500);}
 .shukei-table .shukei-in{border:1px solid var(--paper-line);border-radius:6px;padding:4px 6px;font-size:13px;}
 .shukei-barcode{height:28px;width:auto;max-width:200px;display:block;}
 .shukei-print-head{margin:6px 0;font-size:14px;}
@@ -825,6 +828,12 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .next-suggest-task{font-size:22px;font-weight:700;color:var(--ink-900);margin-bottom:4px;}
 .next-suggest-meta{font-size:12px;color:var(--slate-500);margin-bottom:10px;}
 .next-suggest-actions{display:flex;gap:8px;flex-wrap:wrap;}
+.shukei-sortable{cursor:pointer;user-select:none;white-space:nowrap;}
+.shukei-sortable:hover{background:rgba(245,158,11,.12);}
+.shukei-filldown{margin-left:3px;border:1px solid var(--paper-line);background:#fff;border-radius:5px;padding:2px 6px;font-size:12px;cursor:pointer;color:var(--slate-500);}
+.shukei-drop{border:2px dashed transparent;border-radius:10px;padding:8px;transition:background .15s,border-color .15s;}
+.shukei-drop.is-dragover{border-color:var(--amber-500);background:rgba(245,158,11,.08);}
+.shukei-drop-hint{display:inline-block;margin-left:10px;font-size:12px;color:var(--slate-500);}
 .idle-alt-box{margin-top:12px;padding-top:10px;border-top:1px dashed #9DB5D8;}
 .idle-alt-title{font-size:12px;font-weight:700;color:var(--slate-500);margin-bottom:6px;}
 .idle-alt-btn{background:#fff;border:2px solid #2E5FA3;color:#2E5FA3;border-radius:10px;padding:10px 14px;font-size:14px;font-weight:700;cursor:pointer;}
@@ -1199,6 +1208,10 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-09-30', items:[
+    '【集計表のロケーション在庫】集計表の各区画の棚番の下に、そのロケーションのロジザードの在庫数(引当数を含む)を「(36)」のようにかっこ付きで表示するようにしました。印刷にも出ます。在庫数から引当数を引いて0になる(出せる在庫の無い)ロケーションは表示しません(棚番順の並び替えも同じ)。表示するには、ロジザードの在庫のCSVをもう一度取り込んでください(以前に取り込んだデータには、ロケーションごとの数が入っていないため)',
+    '【集計表の並び替え】集計表・在庫差異の表で、見出し(品番・数量・ケース・各区画の棚番・弥生・ロジ・才数・備考など)を押すと、その項目で並び替えるようにしました。もう一度押すと逆順です(▲昇順/▼降順)。空欄・「-」はどちらの順でも後ろに並びます。集計表は並べ替えた順で保存・印刷されます',
+    '【集計表の入力】「まとめて貼り付け」で、貼り付ける列を「VC番号から(VC番号・品番・数量・備考)」と「品番から(品番・数量・備考)」から選べるようにしました。貼り付けで備考が空の行は、上の行の備考を引き継ぎます。各行の備考の横の「↓」で、その備考を下の行すべてにコピーできます',
+    '【集計表】元データのCSVファイルを、各欄の枠へドラッグ&ドロップしても取り込めるようにしました(ファイル選択ボタンもそのまま使えます)。CSV以外のファイルや、複数のファイルをまとめてドロップした場合は取り込まずに案内を出します',
     '【休憩明けの継続】完了のあとにCSVが追加された作業(例: 生協を9:52に完了 → 追加の取込で残り29ピース)を休憩前にしていた人が、休憩明けにその作業を続ける担当として扱われず、別の作業(返品)の配置予定が出ていた問題を直しました。完了記録の数量より今のCSVの数量が多ければ未完了として扱います(休憩前の作業の「終わりましたか?」の確認・作業を離れたときの完了判定も同じ)',
     '【モニター表示】スタッフごとのカードを、割り当てられた作業の一覧から「今の作業(経過時間・開始・完了予定)」と「次の作業(完了予定)」の表示に変えました。次の作業は確定済みの作業指示(作業完了後の予定を含む)です。休憩中は、休憩前の作業(未完了なら)か、人員配置画面と同じ「休憩明けの配置予定」を表示します',
     '【集計表】元データ(ロジザードの在庫・弥生の在庫・ロジザードの商品マスタ)の登録を、貼り付けからCSVファイルの取り込みに変えました(Shift_JIS・UTF-8のどちらも読めます)。弥生の在庫は、弥生から出力したCSV(「高屋在庫.csv」「丹南在庫.csv」)をそのまま取り込めます。複数の倉庫が入ったファイル(全外部倉庫)は、高屋(倉庫コード0018)・丹南(0000)の分だけを取り出します',
@@ -7659,10 +7672,13 @@ function shukeiParseLogizard(text){
     if(!code) return;
     var blk = r[ix['ブロック略称']] || '';
     var p = products[code] || (products[code] = { name: (ix['商品名']!==undefined ? r[ix['商品名']] : '') || '', blocks:{} });
-    var b = p.blocks[blk] || (p.blocks[blk] = { qty:0, locs:[] });
-    b.qty += shukeiNum(r[ix['在庫数(引当数を含む)']]);
+    var b = p.blocks[blk] || (p.blocks[blk] = { qty:0, locs:[], locQty:{}, locAlloc: ix['引当数']!==undefined ? {} : undefined });
+    var q = shukeiNum(r[ix['在庫数(引当数を含む)']]);
+    b.qty += q;
     var loc = shukeiLocLabel(r[ix['ロケーション']]);
     if(loc && b.locs.indexOf(loc)===-1) b.locs.push(loc);
+    if(loc) b.locQty[loc] = (b.locQty[loc]||0) + q; // ロケーションごとの在庫数(集計表で棚番の下に出す)
+    if(loc && b.locAlloc) b.locAlloc[loc] = (b.locAlloc[loc]||0) + shukeiNum(r[ix['引当数']]); // ロケーションごとの引当数
     count++;
   });
   return { products: products, rowCount: count };
@@ -7719,11 +7735,21 @@ function shukeiComputeRow(siteKey, row, data, pm){
     fraction = qty - Math.floor(qty/packQty)*packQty;
   }
   var zones = {};
-  site.zones.forEach(function(z){ zones[z] = (lz && lz.blocks[z] && lz.blocks[z].locs.length) ? lz.blocks[z].locs.join('・') : '-'; });
+  var zoneLocs = {}; // 区画ごとの [{ loc, qty }]。qty は以前に登録した(ロケーションごとの数を持たない)データでは null
+  site.zones.forEach(function(z){
+    var blk = lz && lz.blocks[z];
+    // 在庫数(引当数を含む)− 引当数 が0以下(出せる在庫が無い)のロケーションは出さない。棚番順の並び替えもこれに合わせる
+    var locs = blk ? blk.locs.filter(function(l){
+      if(!blk.locQty || !blk.locAlloc) return true; // 引当数の無い(以前の)データは従来どおり全部
+      return (blk.locQty[l]||0) - (blk.locAlloc[l]||0) > 0;
+    }) : [];
+    zones[z] = locs.length ? locs.join('・') : '-';
+    zoneLocs[z] = locs.map(function(l){ return { loc: l, qty: blk.locQty ? (blk.locQty[l]||0) : null }; });
+  });
   var logi = 0;
   if(lz) site.stockBlocks.forEach(function(b){ if(lz.blocks[b]) logi += lz.blocks[b].qty; });
   return {
-    code: code, qty: qty, name: (yy && yy.name) || (lz && lz.name) || '', packQty: packQty, cases: cases, fraction: fraction, zones: zones,
+    code: code, qty: qty, name: (yy && yy.name) || (lz && lz.name) || '', packQty: packQty, cases: cases, fraction: fraction, zones: zones, zoneLocs: zoneLocs,
     yayoi: yy ? yy.stock : null, logi: code ? logi : null,
     cubic: (m && typeof m.cubicVolume==='number') ? m.cubicVolume : null,
     jan: (data.barcodes && data.barcodes.codes && data.barcodes.codes[code]) || ''
@@ -7747,6 +7773,31 @@ function shukeiSortRows(siteKey, rows, data, pm){
     return 0;
   });
   return views.map(function(x){ return x.r; });
+}
+/* 項目ごとの並び替え用の比較。数は数として、文字は数字の部分を数として比べる。空欄・「-」はどちらの向きでも後ろ */
+function shukeiCompareValues(a, b, dir){
+  var ea = (a===null || a===undefined || a==='' || a==='-'), eb = (b===null || b===undefined || b==='' || b==='-');
+  if(ea || eb) return ea===eb ? 0 : (ea ? 1 : -1);
+  var c = (typeof a==='number' && typeof b==='number') ? a-b : String(a).localeCompare(String(b), 'ja', { numeric:true });
+  return dir==='desc' ? -c : c;
+}
+/* 集計表の列ごとの値(並び替え用)。key は列の名前(zone:A など) */
+function shukeiSheetSortValue(key, r, v){
+  if(key==='vc') return String(r.vc||'').trim();
+  if(key==='code') return String(r.code||'').trim();
+  if(key==='qty') return (r.qty===''||r.qty===null||r.qty===undefined) ? null : shukeiNum(r.qty);
+  if(key==='note') return String(r.note||'').trim();
+  if(key.indexOf('zone:')===0) return v.code ? v.zones[key.slice(5)] : null;
+  var x = v[key];
+  return x===undefined ? null : x;
+}
+function shukeiSortRowsBy(siteKey, rows, data, pm, key, dir){
+  var views = rows.map(function(r){ return { r: r, v: shukeiComputeRow(siteKey, r, data, pm) }; });
+  views.sort(function(x,y){ return shukeiCompareValues(shukeiSheetSortValue(key, x.r, x.v), shukeiSheetSortValue(key, y.r, y.v), dir); });
+  return views.map(function(x){ return x.r; });
+}
+function shukeiSortMark(sort, key){
+  return (sort && sort.key===key) ? '<span class="no-print">'+(sort.dir==='desc'?' ▼':' ▲')+'</span>' : '';
 }
 /* 在庫差異: 弥生に登録された商品ごとに、弥生の在庫 − ロジザードの在庫(拠点の区画の合計) */
 function shukeiStockDiffRows(siteKey, data, pm){
@@ -7850,12 +7901,24 @@ function renderShukei(){
     body+
   '</div></div>';
 }
+/* 集計表の区画の欄: 棚番の下に、そのロケーションの在庫数(ロジザード)を出す */
+function shukeiZoneCellHtml(v, z){
+  var locs = v.zoneLocs && v.zoneLocs[z];
+  if(!locs || !locs.length) return esc(v.zones[z]);
+  return locs.map(function(x){
+    return '<span class="shukei-loc"><span class="shukei-loc-name">'+esc(x.loc)+'</span>'+
+      (x.qty===null ? '' : '<span class="shukei-loc-qty">('+formatNum(x.qty)+')</span>')+'</span>';
+  }).join('');
+}
 function renderShukeiSheet(siteKey, site, data, draft){
   var codes = draft.rows.map(function(r){ return String(r.code||'').trim(); }).filter(Boolean);
   ensureShukeiProductMaster(codes);
   var pm = state.shukeiPm || {};
-  var cols = ['VC番号','品番','数量','ケース'].concat(site.showFraction ? ['端数'] : []).concat(['入数']).concat(site.zones).concat(['弥生','ロジ','才数']).concat(site.showJan ? ['JAN'] : []).concat(['備考']);
-  var head = '<tr>'+cols.map(function(c){ return '<th>'+esc(c)+'</th>'; }).join('')+'<th class="no-print"></th></tr>';
+  // [見出し, 並び替えのキー]。見出しを押すとその列で並び替える(もう一度押すと逆順)
+  var cols = [['VC番号','vc'],['品番','code'],['数量','qty'],['ケース','cases']].concat(site.showFraction ? [['端数','fraction']] : []).concat([['入数','packQty']])
+    .concat(site.zones.map(function(z){ return [z, 'zone:'+z]; })).concat([['弥生','yayoi'],['ロジ','logi'],['才数','cubic']]).concat(site.showJan ? [['JAN','jan']] : []).concat([['備考','note']]);
+  var sheetSort = state.shukeiSheetSort;
+  var head = '<tr>'+cols.map(function(c){ return '<th class="shukei-sortable" data-shukei-colsort="'+esc(c[1])+'" title="押すと「'+esc(c[0])+'」で並び替え">'+esc(c[0])+shukeiSortMark(sheetSort, c[1])+'</th>'; }).join('')+'<th class="no-print"></th></tr>';
   function inp(i, field, v, w){
     return '<input type="'+(field==='qty'?'number':'text')+'" class="shukei-in" data-shukei-row="'+i+'" data-shukei-field="'+field+'" value="'+esc(v===undefined||v===null?'':v)+'" style="width:'+w+'px;">';
   }
@@ -7868,16 +7931,22 @@ function renderShukeiSheet(siteKey, site, data, draft){
       '<td class="num">'+(v.cases===null?'':formatNum(v.cases))+'</td>'+
       (site.showFraction ? '<td class="num">'+(v.fraction===null?'':formatNum(v.fraction))+'</td>' : '')+
       '<td class="num">'+(v.packQty===null?'':formatNum(v.packQty))+'</td>'+
-      site.zones.map(function(z){ return '<td>'+esc(v.code ? v.zones[z] : '')+'</td>'; }).join('')+
+      site.zones.map(function(z){ return '<td>'+(v.code ? shukeiZoneCellHtml(v, z) : '')+'</td>'; }).join('')+
       '<td class="num">'+(v.yayoi===null?'':formatNum(v.yayoi))+'</td>'+
       '<td class="num">'+(v.logi===null?'':formatNum(v.logi))+'</td>'+
       '<td class="num">'+(!v.code ? '' : (v.cubic===null ? '要計測' : esc(String(v.cubic))))+'</td>'+
       (site.showJan ? '<td>'+(v.jan ? code39Svg(v.jan)+'<div style="font-size:10px;">'+esc(v.jan)+'</div>' : '')+'</td>' : '')+
-      '<td>'+inp(i,'note',r.note,110)+'<span class="print-only">'+esc(r.note||'')+'</span></td>'+
+      '<td style="white-space:nowrap;">'+inp(i,'note',r.note,110)+
+        (i<draft.rows.length-1 ? '<button type="button" class="shukei-filldown no-print" data-shukei-filldown="'+i+'" title="この備考を下の行すべてにコピー">↓</button>' : '')+
+        '<span class="print-only">'+esc(r.note||'')+'</span></td>'+
       '<td class="no-print"><button type="button" class="icon-x" data-shukei-del="'+i+'" title="この行を削除">&times;</button></td>';
     return '<tr>'+cells+'</tr>';
   }).join('') || '<tr><td colspan="'+(cols.length+1)+'" class="empty-note">「行を追加」か「まとめて貼り付け」で入力してください。</td></tr>';
-  var needData = (!data.logizard || !data.yayoi) ? '<div class="vc-warning-box no-print">元データが未登録です(ロジザードの在庫・弥生の在庫)。「📥 元データの登録」から貼り付けてください。未登録の間は、棚番・在庫が空欄になります。</div>' : '';
+  var oldLogi = data.logizard && data.logizard.products && Object.keys(data.logizard.products).slice(0,50).some(function(c){
+    var bl = data.logizard.products[c].blocks; return Object.keys(bl).some(function(k){ return !bl[k].locQty || !bl[k].locAlloc; });
+  });
+  var needData = oldLogi ? '<div class="vc-warning-box no-print">棚番の下にロケーションごとの在庫数を出し、引当済みで在庫の残らないロケーションを除くには、ロジザードの在庫のCSVをもう一度取り込んでください(「📥 元データの登録」)。</div>' : '';
+  needData += (!data.logizard || !data.yayoi) ? '<div class="vc-warning-box no-print">元データが未登録です(ロジザードの在庫・弥生の在庫)。「📥 元データの登録」からCSVを取り込んでください。未登録の間は、棚番・在庫が空欄になります。</div>' : '';
   return needData+
     '<div class="shukei-print-head"><b>'+esc(site.name)+' 集計表</b> ・ 日付 '+esc(dateLabelFromStr(todayStr()))+
       ' ・ 依頼者 <input type="text" id="shukeiRequester" class="no-print" value="'+esc(draft.requester||'')+'" style="width:140px;"><span class="print-only">'+esc(draft.requester||'')+'</span></div>'+
@@ -7888,7 +7957,12 @@ function renderShukeiSheet(siteKey, site, data, draft){
       '<button type="button" class="vc-manage-toggle-btn" id="shukeiPrint">🖨 印刷</button>'+
       '<button type="button" class="vc-manage-toggle-btn" id="shukeiClear" style="color:var(--rust-600);">新規作成(入力を消す)</button>'+
     '</div>'+
-    (state.shukeiPasteOpen ? '<div class="no-print" style="margin-bottom:8px;"><div class="pool-hint" style="margin:0 0 4px;">Excelなどから「VC番号・品番・数量(・備考)」の列をコピーして貼り付けてください(1行に1品番)。見出しの行は不要です。</div>'+
+    (state.shukeiPasteOpen ? '<div class="no-print" style="margin-bottom:8px;">'+
+      '<div style="display:flex;gap:14px;flex-wrap:wrap;margin:0 0 4px;font-size:13px;"><b>貼り付ける列:</b>'+
+        [['vc','VC番号から(VC番号・品番・数量・備考)'],['code','品番から(品番・数量・備考)']].map(function(o){
+          return '<label style="cursor:pointer;"><input type="radio" name="shukeiPasteFrom" value="'+o[0]+'"'+((state.shukeiPasteFrom||'vc')===o[0]?' checked':'')+'> '+o[1]+'</label>';
+        }).join('')+'</div>'+
+      '<div class="pool-hint" style="margin:0 0 4px;">Excelなどから、上で選んだ並びの列をコピーして貼り付けてください(1行に1品番)。見出しの行は不要です。備考が空の行は、上の行の備考を引き継ぎます。</div>'+
       '<textarea id="shukeiPasteText" rows="5" style="width:100%;font-family:monospace;"></textarea>'+
       '<button type="button" class="add-btn" id="shukeiPasteAdd" style="margin-top:4px;">貼り付けた行を追加</button></div>' : '')+
     '<div style="overflow-x:auto;" data-keep-scroll="shukeiSheet"><table class="report-table shukei-table" id="shukeiTable"><thead>'+head+'</thead><tbody>'+rows+'</tbody></table></div>'+
@@ -7899,7 +7973,12 @@ function renderShukeiDiff(siteKey, site, data){
   ensureShukeiProductMaster(Object.keys(data.yayoi.products||{}));
   var all = shukeiStockDiffRows(siteKey, data, state.shukeiPm);
   var onlyDiff = state.shukeiDiffOnly!==false;
-  var list = all.filter(function(r){ return !onlyDiff || r.diff!==0; }).sort(function(a,b){ return Math.abs(b.diff)-Math.abs(a.diff); });
+  var diffSort = state.shukeiDiffSort;
+  var list = all.filter(function(r){ return !onlyDiff || r.diff!==0; }).sort(function(a,b){
+    if(diffSort) return shukeiCompareValues(a[diffSort.key], b[diffSort.key], diffSort.dir);
+    return Math.abs(b.diff)-Math.abs(a.diff); // 初期: 差異の大きい順
+  });
+  function dh(label, key){ return '<th class="shukei-sortable" data-shukei-diffsort="'+key+'" title="押すと「'+esc(label)+'」で並び替え">'+esc(label)+shukeiSortMark(diffSort, key)+'</th>'; }
   var rows = list.map(function(r){
     return '<tr><td>'+esc(r.code)+'</td><td>'+esc(r.name)+'</td><td class="num">'+formatNum(r.yayoi)+'</td><td class="num">'+formatNum(r.logi)+'</td>'+
       '<td class="num" style="'+(r.diff!==0?'color:var(--rust-600);font-weight:700;':'')+'">'+(r.diff>0?'+':'')+formatNum(r.diff)+'</td>'+
@@ -7911,16 +7990,17 @@ function renderShukeiDiff(siteKey, site, data){
       '<button type="button" class="vc-manage-toggle-btn" id="shukeiPrint">🖨 印刷</button>'+
     '</div>'+
     '<div class="shukei-print-head"><b>'+esc(site.name)+' 在庫差異</b> ・ '+esc(dateLabelFromStr(todayStr()))+'</div>'+
-    '<div style="overflow-x:auto;max-height:560px;overflow-y:auto;" data-keep-scroll="shukeiDiff"><table class="report-table shukei-table"><thead><tr><th>商品コード</th><th>商品名</th><th>弥生('+esc(site.name)+')</th><th>ロジザード</th><th>差異(弥生−ロジ)</th><th>ケース数(ロジ)</th><th>才数</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div style="overflow-x:auto;max-height:560px;overflow-y:auto;" data-keep-scroll="shukeiDiff"><table class="report-table shukei-table"><thead><tr>'+dh('商品コード','code')+dh('商品名','name')+dh('弥生('+site.name+')','yayoi')+dh('ロジザード','logi')+dh('差異(弥生−ロジ)','diff')+dh('ケース数(ロジ)','cases')+dh('才数','cubic')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div class="pool-hint no-print" style="margin-top:6px;">ロジザードは'+esc(site.name)+'の区画('+esc(site.stockBlocks.join('・'))+')の在庫の合計、ケース数はロジザードの在庫 ÷ 入数 の切り上げ、才数はkintoneの商品台帳の値です。</div>';
 }
 function renderShukeiDataPanel(siteKey, site, data){
   function block(id, title, hint, info){
-    return '<div class="ll-form-group" style="margin-bottom:14px;"><div class="ll-form-group-title">'+title+'</div>'+
+    return '<div class="ll-form-group shukei-drop" data-shukei-drop="'+id+'" style="margin-bottom:14px;"><div class="ll-form-group-title">'+title+'</div>'+
       '<div class="pool-hint" style="margin:0 0 4px;">'+hint+'</div>'+
       (info ? '<div class="pool-hint" style="margin:0 0 4px;">'+info+'</div>' : '')+
       '<label class="add-btn" style="display:inline-block;cursor:pointer;margin-top:4px;">📄 CSVファイルを選んで取り込む'+
-        '<input type="file" accept=".csv,text/csv" data-shukei-upload="'+id+'" style="display:none;"></label></div>';
+        '<input type="file" accept=".csv,text/csv" data-shukei-upload="'+id+'" style="display:none;"></label>'+
+      '<span class="shukei-drop-hint">またはCSVファイルをこの枠にドラッグ&ドロップ</span></div>';
   }
   function info(d, unit){ return d && d.uploadedAt ? '現在の登録: '+esc(fmtDateTime(d.uploadedAt))+'・'+formatNum(d.rowCount||0)+unit : '現在の登録: なし'; }
   return (state.shukeiUploadMsg ? '<div class="vc-import-status">'+esc(state.shukeiUploadMsg)+'</div>' : '')+
@@ -7931,7 +8011,7 @@ function renderShukeiDataPanel(siteKey, site, data){
 }
 function bindShukei(){
   document.querySelectorAll('[data-shukei-site]').forEach(function(el){
-    el.addEventListener('click', function(){ state.shukeiSite = el.getAttribute('data-shukei-site'); state.shukeiUploadMsg = ''; render(); });
+    el.addEventListener('click', function(){ state.shukeiSite = el.getAttribute('data-shukei-site'); state.shukeiUploadMsg = ''; state.shukeiSheetSort = null; state.shukeiDiffSort = null; render(); });
   });
   document.querySelectorAll('[data-shukei-tab]').forEach(function(el){
     el.addEventListener('click', function(){ state.shukeiTab = el.getAttribute('data-shukei-tab'); state.shukeiUploadMsg = ''; render(); });
@@ -7953,53 +8033,118 @@ function bindShukei(){
     el.addEventListener('click', function(){ draft.rows.splice(Number(el.getAttribute('data-shukei-del')),1); persist(); render(); });
   });
   var add = document.getElementById('shukeiAddRow');
-  if(add) add.addEventListener('click', function(){ draft.rows.push({ vc:'', code:'', qty:'', note:'' }); persist(); render(); });
+  if(add) add.addEventListener('click', function(){ draft.rows.push({ vc:'', code:'', qty:'', note:'' }); state.shukeiSheetSort = null; persist(); render(); });
   var pt = document.getElementById('shukeiPasteToggle');
   if(pt) pt.addEventListener('click', function(){ state.shukeiPasteOpen = !state.shukeiPasteOpen; render(); });
   var pa = document.getElementById('shukeiPasteAdd');
   if(pa) pa.addEventListener('click', function(){
     var rows = shukeiParseTsv(document.getElementById('shukeiPasteText').value);
-    var added = 0;
-    rows.forEach(function(r){ if(r[1]){ draft.rows.push({ vc:r[0]||'', code:r[1], qty:r[2]||'', note:r[3]||'' }); added++; } });
+    var fromCode = (state.shukeiPasteFrom||'vc')==='code';
+    var added = 0, lastNote = '';
+    rows.forEach(function(r){
+      // VC番号から: VC番号・品番・数量・備考 / 品番から: 品番・数量・備考(VC番号は空)
+      var c = fromCode ? { vc:'', code:r[0], qty:r[1], note:r[2] } : { vc:r[0], code:r[1], qty:r[2], note:r[3] };
+      if(!c.code) return;
+      // 備考が空の行は、上の行の備考を引き継ぐ(Excelで先頭の行にだけ備考を書いている場合)
+      if(c.note) lastNote = c.note; else c.note = lastNote;
+      draft.rows.push({ vc:c.vc||'', code:c.code, qty:c.qty||'', note:c.note||'' });
+      added++;
+    });
+    if(added) state.shukeiSheetSort = null;
     state.shukeiPasteOpen = false; persist(); render();
-    showToast(added ? added+'行を追加しました' : '追加できる行がありませんでした(2列目に品番が必要です)');
+    showToast(added ? added+'行を追加しました' : '追加できる行がありませんでした('+(fromCode?'1':'2')+'列目に品番が必要です)');
+  });
+  document.querySelectorAll('input[name="shukeiPasteFrom"]').forEach(function(el){
+    el.addEventListener('change', function(){ if(el.checked) state.shukeiPasteFrom = el.value; });
+  });
+  // 備考を下の行すべてにコピー(Excelのフィルダウンと同じ)
+  document.querySelectorAll('[data-shukei-filldown]').forEach(function(el){
+    // 押したときに備考欄のフォーカスが外れない(入力確定での描き直しでクリックが消えない)ようにする
+    el.addEventListener('mousedown', function(e){ e.preventDefault(); });
+    el.addEventListener('click', function(){
+      var i = Number(el.getAttribute('data-shukei-filldown'));
+      var src = draft.rows[i];
+      if(!src) return;
+      // 入力したばかりで確定前の備考も使う
+      var noteEl = document.querySelector('[data-shukei-row="'+i+'"][data-shukei-field="note"]');
+      if(noteEl) src.note = noteEl.value;
+      var note = src.note || '';
+      var below = draft.rows.slice(i+1);
+      var overwrite = below.filter(function(r){ return r.note && r.note!==note; }).length;
+      if(overwrite && !confirm('下の行のうち'+overwrite+'行の備考が「'+note+'」に置き換わります。よろしいですか?')) return;
+      below.forEach(function(r){ r.note = note; });
+      persist(); render();
+      showToast('備考を下の'+below.length+'行にコピーしました');
+    });
+  });
+  // 見出しを押して並び替え(同じ列をもう一度押すと逆順)。並べ替えた順で保存・印刷する
+  function nextSort(cur, key){ return (cur && cur.key===key && cur.dir==='asc') ? { key:key, dir:'desc' } : { key:key, dir:'asc' }; }
+  document.querySelectorAll('[data-shukei-colsort]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var s2 = nextSort(state.shukeiSheetSort, el.getAttribute('data-shukei-colsort'));
+      state.shukeiSheetSort = s2;
+      draft.rows = shukeiSortRowsBy(siteKey, draft.rows, state.shukeiData || {}, state.shukeiPm, s2.key, s2.dir);
+      persist(); render();
+    });
+  });
+  document.querySelectorAll('[data-shukei-diffsort]').forEach(function(el){
+    el.addEventListener('click', function(){ state.shukeiDiffSort = nextSort(state.shukeiDiffSort, el.getAttribute('data-shukei-diffsort')); render(); });
   });
   var sort = document.getElementById('shukeiSort');
   if(sort) sort.addEventListener('click', function(){
+    state.shukeiSheetSort = null;
     draft.rows = shukeiSortRows(siteKey, draft.rows, state.shukeiData || {}, state.shukeiPm);
     persist(); render();
   });
   var clr = document.getElementById('shukeiClear');
   if(clr) clr.addEventListener('click', function(){
     if(!confirm('入力した行をすべて消します。よろしいですか?')) return;
-    draft.rows = []; persist(); render();
+    draft.rows = []; state.shukeiSheetSort = null; persist(); render();
   });
   var pr = document.getElementById('shukeiPrint');
   if(pr) pr.addEventListener('click', function(){ window.print(); });
   var only = document.getElementById('shukeiDiffOnly');
   if(only) only.addEventListener('change', function(){ state.shukeiDiffOnly = only.checked; render(); });
+  // CSVファイルの取り込み(ファイル選択・ドラッグ&ドロップ共通)
+  async function importShukeiFile(id, file, btn){
+    if(!file) return;
+    var text;
+    try{ text = await shukeiReadFileText(file); }
+    catch(e){ state.shukeiUploadMsg = '⚠️ ファイルを読み込めませんでした'; render(); return; }
+    var parsed, key, label;
+    if(id==='shukeiLogizardText'){ parsed = shukeiParseLogizard(text); key = SHUKEI_KEYS.logizard; label = 'ロジザードの在庫'; }
+    else if(id==='shukeiYayoiText'){ parsed = shukeiParseYayoi(text, SHUKEI_SITES[siteKey]); key = SHUKEI_KEYS.yayoi(siteKey); label = '弥生('+SHUKEI_SITES[siteKey].name+')の在庫'; }
+    else { parsed = shukeiParseBarcodes(text); key = SHUKEI_KEYS.barcodes; label = 'JAN(ロジザードの商品マスタ)'; }
+    if(parsed.error){ state.shukeiUploadMsg = '⚠️ '+parsed.error; render(); return; }
+    parsed.uploadedAt = new Date().toISOString();
+    if(btn) btn.disabled = true;
+    var ok = await persistKey(key, parsed);
+    if(btn) btn.disabled = false;
+    if(!ok){ state.shukeiUploadMsg = '⚠️ '+label+'を保存できませんでした'; render(); return; }
+    await appendAuditLog({ action:'集計表の元データを登録', target: label, before:null, after: formatNum(parsed.rowCount)+'件' });
+    state.shukeiUploadMsg = label+'を登録しました('+file.name+'・'+formatNum(parsed.rowCount)+'件)';
+    state.shukeiData = null; // 読み直す
+    render();
+  }
   document.querySelectorAll('[data-shukei-upload]').forEach(function(btn){
-    btn.addEventListener('change', async function(){
-      var id = btn.getAttribute('data-shukei-upload');
-      var file = btn.files && btn.files[0];
-      if(!file) return;
-      var text;
-      try{ text = await shukeiReadFileText(file); }
-      catch(e){ state.shukeiUploadMsg = '⚠️ ファイルを読み込めませんでした'; render(); return; }
-      var parsed, key, label;
-      if(id==='shukeiLogizardText'){ parsed = shukeiParseLogizard(text); key = SHUKEI_KEYS.logizard; label = 'ロジザードの在庫'; }
-      else if(id==='shukeiYayoiText'){ parsed = shukeiParseYayoi(text, SHUKEI_SITES[siteKey]); key = SHUKEI_KEYS.yayoi(siteKey); label = '弥生('+SHUKEI_SITES[siteKey].name+')の在庫'; }
-      else { parsed = shukeiParseBarcodes(text); key = SHUKEI_KEYS.barcodes; label = 'JAN(ロジザードの商品マスタ)'; }
-      if(parsed.error){ state.shukeiUploadMsg = '⚠️ '+parsed.error; render(); return; }
-      parsed.uploadedAt = new Date().toISOString();
-      btn.disabled = true;
-      var ok = await persistKey(key, parsed);
-      btn.disabled = false;
-      if(!ok){ state.shukeiUploadMsg = '⚠️ '+label+'を保存できませんでした'; render(); return; }
-      await appendAuditLog({ action:'集計表の元データを登録', target: label, before:null, after: formatNum(parsed.rowCount)+'件' });
-      state.shukeiUploadMsg = label+'を登録しました('+file.name+'・'+formatNum(parsed.rowCount)+'件)';
-      state.shukeiData = null; // 読み直す
-      render();
+    btn.addEventListener('change', function(){
+      importShukeiFile(btn.getAttribute('data-shukei-upload'), btn.files && btn.files[0], btn);
+    });
+  });
+  document.querySelectorAll('[data-shukei-drop]').forEach(function(zone){
+    var id = zone.getAttribute('data-shukei-drop');
+    ['dragenter','dragover'].forEach(function(ev){
+      zone.addEventListener(ev, function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; zone.classList.add('is-dragover'); });
+    });
+    zone.addEventListener('dragleave', function(e){ if(!zone.contains(e.relatedTarget)) zone.classList.remove('is-dragover'); });
+    zone.addEventListener('drop', function(e){
+      e.preventDefault();
+      zone.classList.remove('is-dragover');
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if(!files || !files.length) return;
+      if(files.length>1){ state.shukeiUploadMsg = '⚠️ ファイルは1つずつドロップしてください'; render(); return; }
+      if(!/\.csv$/i.test(files[0].name)){ state.shukeiUploadMsg = '⚠️ CSVファイル(.csv)をドロップしてください('+files[0].name+')'; render(); return; }
+      importShukeiFile(id, files[0], zone.querySelector('[data-shukei-upload]'));
     });
   });
 }

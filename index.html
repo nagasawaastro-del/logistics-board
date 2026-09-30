@@ -706,6 +706,17 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .shukei-loc-qty{font-size:0.82em;color:var(--slate-500);}
 .shukei-table .shukei-in{border:1px solid var(--paper-line);border-radius:6px;padding:4px 6px;font-size:13px;}
 .shukei-print-head{margin:6px 0;font-size:14px;}
+.sk-pick tbody tr:nth-child(even) td{background:rgba(15,23,42,.035);}
+.sk-pick td{vertical-align:middle;}
+.sk-pick .sk-no{color:var(--slate-500);font-size:11px;text-align:right;width:1%;}
+.sk-pick .sk-key{font-weight:700;font-size:15px;}
+.sk-pick .sk-minor{color:var(--slate-500);font-size:12px;}
+.sk-pick .sk-name{font-size:11px;color:var(--slate-500);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;}
+.sk-pick .sk-code{font-weight:700;font-size:14px;}
+.sk-pick .sk-zone .shukei-loc-name{font-weight:700;font-size:14px;}
+.sk-pick .sk-total td{border-top:2px solid var(--ink-900);font-weight:700;background:none !important;}
+.print-only-cell{display:none;}
+.sk-pick .sk-check{text-align:center;font-size:16px;width:1%;}
 @media print{
   @page{size:A4 landscape;margin:8mm;}
   body{background:#fff !important;}
@@ -713,8 +724,17 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
   .print-only{display:inline !important;}
   .shukei-wrap .panel{box-shadow:none !important;border:none !important;padding:0 !important;}
   .shukei-wrap [data-keep-scroll]{max-height:none !important;overflow:visible !important;}
-  .shukei-table{font-size:10px;}
-  .shukei-table th,.shukei-table td{padding:2px 4px !important;}
+  .shukei-table{font-size:11px;border-collapse:collapse;}
+  .shukei-table th,.shukei-table td{padding:4px 5px !important;border-bottom:1px solid #999 !important;}
+  .shukei-table thead th{border-bottom:2px solid #000 !important;background:#eee !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .sk-pick tbody tr{page-break-inside:avoid;break-inside:avoid;}
+  .sk-pick tbody tr:nth-child(even) td{background:#f2f2f2 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .sk-pick .sk-key,.sk-pick .sk-code,.sk-pick .sk-zone .shukei-loc-name{font-size:13px;}
+  .sk-pick .sk-item{min-width:170px;}
+  .sk-pick .sk-name{max-width:260px;white-space:normal;font-size:9.5px;}
+  .sk-pick .sk-minor{font-size:10px;color:#555;}
+  .print-only-cell{display:table-cell !important;}
+  .shukei-sortable span{display:none;}
 }
 .toast-container{position:fixed;top:74px;right:16px;z-index:300;display:flex;flex-direction:column;gap:8px;max-width:320px;}
 .toast{
@@ -1185,6 +1205,8 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-10-01', items:[
+    '【人員配置: まだ始めていない指示の入れ替え】CSVが届いた順に人が埋まり、あとから取り込まれた優先度の高い作業(例: ゆうパック・JOD)に誰も回らない問題を直しました。空いている人・手待ち作業の人で足りないときは、まだ作業を始めていない人の未開始の指示のうち、優先度が低い作業(例: VC)の指示を入れ替える配置案を出します(自動確定の対象)。優先度が同じ作業同士では入れ替えません。元の作業は不足に戻り、残りの人で埋められるか計算し直します',
+    '【集計表をピッキングリスト向けに】行番号を付け、品番の下に商品名を表示しました。数量・ケース・端数と棚番を太く大きく、弥生・ロジ・才数は控えめな表示にしました。棚番のある区画の列だけを出し、棚番のない所は「-」ではなく空欄にしました。1行おきに色を付け、最後に合計(品目数・数量・ケース・端数)の行を付けました。印刷では右端にチェック欄(□)を付け、1行がページの境目で分かれないようにしました',
     '【再読み込み】どの画面でも、再読み込みするとトップ画面に戻っていた問題を直しました。開いている画面(管理者・設定・集計のタブ、集計表の拠点とタブ、作業記録で選んでいる人を含む)をアドレスの「#」のあとに残し、再読み込みしても同じ画面を開き直します。モニターの「← 戻る」は、再読み込み後などで直前の画面が分からないときはトップに戻ります(アプリの外に出ないようにしました)',
     '【モニター表示】右側の「作業別サマリー」と、下の「今月のチームチャレンジ」を廃止しました。スタッフのカード(今の作業・次の作業)を画面の横幅いっぱいに表示し、下は「本日の出荷実績」だけにしました'
   ]},
@@ -3854,7 +3876,7 @@ function computeTaskUrgency(task, workVolume, taskPriority, productivityMaster, 
      不足があれば ①空いている人 → ②手待ち作業の人 → ③余力のある人 の順で追加配置を検討
      残作業量 ÷ (配置人数ぶんの生産性の合計) → 予定完了時刻
    ============================================================ */
-var STAFFING_TIER_LABELS = { 1:'空いている人', 2:'手待ち作業の人', 3:'余力のある作業の人', next:'次の作業(手待ち)', noprod:'生産性未設定の作業' };
+var STAFFING_TIER_LABELS = { 1:'空いている人', 2:'手待ち作業の人', pend:'まだ始めていない、優先度の低い作業の指示の人', 3:'余力のある作業の人', next:'次の作業(手待ち)', noprod:'生産性未設定の作業' };
 /* スタッフの勤務終了時刻("HH:MM")。人員配置・必要人数・完了予定・残り勤務時間・自動退勤はすべてこの時刻を使う。
    優先順位: 本日の勤務終了時刻(day.shiftEndOverrides。その日だけの早退・残業)
            → スタッフ設定の退勤時間(roster の shiftEnd。通常の退勤時刻)
@@ -4219,21 +4241,56 @@ function computeTodayStaffingPlan(ctx){
     }
     return null;
   }
+  // まだ作業を始めていない人の、確定済み・未開始の指示(作業完了後の予定を除く)。
+  // あとから取り込まれた、より優先度の高い作業に人が足りないときは、この指示を入れ替えてよい
+  // (CSVが届いた順に人が埋まり、優先度の高い作業に誰も回らないことを防ぐ)。優先度が同じなら動かさない(行ったり来たりしない)。
+  function movablePendingFor(sid, calc){
+    var info = staffInfo[sid];
+    var it = pendingConfirmedByStaff[sid];
+    if(!it || it.startAfterTaskId || it.taskId===calc.taskId) return null;
+    if(!info || !info.present || info.excluded || info.remainMin<=0 || info.onBreak || used[sid]) return null;
+    var cur = info.currentTaskId;
+    if(cur && !(taskMap[cur] && taskMap[cur].idleLikely===true)) return null; // 作業(手待ち作業以外)を始めている
+    var from = calcByTask[it.taskId];
+    var fromPriority = from ? from.priorityLevel : ((taskMap[it.taskId] && taskMap[it.taskId].priorityLevel) || 4);
+    if(!(fromPriority > calc.priorityLevel)) return null;
+    return { item: it, fromPriority: fromPriority };
+  }
   var proposals = [];
   function pickFor(calc){
     var targetIsIdleWork = !!(taskMap[calc.taskId] && taskMap[calc.taskId].idleLikely===true);
-    for(var tier=1; tier<=3; tier++){
+    var tiers = [1, 2, 'pend', 3]; // 入れ替えは、空いている人・手待ち作業の人で足りないときだけ(指示の出し直しを減らす)
+    for(var ti=0; ti<tiers.length; ti++){
+      var tier = tiers[ti];
       if(tier===2 && targetIsIdleWork) continue; // 手待ち作業から別の手待ち作業へは動かさない
-      var best = null;
+      if(tier==='pend' && targetIsIdleWork) continue;
+      var best = null, bestPrio = null;
       Object.keys(staffInfo).forEach(function(sid){
-        if(candidateTier(sid)!==tier) return;
+        var mv = null;
+        if(tier==='pend'){ mv = movablePendingFor(sid, calc); if(!mv) return; }
+        else if(candidateTier(sid)!==tier) return;
         var cap = capacityFor(sid, calc.taskId, calc.capDeadlineMs);
         if(!cap.rate || cap.capQty<=0) return;
+        // 入れ替えは、指示の作業の優先度が一番低い人から(同じなら処理見込みの多い人)
+        if(tier==='pend'){
+          if(!best || mv.fromPriority>bestPrio || (mv.fromPriority===bestPrio && cap.capQty>best.capQty)){ best = cap; bestPrio = mv.fromPriority; best.pendingItem = mv.item; }
+          return;
+        }
         if(!best || cap.capQty>best.capQty) best = cap;
       });
       if(best) return { cap: best, tier: tier };
     }
     return null;
+  }
+  // 入れ替えた人を、元の指示の作業の予定人員から外し、その作業の不足に戻す(優先度の低い作業はこのあとで計算するため、残りの人で埋められるか見る)
+  function releasePendingFrom(sid, it){
+    var src = calcByTask[it.taskId];
+    if(!src) return;
+    var w = src.plannedWorkers.find(function(x){ return x.staffId===sid; });
+    if(!w) return;
+    src.plannedWorkers = src.plannedWorkers.filter(function(x){ return x.staffId!==sid; });
+    src.capacity -= w.capQty;
+    if(src.rate) src.shortageQty = Math.max(0, src.remainingQty - src.capacity - (src.breakCapacity||0));
   }
   function addProposal(sid, calc, tier, cap, reason){
     var info = staffInfo[sid];
@@ -4273,8 +4330,12 @@ function computeTodayStaffingPlan(ctx){
     while(shortage>0.01){
       var pick = pickFor(calc);
       if(!pick) break;
-      addProposal(pick.cap.staffId, calc, pick.tier, pick.cap,
-        '不足'+Math.ceil(shortage)+calc.unit+'を補うため('+STAFFING_TIER_LABELS[pick.tier]+'から、処理見込み'+Math.round(pick.cap.capQty)+calc.unit+')');
+      var pendIt = pick.tier==='pend' ? pick.cap.pendingItem : null;
+      var np = addProposal(pick.cap.staffId, calc, pick.tier, pick.cap,
+        '不足'+Math.ceil(shortage)+calc.unit+'を補うため('+(pendIt
+          ? 'まだ始めていない「'+(taskMap[pendIt.taskId] ? taskMap[pendIt.taskId].name : '')+'」(優先度'+(calcByTask[pendIt.taskId] ? calcByTask[pendIt.taskId].priorityLevel : '')+')の指示より優先度が高いため入れ替え'
+          : STAFFING_TIER_LABELS[pick.tier]+'から')+'、処理見込み'+Math.round(pick.cap.capQty)+calc.unit+')');
+      if(pendIt){ np.fromPendingTaskId = pendIt.taskId; releasePendingFrom(pick.cap.staffId, pendIt); }
       shortage -= pick.cap.capQty;
     }
   });
@@ -6418,6 +6479,7 @@ function staffingProposalFromText(p){
   var from = p.fromTaskId ? taskById(p.fromTaskId).name : '';
   if(p.tier===1) return '空いている人';
   if(p.tier===2) return '手待ち作業'+(from?'「'+from+'」':'')+'から';
+  if(p.tier==='pend') return 'まだ始めていない「'+(p.fromPendingTaskId ? taskById(p.fromPendingTaskId).name : '')+'」の指示から入れ替え';
   if(p.tier===3) return '余力のある作業'+(from?'「'+from+'」':'')+'から';
   if(p.tier==='noprod') return '空いている人(生産性未設定の作業)';
   return '';
@@ -7861,7 +7923,7 @@ function renderShukei(){
 /* 集計表の区画の欄: 棚番の下に、そのロケーションの在庫数(ロジザード)を出す */
 function shukeiZoneCellHtml(v, z){
   var locs = v.zoneLocs && v.zoneLocs[z];
-  if(!locs || !locs.length) return esc(v.zones[z]);
+  if(!locs || !locs.length) return '';
   return locs.map(function(x){
     return '<span class="shukei-loc"><span class="shukei-loc-name">'+esc(x.loc)+'</span>'+
       (x.qty===null ? '' : '<span class="shukei-loc-qty">('+formatNum(x.qty)+')</span>')+'</span>';
@@ -7871,41 +7933,58 @@ function renderShukeiSheet(siteKey, site, data, draft){
   var codes = draft.rows.map(function(r){ return String(r.code||'').trim(); }).filter(Boolean);
   ensureShukeiProductMaster(codes);
   var pm = state.shukeiPm || {};
-  // [見出し, 並び替えのキー]。見出しを押すとその列で並び替える(もう一度押すと逆順)
-  var cols = [['VC番号','vc'],['品番','code'],['数量','qty'],['ケース','cases']].concat(site.showFraction ? [['端数','fraction']] : []).concat([['入数','packQty']])
-    .concat(site.zones.map(function(z){ return [z, 'zone:'+z]; })).concat([['弥生','yayoi'],['ロジ','logi'],['才数','cubic']]).concat([['備考','note']]);
+  var views = draft.rows.map(function(r){ return shukeiComputeRow(siteKey, r, data, pm); });
+  // 棚番のある区画の列だけ出す(ピッキングリストとして見やすくするため。元データが無いときは全部)
+  var zonesShown = site.zones.filter(function(z){ return views.some(function(v){ return v.code && v.zoneLocs[z] && v.zoneLocs[z].length; }); });
+  if(!zonesShown.length) zonesShown = site.zones.slice();
+  // [見出し, 並び替えのキー, 列のclass]。見出しを押すとその列で並び替える(もう一度押すと逆順)
+  var cols = [['VC番号','vc',''],['品番・商品名','code',''],['数量','qty','num sk-key'],['ケース','cases','num sk-key']].concat(site.showFraction ? [['端数','fraction','num sk-key']] : []).concat([['入数','packQty','num']])
+    .concat(zonesShown.map(function(z){ return [z, 'zone:'+z, 'sk-zone']; })).concat([['弥生','yayoi','num sk-minor'],['ロジ','logi','num sk-minor'],['才数','cubic','num sk-minor']]).concat([['備考','note','']]);
   var sheetSort = state.shukeiSheetSort;
-  var head = '<tr>'+cols.map(function(c){ return '<th class="shukei-sortable" data-shukei-colsort="'+esc(c[1])+'" title="押すと「'+esc(c[0])+'」で並び替え">'+esc(c[0])+shukeiSortMark(sheetSort, c[1])+'</th>'; }).join('')+'<th class="no-print"></th></tr>';
+  var head = '<tr><th class="sk-no">No</th>'+cols.map(function(c){ return '<th class="shukei-sortable '+c[2]+'" data-shukei-colsort="'+esc(c[1])+'" title="押すと「'+esc(c[0])+'」で並び替え">'+esc(c[0])+shukeiSortMark(sheetSort, c[1])+'</th>'; }).join('')+
+    '<th class="print-only-cell sk-check">✓</th><th class="no-print"></th></tr>';
   function inp(i, field, v, w){
     return '<input type="'+(field==='qty'?'number':'text')+'" class="shukei-in" data-shukei-row="'+i+'" data-shukei-field="'+field+'" value="'+esc(v===undefined||v===null?'':v)+'" style="width:'+w+'px;">';
   }
+  var tot = { qty:0, cases:0, fraction:0, n:0 };
   var rows = draft.rows.map(function(r, i){
-    var v = shukeiComputeRow(siteKey, r, data, pm);
+    var v = views[i];
     var unknown = v.code && !v.name && !v.packQty;
-    var cells = '<td>'+inp(i,'vc',r.vc,56)+'<span class="print-only">'+esc(r.vc||'')+'</span></td>'+
-      '<td>'+inp(i,'code',r.code,90)+'<span class="print-only">'+esc(r.code||'')+'</span>'+(unknown?'<div class="no-print" style="color:#B54708;font-size:10px;">品番が見つかりません</div>':'')+'</td>'+
-      '<td class="num">'+inp(i,'qty',r.qty,64)+'<span class="print-only">'+esc(r.qty||'')+'</span></td>'+
-      '<td class="num">'+(v.cases===null?'':formatNum(v.cases))+'</td>'+
-      (site.showFraction ? '<td class="num">'+(v.fraction===null?'':formatNum(v.fraction))+'</td>' : '')+
+    if(v.code){ tot.n++; tot.qty += shukeiNum(r.qty); tot.cases += v.cases||0; tot.fraction += v.fraction||0; }
+    var cells = '<td class="sk-no">'+(i+1)+'</td>'+
+      '<td>'+inp(i,'vc',r.vc,56)+'<span class="print-only">'+esc(r.vc||'')+'</span></td>'+
+      '<td class="sk-item">'+inp(i,'code',r.code,90)+'<span class="print-only sk-code">'+esc(r.code||'')+'</span>'+
+        (v.name ? '<div class="sk-name" title="'+esc(v.name)+'">'+esc(v.name)+'</div>' : '')+
+        (unknown?'<div class="no-print" style="color:#B54708;font-size:10px;">品番が見つかりません</div>':'')+'</td>'+
+      '<td class="num sk-key">'+inp(i,'qty',r.qty,64)+'<span class="print-only">'+esc(r.qty||'')+'</span></td>'+
+      '<td class="num sk-key">'+(v.cases===null?'':formatNum(v.cases))+'</td>'+
+      (site.showFraction ? '<td class="num sk-key">'+(v.fraction ? formatNum(v.fraction) : '')+'</td>' : '')+
       '<td class="num">'+(v.packQty===null?'':formatNum(v.packQty))+'</td>'+
-      site.zones.map(function(z){ return '<td>'+(v.code ? shukeiZoneCellHtml(v, z) : '')+'</td>'; }).join('')+
-      '<td class="num">'+(v.yayoi===null?'':formatNum(v.yayoi))+'</td>'+
-      '<td class="num">'+(v.logi===null?'':formatNum(v.logi))+'</td>'+
-      '<td class="num">'+(!v.code ? '' : (v.cubic===null ? '要計測' : esc(String(v.cubic))))+'</td>'+
+      zonesShown.map(function(z){ return '<td class="sk-zone">'+(v.code ? shukeiZoneCellHtml(v, z) : '')+'</td>'; }).join('')+
+      '<td class="num sk-minor">'+(v.yayoi===null?'':formatNum(v.yayoi))+'</td>'+
+      '<td class="num sk-minor">'+(v.logi===null?'':formatNum(v.logi))+'</td>'+
+      '<td class="num sk-minor">'+(!v.code ? '' : (v.cubic===null ? '要計測' : esc(String(v.cubic))))+'</td>'+
       '<td style="white-space:nowrap;">'+inp(i,'note',r.note,110)+
         (i<draft.rows.length-1 ? '<button type="button" class="shukei-filldown no-print" data-shukei-filldown="'+i+'" title="この備考を下の行すべてにコピー">↓</button>' : '')+
         '<span class="print-only">'+esc(r.note||'')+'</span></td>'+
+      '<td class="print-only-cell sk-check">□</td>'+
       '<td class="no-print"><button type="button" class="icon-x" data-shukei-del="'+i+'" title="この行を削除">&times;</button></td>';
     return '<tr>'+cells+'</tr>';
-  }).join('') || '<tr><td colspan="'+(cols.length+1)+'" class="empty-note">「行を追加」か「まとめて貼り付け」で入力してください。</td></tr>';
+  }).join('') || '<tr><td colspan="'+(cols.length+3)+'" class="empty-note">「行を追加」か「まとめて貼り付け」で入力してください。</td></tr>';
+  // 合計行(数量・ケース・端数)。tfoot は印刷でページごとに繰り返されるため、表の最後の行にする
+  var foot = tot.n ? '<tbody><tr class="sk-total"><td></td><td></td><td>合計 '+formatNum(tot.n)+'品目</td>'+
+    '<td class="num sk-key">'+formatNum(tot.qty)+'</td><td class="num sk-key">'+formatNum(tot.cases)+'</td>'+
+    (site.showFraction ? '<td class="num sk-key">'+formatNum(tot.fraction)+'</td>' : '')+
+    '<td colspan="'+(zonesShown.length+5)+'"></td><td class="print-only-cell"></td><td class="no-print"></td></tr></tbody>' : '';
   var oldLogi = data.logizard && data.logizard.products && Object.keys(data.logizard.products).slice(0,50).some(function(c){
     var bl = data.logizard.products[c].blocks; return Object.keys(bl).some(function(k){ return !bl[k].locQty || !bl[k].locAlloc; });
   });
   var needData = oldLogi ? '<div class="vc-warning-box no-print">棚番の下にロケーションごとの在庫数を出し、引当済みで在庫の残らないロケーションを除くには、ロジザードの在庫のCSVをもう一度取り込んでください(「📥 元データの登録」)。</div>' : '';
   needData += (!data.logizard || !data.yayoi) ? '<div class="vc-warning-box no-print">元データが未登録です(ロジザードの在庫・弥生の在庫)。「📥 元データの登録」からCSVを取り込んでください。未登録の間は、棚番・在庫が空欄になります。</div>' : '';
   return needData+
-    '<div class="shukei-print-head"><b>'+esc(site.name)+' 集計表</b> ・ 日付 '+esc(dateLabelFromStr(todayStr()))+
-      ' ・ 依頼者 <input type="text" id="shukeiRequester" class="no-print" value="'+esc(draft.requester||'')+'" style="width:140px;"><span class="print-only">'+esc(draft.requester||'')+'</span></div>'+
+    '<div class="shukei-print-head"><b>'+esc(site.name)+' 集計表(ピッキングリスト)</b> ・ 日付 '+esc(dateLabelFromStr(todayStr()))+
+      ' ・ 依頼者 <input type="text" id="shukeiRequester" class="no-print" value="'+esc(draft.requester||'')+'" style="width:140px;"><span class="print-only">'+esc(draft.requester||'')+'</span>'+
+      (tot.n ? ' ・ '+formatNum(tot.n)+'品目・数量 '+formatNum(tot.qty)+'・ケース '+formatNum(tot.cases)+(site.showFraction ? '・端数 '+formatNum(tot.fraction) : '') : '')+'</div>'+
     '<div class="no-print" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;">'+
       '<button type="button" class="add-btn" id="shukeiAddRow">＋ 行を追加</button>'+
       '<button type="button" class="vc-manage-toggle-btn" id="shukeiPasteToggle">まとめて貼り付け</button>'+
@@ -7921,7 +8000,7 @@ function renderShukeiSheet(siteKey, site, data, draft){
       '<div class="pool-hint" style="margin:0 0 4px;">Excelなどから、上で選んだ並びの列をコピーして貼り付けてください(1行に1品番)。見出しの行は不要です。備考が空の行は、上の行の備考を引き継ぎます。</div>'+
       '<textarea id="shukeiPasteText" rows="5" style="width:100%;font-family:monospace;"></textarea>'+
       '<button type="button" class="add-btn" id="shukeiPasteAdd" style="margin-top:4px;">貼り付けた行を追加</button></div>' : '')+
-    '<div style="overflow-x:auto;" data-keep-scroll="shukeiSheet"><table class="report-table shukei-table" id="shukeiTable"><thead>'+head+'</thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div style="overflow-x:auto;" data-keep-scroll="shukeiSheet"><table class="report-table shukei-table sk-pick" id="shukeiTable"><thead>'+head+'</thead><tbody>'+rows+'</tbody>'+foot+'</table></div>'+
     '<div class="pool-hint no-print" style="margin-top:6px;">入数は弥生の在庫データ(無い場合はkintoneの商品台帳)、才数はkintoneの商品台帳の値です。ケースは'+(site.caseMode==='up'?'切り上げ':'切り捨て(残りは端数)')+'で計算します。ロジはロジザードの'+esc(site.name)+'の区画('+esc(site.stockBlocks.join('・'))+')の在庫の合計です。入力中の表はこの端末に保存されます。</div>';
 }
 function renderShukeiDiff(siteKey, site, data){
@@ -13090,7 +13169,7 @@ async function checkAutoBreak(){
 /* 配置案の自動確定。管理者が常に画面を見ているわけではないため、空いている人・手待ち作業の人への配置案は
    管理者の確定を待たずに確定し、作業者画面の「📋 本日の作業指示」に出す。
    通常の作業中の人を動かす案(余力のある作業の人から)と、作業完了後の配置予定は、これまでどおり管理者が確定する。 */
-var AUTO_CONFIRM_TIERS = { 1:true, 2:true, next:true, noprod:true };
+var AUTO_CONFIRM_TIERS = { 1:true, pend:true, 2:true, next:true, noprod:true };
 var AUTO_CONFIRM_MIN_INTERVAL_MS = 20000; // 同じ端末で読み直し・確定を行う最短間隔(定期更新のたびに通信しないため)
 var AUTO_CONFIRM_MIN_WORK_MIN = 15;         // 勤務終了までの実働がこれより短い人には、自動で新しい作業を指示しない
 var AUTO_CONFIRM_IGNORED_HOLD_MS = 30*60000; // 自動確定の指示を実施しなかった人には、この間は別の指示を自動で出さない(指示が次々に変わらないように)

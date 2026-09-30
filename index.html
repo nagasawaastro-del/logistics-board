@@ -1205,6 +1205,7 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-10-01', items:[
+    '【才数の表示】才数は小数第2位まで(四捨五入)で表示するようにしました(集計表・在庫差異・収支の商品別・収支の内訳)。売上の計算には元の値をそのまま使います',
     '【人員配置: まだ始めていない指示の入れ替え】CSVが届いた順に人が埋まり、あとから取り込まれた優先度の高い作業(例: ゆうパック・JOD)に誰も回らない問題を直しました。空いている人・手待ち作業の人で足りないときは、まだ作業を始めていない人の未開始の指示のうち、優先度が低い作業(例: VC)の指示を入れ替える配置案を出します(自動確定の対象)。優先度が同じ作業同士では入れ替えません。元の作業は不足に戻り、残りの人で埋められるか計算し直します',
     '【集計表をピッキングリスト向けに】行番号を付け、品番の下に商品名を表示しました。数量・ケース・端数と棚番を太く大きく、弥生・ロジ・才数は控えめな表示にしました。棚番のある区画の列だけを出し、棚番のない所は「-」ではなく空欄にしました。1行おきに色を付け、最後に合計(品目数・数量・ケース・端数)の行を付けました。印刷では右端にチェック欄(□)を付け、1行がページの境目で分かれないようにしました',
     '【再読み込み】どの画面でも、再読み込みするとトップ画面に戻っていた問題を直しました。開いている画面(管理者・設定・集計のタブ、集計表の拠点とタブ、作業記録で選んでいる人を含む)をアドレスの「#」のあとに残し、再読み込みしても同じ画面を開き直します。モニターの「← 戻る」は、再読み込み後などで直前の画面が分からないときはトップに戻ります(アプリの外に出ないようにしました)',
@@ -6927,8 +6928,14 @@ function renderFinancialNotices(n){
   if(!items.length) return '';
   return '<div class="vc-warning-box" style="margin-top:10px;">'+items.map(function(t){ return '<div>⚠️ '+esc(t)+'</div>'; }).join('')+'</div>';
 }
+/* 才数の表示は小数第2位まで(四捨五入)。計算には元の値を使う */
+function formatCubic(v){
+  var n = Number(v);
+  if(!isFinite(n)) return '';
+  return (Math.round(n*100)/100).toLocaleString('ja-JP', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
 function formatPriceQty(u, q){
-  return (u==='才' ? (Math.round(q*100)/100).toLocaleString('ja-JP') : formatNum(Math.round(q)))+u;
+  return (u==='才' ? formatCubic(q) : formatNum(Math.round(q)))+u;
 }
 function renderFinancial(){
   ensureManagerSessionChecked();
@@ -6996,7 +7003,7 @@ function renderFinancial(){
       var partialMark = r.splitPartial ? '<span title="ケース・バラのデータが無い取込を含みます">※</span>' : '';
       var caseCell = '<td class="num"'+(r.caseQty===null?' style="color:var(--slate-500);"':'')+'>'+(r.caseQty!==null?formatNum(r.caseQty)+partialMark:'データなし')+'</td>';
       var fractionCell = '<td class="num"'+(r.fractionQty===null?' style="color:var(--slate-500);"':'')+'>'+(r.fractionQty!==null?formatNum(r.fractionQty)+partialMark:'データなし')+'</td>';
-      var cubicCell = '<td class="num"'+(r.cubicVolume===null||r.cubicVolume===undefined?' style="color:var(--slate-500);"':'')+'>'+(typeof r.cubicVolume==='number' ? r.cubicVolume : '―')+'</td>';
+      var cubicCell = '<td class="num"'+(r.cubicVolume===null||r.cubicVolume===undefined?' style="color:var(--slate-500);"':'')+'>'+(typeof r.cubicVolume==='number' ? formatCubic(r.cubicVolume) : '―')+'</td>';
       if(isProductAxis){
         return '<tr><td>'+esc(r.productCode||r.key)+'</td><td>'+esc(r.productName||r.label)+'</td><td>'+esc(r.customerName||'')+'</td>'+
           '<td class="num">'+formatNum(r.shipmentCount)+'</td>'+
@@ -7963,7 +7970,7 @@ function renderShukeiSheet(siteKey, site, data, draft){
       zonesShown.map(function(z){ return '<td class="sk-zone">'+(v.code ? shukeiZoneCellHtml(v, z) : '')+'</td>'; }).join('')+
       '<td class="num sk-minor">'+(v.yayoi===null?'':formatNum(v.yayoi))+'</td>'+
       '<td class="num sk-minor">'+(v.logi===null?'':formatNum(v.logi))+'</td>'+
-      '<td class="num sk-minor">'+(!v.code ? '' : (v.cubic===null ? '要計測' : esc(String(v.cubic))))+'</td>'+
+      '<td class="num sk-minor">'+(!v.code ? '' : (v.cubic===null ? '要計測' : formatCubic(v.cubic)))+'</td>'+
       '<td style="white-space:nowrap;">'+inp(i,'note',r.note,110)+
         (i<draft.rows.length-1 ? '<button type="button" class="shukei-filldown no-print" data-shukei-filldown="'+i+'" title="この備考を下の行すべてにコピー">↓</button>' : '')+
         '<span class="print-only">'+esc(r.note||'')+'</span></td>'+
@@ -8017,7 +8024,7 @@ function renderShukeiDiff(siteKey, site, data){
   var rows = list.map(function(r){
     return '<tr><td>'+esc(r.code)+'</td><td>'+esc(r.name)+'</td><td class="num">'+formatNum(r.yayoi)+'</td><td class="num">'+formatNum(r.logi)+'</td>'+
       '<td class="num" style="'+(r.diff!==0?'color:var(--rust-600);font-weight:700;':'')+'">'+(r.diff>0?'+':'')+formatNum(r.diff)+'</td>'+
-      '<td class="num">'+(r.cases===null?'':formatNum(r.cases))+'</td><td class="num">'+(r.cubic===null?'要計測':esc(String(r.cubic)))+'</td></tr>';
+      '<td class="num">'+(r.cases===null?'':formatNum(r.cases))+'</td><td class="num">'+(r.cubic===null?'要計測':formatCubic(r.cubic))+'</td></tr>';
   }).join('') || '<tr><td colspan="7" class="empty-note">'+(onlyDiff?'差異のある商品はありません':'商品がありません')+'</td></tr>';
   return '<div class="no-print" style="display:flex;gap:12px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">'+
       '<label><input type="checkbox" id="shukeiDiffOnly"'+(onlyDiff?' checked':'')+'> 差異のある商品だけ表示</label>'+

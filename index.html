@@ -684,6 +684,21 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .ach-refresh-small{display:block;margin:28px auto 8px;}
 .ach-generated-note{text-align:center;font-size:11px;color:var(--slate-300);}
 
+.print-only{display:none;}
+.shukei-table th,.shukei-table td{white-space:nowrap;}
+.shukei-table .shukei-in{border:1px solid var(--paper-line);border-radius:6px;padding:4px 6px;font-size:13px;}
+.shukei-barcode{height:28px;width:auto;max-width:200px;display:block;}
+.shukei-print-head{margin:6px 0;font-size:14px;}
+@media print{
+  @page{size:A4 landscape;margin:8mm;}
+  body{background:#fff !important;}
+  .no-print,.topbar,.toast-container,.shukei-in{display:none !important;}
+  .print-only{display:inline !important;}
+  .shukei-wrap .panel{box-shadow:none !important;border:none !important;padding:0 !important;}
+  .shukei-wrap [data-keep-scroll]{max-height:none !important;overflow:visible !important;}
+  .shukei-table{font-size:10px;}
+  .shukei-table th,.shukei-table td{padding:2px 4px !important;}
+}
 .toast-container{position:fixed;top:74px;right:16px;z-index:300;display:flex;flex-direction:column;gap:8px;max-width:320px;}
 .toast{
   background:var(--ink-900);color:#fff;border-radius:10px;padding:12px 16px;font-size:13px;line-height:1.5;
@@ -1167,7 +1182,8 @@ var CHANGELOG = [
     '【作業単価マスタ】得意先・計算単位を設定するとき、操作するたびに表が先頭まで戻ってしまい設定しにくかった問題を直しました(表の枠のスクロール位置を保つようにしました)',
     '【収支・分析】売上を、kintoneの作業単価(作業単価マスタで設定した得意先・計算単位)× 得意先ごとの数量で計算するようにしました。本日の収支に得意先ごとの内訳(作業単価 数量×単価)と作業ごとの売上を表示します。作業ごとの売上は、その作業で扱った得意先ごとの数量から計算します。得意先・計算単位が未設定の項目、当てはまる単価が無い得意先、才数の無いケースは画面でお知らせします',
     '【人件費】人件費を「スタッフごとの作業時間 × 時給」で計算するようにしました。時給は「設定 → スタッフ設定」の「時給」欄で、スタッフごとと標準時給(時給を設定していない人に使う)を設定します。表示は管理者のみ、変更は admin のみで、時給はスタッフ一覧とは別の、管理者だけが読める場所に保存します(操作履歴にも金額は残しません)。標準時給が未設定の間は、以前の共通時給を使います',
-    '【設定】「単価・人件費設定」をなくしました(単価はkintoneの作業単価マスタ、時給はスタッフ設定へ)。これまでに入力した単価・時給のデータは消していません'
+    '【設定】「単価・人件費設定」をなくしました(単価はkintoneの作業単価マスタ、時給はスタッフ設定へ)。これまでに入力した単価・時給のデータは消していません',
+    '【集計表(高屋・丹南)】Excelの「高屋集計表」「丹南集計表」をロジリンクに移し、トップページに追加しました。VC番号・品番・数量を入れると、入数・ケース(高屋は端数も)・区画ごとの棚番・弥生の在庫・ロジザードの在庫・才数(丹南はJANのバーコードも)を出し、棚番順の並び替え・印刷ができます。「在庫差異」タブで弥生とロジザードの在庫の差も確認できます。元データ(ロジザードの在庫・弥生の在庫・ロジザードの商品マスタ)は、Excelと同じ範囲を貼り付けて登録します。ログインなしで使えます'
   ]},
   { date:'2026-09-27', items:[
     '【数量の手入力を廃止】作業者・管理者が数量(件数・内訳の数量)を入力する欄をなくしました。数量はCSV取込の出荷数量(ピース・ケース・バラ・件数)から集計し、VCはケース数入力(加算・取消の履歴つき)を使います。作業時間(開始・終了・切替・休憩・内訳の時間)の記録は従来どおりです。過去に入力された数量データは削除していません',
@@ -7409,6 +7425,381 @@ function computeFinancialSummary(dateStr, day, workVolume){
     missingWageStaffIds: labor.missingStaffIds, unsetItems: model.unsetItems };
 }
 
+/* ---------- 集計表(高屋・丹南)。以前の Excel「高屋集計表」「丹南集計表」をロジリンクに移したもの ----------
+   ・集計表: VC番号・品番・数量を入れると、入数・ケース(・端数)・区画ごとの棚番・弥生の在庫・ロジザードの在庫・才数(・JAN)を出す。
+     並び替え(棚番順)・新規作成(入力を消す)・印刷。入力中の表はこの端末に保存する(拠点ごと)。
+   ・在庫差異: 弥生の在庫 − ロジザードの在庫(拠点の区画の合計)、ケース数(ロジ ÷ 入数 の切り上げ)、才数。
+   ・元データは Excel と同じ範囲を貼り付けて登録する(ロジザードの在庫・弥生の在庫・ロジザードの商品マスタ(JAN))。
+     入数は弥生の値(無ければ商品台帳)、才数は kintone 商品台帳(product_master)の値を使う。 */
+var SHUKEI_SITES = {
+  takaya: { name:'高屋', zones:['S','AA','A','B','C','D','E'], stockBlocks:['A','B','C','D','E','S','AA','SET','ZZZ','XXX'],
+            sortZones:['A','B','C','D'], caseMode:'down', showFraction:true, showJan:false },
+  tannan: { name:'丹南', zones:['F','G','H','I','J','K','HOME'], stockBlocks:['F','G','H','I','J','K','HOME'],
+            sortZones:['F','G','H','I','J','K'], caseMode:'up', showFraction:false, showJan:true }
+};
+var SHUKEI_KEYS = { logizard:'shukei-logizard-stock', barcodes:'shukei-logizard-barcodes', yayoi: function(site){ return 'shukei-yayoi-stock:'+site; } };
+/* ロジザードのロケーション番号(8桁: 棚3桁+段3桁+位置2桁)を Excel のロケ表記(棚 / 棚-段 / 棚-段-位置)にする。数字以外はそのまま */
+function shukeiLocLabel(v){
+  var s = String(v===null||v===undefined ? '' : v).trim();
+  if(!/^\d+$/.test(s)) return s;
+  s = s.padStart(8,'0');
+  var rack = parseInt(s.slice(0,3),10), lv = parseInt(s.slice(3,6),10), pos = parseInt(s.slice(6,8),10);
+  var out = String(rack);
+  if(lv || pos) out += '-'+lv;
+  if(pos) out += '-'+pos;
+  return out;
+}
+/* Excel からコピーした範囲(タブ区切り)を行・列に分ける。セル内の改行は想定しない */
+function shukeiParseTsv(text){
+  return String(text||'').replace(/\r/g,'').split('\n').filter(function(l){ return l.trim()!==''; }).map(function(l){ return l.split('\t').map(function(c){ return c.trim(); }); });
+}
+function shukeiNum(v){
+  var n = Number(String(v===null||v===undefined?'':v).replace(/,/g,''));
+  return isFinite(n) ? n : 0;
+}
+/* ロジザードの在庫(「ロジ貼り付け」と同じ表。見出し行つき)→ { products:{ 商品ID:{ name, blocks:{ 区画:{ qty, locs[] } } } }, rowCount } */
+function shukeiParseLogizard(text){
+  var rows = shukeiParseTsv(text);
+  if(!rows.length) return { error:'貼り付けられた内容がありません。' };
+  var h = rows[0], ix = {};
+  h.forEach(function(n,i){ ix[n] = i; });
+  var need = ['ブロック略称','ロケーション','商品ID','在庫数(引当数を含む)'];
+  var missing = need.filter(function(n){ return ix[n]===undefined; });
+  if(missing.length) return { error:'見出しに「'+missing.join('」「')+'」が見つかりません。ロジザードの在庫の表を、見出しの行ごと貼り付けてください。' };
+  var products = {}, count = 0;
+  rows.slice(1).forEach(function(r){
+    var code = r[ix['商品ID']];
+    if(!code) return;
+    var blk = r[ix['ブロック略称']] || '';
+    var p = products[code] || (products[code] = { name: (ix['商品名']!==undefined ? r[ix['商品名']] : '') || '', blocks:{} });
+    var b = p.blocks[blk] || (p.blocks[blk] = { qty:0, locs:[] });
+    b.qty += shukeiNum(r[ix['在庫数(引当数を含む)']]);
+    var loc = shukeiLocLabel(r[ix['ロケーション']]);
+    if(loc && b.locs.indexOf(loc)===-1) b.locs.push(loc);
+    count++;
+  });
+  return { products: products, rowCount: count };
+}
+/* 弥生の在庫(Excel の「高屋在庫差異」「丹南在庫差異」の A〜F 列: 商品コード・商品名・単位・入数・(未使用)・在庫)。見出し行は有っても無くてもよい */
+function shukeiParseYayoi(text){
+  var rows = shukeiParseTsv(text);
+  if(rows.length && rows[0][0]==='商品コード') rows = rows.slice(1);
+  if(!rows.length) return { error:'貼り付けられた内容がありません。' };
+  if(rows.some(function(r){ return r.length<6; })) return { error:'列が足りない行があります。弥生の在庫を A列(商品コード)〜F列(在庫)まで含めて貼り付けてください。' };
+  var products = {};
+  rows.forEach(function(r){
+    if(!r[0]) return;
+    products[r[0]] = { name: r[1]||'', unit: r[2]||'', packQty: shukeiNum(r[3]) || null, stock: shukeiNum(r[5]) };
+  });
+  return { products: products, rowCount: Object.keys(products).length };
+}
+/* ロジザードの商品マスタ(見出し行つき)から、商品IDごとのJAN(バーコード)だけを取り出す */
+function shukeiParseBarcodes(text){
+  var rows = shukeiParseTsv(text);
+  if(!rows.length) return { error:'貼り付けられた内容がありません。' };
+  var h = rows[0], ci = h.indexOf('商品ID'), bi = h.indexOf('バーコード');
+  if(bi===-1) bi = h.indexOf('バーコード数値');
+  if(ci===-1 || bi===-1) return { error:'見出しに「商品ID」「バーコード」が見つかりません。ロジザードの商品マスタを、見出しの行ごと貼り付けてください。' };
+  var codes = {};
+  rows.slice(1).forEach(function(r){ if(r[ci] && r[bi]) codes[r[ci]] = r[bi]; });
+  return { codes: codes, rowCount: Object.keys(codes).length };
+}
+/* 集計表の1行分の計算。data: { logizard, yayoi, barcodes } / pm: 商品台帳 { 品番: { packQty, cubicVolume } } */
+function shukeiComputeRow(siteKey, row, data, pm){
+  var site = SHUKEI_SITES[siteKey];
+  var code = String(row.code||'').trim();
+  var qty = shukeiNum(row.qty);
+  var lz = data.logizard && data.logizard.products ? data.logizard.products[code] : null;
+  var yy = data.yayoi && data.yayoi.products ? data.yayoi.products[code] : null;
+  var m = pm ? pm[code] : null;
+  var packQty = (yy && yy.packQty) ? yy.packQty : ((m && m.packQty) ? m.packQty : null);
+  var cases = null, fraction = null;
+  if(code && packQty && qty){
+    cases = site.caseMode==='up' ? Math.ceil(qty/packQty) : Math.floor(qty/packQty);
+    fraction = qty - Math.floor(qty/packQty)*packQty;
+  }
+  var zones = {};
+  site.zones.forEach(function(z){ zones[z] = (lz && lz.blocks[z] && lz.blocks[z].locs.length) ? lz.blocks[z].locs.join('・') : '-'; });
+  var logi = 0;
+  if(lz) site.stockBlocks.forEach(function(b){ if(lz.blocks[b]) logi += lz.blocks[b].qty; });
+  return {
+    code: code, qty: qty, name: (yy && yy.name) || (lz && lz.name) || '', packQty: packQty, cases: cases, fraction: fraction, zones: zones,
+    yayoi: yy ? yy.stock : null, logi: code ? logi : null,
+    cubic: (m && typeof m.cubicVolume==='number') ? m.cubicVolume : null,
+    jan: (data.barcodes && data.barcodes.codes && data.barcodes.codes[code]) || ''
+  };
+}
+/* 棚番の並び替え用の比較(数字は数として比べる。「-」(棚番なし)は後ろ) */
+function shukeiLocCompare(a, b){
+  var ea = (!a || a==='-'), eb = (!b || b==='-');
+  if(ea || eb) return ea===eb ? 0 : (ea ? 1 : -1);
+  return String(a).localeCompare(String(b), 'ja', { numeric:true });
+}
+/* 並び替え(Excel の「並び替え」ボタンと同じく、拠点の区画の棚番の順) */
+function shukeiSortRows(siteKey, rows, data, pm){
+  var site = SHUKEI_SITES[siteKey];
+  var views = rows.map(function(r){ return { r: r, v: shukeiComputeRow(siteKey, r, data, pm) }; });
+  views.sort(function(x,y){
+    for(var i=0;i<site.sortZones.length;i++){
+      var z = site.sortZones[i], c = shukeiLocCompare(x.v.zones[z], y.v.zones[z]);
+      if(c) return c;
+    }
+    return 0;
+  });
+  return views.map(function(x){ return x.r; });
+}
+/* 在庫差異: 弥生に登録された商品ごとに、弥生の在庫 − ロジザードの在庫(拠点の区画の合計) */
+function shukeiStockDiffRows(siteKey, data, pm){
+  var site = SHUKEI_SITES[siteKey];
+  var yy = (data.yayoi && data.yayoi.products) || {};
+  return Object.keys(yy).map(function(code){
+    var y = yy[code];
+    var lz = data.logizard && data.logizard.products ? data.logizard.products[code] : null;
+    var logi = 0;
+    if(lz) site.stockBlocks.forEach(function(b){ if(lz.blocks[b]) logi += lz.blocks[b].qty; });
+    var m = pm ? pm[code] : null;
+    var packQty = y.packQty || (m && m.packQty) || null;
+    return { code: code, name: y.name, yayoi: y.stock, logi: logi, diff: y.stock - logi,
+      cases: packQty ? Math.ceil(logi/packQty) : null, cubic: (m && typeof m.cubicVolume==='number') ? m.cubicVolume : null };
+  });
+}
+/* Code39 のバーコード(SVG)。丹南の Excel は「*JAN*」をバーコードのフォントで印刷していたため、同じ形式を画像で出す */
+var CODE39_PATTERNS = {'0':'nnnwwnwnn','1':'wnnwnnnnw','2':'nnwwnnnnw','3':'wnwwnnnnn','4':'nnnwwnnnw','5':'wnnwwnnnn','6':'nnwwwnnnn','7':'nnnwnnwnw','8':'wnnwnnwnn','9':'nnwwnnwnn',
+  'A':'wnnnnwnnw','B':'nnwnnwnnw','C':'wnwnnwnnn','D':'nnnnwwnnw','E':'wnnnwwnnn','F':'nnwnwwnnn','G':'nnnnnwwnw','H':'wnnnnwwnn','I':'nnwnnwwnn','J':'nnnnwwwnn',
+  'K':'wnnnnnnww','L':'nnwnnnnww','M':'wnwnnnnwn','N':'nnnnwnnww','O':'wnnnwnnwn','P':'nnwnwnnwn','Q':'nnnnnnwww','R':'wnnnnnwwn','S':'nnwnnnwwn','T':'nnnnwnwwn',
+  'U':'wwnnnnnnw','V':'nwwnnnnnw','W':'wwwnnnnnn','X':'nwnnwnnnw','Y':'wwnnwnnnn','Z':'nwwnwnnnn','-':'nwnnnnwnw','.':'wwnnnnwnn',' ':'nwwnnnwnn','*':'nwnnwnwnn'};
+function code39Svg(text){
+  var t = String(text||'').toUpperCase();
+  if(!t || !/^[0-9A-Z\-. ]+$/.test(t)) return '';
+  var chars = ('*'+t+'*').split(''), x = 0, bars = '', nw = 1, ww = 3, h = 34;
+  chars.forEach(function(ch){
+    var p = CODE39_PATTERNS[ch];
+    for(var i=0;i<9;i++){
+      var w = p[i]==='w' ? ww : nw;
+      if(i%2===0) bars += '<rect x="'+x+'" y="0" width="'+w+'" height="'+h+'"/>';
+      x += w;
+    }
+    x += nw; // 文字の間のすき間
+  });
+  return '<svg class="shukei-barcode" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+x+' '+h+'" width="'+x+'" height="'+h+'" preserveAspectRatio="none"><g fill="#000">'+bars+'</g></svg>';
+}
+/* 元データの読み込み(拠点ごとの弥生と、共通のロジザード・JAN) */
+async function loadShukeiData(siteKey){
+  var r = await Promise.all([
+    loadKeyJson(SHUKEI_KEYS.logizard, function(){ return null; }),
+    loadKeyJson(SHUKEI_KEYS.yayoi(siteKey), function(){ return null; }),
+    loadKeyJson(SHUKEI_KEYS.barcodes, function(){ return null; })
+  ]);
+  return { site: siteKey, logizard: r[0], yayoi: r[1], barcodes: r[2] };
+}
+/* 入力中の表(拠点ごと)。この端末のブラウザに保存する(作りかけの表を閉じても消えないように) */
+function loadShukeiDraft(siteKey){
+  try{
+    var d = JSON.parse(localStorage.getItem('shukei-draft:'+siteKey)||'null');
+    if(d && Array.isArray(d.rows)) return d;
+  }catch(e){}
+  return { requester:'', rows: [] };
+}
+function saveShukeiDraft(siteKey, d){
+  try{ localStorage.setItem('shukei-draft:'+siteKey, JSON.stringify(d)); }catch(e){}
+}
+/* 集計表で使う品番の商品台帳(入数・才数)を読み込む(読み込み済みの品番は読み直さない) */
+function ensureShukeiProductMaster(codes){
+  if(!state.shukeiPm) state.shukeiPm = {};
+  var need = codes.filter(function(c){ return c && !Object.prototype.hasOwnProperty.call(state.shukeiPm, c); });
+  if(!need.length || state.shukeiPmLoading) return;
+  state.shukeiPmLoading = true;
+  need.forEach(function(c){ state.shukeiPm[c] = null; }); // 読み込み中(失敗しても何度も読み直さない)
+  getProductMasterInfoBatch(need).then(function(info){
+    if(info && !info.__error) need.forEach(function(c){ state.shukeiPm[c] = info[c] || null; });
+  }).catch(function(){}).then(function(){ state.shukeiPmLoading = false; render(); });
+}
+function renderShukei(){
+  var siteKey = state.shukeiSite || 'takaya';
+  var site = SHUKEI_SITES[siteKey];
+  var tab = state.shukeiTab || 'sheet';
+  if(!state.shukeiData || state.shukeiData.site!==siteKey){
+    if(!state.shukeiDataLoading){
+      state.shukeiDataLoading = true;
+      loadShukeiData(siteKey).then(function(d){ state.shukeiData = d; state.shukeiDataLoading = false; render(); });
+    }
+  }
+  if(!state.shukeiDraft || state.shukeiDraft.site!==siteKey){
+    var dr = loadShukeiDraft(siteKey); dr.site = siteKey; state.shukeiDraft = dr;
+  }
+  var data = (state.shukeiData && state.shukeiData.site===siteKey) ? state.shukeiData : { logizard:null, yayoi:null, barcodes:null };
+  var draft = state.shukeiDraft;
+  var siteTabs = Object.keys(SHUKEI_SITES).map(function(k){
+    return '<button type="button" class="vc-tab-btn'+(k===siteKey?' active':'')+'" data-shukei-site="'+k+'">'+esc(SHUKEI_SITES[k].name)+'</button>';
+  }).join('');
+  var tabs = [['sheet','📋 集計表'],['diff','📦 在庫差異'],['data','📥 元データの登録']].map(function(t){
+    return '<button type="button" class="vc-tab-btn'+(tab===t[0]?' active':'')+'" data-shukei-tab="'+t[0]+'">'+t[1]+'</button>';
+  }).join('');
+  function asOf(d){ return d && d.uploadedAt ? fmtDateTime(d.uploadedAt) : '未登録'; }
+  var status = '<div class="pool-hint" style="margin:6px 0 10px;">ロジザードの在庫: '+esc(asOf(data.logizard))+' ・ 弥生('+esc(site.name)+')の在庫: '+esc(asOf(data.yayoi))+
+    (site.showJan ? ' ・ JAN(ロジザードの商品マスタ): '+esc(asOf(data.barcodes)) : '')+'</div>';
+  var body = '';
+  if(tab==='sheet') body = renderShukeiSheet(siteKey, site, data, draft);
+  else if(tab==='diff') body = renderShukeiDiff(siteKey, site, data);
+  else body = renderShukeiDataPanel(siteKey, site, data);
+  return '<div class="mgr-wrap shukei-wrap"><div class="panel">'+
+    '<div class="panel-title">🧾 集計表(高屋・丹南)</div>'+
+    '<div class="vc-tabs no-print">'+siteTabs+'</div>'+
+    '<div class="vc-tabs no-print" style="margin-top:6px;">'+tabs+'</div>'+
+    '<div class="no-print">'+status+'</div>'+
+    body+
+  '</div></div>';
+}
+function renderShukeiSheet(siteKey, site, data, draft){
+  var codes = draft.rows.map(function(r){ return String(r.code||'').trim(); }).filter(Boolean);
+  ensureShukeiProductMaster(codes);
+  var pm = state.shukeiPm || {};
+  var cols = ['VC番号','品番','数量','ケース'].concat(site.showFraction ? ['端数'] : []).concat(['入数']).concat(site.zones).concat(['弥生','ロジ','才数']).concat(site.showJan ? ['JAN'] : []).concat(['備考']);
+  var head = '<tr>'+cols.map(function(c){ return '<th>'+esc(c)+'</th>'; }).join('')+'<th class="no-print"></th></tr>';
+  function inp(i, field, v, w){
+    return '<input type="'+(field==='qty'?'number':'text')+'" class="shukei-in" data-shukei-row="'+i+'" data-shukei-field="'+field+'" value="'+esc(v===undefined||v===null?'':v)+'" style="width:'+w+'px;">';
+  }
+  var rows = draft.rows.map(function(r, i){
+    var v = shukeiComputeRow(siteKey, r, data, pm);
+    var unknown = v.code && !v.name && !v.packQty;
+    var cells = '<td>'+inp(i,'vc',r.vc,56)+'<span class="print-only">'+esc(r.vc||'')+'</span></td>'+
+      '<td>'+inp(i,'code',r.code,90)+'<span class="print-only">'+esc(r.code||'')+'</span>'+(unknown?'<div class="no-print" style="color:#B54708;font-size:10px;">品番が見つかりません</div>':'')+'</td>'+
+      '<td class="num">'+inp(i,'qty',r.qty,64)+'<span class="print-only">'+esc(r.qty||'')+'</span></td>'+
+      '<td class="num">'+(v.cases===null?'':formatNum(v.cases))+'</td>'+
+      (site.showFraction ? '<td class="num">'+(v.fraction===null?'':formatNum(v.fraction))+'</td>' : '')+
+      '<td class="num">'+(v.packQty===null?'':formatNum(v.packQty))+'</td>'+
+      site.zones.map(function(z){ return '<td>'+esc(v.code ? v.zones[z] : '')+'</td>'; }).join('')+
+      '<td class="num">'+(v.yayoi===null?'':formatNum(v.yayoi))+'</td>'+
+      '<td class="num">'+(v.logi===null?'':formatNum(v.logi))+'</td>'+
+      '<td class="num">'+(!v.code ? '' : (v.cubic===null ? '要計測' : esc(String(v.cubic))))+'</td>'+
+      (site.showJan ? '<td>'+(v.jan ? code39Svg(v.jan)+'<div style="font-size:10px;">'+esc(v.jan)+'</div>' : '')+'</td>' : '')+
+      '<td>'+inp(i,'note',r.note,110)+'<span class="print-only">'+esc(r.note||'')+'</span></td>'+
+      '<td class="no-print"><button type="button" class="icon-x" data-shukei-del="'+i+'" title="この行を削除">&times;</button></td>';
+    return '<tr>'+cells+'</tr>';
+  }).join('') || '<tr><td colspan="'+(cols.length+1)+'" class="empty-note">「行を追加」か「まとめて貼り付け」で入力してください。</td></tr>';
+  var needData = (!data.logizard || !data.yayoi) ? '<div class="vc-warning-box no-print">元データが未登録です(ロジザードの在庫・弥生の在庫)。「📥 元データの登録」から貼り付けてください。未登録の間は、棚番・在庫が空欄になります。</div>' : '';
+  return needData+
+    '<div class="shukei-print-head"><b>'+esc(site.name)+' 集計表</b> ・ 日付 '+esc(dateLabelFromStr(todayStr()))+
+      ' ・ 依頼者 <input type="text" id="shukeiRequester" class="no-print" value="'+esc(draft.requester||'')+'" style="width:140px;"><span class="print-only">'+esc(draft.requester||'')+'</span></div>'+
+    '<div class="no-print" style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;">'+
+      '<button type="button" class="add-btn" id="shukeiAddRow">＋ 行を追加</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="shukeiPasteToggle">まとめて貼り付け</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="shukeiSort">並び替え(棚番順)</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="shukeiPrint">🖨 印刷</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="shukeiClear" style="color:var(--rust-600);">新規作成(入力を消す)</button>'+
+    '</div>'+
+    (state.shukeiPasteOpen ? '<div class="no-print" style="margin-bottom:8px;"><div class="pool-hint" style="margin:0 0 4px;">Excelなどから「VC番号・品番・数量(・備考)」の列をコピーして貼り付けてください(1行に1品番)。見出しの行は不要です。</div>'+
+      '<textarea id="shukeiPasteText" rows="5" style="width:100%;font-family:monospace;"></textarea>'+
+      '<button type="button" class="add-btn" id="shukeiPasteAdd" style="margin-top:4px;">貼り付けた行を追加</button></div>' : '')+
+    '<div style="overflow-x:auto;" data-keep-scroll="shukeiSheet"><table class="report-table shukei-table" id="shukeiTable"><thead>'+head+'</thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div class="pool-hint no-print" style="margin-top:6px;">入数は弥生の在庫データ(無い場合はkintoneの商品台帳)、才数はkintoneの商品台帳の値です。ケースは'+(site.caseMode==='up'?'切り上げ':'切り捨て(残りは端数)')+'で計算します。ロジはロジザードの'+esc(site.name)+'の区画('+esc(site.stockBlocks.join('・'))+')の在庫の合計です。入力中の表はこの端末に保存されます。</div>';
+}
+function renderShukeiDiff(siteKey, site, data){
+  if(!data.yayoi || !data.logizard) return '<div class="vc-warning-box">元データが未登録です(ロジザードの在庫・弥生の在庫)。「📥 元データの登録」から貼り付けてください。</div>';
+  ensureShukeiProductMaster(Object.keys(data.yayoi.products||{}));
+  var all = shukeiStockDiffRows(siteKey, data, state.shukeiPm);
+  var onlyDiff = state.shukeiDiffOnly!==false;
+  var list = all.filter(function(r){ return !onlyDiff || r.diff!==0; }).sort(function(a,b){ return Math.abs(b.diff)-Math.abs(a.diff); });
+  var rows = list.map(function(r){
+    return '<tr><td>'+esc(r.code)+'</td><td>'+esc(r.name)+'</td><td class="num">'+formatNum(r.yayoi)+'</td><td class="num">'+formatNum(r.logi)+'</td>'+
+      '<td class="num" style="'+(r.diff!==0?'color:var(--rust-600);font-weight:700;':'')+'">'+(r.diff>0?'+':'')+formatNum(r.diff)+'</td>'+
+      '<td class="num">'+(r.cases===null?'':formatNum(r.cases))+'</td><td class="num">'+(r.cubic===null?'要計測':esc(String(r.cubic)))+'</td></tr>';
+  }).join('') || '<tr><td colspan="7" class="empty-note">'+(onlyDiff?'差異のある商品はありません':'商品がありません')+'</td></tr>';
+  return '<div class="no-print" style="display:flex;gap:12px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">'+
+      '<label><input type="checkbox" id="shukeiDiffOnly"'+(onlyDiff?' checked':'')+'> 差異のある商品だけ表示</label>'+
+      '<span class="pool-hint" style="margin:0;">'+formatNum(all.filter(function(r){ return r.diff!==0; }).length)+'件に差異 / 全'+formatNum(all.length)+'件</span>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="shukeiPrint">🖨 印刷</button>'+
+    '</div>'+
+    '<div class="shukei-print-head"><b>'+esc(site.name)+' 在庫差異</b> ・ '+esc(dateLabelFromStr(todayStr()))+'</div>'+
+    '<div style="overflow-x:auto;max-height:560px;overflow-y:auto;" data-keep-scroll="shukeiDiff"><table class="report-table shukei-table"><thead><tr><th>商品コード</th><th>商品名</th><th>弥生('+esc(site.name)+')</th><th>ロジザード</th><th>差異(弥生−ロジ)</th><th>ケース数(ロジ)</th><th>才数</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div class="pool-hint no-print" style="margin-top:6px;">ロジザードは'+esc(site.name)+'の区画('+esc(site.stockBlocks.join('・'))+')の在庫の合計、ケース数はロジザードの在庫 ÷ 入数 の切り上げ、才数はkintoneの商品台帳の値です。</div>';
+}
+function renderShukeiDataPanel(siteKey, site, data){
+  function block(id, title, hint, info){
+    return '<div class="ll-form-group" style="margin-bottom:14px;"><div class="ll-form-group-title">'+title+'</div>'+
+      '<div class="pool-hint" style="margin:0 0 4px;">'+hint+'</div>'+
+      (info ? '<div class="pool-hint" style="margin:0 0 4px;">'+info+'</div>' : '')+
+      '<textarea id="'+id+'" rows="4" style="width:100%;font-family:monospace;" placeholder="ここに貼り付け"></textarea>'+
+      '<button type="button" class="add-btn" data-shukei-upload="'+id+'" style="margin-top:4px;">登録する</button></div>';
+  }
+  function info(d, unit){ return d && d.uploadedAt ? '現在の登録: '+esc(fmtDateTime(d.uploadedAt))+'・'+formatNum(d.rowCount||0)+unit : '現在の登録: なし'; }
+  return (state.shukeiUploadMsg ? '<div class="vc-import-status">'+esc(state.shukeiUploadMsg)+'</div>' : '')+
+    block('shukeiLogizardText', 'ロジザードの在庫(高屋・丹南 共通)', 'Excelの「ロジ貼り付け」シートに貼っていた表を、見出しの行ごと貼り付けてください(ブロック略称・ロケーション・商品ID・在庫数(引当数を含む)の列を使います)。棚番もここから作ります。', info(data.logizard,'行'))+
+    block('shukeiYayoiText', '弥生の在庫('+esc(site.name)+')', 'Excelの「'+esc(site.name)+'在庫差異」シートのA列(商品コード)〜F列('+esc(site.name)+'在庫)に貼っていた範囲を貼り付けてください(見出しの行は有っても無くても構いません)。', info(data.yayoi,'商品'))+
+    (site.showJan ? block('shukeiBarcodeText', 'ロジザードの商品マスタ(JAN)', 'Excelの「ロジ(マスタ)」シートの表を、見出しの行ごと貼り付けてください(商品ID・バーコードの列だけを使います)。', info(data.barcodes,'商品')) : '')+
+    '<div class="pool-hint">登録したデータは、ロジリンクを使う全員で共有されます。以前のデータは新しいデータに置き換わります。</div>';
+}
+function bindShukei(){
+  document.querySelectorAll('[data-shukei-site]').forEach(function(el){
+    el.addEventListener('click', function(){ state.shukeiSite = el.getAttribute('data-shukei-site'); state.shukeiUploadMsg = ''; render(); });
+  });
+  document.querySelectorAll('[data-shukei-tab]').forEach(function(el){
+    el.addEventListener('click', function(){ state.shukeiTab = el.getAttribute('data-shukei-tab'); state.shukeiUploadMsg = ''; render(); });
+  });
+  var siteKey = state.shukeiSite || 'takaya';
+  var draft = state.shukeiDraft;
+  function persist(){ saveShukeiDraft(siteKey, { requester: draft.requester, rows: draft.rows }); }
+  document.querySelectorAll('[data-shukei-field]').forEach(function(el){
+    el.addEventListener('change', function(){
+      var i = Number(el.getAttribute('data-shukei-row')), f = el.getAttribute('data-shukei-field');
+      if(!draft.rows[i]) return;
+      draft.rows[i][f] = el.value;
+      persist(); render();
+    });
+  });
+  var req = document.getElementById('shukeiRequester');
+  if(req) req.addEventListener('change', function(){ draft.requester = req.value; persist(); });
+  document.querySelectorAll('[data-shukei-del]').forEach(function(el){
+    el.addEventListener('click', function(){ draft.rows.splice(Number(el.getAttribute('data-shukei-del')),1); persist(); render(); });
+  });
+  var add = document.getElementById('shukeiAddRow');
+  if(add) add.addEventListener('click', function(){ draft.rows.push({ vc:'', code:'', qty:'', note:'' }); persist(); render(); });
+  var pt = document.getElementById('shukeiPasteToggle');
+  if(pt) pt.addEventListener('click', function(){ state.shukeiPasteOpen = !state.shukeiPasteOpen; render(); });
+  var pa = document.getElementById('shukeiPasteAdd');
+  if(pa) pa.addEventListener('click', function(){
+    var rows = shukeiParseTsv(document.getElementById('shukeiPasteText').value);
+    var added = 0;
+    rows.forEach(function(r){ if(r[1]){ draft.rows.push({ vc:r[0]||'', code:r[1], qty:r[2]||'', note:r[3]||'' }); added++; } });
+    state.shukeiPasteOpen = false; persist(); render();
+    showToast(added ? added+'行を追加しました' : '追加できる行がありませんでした(2列目に品番が必要です)');
+  });
+  var sort = document.getElementById('shukeiSort');
+  if(sort) sort.addEventListener('click', function(){
+    draft.rows = shukeiSortRows(siteKey, draft.rows, state.shukeiData || {}, state.shukeiPm);
+    persist(); render();
+  });
+  var clr = document.getElementById('shukeiClear');
+  if(clr) clr.addEventListener('click', function(){
+    if(!confirm('入力した行をすべて消します。よろしいですか?')) return;
+    draft.rows = []; persist(); render();
+  });
+  var pr = document.getElementById('shukeiPrint');
+  if(pr) pr.addEventListener('click', function(){ window.print(); });
+  var only = document.getElementById('shukeiDiffOnly');
+  if(only) only.addEventListener('change', function(){ state.shukeiDiffOnly = only.checked; render(); });
+  document.querySelectorAll('[data-shukei-upload]').forEach(function(btn){
+    btn.addEventListener('click', async function(){
+      var id = btn.getAttribute('data-shukei-upload');
+      var text = document.getElementById(id).value;
+      var parsed, key, label;
+      if(id==='shukeiLogizardText'){ parsed = shukeiParseLogizard(text); key = SHUKEI_KEYS.logizard; label = 'ロジザードの在庫'; }
+      else if(id==='shukeiYayoiText'){ parsed = shukeiParseYayoi(text); key = SHUKEI_KEYS.yayoi(siteKey); label = '弥生('+SHUKEI_SITES[siteKey].name+')の在庫'; }
+      else { parsed = shukeiParseBarcodes(text); key = SHUKEI_KEYS.barcodes; label = 'JAN(ロジザードの商品マスタ)'; }
+      if(parsed.error){ state.shukeiUploadMsg = '⚠️ '+parsed.error; render(); return; }
+      parsed.uploadedAt = new Date().toISOString();
+      btn.disabled = true;
+      var ok = await persistKey(key, parsed);
+      btn.disabled = false;
+      if(!ok){ state.shukeiUploadMsg = '⚠️ '+label+'を保存できませんでした'; render(); return; }
+      await appendAuditLog({ action:'集計表の元データを登録', target: label, before:null, after: formatNum(parsed.rowCount)+'件' });
+      state.shukeiUploadMsg = label+'を登録しました('+formatNum(parsed.rowCount)+'件)';
+      state.shukeiData = null; // 読み直す
+      render();
+    });
+  });
+}
+
 /* ---------- render root ---------- */
 function isUserBusy(){
   if(state.suppressRender) return true;
@@ -7469,6 +7860,7 @@ function render(){
   else if(state.role==='history') html += renderHistory();
   else if(state.role==='adminHub') html += renderAdminHub();
   else if(state.role==='settingsHub') html += renderSettingsHub();
+  else if(state.role==='shukei') html += renderShukei();
   if(state.modal) html += renderModal();
   root.innerHTML = html;
   bindCommon();
@@ -7480,6 +7872,7 @@ function render(){
   if(state.role==='history') bindHistory();
   if(state.role==='adminHub') bindAdminHub();
   if(state.role==='settingsHub') bindSettingsHub();
+  if(state.role==='shukei') bindShukei();
   if(state.modal) bindModal();
   restoreScroll();
 }
@@ -7511,6 +7904,11 @@ function renderGate(){
         '<div class="gate-icon" style="background:#EFF8FF;color:#175CD3;">&#128197;</div>'+
         '<div class="gate-card-title">カレンダー</div>'+
         '<div class="gate-card-desc">'+(isReadOnlyAccount() ? '登録済みの作業・出勤予定を月ごとに確認(閲覧のみ)' : '登録済みの作業・出勤予定を月ごとに確認して編集')+'</div>'+
+      '</button>'+
+      '<button class="gate-card" data-role="shukei">'+
+        '<div class="gate-icon" style="background:#ECFDF3;color:#027A48;">&#129534;</div>'+
+        '<div class="gate-card-title">集計表(高屋・丹南)</div>'+
+        '<div class="gate-card-desc">VC番号・品番・数量から入数・ケース・棚番・在庫・才数を出して印刷。弥生とロジザードの在庫差異</div>'+
       '</button>'+
       '<button class="gate-card" data-role="adminHub">'+
         '<div class="gate-lock-badge" title="管理者ログインが必要です">&#128274;</div>'+
@@ -7612,14 +8010,15 @@ var COMMON_NAV_ITEMS = [
   { role:'input', label:'作業記録', icon:'📋' },
   { role:'report', label:'集計', icon:'📊' },
   { role:'monitor', label:'モニター', icon:'🖥' },
-  { role:'calendar', label:'カレンダー', icon:'📅' }
+  { role:'calendar', label:'カレンダー', icon:'📅' },
+  { role:'shukei', label:'集計表', icon:'🧾' }
 ];
 var ADMIN_NAV_ITEMS = [
   { role:'adminHub', label:'管理者', icon:'👔' },
   { role:'settingsHub', label:'設定', icon:'⚙️' }
 ];
 function renderTopbar(){
-  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定'}[state.role];
+  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'集計表(高屋・丹南)'}[state.role];
   var lockBtn = (hasManagerSession() && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="ログアウトする">🔓 ログアウト</button>' : '';
   // 共通ナビゲーション: どのページからでも他の主要ページへ直接移動できるようにする。
   // 管理者専用項目(管理者/設定)は、実際にログイン済みの場合のみ表示する

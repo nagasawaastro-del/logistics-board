@@ -926,10 +926,9 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 }
 .monitor.mon-theme-light .mon-title,
 .monitor.mon-theme-light .mon-name,
-.monitor.mon-theme-light .mon-task-name,
-.monitor.mon-theme-light .mon-footer-title,
-.monitor.mon-theme-light .mon-challenge-nums{ color:#1A2233; }
-.monitor.mon-theme-light .mon-assign-chip.active{ background:var(--amber-500); color:#fff; }
+.monitor.mon-theme-light .mon-now-task,
+.monitor.mon-theme-light .mon-next-task,
+.monitor.mon-theme-light .mon-footer-title{ color:#1A2233; }
 .monitor.mon-theme-light .mon-row{ box-shadow:0 1px 3px rgba(0,0,0,.08); }
 .monitor.mon-theme-light .mon-exit{ border-color:var(--ink-600); color:#1A2233; }
 .mon-theme-toggle{border:1px solid var(--ink-600);background:transparent;color:inherit;border-radius:16px;padding:5px 10px;font-size:14px;line-height:1;cursor:pointer;}
@@ -944,7 +943,7 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .mon-clock{font-family:var(--font-mono);font-size:26px;font-weight:700;color:var(--amber-500);}
 .mon-exit{border:1px solid var(--ink-600);background:transparent;color:var(--slate-300);border-radius:16px;padding:5px 12px;font-size:11px;}
 
-.mon-body{flex:1;min-height:0;display:grid;grid-template-columns:1fr 360px;gap:0;}
+.mon-body{flex:1;min-height:0;display:grid;grid-template-columns:1fr;gap:0;}
 @media (max-width:1000px){.mon-body{grid-template-columns:1fr;}}
 
 .mon-staff-list{padding:14px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));grid-auto-rows:min-content;gap:12px;align-content:start;overflow-y:auto;}
@@ -979,42 +978,21 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .mon-csv-volume{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11px;padding:5px 8px;margin:2px 0;background:rgba(255,255,255,.05);border-radius:6px;}
 .mon-csv-label{color:var(--teal-500);font-weight:700;}
 .mon-csv-stat{color:#cfd5e0;}
-.mon-assign-list{display:flex;flex-wrap:wrap;gap:5px;}
-.mon-assign-chip{
-  display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--slate-300);
-  background:var(--ink-700);border-radius:10px;padding:3px 8px;
-}
-.mon-assign-chip.active{background:var(--ink-800,#1B2340);color:#fff;font-weight:700;box-shadow:0 0 0 1px var(--amber-500) inset;}
-.mon-assign-dot{width:7px;height:7px;border-radius:50%;flex:none;}
-.mon-assign-empty{font-size:11px;color:var(--slate-500);}
 .mon-bar-wrap{display:flex;flex-direction:column;gap:3px;}
 .mon-bar{height:7px;border-radius:4px;background:var(--ink-700);overflow:hidden;display:flex;}
 .mon-bar-seg{height:100%;}
 .mon-bar-total{font-family:var(--font-mono);font-size:11px;color:var(--slate-300);text-align:right;}
 .mon-empty{color:var(--slate-500);text-align:center;padding:60px 0;font-size:14px;grid-column:1/-1;}
 
-.mon-side{border-left:2px solid var(--ink-700);padding:14px 20px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;}
-.mon-side-title{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--slate-300);margin-bottom:2px;}
-.mon-task-card{background:var(--ink-900);border:1px solid var(--ink-700);border-radius:10px;padding:10px 14px;border-left:4px solid var(--slate-300);}
-.mon-task-name{font-family:var(--font-display);font-weight:600;font-size:14px;color:#fff;margin-bottom:5px;}
-.mon-task-stats{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11px;color:var(--slate-300);}
-.mon-task-stats b{color:var(--amber-500);font-size:13px;}
 
-.mon-footer{flex:none;display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:2px solid var(--ink-700);}
+.mon-footer{flex:none;display:grid;grid-template-columns:1fr;gap:0;border-top:2px solid var(--ink-700);}
 @media (max-width:900px){.mon-footer{grid-template-columns:1fr;}}
 .mon-footer-col{padding:12px 26px;}
-.mon-footer-col:first-child{border-right:2px solid var(--ink-700);}
-@media (max-width:900px){.mon-footer-col:first-child{border-right:none;border-bottom:2px solid var(--ink-700);}}
 .mon-footer-title{font-family:var(--font-display);font-weight:700;font-size:13px;color:#fff;margin-bottom:8px;}
 .mon-footer-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;}
 .mon-footer-stats div{display:flex;flex-direction:column;gap:2px;}
 .mon-footer-stats span{font-size:10px;color:var(--slate-300);}
 .mon-footer-stats b{font-family:var(--font-mono);font-size:18px;color:var(--amber-500);}
-.mon-challenge-nums{font-family:var(--font-mono);font-weight:700;font-size:20px;color:#fff;margin-bottom:6px;}
-.mon-challenge-nums span{font-size:13px;color:var(--slate-300);font-weight:400;}
-.mon-challenge-bar{height:11px;border-radius:6px;background:var(--ink-700);overflow:hidden;margin-bottom:6px;}
-.mon-challenge-fill{height:100%;background:linear-gradient(90deg,var(--amber-500),#FFD782);border-radius:6px;transition:width .4s;}
-.mon-challenge-sub{font-size:12px;font-weight:600;color:var(--amber-500);}
 </style>
 </head>
 <body>
@@ -1206,6 +1184,9 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-01', items:[
+    '【モニター表示】右側の「作業別サマリー」と、下の「今月のチームチャレンジ」を廃止しました。スタッフのカード(今の作業・次の作業)を画面の横幅いっぱいに表示し、下は「本日の出荷実績」だけにしました'
+  ]},
   { date:'2026-09-30', items:[
     '【集計表の元データ】JAN(ロジザードの商品マスタ)の取り込みと、丹南の集計表のJAN(バーコード)の列を廃止しました。元データの取り込みを1か所にまとめ、ロジザードの在庫・弥生の在庫のCSVを複数まとめて選ぶ(ドラッグ&ドロップする)と、中身から種類を見分けて登録するようにしました。弥生の在庫は倉庫コードで高屋・丹南に分けて登録するため、全外部倉庫のCSVなら1つで高屋・丹南の両方が登録されます',
     '【集計表のロケーション在庫】集計表の各区画の棚番の下に、そのロケーションのロジザードの在庫数(引当数を含む)を「(36)」のようにかっこ付きで表示するようにしました。印刷にも出ます。在庫数から引当数を引いて0になる(出せる在庫の無い)ロケーションは表示しません(棚番順の並び替えも同じ)。表示するには、ロジザードの在庫のCSVをもう一度取り込んでください(以前に取り込んだデータには、ロケーションごとの数が入っていないため)',
@@ -14715,7 +14696,6 @@ function renderMonitorStaffCard(s, plan, afterBreakPlan){
 }
 function renderMonitor(){
   var present = presentStaff();
-  var tasks = tasksForToday().slice().sort(byTaskColor(function(t){ return t.color; }));
   var monPlan = null;
   var monAfterBreak = null;
   try{
@@ -14724,41 +14704,10 @@ function renderMonitor(){
   }catch(e){ monPlan = null; monAfterBreak = null; }
   var rows = present.map(function(s){ return renderMonitorStaffCard(s, monPlan, monAfterBreak); }).join('') || '<div class="mon-empty">本日出勤中のスタッフはいません</div>';
 
-  var sideCards = tasks.map(function(t){
-    var agg = taskAggregate(t.id);
-    // 数量は手入力ではなくCSV取込の出荷数量を表示する(CSVの無い作業は作業時間のみ)
-    var wvt = wvTotalsForTask(state.workVolume, t.id);
-    var sp = outboundSplitForTask(state.workVolume, t.id);
-    var vcCases = isVcKindTask(t.id) ? vcCaseCurrentValue(((state.vcCaseLedger||{})[t.id]||{}).entries) : null;
-    var volHtml = wvt.importCount
-      ? '<span>'+formatNum(wvt.totalQty)+'ピース</span>'
-      : '';
-    var subLine = wvt.importCount
-      ? (isVcKindTask(t.id) ? 'PO数 '+formatNum(wvt.primaryCount) : '出荷件数 '+formatNum(wvt.primaryCount)+'件')+(sp.total ? ' / '+outboundSplitText(sp) : '')+(vcCases!==null ? ' / VCケース数 '+formatNum(vcCases)+'ケース' : '')
-      : (vcCases ? 'VCケース数 '+formatNum(vcCases)+'ケース' : 'CSVなし(作業時間のみ)');
-    return '<div class="mon-task-card" style="border-left-color:'+t.color+'" data-mon-task="'+esc(t.id)+'">'+
-      '<div class="mon-task-name">'+esc(t.name)+'</div>'+
-      '<div class="mon-task-stats"><span>稼働 <b>'+agg.activeCount+'</b>人</span><span>計 <b>'+fmtHM(agg.ms)+'</b></span>'+volHtml+'</div>'+
-      '<div style="font-size:11px;color:var(--slate-300);margin-top:6px;font-family:var(--font-mono);">'+esc(subLine)+'</div>'+
-    '</div>';
-  }).join('') || '<div class="empty-note" style="color:var(--slate-300)">本日の作業が未登録です</div>';
-
   var now = new Date();
   var clock = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
 
   var shipToday = todaysShipStats();
-
-  var challengeHtml;
-  if(state.achievementsResult){
-    var curPieces = achievementsMonthStats(state.achievementsResult, state.achievementsResult.curMonthKey).pieces;
-    var target = (state.achievementSettings && state.achievementSettings.monthlyTargetPieces) || 25000;
-    var rate = target>0 ? curPieces/target : 0;
-    challengeHtml = '<div class="mon-challenge-nums">'+formatNum(curPieces)+' <span>/ '+formatNum(target)+'ピース</span></div>'+
-      '<div class="mon-challenge-bar"><div class="mon-challenge-fill" style="width:'+Math.min(100,rate*100).toFixed(1)+'%"></div></div>'+
-      '<div class="mon-challenge-sub">達成率 '+(rate*100).toFixed(1)+'%</div>';
-  }else{
-    challengeHtml = '<div class="empty-note" style="color:var(--slate-300)">集計中...</div>';
-  }
 
   var monNavItems = COMMON_NAV_ITEMS.filter(function(item){ return item.role!=='monitor'; });
   if(hasManagerSession()) monNavItems = monNavItems.concat(ADMIN_NAV_ITEMS);
@@ -14784,7 +14733,6 @@ function renderMonitor(){
     renderMonitorInstructions()+
     '<div class="mon-body">'+
       '<div class="mon-staff-list">'+rows+'</div>'+
-      '<div class="mon-side"><div class="mon-side-title">作業別サマリー</div>'+sideCards+'</div>'+
     '</div>'+
     '<div class="mon-footer">'+
       '<div class="mon-footer-col">'+
@@ -14796,17 +14744,10 @@ function renderMonitor(){
           '<div><span>バラ</span><b>'+(shipToday.splitWith ? formatNum(shipToday.baraCount)+'ピース'+(shipToday.splitWith<shipToday.splitTotal?'※':'') : 'データなし')+'</b></div>'+
         '</div>'+
       '</div>'+
-      '<div class="mon-footer-col">'+
-        '<div class="mon-footer-title">🚚 今月のチームチャレンジ</div>'+
-        challengeHtml+
-      '</div>'+
     '</div>'+
   '</div></div>';
 }
 function bindMonitor(){
-  if(!state.achievementsResult && !state.achievementsLoading){
-    runAchievementsReport();
-  }
   var themeToggleBtn = document.getElementById('monThemeToggleBtn');
   if(themeToggleBtn){
     themeToggleBtn.addEventListener('click', function(){

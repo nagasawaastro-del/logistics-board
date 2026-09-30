@@ -954,6 +954,19 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .mon-status-text.idle{color:var(--slate-300);}
 .mon-timer{font-family:var(--font-mono);font-size:20px;font-weight:700;color:var(--teal-500);}
 .mon-timer.idle{color:var(--slate-500);font-size:16px;}
+.mon-timer.is-break{color:var(--slate-300);}
+.mon-elapsed{display:flex;align-items:baseline;gap:6px;}
+.mon-elapsed-label{font-size:11px;font-weight:700;color:var(--slate-300);}
+.mon-now,.mon-next{border-left:5px solid var(--slate-500);padding:6px 10px;border-radius:6px;background:rgba(255,255,255,.04);}
+.monitor.mon-theme-light .mon-now,.monitor.mon-theme-light .mon-next{background:var(--ink-800);}
+.mon-now-label{font-size:11px;font-weight:700;color:var(--slate-300);letter-spacing:.05em;}
+.mon-now-task{font-family:var(--font-display);font-size:24px;font-weight:700;line-height:1.25;}
+.mon-now.is-idle .mon-now-task,.mon-now.is-break .mon-now-task{color:var(--slate-300);font-size:20px;}
+.mon-next-task{font-family:var(--font-display);font-size:19px;font-weight:700;line-height:1.25;}
+.mon-next.is-none .mon-next-task{color:var(--slate-500);}
+.mon-now-meta{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;color:var(--slate-300);font-family:var(--font-mono);margin-top:2px;}
+.mon-now-eta{color:var(--amber-500);}
+.mon-now-eta b{font-size:16px;}
 .mon-start-info{font-size:11px;color:var(--slate-300);font-family:var(--font-mono);}
 .mon-csv-volume{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11px;padding:5px 8px;margin:2px 0;background:rgba(255,255,255,.05);border-radius:6px;}
 .mon-csv-label{color:var(--teal-500);font-weight:700;}
@@ -1186,6 +1199,8 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-09-30', items:[
+    '【モニター表示】スタッフごとのカードを、割り当てられた作業の一覧から「今の作業(経過時間・開始・完了予定)」と「次の作業(完了予定)」の表示に変えました。次の作業は確定済みの作業指示(作業完了後の予定を含む)です。休憩中は、休憩前の作業(未完了なら)か、人員配置画面と同じ「休憩明けの配置予定」を表示します',
+    '【集計表】元データ(ロジザードの在庫・弥生の在庫・ロジザードの商品マスタ)の登録を、貼り付けからCSVファイルの取り込みに変えました(Shift_JIS・UTF-8のどちらも読めます)。弥生の在庫は、弥生から出力したCSV(「高屋在庫.csv」「丹南在庫.csv」)をそのまま取り込めます。複数の倉庫が入ったファイル(全外部倉庫)は、高屋(倉庫コード0018)・丹南(0000)の分だけを取り出します',
     '【手待ち作業のほかの候補】手待ち作業(返品など)への作業指示に、ほかの手待ち作業(検品・セットなど)も選べるボタンを出すようにしました。現場の状況に合わせて、作業者が選んで始められます。通知・モニター・人員配置画面にも「ほかの候補」を表示します。ほかの手待ち作業を選んで始めた場合、元の指示は「変更済み」になり、「未実施」として残りません'
   ]},
   { date:'2026-09-29', items:[
@@ -7570,9 +7585,9 @@ function computeFinancialSummary(dateStr, day, workVolume){
      入数は弥生の値(無ければ商品台帳)、才数は kintone 商品台帳(product_master)の値を使う。 */
 var SHUKEI_SITES = {
   takaya: { name:'高屋', zones:['S','AA','A','B','C','D','E'], stockBlocks:['A','B','C','D','E','S','AA','SET','ZZZ','XXX'],
-            sortZones:['A','B','C','D'], caseMode:'down', showFraction:true, showJan:false },
+            sortZones:['A','B','C','D'], caseMode:'down', showFraction:true, showJan:false, yayoiWarehouse:'0018' },
   tannan: { name:'丹南', zones:['F','G','H','I','J','K','HOME'], stockBlocks:['F','G','H','I','J','K','HOME'],
-            sortZones:['F','G','H','I','J','K'], caseMode:'up', showFraction:false, showJan:true }
+            sortZones:['F','G','H','I','J','K'], caseMode:'up', showFraction:false, showJan:true, yayoiWarehouse:'0000' }
 };
 var SHUKEI_KEYS = { logizard:'shukei-logizard-stock', barcodes:'shukei-logizard-barcodes', yayoi: function(site){ return 'shukei-yayoi-stock:'+site; } };
 /* ロジザードのロケーション番号(8桁: 棚3桁+段3桁+位置2桁)を Excel のロケ表記(棚 / 棚-段 / 棚-段-位置)にする。数字以外はそのまま */
@@ -7590,19 +7605,44 @@ function shukeiLocLabel(v){
 function shukeiParseTsv(text){
   return String(text||'').replace(/\r/g,'').split('\n').filter(function(l){ return l.trim()!==''; }).map(function(l){ return l.split('\t').map(function(c){ return c.trim(); }); });
 }
+/* 取り込んだCSVファイルの中身(カンマ区切り。ダブルクォート可)を行・列に分ける。タブ区切りなら shukeiParseTsv と同じ */
+function shukeiParseTable(text){
+  var t = String(text||'').replace(/^\uFEFF/, '');
+  var first = t.split('\n')[0] || '';
+  if(first.indexOf('\t')!==-1 || typeof Papa==='undefined') return shukeiParseTsv(t);
+  return (Papa.parse(t, { skipEmptyLines: true }).data || [])
+    .map(function(r){ return r.map(function(c){ return String(c===null||c===undefined?'':c).trim(); }); })
+    .filter(function(r){ return r.some(function(c){ return c!==''; }); });
+}
+/* CSVファイルを文字列にする。ロジザード・弥生のCSVは Shift_JIS。UTF-8 として正しく読めるときだけ UTF-8 とみなす */
+function shukeiReadFileText(file){
+  return new Promise(function(resolve, reject){
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var buf = e.target.result, text;
+      try{ text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+      catch(err){
+        try{ text = new TextDecoder('shift-jis').decode(buf); }catch(err2){ reject(err2); return; }
+      }
+      resolve(text);
+    };
+    reader.onerror = function(){ reject(reader.error); };
+    reader.readAsArrayBuffer(file);
+  });
+}
 function shukeiNum(v){
   var n = Number(String(v===null||v===undefined?'':v).replace(/,/g,''));
   return isFinite(n) ? n : 0;
 }
 /* ロジザードの在庫(「ロジ貼り付け」と同じ表。見出し行つき)→ { products:{ 商品ID:{ name, blocks:{ 区画:{ qty, locs[] } } } }, rowCount } */
 function shukeiParseLogizard(text){
-  var rows = shukeiParseTsv(text);
+  var rows = shukeiParseTable(text);
   if(!rows.length) return { error:'貼り付けられた内容がありません。' };
   var h = rows[0], ix = {};
   h.forEach(function(n,i){ ix[n] = i; });
   var need = ['ブロック略称','ロケーション','商品ID','在庫数(引当数を含む)'];
   var missing = need.filter(function(n){ return ix[n]===undefined; });
-  if(missing.length) return { error:'見出しに「'+missing.join('」「')+'」が見つかりません。ロジザードの在庫の表を、見出しの行ごと貼り付けてください。' };
+  if(missing.length) return { error:'見出しに「'+missing.join('」「')+'」が見つかりません。ロジザードから出力した在庫のCSVファイル(見出しの行つき)を選んでください。' };
   var products = {}, count = 0;
   rows.slice(1).forEach(function(r){
     var code = r[ix['商品ID']];
@@ -7617,26 +7657,39 @@ function shukeiParseLogizard(text){
   });
   return { products: products, rowCount: count };
 }
-/* 弥生の在庫(Excel の「高屋在庫差異」「丹南在庫差異」の A〜F 列: 商品コード・商品名・単位・入数・(未使用)・在庫)。見出し行は有っても無くてもよい */
-function shukeiParseYayoi(text){
-  var rows = shukeiParseTsv(text);
+/* 弥生の在庫。次のどちらの形でも読む。
+   ・弥生から出力した在庫のCSV(見出しなし): 3列目 商品コード・4列目 商品名・5列目 単位・6列目 入数・7列目 倉庫コード・8列目 在庫。
+     複数の倉庫が入ったファイル(全外部倉庫など)は、拠点の倉庫コード(site.yayoiWarehouse)の行だけを使う。
+   ・以前の貼り付けの形(Excel「高屋在庫差異」「丹南在庫差異」の A〜F 列: 商品コード・商品名・単位・入数・倉庫コード・在庫。見出し行は有っても無くてもよい) */
+function shukeiParseYayoi(text, site){
+  var rows = shukeiParseTable(text);
   if(rows.length && rows[0][0]==='商品コード') rows = rows.slice(1);
-  if(!rows.length) return { error:'貼り付けられた内容がありません。' };
-  if(rows.some(function(r){ return r.length<6; })) return { error:'列が足りない行があります。弥生の在庫を A列(商品コード)〜F列(在庫)まで含めて貼り付けてください。' };
+  if(!rows.length) return { error:'ファイルに在庫のデータがありません。' };
+  var exported = rows.every(function(r){ return r.length>=8 && r[0]==='' && r[1]===''; });
+  if(!exported && rows.some(function(r){ return r.length<6; })) return { error:'弥生の在庫のCSVではないようです。弥生から出力した在庫のCSVファイルを選んでください。' };
+  var col = exported ? { code:2, name:3, unit:4, pack:5, wh:6, stock:7 } : { code:0, name:1, unit:2, pack:3, wh:4, stock:5 };
+  var wanted = site && site.yayoiWarehouse;
+  if(exported && wanted){
+    var whs = {};
+    rows.forEach(function(r){ whs[r[col.wh]] = true; });
+    if(!whs[wanted]) return { error:'このファイルには'+(site.name||'')+'(倉庫コード'+wanted+')の在庫が入っていません(入っている倉庫コード: '+Object.keys(whs).sort().join('・')+')。' };
+    rows = rows.filter(function(r){ return r[col.wh]===wanted; });
+  }
   var products = {};
   rows.forEach(function(r){
-    if(!r[0]) return;
-    products[r[0]] = { name: r[1]||'', unit: r[2]||'', packQty: shukeiNum(r[3]) || null, stock: shukeiNum(r[5]) };
+    var code = r[col.code];
+    if(!code) return;
+    products[code] = { name: r[col.name]||'', unit: r[col.unit]||'', packQty: shukeiNum(r[col.pack]) || null, stock: shukeiNum(r[col.stock]) };
   });
   return { products: products, rowCount: Object.keys(products).length };
 }
 /* ロジザードの商品マスタ(見出し行つき)から、商品IDごとのJAN(バーコード)だけを取り出す */
 function shukeiParseBarcodes(text){
-  var rows = shukeiParseTsv(text);
+  var rows = shukeiParseTable(text);
   if(!rows.length) return { error:'貼り付けられた内容がありません。' };
   var h = rows[0], ci = h.indexOf('商品ID'), bi = h.indexOf('バーコード');
   if(bi===-1) bi = h.indexOf('バーコード数値');
-  if(ci===-1 || bi===-1) return { error:'見出しに「商品ID」「バーコード」が見つかりません。ロジザードの商品マスタを、見出しの行ごと貼り付けてください。' };
+  if(ci===-1 || bi===-1) return { error:'見出しに「商品ID」「バーコード」が見つかりません。ロジザードから出力した商品マスタのCSVファイル(見出しの行つき)を選んでください。' };
   var codes = {};
   rows.slice(1).forEach(function(r){ if(r[ci] && r[bi]) codes[r[ci]] = r[bi]; });
   return { codes: codes, rowCount: Object.keys(codes).length };
@@ -7856,14 +7909,14 @@ function renderShukeiDataPanel(siteKey, site, data){
     return '<div class="ll-form-group" style="margin-bottom:14px;"><div class="ll-form-group-title">'+title+'</div>'+
       '<div class="pool-hint" style="margin:0 0 4px;">'+hint+'</div>'+
       (info ? '<div class="pool-hint" style="margin:0 0 4px;">'+info+'</div>' : '')+
-      '<textarea id="'+id+'" rows="4" style="width:100%;font-family:monospace;" placeholder="ここに貼り付け"></textarea>'+
-      '<button type="button" class="add-btn" data-shukei-upload="'+id+'" style="margin-top:4px;">登録する</button></div>';
+      '<label class="add-btn" style="display:inline-block;cursor:pointer;margin-top:4px;">📄 CSVファイルを選んで取り込む'+
+        '<input type="file" accept=".csv,text/csv" data-shukei-upload="'+id+'" style="display:none;"></label></div>';
   }
   function info(d, unit){ return d && d.uploadedAt ? '現在の登録: '+esc(fmtDateTime(d.uploadedAt))+'・'+formatNum(d.rowCount||0)+unit : '現在の登録: なし'; }
   return (state.shukeiUploadMsg ? '<div class="vc-import-status">'+esc(state.shukeiUploadMsg)+'</div>' : '')+
-    block('shukeiLogizardText', 'ロジザードの在庫(高屋・丹南 共通)', 'Excelの「ロジ貼り付け」シートに貼っていた表を、見出しの行ごと貼り付けてください(ブロック略称・ロケーション・商品ID・在庫数(引当数を含む)の列を使います)。棚番もここから作ります。', info(data.logizard,'行'))+
-    block('shukeiYayoiText', '弥生の在庫('+esc(site.name)+')', 'Excelの「'+esc(site.name)+'在庫差異」シートのA列(商品コード)〜F列('+esc(site.name)+'在庫)に貼っていた範囲を貼り付けてください(見出しの行は有っても無くても構いません)。', info(data.yayoi,'商品'))+
-    (site.showJan ? block('shukeiBarcodeText', 'ロジザードの商品マスタ(JAN)', 'Excelの「ロジ(マスタ)」シートの表を、見出しの行ごと貼り付けてください(商品ID・バーコードの列だけを使います)。', info(data.barcodes,'商品')) : '')+
+    block('shukeiLogizardText', 'ロジザードの在庫(高屋・丹南 共通)', 'ロジザードから出力した在庫のCSVファイルを選んでください(ブロック略称・ロケーション・商品ID・在庫数(引当数を含む)の列を使います)。棚番もここから作ります。', info(data.logizard,'行'))+
+    block('shukeiYayoiText', '弥生の在庫('+esc(site.name)+')', '弥生から出力した在庫のCSVファイル(「'+esc(site.name)+'在庫.csv」など)を選んでください。複数の倉庫が入ったファイル(全外部倉庫など)は、'+esc(site.name)+'(倉庫コード'+esc(site.yayoiWarehouse)+')の分だけを取り込みます。', info(data.yayoi,'商品'))+
+    (site.showJan ? block('shukeiBarcodeText', 'ロジザードの商品マスタ(JAN)', 'ロジザードから出力した商品マスタのCSVファイルを選んでください(商品ID・バーコードの列だけを使います)。', info(data.barcodes,'商品')) : '')+
     '<div class="pool-hint">登録したデータは、ロジリンクを使う全員で共有されます。以前のデータは新しいデータに置き換わります。</div>';
 }
 function bindShukei(){
@@ -7916,12 +7969,16 @@ function bindShukei(){
   var only = document.getElementById('shukeiDiffOnly');
   if(only) only.addEventListener('change', function(){ state.shukeiDiffOnly = only.checked; render(); });
   document.querySelectorAll('[data-shukei-upload]').forEach(function(btn){
-    btn.addEventListener('click', async function(){
+    btn.addEventListener('change', async function(){
       var id = btn.getAttribute('data-shukei-upload');
-      var text = document.getElementById(id).value;
+      var file = btn.files && btn.files[0];
+      if(!file) return;
+      var text;
+      try{ text = await shukeiReadFileText(file); }
+      catch(e){ state.shukeiUploadMsg = '⚠️ ファイルを読み込めませんでした'; render(); return; }
       var parsed, key, label;
       if(id==='shukeiLogizardText'){ parsed = shukeiParseLogizard(text); key = SHUKEI_KEYS.logizard; label = 'ロジザードの在庫'; }
-      else if(id==='shukeiYayoiText'){ parsed = shukeiParseYayoi(text); key = SHUKEI_KEYS.yayoi(siteKey); label = '弥生('+SHUKEI_SITES[siteKey].name+')の在庫'; }
+      else if(id==='shukeiYayoiText'){ parsed = shukeiParseYayoi(text, SHUKEI_SITES[siteKey]); key = SHUKEI_KEYS.yayoi(siteKey); label = '弥生('+SHUKEI_SITES[siteKey].name+')の在庫'; }
       else { parsed = shukeiParseBarcodes(text); key = SHUKEI_KEYS.barcodes; label = 'JAN(ロジザードの商品マスタ)'; }
       if(parsed.error){ state.shukeiUploadMsg = '⚠️ '+parsed.error; render(); return; }
       parsed.uploadedAt = new Date().toISOString();
@@ -7930,7 +7987,7 @@ function bindShukei(){
       btn.disabled = false;
       if(!ok){ state.shukeiUploadMsg = '⚠️ '+label+'を保存できませんでした'; render(); return; }
       await appendAuditLog({ action:'集計表の元データを登録', target: label, before:null, after: formatNum(parsed.rowCount)+'件' });
-      state.shukeiUploadMsg = label+'を登録しました('+formatNum(parsed.rowCount)+'件)';
+      state.shukeiUploadMsg = label+'を登録しました('+file.name+'・'+formatNum(parsed.rowCount)+'件)';
       state.shukeiData = null; // 読み直す
       render();
     });
@@ -14450,61 +14507,79 @@ function renderMonitorInstructions(){
       return '<span class="mon-instr-item'+(isRecentInstruction(i.key)?' is-new':'')+'"><b>'+esc(i.name)+'</b> → '+esc(i.taskName)+((i.altNames && i.altNames.length) ? ' <small>(または '+i.altNames.map(esc).join('・')+')</small>' : '')+(i.confirmedAt?' <small>'+fmtClock(i.confirmedAt)+'</small>':'')+'</span>';
     }).join('')+soundHint+'</div>';
 }
+/* モニターのスタッフ1人分: 今の作業(経過時間・完了予定)と次の作業(完了予定)だけを大きく出す。
+   次の作業は確定済みの作業指示(作業者画面の「本日の作業指示」と同じ)。休憩中は休憩前の作業(未完了なら)を次に出す。 */
+function renderMonitorStaffCard(s, plan, afterBreakPlan){
+  var log = currentLog(s.id);
+  var totals = totalsByTask(s.id);
+  var totalMs = Object.keys(totals).reduce(function(a,k){ return a+totals[k]; },0);
+  var etaPlan = plan;
+  function etaHtml(taskId){
+    var eta = etaPlan ? planEtaText(etaPlan, taskId) : null;
+    return eta ? '<span class="mon-now-eta">完了予定 <b>'+esc(eta)+'</b></span>' : '';
+  }
+  var onBreak = !!(log && log.taskId==='BREAK');
+  var nowHtml, timerHtml;
+  if(log){
+    var t = taskById(log.taskId);
+    var elapsedMs = Date.now()-new Date(log.start).getTime();
+    timerHtml = '<div class="mon-timer'+(onBreak?' is-break':'')+'" data-live-timer="'+log.start+'">'+fmtElapsed(elapsedMs)+'</div>';
+    nowHtml = '<div class="mon-now'+(onBreak?' is-break':'')+'" style="border-left-color:'+esc(t.color)+'">'+
+      '<div class="mon-now-label">'+(onBreak?'休憩中':'今の作業')+'</div>'+
+      '<div class="mon-now-task">'+esc(onBreak?'🍽 休憩':t.name)+'</div>'+
+      '<div class="mon-now-meta"><span>開始 '+fmtClock(log.start)+'</span>'+(onBreak?'':etaHtml(log.taskId))+'</div>'+
+    '</div>';
+  }else{
+    timerHtml = '<div class="mon-timer idle">-</div>';
+    nowHtml = '<div class="mon-now is-idle"><div class="mon-now-label">今の作業</div><div class="mon-now-task">○ 待機中</div></div>';
+  }
+  // 次の作業
+  var next = plan ? nextTaskForStaff(plan, s.id, state.day) : null;
+  var nextName = null, nextSub = '', nextTaskId = null;
+  if(next){
+    nextTaskId = next.taskId; nextName = taskById(next.taskId).name;
+    nextSub = next.afterTaskId ? '今の作業が終わったら' : '指示あり・開始待ち';
+  }else if(onBreak){
+    var before = (state.day.logs||[]).filter(function(l){ return l.staffId===s.id && l.taskId!=='BREAK' && l.start; })
+      .sort(function(a,b){ return String(b.start).localeCompare(String(a.start)); })[0];
+    var bc = before && plan ? plan.taskById[before.taskId] : null;
+    if(before && !(bc && bc.remainingQty<=0) && !(state.day.taskCompletion||{})[before.taskId]){
+      nextTaskId = before.taskId; nextName = taskById(before.taskId).name; nextSub = '休憩明けに再開';
+    }else if(afterBreakPlan){
+      // 休憩前の作業が終わっている人: 人員配置画面の「休憩明けの配置予定」と同じ見込み(まだ指示ではない)
+      var abp = afterBreakPlan.proposals.filter(function(p){ return p.staffId===s.id && !!p.taskId; })[0];
+      if(abp){ nextTaskId = abp.taskId; nextName = taskById(abp.taskId).name; nextSub = '休憩明けの予定(見込み)'; etaPlan = afterBreakPlan; }
+    }
+  }else if(plan && plan.staff[s.id] && plan.staff[s.id].continuingAfterBreak && !log){
+    nextTaskId = plan.staff[s.id].currentTaskId; nextName = taskById(nextTaskId).name; nextSub = '休憩前の作業を再開';
+  }
+  var nextHtml = nextName
+    ? '<div class="mon-next" style="border-left-color:'+esc(taskById(nextTaskId).color)+'">'+
+        '<div class="mon-now-label">次の作業</div>'+
+        '<div class="mon-next-task">'+esc(nextName)+'</div>'+
+        '<div class="mon-now-meta"><span>'+esc(nextSub)+'</span>'+etaHtml(nextTaskId)+'</div>'+
+      '</div>'
+    : '<div class="mon-next is-none"><div class="mon-now-label">次の作業</div><div class="mon-next-task">—</div></div>';
+  return '<div class="mon-row">'+
+    '<div class="mon-row-top">'+
+      '<div class="mon-name">'+esc(s.name)+'</div>'+
+      '<div class="mon-elapsed">'+(log ? '<span class="mon-elapsed-label">経過</span>' : '')+timerHtml+'</div>'+
+    '</div>'+
+    nowHtml+
+    nextHtml+
+    '<div class="mon-bar-total">本日計 '+fmtHM(totalMs)+'</div>'+
+  '</div>';
+}
 function renderMonitor(){
   var present = presentStaff();
   var tasks = tasksForToday().slice().sort(byTaskColor(function(t){ return t.color; }));
-  var rows = present.map(function(s){
-    var log = currentLog(s.id);
-    var totals = totalsByTask(s.id);
-    var totalMs = Object.keys(totals).reduce(function(a,k){ return a+totals[k]; },0);
-    var barSegs = Object.keys(totals).sort(byTaskColor(function(tid){ return taskById(tid).color; })).map(function(tid){
-      var t = taskById(tid);
-      var pct = totalMs>0 ? (totals[tid]/totalMs*100) : 0;
-      return '<span class="mon-bar-seg" style="width:'+pct.toFixed(1)+'%;background:'+t.color+'"></span>';
-    }).join('');
-    var statusText, dotColor, timerHtml, startInfoHtml;
-    if(log){
-      var t = taskById(log.taskId);
-      statusText = '<span class="mon-status-dot working"></span><span class="mon-status-text">● 作業中 — '+esc(t.name)+'</span>';
-      var elapsedMs = Date.now()-new Date(log.start).getTime();
-      timerHtml = '<div class="mon-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsedMs)+'</div>';
-      startInfoHtml = '<div class="mon-start-info">開始 '+fmtClock(log.start)+' ・ 経過 <span data-live-elapsed-min="'+log.start+'">'+Math.floor(elapsedMs/60000)+'</span>分</div>';
-    }else{
-      statusText = '<span class="mon-status-dot"></span><span class="mon-status-text idle">○ 待機中</span>';
-      timerHtml = '<div class="mon-timer idle">-</div>';
-      startInfoHtml = '';
-    }
-    var csvVolumeMonHtml = '';
-    if(log){
-      var wvTotalsMon = wvTotalsForTask(state.workVolume, log.taskId);
-      if(wvTotalsMon.importCount>0){
-        csvVolumeMonHtml = '<div class="mon-csv-volume">'+
-          '<span class="mon-csv-label">📄 CSV取込済み</span>'+
-          '<span class="mon-csv-stat">出荷件数 '+formatNum(wvTotalsMon.primaryCount)+'件</span>'+
-          '<span class="mon-csv-stat">出荷数量 '+formatNum(wvTotalsMon.totalQty)+'ピース</span>'+
-          (outboundSplitForTask(state.workVolume, log.taskId).total ? '<span class="mon-csv-stat" data-mon-split="1">'+esc(outboundSplitText(outboundSplitForTask(state.workVolume, log.taskId)))+'</span>' : '')+
-        '</div>';
-      }
-    }
-    var assignedIds = (state.day.assignments[s.id] || []).slice().sort(byTaskColor(function(tid){ return taskById(tid).color; }));
-    var assignedChips = assignedIds.map(function(tid){
-      var at = taskById(tid);
-      var isActive = log && log.taskId===tid;
-      return '<span class="mon-assign-chip'+(isActive?' active':'')+'"><span class="mon-assign-dot" style="background:'+at.color+'"></span>'+esc(at.name)+'</span>';
-    }).join('');
-    var assignedHtml = assignedChips ? '<div class="mon-assign-list">'+assignedChips+'</div>' : '<div class="mon-assign-list mon-assign-empty">本日の割り当てなし</div>';
-    return '<div class="mon-row">'+
-      '<div class="mon-row-top">'+
-        '<div class="mon-name">'+esc(s.name)+'</div>'+
-        timerHtml+
-      '</div>'+
-      '<div class="mon-status">'+statusText+'</div>'+
-      csvVolumeMonHtml+
-      assignedHtml+
-      '<div class="mon-bar-wrap"><div class="mon-bar">'+(barSegs||'')+'</div><div class="mon-bar-total">本日計 '+fmtHM(totalMs)+'</div></div>'+
-      startInfoHtml+
-    '</div>';
-  }).join('') || '<div class="mon-empty">本日出勤中のスタッフはいません</div>';
+  var monPlan = null;
+  var monAfterBreak = null;
+  try{
+    monPlan = computeTodayStaffingPlanNow();
+    if(monPlan && monPlan.breakHold) monAfterBreak = computeAfterBreakStaffingPlan(buildTodayStaffingContext(new Date(monPlan.nowMs)));
+  }catch(e){ monPlan = null; monAfterBreak = null; }
+  var rows = present.map(function(s){ return renderMonitorStaffCard(s, monPlan, monAfterBreak); }).join('') || '<div class="mon-empty">本日出勤中のスタッフはいません</div>';
 
   var sideCards = tasks.map(function(t){
     var agg = taskAggregate(t.id);

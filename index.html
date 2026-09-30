@@ -1199,6 +1199,7 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-09-30', items:[
+    '【休憩明けの継続】完了のあとにCSVが追加された作業(例: 生協を9:52に完了 → 追加の取込で残り29ピース)を休憩前にしていた人が、休憩明けにその作業を続ける担当として扱われず、別の作業(返品)の配置予定が出ていた問題を直しました。完了記録の数量より今のCSVの数量が多ければ未完了として扱います(休憩前の作業の「終わりましたか?」の確認・作業を離れたときの完了判定も同じ)',
     '【モニター表示】スタッフごとのカードを、割り当てられた作業の一覧から「今の作業(経過時間・開始・完了予定)」と「次の作業(完了予定)」の表示に変えました。次の作業は確定済みの作業指示(作業完了後の予定を含む)です。休憩中は、休憩前の作業(未完了なら)か、人員配置画面と同じ「休憩明けの配置予定」を表示します',
     '【集計表】元データ(ロジザードの在庫・弥生の在庫・ロジザードの商品マスタ)の登録を、貼り付けからCSVファイルの取り込みに変えました(Shift_JIS・UTF-8のどちらも読めます)。弥生の在庫は、弥生から出力したCSV(「高屋在庫.csv」「丹南在庫.csv」)をそのまま取り込めます。複数の倉庫が入ったファイル(全外部倉庫)は、高屋(倉庫コード0018)・丹南(0000)の分だけを取り出します',
     '【手待ち作業のほかの候補】手待ち作業(返品など)への作業指示に、ほかの手待ち作業(検品・セットなど)も選べるボタンを出すようにしました。現場の状況に合わせて、作業者が選んで始められます。通知・モニター・人員配置画面にも「ほかの候補」を表示します。ほかの手待ち作業を選んで始めた場合、元の指示は「変更済み」になり、「未実施」として残りません'
@@ -3888,6 +3889,15 @@ function fmtClockMs(ms){
 function taskCompletionFor(day, taskId){
   return (day && day.taskCompletion && day.taskCompletion[taskId]) || null;
 }
+/* 完了記録が、今のCSVの数量まで全部を終えたものか。完了のあとにCSVが追加されて数量が増えた場合
+   (例: 生協を9:52に33ピースで完了 → そのあと追加の取込で62ピース)は、完了記録があっても未完了として扱う。
+   CSVの数量が無い作業は、完了記録があれば完了。 */
+function taskFullyCompleted(day, taskId, wv){
+  var comp = taskCompletionFor(day, taskId);
+  if(!comp) return false;
+  var planned = wvTotalsForTask(wv || state.workVolume || emptyWorkVolume(), taskId).totalQty;
+  return !(planned > (Number(comp.qty)||0));
+}
 /* 保存済みの「確定済み配置」を一覧にする。旧形式(status:'confirmed' + assignments)も読める。 */
 function normalizeConfirmedInstructions(sug){
   if(!sug) return [];
@@ -4075,7 +4085,7 @@ function computeTodayStaffingPlan(ctx){
     var pendingIt = pendingConfirmedByStaff[sid];
     if(pendingIt && !(pendingIt.startAfterTaskId && pendingIt.startAfterTaskId===tid)) return;
     if(!tid || !taskMap[tid]) return;                               // 当日の対象外になった作業
-    if(taskCompletionFor(day, tid)) return;                         // 作業が完了している
+    if(taskFullyCompleted(day, tid, wv)) return;                    // 作業が完了している(完了のあとに追加されたCSVの分が残っていれば継続)
     // 休憩明けの試算(afterBreakPreview)では、休憩前の作業に戻った人として扱う(休憩中として候補から外さない)。
     // 外すと、休憩前に手待ち作業をしていた人を休憩明けに動かせる人として数えず、「配置する人はいない見込み」と誤って表示する
     info.onBreak = info.currentTaskId==='BREAK' && !ctx.afterBreakPreview;
@@ -11875,7 +11885,7 @@ function askPreBreakTaskCompletion(nextTaskId, isEndDay){
   if(!day || day.date!==todayStr() || !sid) return false;
   var pre = preBreakTaskOf(day, sid);
   if(!pre || pre==='BREAK' || pre===nextTaskId) return false;
-  if(taskCompletionFor(day, pre)) return false;
+  if(taskFullyCompleted(day, pre)) return false;
   var othersContinuing = (state.roster||[]).some(function(s){
     return s.id!==sid && day.attendance && day.attendance[s.id] && preBreakTaskOf(day, s.id)===pre;
   });
@@ -12780,7 +12790,7 @@ function decideCompletionOnLeave(day, taskId, staffId){
   var others = (day.logs||[]).some(function(l){ return l.end===null && l.taskId===taskId && l.staffId!==staffId; });
   if(others) return null;
   var planned = wvTotalsForTask(state.workVolume||emptyWorkVolume(), taskId).totalQty;
-  if(taskCompletionFor(day, taskId) || !(planned>0)){ markTaskCompletedIfLastWorker(day, taskId, staffId); return null; }
+  if(taskFullyCompleted(day, taskId) || !(planned>0)){ markTaskCompletedIfLastWorker(day, taskId, staffId); return null; }
   var plan = (day.date===todayStr()) ? computeTodayStaffingPlan(buildTodayStaffingContext(new Date())) : null;
   var c = plan && plan.taskById[taskId];
   if(c && c.remainingQty<=0.5){ markTaskCompletedIfLastWorker(day, taskId, staffId); return null; }
@@ -14540,11 +14550,10 @@ function renderMonitorStaffCard(s, plan, afterBreakPlan){
     nextTaskId = next.taskId; nextName = taskById(next.taskId).name;
     nextSub = next.afterTaskId ? '今の作業が終わったら' : '指示あり・開始待ち';
   }else if(onBreak){
-    var before = (state.day.logs||[]).filter(function(l){ return l.staffId===s.id && l.taskId!=='BREAK' && l.start; })
-      .sort(function(a,b){ return String(b.start).localeCompare(String(a.start)); })[0];
-    var bc = before && plan ? plan.taskById[before.taskId] : null;
-    if(before && !(bc && bc.remainingQty<=0) && !(state.day.taskCompletion||{})[before.taskId]){
-      nextTaskId = before.taskId; nextName = taskById(before.taskId).name; nextSub = '休憩明けに再開';
+    // 休憩前の作業が未完了なら、人員配置の計算(休憩をまたいだ担当の継続)がその作業を担当として残している
+    var pinfo = plan && plan.staff[s.id];
+    if(pinfo && pinfo.continuingAfterBreak && pinfo.currentTaskId && pinfo.currentTaskId!=='BREAK'){
+      nextTaskId = pinfo.currentTaskId; nextName = taskById(nextTaskId).name; nextSub = '休憩明けに再開';
     }else if(afterBreakPlan){
       // 休憩前の作業が終わっている人: 人員配置画面の「休憩明けの配置予定」と同じ見込み(まだ指示ではない)
       var abp = afterBreakPlan.proposals.filter(function(p){ return p.staffId===s.id && !!p.taskId; })[0];

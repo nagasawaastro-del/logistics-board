@@ -1241,6 +1241,7 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-10-02', items:[
+    '【人員配置: 締切の早い作業への入れ替え】まだ始めていない指示の入れ替えを、優先度が高い作業に加えて、同じ優先度で締切が早い作業(例: 優先度2のDF 16:00 と 卸 16:30)にも行うようにしました。締切のない作業は一番遅い扱いです。入れ替えは一方向なので、指示が行ったり来たりすることはありません',
     '【集計表の表示】数字の列(数量・ケース・端数・入数・弥生・ロジ・才数、在庫差異の数字の列)の見出しを右寄せにして、見出しと数字の位置をそろえました。数量の入力欄の数字も右寄せです。備考の列は、印刷で長い備考を列の中で折り返すようにしました(表からはみ出していたため)'
   ]},
   { date:'2026-10-01', items:[
@@ -4335,8 +4336,11 @@ function computeTodayStaffingPlan(ctx){
     if(cur && !(taskMap[cur] && taskMap[cur].idleLikely===true)) return null; // 作業(手待ち作業以外)を始めている
     var from = calcByTask[it.taskId];
     var fromPriority = from ? from.priorityLevel : ((taskMap[it.taskId] && taskMap[it.taskId].priorityLevel) || 4);
-    if(!(fromPriority > calc.priorityLevel)) return null;
-    return { item: it, fromPriority: fromPriority };
+    // 優先度が高い作業、または同じ優先度で締切が早い作業(締切なしは一番遅い扱い)のときだけ入れ替える(一方向なので行ったり来たりしない)
+    var fromDl = (from && from.deadlineMs!==null && from.deadlineMs!==undefined) ? from.deadlineMs : Infinity;
+    var toDl = (calc.deadlineMs!==null && calc.deadlineMs!==undefined) ? calc.deadlineMs : Infinity;
+    if(!(fromPriority > calc.priorityLevel || (fromPriority===calc.priorityLevel && fromDl > toDl))) return null;
+    return { item: it, fromPriority: fromPriority, fromDeadlineMs: fromDl };
   }
   var proposals = [];
   function pickFor(calc){
@@ -4346,7 +4350,7 @@ function computeTodayStaffingPlan(ctx){
       var tier = tiers[ti];
       if(tier===2 && targetIsIdleWork) continue; // 手待ち作業から別の手待ち作業へは動かさない
       if(tier==='pend' && targetIsIdleWork) continue;
-      var best = null, bestPrio = null;
+      var best = null, bestPrio = null, bestDl = null;
       Object.keys(staffInfo).forEach(function(sid){
         var mv = null;
         if(tier==='pend'){ mv = movablePendingFor(sid, calc); if(!mv) return; }
@@ -4355,7 +4359,9 @@ function computeTodayStaffingPlan(ctx){
         if(!cap.rate || cap.capQty<=0) return;
         // 入れ替えは、指示の作業の優先度が一番低い人から(同じなら処理見込みの多い人)
         if(tier==='pend'){
-          if(!best || mv.fromPriority>bestPrio || (mv.fromPriority===bestPrio && cap.capQty>best.capQty)){ best = cap; bestPrio = mv.fromPriority; best.pendingItem = mv.item; }
+          // 指示の作業が一番急ぎでない人から(優先度が低い → 締切が遅い → 処理見込みが多い)
+          var better = !best || mv.fromPriority>bestPrio || (mv.fromPriority===bestPrio && (mv.fromDeadlineMs>bestDl || (mv.fromDeadlineMs===bestDl && cap.capQty>best.capQty)));
+          if(better){ best = cap; bestPrio = mv.fromPriority; bestDl = mv.fromDeadlineMs; best.pendingItem = mv.item; }
           return;
         }
         if(!best || cap.capQty>best.capQty) best = cap;
@@ -4415,7 +4421,7 @@ function computeTodayStaffingPlan(ctx){
       var pendIt = pick.tier==='pend' ? pick.cap.pendingItem : null;
       var np = addProposal(pick.cap.staffId, calc, pick.tier, pick.cap,
         '不足'+Math.ceil(shortage)+calc.unit+'を補うため('+(pendIt
-          ? 'まだ始めていない「'+(taskMap[pendIt.taskId] ? taskMap[pendIt.taskId].name : '')+'」(優先度'+(calcByTask[pendIt.taskId] ? calcByTask[pendIt.taskId].priorityLevel : '')+')の指示より優先度が高いため入れ替え'
+          ? 'まだ始めていない「'+(taskMap[pendIt.taskId] ? taskMap[pendIt.taskId].name : '')+'」(優先度'+(calcByTask[pendIt.taskId] ? calcByTask[pendIt.taskId].priorityLevel : '')+(calcByTask[pendIt.taskId] && calcByTask[pendIt.taskId].deadline ? '・締切'+calcByTask[pendIt.taskId].deadline : '')+')の指示より'+((calcByTask[pendIt.taskId] && calcByTask[pendIt.taskId].priorityLevel===calc.priorityLevel) ? '締切が早い('+(calc.deadline||'')+')' : '優先度が高い')+'ため入れ替え'
           : STAFFING_TIER_LABELS[pick.tier]+'から')+'、処理見込み'+Math.round(pick.cap.capQty)+calc.unit+')');
       if(pendIt){ np.fromPendingTaskId = pendIt.taskId; releasePendingFrom(pick.cap.staffId, pendIt); }
       shortage -= pick.cap.capQty;

@@ -739,6 +739,13 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .sk-pick .sk-total td{border-top:2px solid var(--ink-900);font-weight:700;background:none !important;}
 .print-only-cell{display:none;}
 .sk-pick .sk-check{text-align:center;font-size:16px;width:1%;}
+/* 見出しと数字の位置をそろえる(数字の列は見出しも右寄せ) */
+.shukei-table th.num{text-align:right;}
+.sk-pick th.sk-no{text-align:right;}
+.sk-pick td.num .shukei-in{text-align:right;}
+/* 備考: 画面は入力欄と「↓」を1行に、印刷では長い備考を折り返す */
+.sk-pick .sk-note-edit{white-space:nowrap;}
+.shukei-table td.sk-note{white-space:normal;}
 @media print{
   @page{size:A4 landscape;margin:8mm;}
   body{background:#fff !important;}
@@ -760,6 +767,8 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
   .sk-pick .sk-item{min-width:170px;}
   .sk-pick .sk-name{max-width:260px;white-space:normal;font-size:9.5px;}
   .sk-pick .sk-minor{font-size:10px;color:#555;}
+  .sk-pick th.sk-note,.sk-pick td.sk-note{min-width:110px;width:130px;max-width:170px;}
+  .sk-pick td.sk-note{white-space:normal !important;word-break:break-all;overflow-wrap:anywhere;}
   .print-only-cell{display:table-cell !important;}
   .shukei-sortable span{display:none;}
 }
@@ -1231,7 +1240,11 @@ function byTaskColor(getColor){
 // アプリを更新するたびに、ここに新しい項目を先頭付近に追加してください。
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
+  { date:'2026-10-02', items:[
+    '【集計表の表示】数字の列(数量・ケース・端数・入数・弥生・ロジ・才数、在庫差異の数字の列)の見出しを右寄せにして、見出しと数字の位置をそろえました。数量の入力欄の数字も右寄せです。備考の列は、印刷で長い備考を列の中で折り返すようにしました(表からはみ出していたため)'
+  ]},
   { date:'2026-10-01', items:[
+    '【指示の準備待ち】優先作業の指示を受けた人が、送り状の準備中などで手待ち作業をしている間は「準備待ち」として、指示を残し、その作業の予定人員に数え続けるようにしました(これまでは手待ち作業を始めると指示が「変更済み」「未実施」になり、別の人が回されていました)。30分たっても始めない場合は、これまでどおり「未実施」にします。タブレットには「準備ができたら開始してください」、モニター・確定済み一覧には「準備待ち」と表示します',
     '【手動の指示: 次の作業】「✋ 手動で指示を出す」で、タイミングに「次に(指示済みの作業、または今の作業が終わったら)」を選べるようにしました。続けて何件でもつなげられます(例: DFをすぐ → 返品を次に → 検品を次に)。タブレットには順に「DFを開始」→(DF中は)「DFが終わったら返品へ」→「返品が終わったら検品へ」と出ます。つないだ指示は、前の指示を「変更済み」にしません。「すぐ」を選ぶと、まだ始めていない指示を置き換えます',
     '【人員配置: 手動で指示を出す】人員配置画面に「✋ 手動で指示を出す」を追加しました。スタッフ・作業・タイミング(すぐ/今の作業が終わったら)を選ぶと、自動配置の計算に関係なく、その人の作業者画面に「📋 本日の作業指示」として出てチャイムで知らせます(処理済みの作業・手待ち作業でも指示できます)。手動の指示は、優先度の高い作業が来ても自動配置で入れ替えません。確定済み一覧のまだ始めていない指示には「取り消す」ボタンを付けました(操作履歴に残ります)',
     '【次の作業: 手待ち作業】優先作業の予定・指示が無い人は、手待ち作業をしている人も含めて、次の作業に手待ち作業(今の手待ち作業とは別の作業を、手待ち優先度の順に)を出すようにしました(タブレット・モニター・人員配置画面)',
@@ -4093,7 +4106,10 @@ function computeTodayStaffingPlan(ctx){
     // あとの指示が、この指示の作業のあとにつないだもの(手動の次の作業)なら、この指示は変更しない
     var newer = confirmed.some(function(o){ return o!==it && o.staffId===it.staffId && o.confirmedAt && it.confirmedAt && o.confirmedAt>it.confirmedAt && chainTasksBefore(o).indexOf(it.taskId)===-1; });
     // つないだ前の作業(今の作業・前の指示の作業)を始めたのは、指示どおり(別の作業ではない)
+    // 優先作業への指示のあとに手待ち作業を始めたのは「準備待ち」(送り状の準備中など。指示はそのまま。下の INSTRUCTION_PREP_WAIT_MS)
+    var targetIdle = !!(taskMap[it.taskId] && taskMap[it.taskId].idleLikely===true);
     var otherStarted = (day.logs||[]).some(function(l){
+      if(!targetIdle && taskMap[l.taskId] && taskMap[l.taskId].idleLikely===true) return false;
       return l.staffId===it.staffId && l.taskId!=='BREAK' && l.taskId!==it.taskId && l.taskId!==it.fromTaskId && before.indexOf(l.taskId)===-1 &&
         !!l.start && new Date(l.start).getTime() >= sinceMs+SUPERSEDE_GRACE_MS;
     });
@@ -4108,11 +4124,17 @@ function computeTodayStaffingPlan(ctx){
   // 未開始のまま数えると、来ない人をこの作業の予定人員に数え続け、不足が隠れる。
   // 作業者画面の指示は残す(管理者が取り消したわけではないため)。完了後の配置予定は元の作業を続けるのが正しいので対象外。
   var NOT_FOLLOWED_MS = 10*60000;
+  // 優先作業の指示を受けた人が手待ち作業をしている間は「準備待ち」(CSVを取り込んでも送り状の準備ができるまで始められない、など)。
+  // この間は指示を残し、その作業の予定人員に数え続ける(別の人を回さない)。この時間を過ぎても始めなければ「未実施」
+  var INSTRUCTION_PREP_WAIT_MS = 30*60000;
   confirmed.forEach(function(it){
     if(it.progress!=='pending' || it.startAfterTaskId || !it.confirmedAt) return;
     var open = openByStaff[it.staffId];
     if(!open || open.taskId==='BREAK' || open.taskId===it.taskId) return;
-    if(nowMs-new Date(it.confirmedAt).getTime() < NOT_FOLLOWED_MS) return;
+    var waited = nowMs-new Date(it.confirmedAt).getTime();
+    var prepWait = !!(taskMap[open.taskId] && taskMap[open.taskId].idleLikely===true && !(taskMap[it.taskId] && taskMap[it.taskId].idleLikely===true));
+    if(prepWait){ it.prepWaiting = waited < INSTRUCTION_PREP_WAIT_MS; if(it.prepWaiting) return; }
+    if(waited < NOT_FOLLOWED_MS) return;
     it.progress = 'notFollowed';
   });
   var pendingConfirmedByStaff = {};
@@ -4647,6 +4669,10 @@ function computeStaffingDiagnostics(plan, day){
     if(waited<DIAG_NOT_STARTED_MIN) return;
     var c = plan.taskById[it.taskId];
     if(c && c.remainingQty<=0) return;
+    if(it.prepWaiting){
+      if(waited>=20) out.push({ level:'info', text: nm(it.staffId)+'さん: 「'+tn(it.taskId)+'」の指示から'+hm(waited)+'、手待ち作業「'+tn(info.currentTaskId)+'」で準備待ちです(30分を過ぎると未実施として扱います)' });
+      return;
+    }
     out.push({ level:'warn', text: nm(it.staffId)+'さん: '+fmtClock(it.confirmedAt)+'の指示「'+tn(it.taskId)+'」が'+hm(waited)+'始まっていません'+(info.currentTaskId && info.currentTaskId!=='BREAK' ? '(今は「'+tn(info.currentTaskId)+'」)' : '') });
   });
   // 4. 推定では終わっているのに、完了の記録がない
@@ -4730,7 +4756,7 @@ function nextTaskForStaff(plan, staffId, day){
   var conf = plan.confirmed.filter(function(it){ return it.staffId===staffId && (it.progress==='pending' || it.progress==='notFollowed') && (usable(it.taskId) || (it.tier==='manual' && it.taskId!==current && it.taskId!=='BREAK')); })
     .sort(function(a,b){ return String(a.confirmedAt).localeCompare(String(b.confirmedAt)); })[0];
   // 作業完了後の配置予定(startAfterTaskId)で、元の作業をまだ続けている場合は afterTaskId を付ける(「開始してください」とは出さない)
-  if(conf) return { taskId: conf.taskId, source: 'confirmed', expectedQty: conf.expectedQty,
+  if(conf) return { taskId: conf.taskId, source: 'confirmed', expectedQty: conf.expectedQty, prepWaiting: !!conf.prepWaiting,
     afterTaskId: (conf.startAfterTaskId && current===conf.startAfterTaskId) ? conf.startAfterTaskId : null };
   return null;
 }
@@ -6946,7 +6972,7 @@ function renderStaffing(){
       (it.startAfterTaskId && it.progress==='pending' && plan.staff[it.staffId] && (plan.staff[it.staffId].currentTaskId===it.startAfterTaskId ||
           plan.confirmed.some(function(o){ return o!==it && o.staffId===it.staffId && o.taskId===it.startAfterTaskId && (o.progress==='pending' || o.progress==='notFollowed'); }))
         ? '<span class="stf-badge stf-badge-pending">確定済み・'+esc(taskById(it.startAfterTaskId).name)+'の完了後に開始</span>'
-        : (progressBadge[it.progress]||''))+
+        : (it.prepWaiting ? '<span class="stf-badge stf-badge-pending">確定済み・準備待ち(手待ち作業中)</span>' : (progressBadge[it.progress]||'')))+
       (it.confirmedAt ? '<span class="stf-row-meta">'+fmtClock(it.confirmedAt)+(it.tier==='manual' ? '手動配置' : (it.auto ? '自動確定' : '確定'))+'</span>' : '')+
       (it.maybeUnneeded ? '<span style="color:var(--rust-600);font-weight:700;font-size:13px;">⚠ 不要の可能性(作業が完了しています)</span>' : '')+
       (it.staffAbsent ? '<span style="color:var(--rust-600);font-weight:700;font-size:13px;">⚠ 出勤していないため、予定人員に数えていません</span>' : '')+
@@ -8414,7 +8440,7 @@ function renderShukeiSheet(siteKey, site, data, draft){
   if(!zonesShown.length) zonesShown = site.zones.slice();
   // [見出し, 並び替えのキー, 列のclass]。見出しを押すとその列で並び替える(もう一度押すと逆順)
   var cols = [['VC番号','vc',''],['品番・商品名','code',''],['数量','qty','num sk-key'],['ケース','cases','num sk-key']].concat(site.showFraction ? [['端数','fraction','num sk-key']] : []).concat([['入数','packQty','num']])
-    .concat(zonesShown.map(function(z, zi){ return [z, 'zone:'+z, 'sk-zone'+(zi===0 ? ' sk-grp' : '')]; })).concat([['弥生','yayoi','num sk-minor sk-grp'],['ロジ','logi','num sk-minor'],['才数','cubic','num sk-minor']]).concat([['備考','note','']]);
+    .concat(zonesShown.map(function(z, zi){ return [z, 'zone:'+z, 'sk-zone'+(zi===0 ? ' sk-grp' : '')]; })).concat([['弥生','yayoi','num sk-minor sk-grp'],['ロジ','logi','num sk-minor'],['才数','cubic','num sk-minor']]).concat([['備考','note','sk-note']]);
   var sheetSort = state.shukeiSheetSort;
   var head = '<tr><th class="sk-no">No</th>'+cols.map(function(c){ return '<th class="shukei-sortable '+c[2]+'" data-shukei-colsort="'+esc(c[1])+'" title="押すと「'+esc(c[0])+'」で並び替え">'+esc(c[0])+shukeiSortMark(sheetSort, c[1])+'</th>'; }).join('')+
     '<th class="print-only-cell sk-check">✓</th><th class="no-print"></th></tr>';
@@ -8439,9 +8465,9 @@ function renderShukeiSheet(siteKey, site, data, draft){
       '<td class="num sk-minor sk-grp">'+(v.yayoi===null?'':formatNum(v.yayoi))+'</td>'+
       '<td class="num sk-minor">'+(v.logi===null?'':formatNum(v.logi))+'</td>'+
       '<td class="num sk-minor">'+(!v.code ? '' : (v.cubic===null ? '要計測' : formatCubic(v.cubic)))+'</td>'+
-      '<td style="white-space:nowrap;">'+inp(i,'note',r.note,110)+
+      '<td class="sk-note"><span class="sk-note-edit">'+inp(i,'note',r.note,110)+
         (i<draft.rows.length-1 ? '<button type="button" class="shukei-filldown no-print" data-shukei-filldown="'+i+'" title="この備考を下の行すべてにコピー">↓</button>' : '')+
-        '<span class="print-only">'+esc(r.note||'')+'</span></td>'+
+        '</span><span class="print-only">'+esc(r.note||'')+'</span></td>'+
       '<td class="print-only-cell sk-check">□</td>'+
       '<td class="no-print"><button type="button" class="icon-x" data-shukei-del="'+i+'" title="この行を削除">&times;</button></td>';
     return '<tr>'+cells+'</tr>';
@@ -8488,7 +8514,7 @@ function renderShukeiDiff(siteKey, site, data){
     if(diffSort) return shukeiCompareValues(a[diffSort.key], b[diffSort.key], diffSort.dir);
     return Math.abs(b.diff)-Math.abs(a.diff); // 初期: 差異の大きい順
   });
-  function dh(label, key){ return '<th class="shukei-sortable" data-shukei-diffsort="'+key+'" title="押すと「'+esc(label)+'」で並び替え">'+esc(label)+shukeiSortMark(diffSort, key)+'</th>'; }
+  function dh(label, key){ return '<th class="shukei-sortable'+(['yayoi','logi','diff','cases','cubic'].indexOf(key)!==-1 ? ' num' : '')+'" data-shukei-diffsort="'+key+'" title="押すと「'+esc(label)+'」で並び替え">'+esc(label)+shukeiSortMark(diffSort, key)+'</th>'; }
   var rows = list.map(function(r){
     return '<tr><td>'+esc(r.code)+'</td><td>'+esc(r.name)+'</td><td class="num">'+formatNum(r.yayoi)+'</td><td class="num">'+formatNum(r.logi)+'</td>'+
       '<td class="num" style="'+(r.diff!==0?'color:var(--rust-600);font-weight:700;':'')+'">'+(r.diff>0?'+':'')+formatNum(r.diff)+'</td>'+
@@ -12243,6 +12269,7 @@ function renderInput(){
             return '<button type="button" class="idle-alt-btn" data-suggest-start="'+esc(w.taskId)+'">'+esc(w.name)+'を開始</button>';
           }).join('')+'</div>'+
         '</div>' : '')+
+        (myNext.prepWaiting ? '<div class="pool-hint" style="margin-top:6px;">送り状などの準備ができたら開始してください(それまでは手待ち作業を続けて構いません)。</div>' : '')+
         (hasCurrent ? '<div class="pool-hint" style="margin-top:6px;">次の作業を開始すると、今の作業は完了になります。</div>' : '')+
       '</div>';
     }
@@ -15271,7 +15298,7 @@ function renderMonitorStaffCard(s, plan, afterBreakPlan){
   var nextName = null, nextSub = '', nextTaskId = null;
   if(next){
     nextTaskId = next.taskId; nextName = taskById(next.taskId).name;
-    nextSub = next.afterTaskId ? '今の作業が終わったら' : '指示あり・開始待ち';
+    nextSub = next.afterTaskId ? '今の作業が終わったら' : (next.prepWaiting ? '指示あり・準備待ち' : '指示あり・開始待ち');
   }else if(onBreak){
     // 休憩前の作業が未完了なら、人員配置の計算(休憩をまたいだ担当の継続)がその作業を担当として残している
     var pinfo = plan && plan.staff[s.id];

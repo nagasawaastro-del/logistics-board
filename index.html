@@ -728,6 +728,9 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .sk-pick .sk-name{font-size:11px;color:var(--slate-500);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;}
 .sk-pick .sk-code{font-weight:700;font-size:14px;}
 .sk-pick .sk-zone .shukei-loc-name{font-weight:700;font-size:14px;}
+.sk-pick th.sk-zone,.sk-pick td.sk-zone{border-left:1px solid #C9D1DD;}
+.sk-pick th.sk-grp,.sk-pick td.sk-grp{border-left:2px solid #8A94A3;}
+.sk-pick th.sk-zone{text-align:center;}
 .sk-pick .sk-total td{border-top:2px solid var(--ink-900);font-weight:700;background:none !important;}
 .print-only-cell{display:none;}
 .sk-pick .sk-check{text-align:center;font-size:16px;width:1%;}
@@ -747,6 +750,8 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
   .sk-pick tbody tr{page-break-inside:avoid;break-inside:avoid;}
   .sk-pick tbody tr:nth-child(even) td{background:#f2f2f2 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
   .sk-pick .sk-key,.sk-pick .sk-code,.sk-pick .sk-zone .shukei-loc-name{font-size:13px;}
+  .sk-pick th.sk-zone,.sk-pick td.sk-zone{border-left:1px solid #999 !important;}
+  .sk-pick th.sk-grp,.sk-pick td.sk-grp{border-left:2px solid #333 !important;}
   .sk-pick .sk-item{min-width:170px;}
   .sk-pick .sk-name{max-width:260px;white-space:normal;font-size:9.5px;}
   .sk-pick .sk-minor{font-size:10px;color:#555;}
@@ -1222,6 +1227,9 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-10-01', items:[
+    '【次の作業: 手待ち作業】優先作業の予定・指示が無い人は、手待ち作業をしている人も含めて、次の作業に手待ち作業(今の手待ち作業とは別の作業を、手待ち優先度の順に)を出すようにしました(タブレット・モニター・人員配置画面)',
+    '【集計表: 区画の縦線】集計表の区画(S・AA・A〜K・HOME)の列ごとに縦線を入れました。数量の列と区画の列の境目、区画の列と弥生・ロジの列の境目は太い線です(印刷も同じ)',
+    '【モニター: 次の作業】次の作業が無いとき、手待ち作業をしている人には「〇〇を継続(優先作業が入ったら指示が出ます)」、何もしていない人には「指示待ち」と表示するようにしました(空欄「—」で分かりにくかったため)',
     '【人員配置: 自動診断】人員配置画面の上に「🩺 自動診断」を追加しました(AIは使わず、費用はかかりません)。締切に間に合わない見込みの作業(何分遅れるか・何人足りないか)、指示が出てから15分以上始まっていない人、推定では終わっているのに完了の記録がない作業、3時間以上続いている作業の記録(切り替え忘れの可能性)、作業も指示もない人、確定待ちの作業完了後の配置予定、今日の実績と生産性の設定のずれ(25%以上)、1日の見通し(今ある作業が終わる時刻と勤務終了までの余裕)を、重要な順に表示します',
     '【人員配置: 次の作業】今の作業のあとに回す優先作業が無い人は、次の作業として手待ち作業(手待ち優先度の順)を表示するようにしました(作業者のタブレット・モニター・人員配置画面の「作業完了後の手待ち作業(予定)」)。手待ち作業は確定不要で、作業が終わった時点で自動で指示が出ます。モニターの「次の作業」には、管理者の確定待ちの作業完了後の配置予定も「確定待ち」として出します',
     '【人員配置: 欠勤者の指示】出勤していない人・勤務が終わった人への未開始の指示を、作業の予定人員に数えないようにしました(お休みの人の指示で人が足りている扱いになり、その作業に誰も回らなかったため)。確定済み一覧には「出勤していないため、予定人員に数えていません」と表示します',
@@ -4526,6 +4534,18 @@ function computeTodayStaffingPlan(ctx){
       var n = { staffId: sid, name: staffInfo[sid].name, taskId: t.id, afterTaskId: a.currentTaskId, freeAtMs: a.freeAtMs, idle: true };
       idleNext.push(n); idleNextByStaff[sid] = n;
     });
+    // 手待ち作業をしている人(優先作業の予定・指示が無い人)の次の作業も、手待ち作業(今の手待ち作業とは別の作業を、手待ち優先度の順に)
+    Object.keys(staffInfo).forEach(function(sid){
+      var info = staffInfo[sid];
+      if(idleNextByStaff[sid] || !info.present || info.excluded || info.remainMin<=0 || info.onBreak || used[sid] || pendingConfirmedByStaff[sid]) return;
+      var cur = info.currentTaskId;
+      if(!cur || !(taskMap[cur] && taskMap[cur].idleLikely===true)) return;
+      if(confirmed.some(function(it){ return it.staffId===sid && (it.progress==='pending' || it.progress==='notFollowed') && it.taskId!==cur; })) return;
+      var t = idleWorkTasks.find(function(w){ return w.id!==cur; });
+      if(!t) return;
+      var n = { staffId: sid, name: info.name, taskId: t.id, afterTaskId: cur, freeAtMs: null, idle: true, fromIdle: true };
+      idleNext.push(n); idleNextByStaff[sid] = n;
+    });
   }
 
   // 作業記録があるのに完了の記録が無く、今は誰も担当していない作業(休憩で中断したまま・勤務終了で打ち切られたなど)。
@@ -6783,8 +6803,8 @@ function renderStaffing(){
     return '<div class="stf-row" data-staffing-idle-next="'+esc(n.staffId)+'" style="flex-wrap:wrap;">'+
       '<span class="stf-row-main">'+esc(n.name)+'さん</span>'+
       '<span class="stf-row-meta">現在: '+esc(taskById(n.afterTaskId).name)+'</span>'+
-      '<span class="stf-row-meta">完了予定: '+esc(aboutClock(n.freeAtMs))+'(目安)</span>'+
-      '<span class="stf-row-meta">次: <b>'+esc(taskById(n.taskId).name)+'</b>(手待ち作業・終わったら自動で指示)</span>'+
+      (n.fromIdle ? '' : '<span class="stf-row-meta">完了予定: '+esc(aboutClock(n.freeAtMs))+'(目安)</span>')+
+      '<span class="stf-row-meta">次: <b>'+esc(taskById(n.taskId).name)+'</b>(手待ち作業'+(n.fromIdle ? '・今の手待ち作業のあとに' : '・終わったら自動で指示')+')</span>'+
     '</div>';
   }).join('');
   var idleNextSection = idleNextRows ? ('<div class="stf-section-title">🟡 作業完了後の手待ち作業(予定)</div><div class="stf-card is-idle">'+idleNextRows+'</div>') : '';
@@ -8234,7 +8254,7 @@ function renderShukeiSheet(siteKey, site, data, draft){
   if(!zonesShown.length) zonesShown = site.zones.slice();
   // [見出し, 並び替えのキー, 列のclass]。見出しを押すとその列で並び替える(もう一度押すと逆順)
   var cols = [['VC番号','vc',''],['品番・商品名','code',''],['数量','qty','num sk-key'],['ケース','cases','num sk-key']].concat(site.showFraction ? [['端数','fraction','num sk-key']] : []).concat([['入数','packQty','num']])
-    .concat(zonesShown.map(function(z){ return [z, 'zone:'+z, 'sk-zone']; })).concat([['弥生','yayoi','num sk-minor'],['ロジ','logi','num sk-minor'],['才数','cubic','num sk-minor']]).concat([['備考','note','']]);
+    .concat(zonesShown.map(function(z, zi){ return [z, 'zone:'+z, 'sk-zone'+(zi===0 ? ' sk-grp' : '')]; })).concat([['弥生','yayoi','num sk-minor sk-grp'],['ロジ','logi','num sk-minor'],['才数','cubic','num sk-minor']]).concat([['備考','note','']]);
   var sheetSort = state.shukeiSheetSort;
   var head = '<tr><th class="sk-no">No</th>'+cols.map(function(c){ return '<th class="shukei-sortable '+c[2]+'" data-shukei-colsort="'+esc(c[1])+'" title="押すと「'+esc(c[0])+'」で並び替え">'+esc(c[0])+shukeiSortMark(sheetSort, c[1])+'</th>'; }).join('')+
     '<th class="print-only-cell sk-check">✓</th><th class="no-print"></th></tr>';
@@ -8255,8 +8275,8 @@ function renderShukeiSheet(siteKey, site, data, draft){
       '<td class="num sk-key">'+(v.cases===null?'':formatNum(v.cases))+'</td>'+
       (site.showFraction ? '<td class="num sk-key">'+(v.fraction ? formatNum(v.fraction) : '')+'</td>' : '')+
       '<td class="num">'+(v.packQty===null?'':formatNum(v.packQty))+'</td>'+
-      zonesShown.map(function(z){ return '<td class="sk-zone">'+(v.code ? shukeiZoneCellHtml(v, z) : '')+'</td>'; }).join('')+
-      '<td class="num sk-minor">'+(v.yayoi===null?'':formatNum(v.yayoi))+'</td>'+
+      zonesShown.map(function(z, zi){ return '<td class="sk-zone'+(zi===0 ? ' sk-grp' : '')+'">'+(v.code ? shukeiZoneCellHtml(v, z) : '')+'</td>'; }).join('')+
+      '<td class="num sk-minor sk-grp">'+(v.yayoi===null?'':formatNum(v.yayoi))+'</td>'+
       '<td class="num sk-minor">'+(v.logi===null?'':formatNum(v.logi))+'</td>'+
       '<td class="num sk-minor">'+(!v.code ? '' : (v.cubic===null ? '要計測' : formatCubic(v.cubic)))+'</td>'+
       '<td style="white-space:nowrap;">'+inp(i,'note',r.note,110)+
@@ -12076,7 +12096,7 @@ function renderInput(){
     workInstructionBanner = '<div class="next-suggest-banner" id="workerIdleNext" style="border-color:#9DB5D8;background:#F5F8FD;">'+
       '<div class="next-suggest-title">📋 次の作業(予定)</div>'+
       '<div class="next-suggest-task" style="font-size:18px;">'+esc(inxNow.name)+'が終わったら、'+esc(inxNext.name)+'(手待ち作業)へ</div>'+
-      '<div class="next-suggest-meta">今の作業「'+esc(inxNow.name)+'」を続けてください'+(inxEta ? '(完了予定 約'+esc(inxEta)+'・目安)' : '')+
+      '<div class="next-suggest-meta">'+(inx.fromIdle ? '優先作業が入ったら指示が出ます' : '今の作業「'+esc(inxNow.name)+'」を続けてください'+(inxEta ? '(完了予定 約'+esc(inxEta)+'・目安)' : ''))+
         (inxAlts.length ? '。ほかの手待ち作業('+inxAlts.map(function(w){ return esc(w.name); }).join('・')+')でも構いません' : '')+'</div>'+
     '</div>';
   }
@@ -15109,13 +15129,20 @@ function renderMonitorStaffCard(s, plan, afterBreakPlan){
     var rsv = plan.reservations.filter(function(r){ return r.staffId===s.id; })[0];
     nextTaskId = rsv.taskId; nextName = taskById(nextTaskId).name; nextSub = '今の作業が終わったら(確定待ち)';
   }else if(plan && plan.idleNextByStaff && plan.idleNextByStaff[s.id]){
-    nextTaskId = plan.idleNextByStaff[s.id].taskId; nextName = taskById(nextTaskId).name; nextSub = '今の作業が終わったら(手待ち作業)';
+    nextTaskId = plan.idleNextByStaff[s.id].taskId; nextName = taskById(nextTaskId).name;
+    nextSub = plan.idleNextByStaff[s.id].fromIdle ? '手待ち作業(優先作業が入ったら指示が出ます)' : '今の作業が終わったら(手待ち作業)';
+  }
+  // 次の作業が無いとき: 手待ち作業中なら「継続」、何もしていなければ「指示待ち」(空欄にしない)
+  if(!nextName && log && !onBreak && taskById(log.taskId).idleLikely===true){
+    nextTaskId = log.taskId; nextName = taskById(log.taskId).name+'を継続'; nextSub = '優先作業が入ったら指示が出ます';
+  }else if(!nextName && !log){
+    nextName = '指示待ち'; nextSub = '作業が入ったら指示が出ます';
   }
   var nextHtml = nextName
-    ? '<div class="mon-next" style="border-left-color:'+esc(taskById(nextTaskId).color)+'">'+
+    ? '<div class="mon-next"'+(nextTaskId ? ' style="border-left-color:'+esc(taskById(nextTaskId).color)+'"' : '')+'>'+
         '<div class="mon-now-label">次の作業</div>'+
         '<div class="mon-next-task">'+esc(nextName)+'</div>'+
-        '<div class="mon-now-meta"><span>'+esc(nextSub)+'</span>'+etaHtml(nextTaskId)+'</div>'+
+        '<div class="mon-now-meta"><span>'+esc(nextSub)+'</span>'+(nextTaskId ? etaHtml(nextTaskId) : '')+'</div>'+
       '</div>'
     : '<div class="mon-next is-none"><div class="mon-now-label">次の作業</div><div class="mon-next-task">—</div></div>';
   return '<div class="mon-row">'+

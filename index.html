@@ -335,6 +335,11 @@ input,select{font-family:inherit;}
 .stf-diag-danger{color:#B42318;font-weight:700;}
 .stf-diag-warn{color:#B54708;}
 .stf-diag-info{color:var(--ink-900);}
+.stf-manual{border:1px solid var(--paper-line);border-left:6px solid #7A5AF8;border-radius:var(--radius-lg);padding:10px 14px;margin:10px 0;background:#fff;}
+.stf-manual summary{cursor:pointer;font-size:14px;}
+.stf-manual-body{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
+.stf-manual-body select{max-width:100%;padding:6px;font-size:14px;}
+.stf-manual-timing{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;}
 .stf-need{color:#B54708;font-weight:700;}
 .stf-person{margin-top:8px;padding:8px 10px;border-radius:var(--radius-md);background:#F0F9FF;}
 .stf-person-name{font-weight:700;}
@@ -1227,6 +1232,8 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-10-01', items:[
+    '【手動の指示: 次の作業】「✋ 手動で指示を出す」で、タイミングに「次に(指示済みの作業、または今の作業が終わったら)」を選べるようにしました。続けて何件でもつなげられます(例: DFをすぐ → 返品を次に → 検品を次に)。タブレットには順に「DFを開始」→(DF中は)「DFが終わったら返品へ」→「返品が終わったら検品へ」と出ます。つないだ指示は、前の指示を「変更済み」にしません。「すぐ」を選ぶと、まだ始めていない指示を置き換えます',
+    '【人員配置: 手動で指示を出す】人員配置画面に「✋ 手動で指示を出す」を追加しました。スタッフ・作業・タイミング(すぐ/今の作業が終わったら)を選ぶと、自動配置の計算に関係なく、その人の作業者画面に「📋 本日の作業指示」として出てチャイムで知らせます(処理済みの作業・手待ち作業でも指示できます)。手動の指示は、優先度の高い作業が来ても自動配置で入れ替えません。確定済み一覧のまだ始めていない指示には「取り消す」ボタンを付けました(操作履歴に残ります)',
     '【次の作業: 手待ち作業】優先作業の予定・指示が無い人は、手待ち作業をしている人も含めて、次の作業に手待ち作業(今の手待ち作業とは別の作業を、手待ち優先度の順に)を出すようにしました(タブレット・モニター・人員配置画面)',
     '【集計表: 区画の縦線】集計表の区画(S・AA・A〜K・HOME)の列ごとに縦線を入れました。数量の列と区画の列の境目、区画の列と弥生・ロジの列の境目は太い線です(印刷も同じ)',
     '【モニター: 次の作業】次の作業が無いとき、手待ち作業をしている人には「〇〇を継続(優先作業が入ったら指示が出ます)」、何もしていない人には「指示待ち」と表示するようにしました(空欄「—」で分かりにくかったため)',
@@ -4068,18 +4075,32 @@ function computeTodayStaffingPlan(ctx){
   // 変更済みを未開始のまま数えると、来ない人をこの作業の予定人員に数え続け(不足が隠れる)、その人を次の配置の候補にも出せなくなる。
   // 確定時点の作業(fromTaskId)・完了後の配置予定の元の作業(startAfterTaskId)・休憩の再開は「別の作業」に含めない。
   var SUPERSEDE_GRACE_MS = 60000; // 端末ごとの時計のずれで、確定の直前に始めた作業を「確定後」と誤判定しないための余裕
+  // 「〇〇が終わったら」とつないだ指示の、前につながる作業(手動で DF → 返品 → 検品 のように続けて指示した場合の DF・返品)
+  function chainTasksBefore(it){
+    var out = [], cur = it, guard = 0;
+    while(cur && cur.startAfterTaskId && guard++<20){
+      out.push(cur.startAfterTaskId);
+      var c0 = cur;
+      cur = confirmed.filter(function(q){ return q!==c0 && q.staffId===c0.staffId && q.taskId===c0.startAfterTaskId && String(q.confirmedAt||'')<=String(c0.confirmedAt||''); })
+        .sort(function(a,b){ return String(b.confirmedAt||'').localeCompare(String(a.confirmedAt||'')); })[0];
+    }
+    return out;
+  }
   confirmed.forEach(function(it){
     if(it.progress!=='pending') return;
     var sinceMs = it.confirmedAt ? new Date(it.confirmedAt).getTime() : 0;
-    var newer = confirmed.some(function(o){ return o!==it && o.staffId===it.staffId && o.confirmedAt && it.confirmedAt && o.confirmedAt>it.confirmedAt; });
+    var before = chainTasksBefore(it);
+    // あとの指示が、この指示の作業のあとにつないだもの(手動の次の作業)なら、この指示は変更しない
+    var newer = confirmed.some(function(o){ return o!==it && o.staffId===it.staffId && o.confirmedAt && it.confirmedAt && o.confirmedAt>it.confirmedAt && chainTasksBefore(o).indexOf(it.taskId)===-1; });
+    // つないだ前の作業(今の作業・前の指示の作業)を始めたのは、指示どおり(別の作業ではない)
     var otherStarted = (day.logs||[]).some(function(l){
-      return l.staffId===it.staffId && l.taskId!=='BREAK' && l.taskId!==it.taskId && l.taskId!==it.fromTaskId && l.taskId!==it.startAfterTaskId &&
+      return l.staffId===it.staffId && l.taskId!=='BREAK' && l.taskId!==it.taskId && l.taskId!==it.fromTaskId && before.indexOf(l.taskId)===-1 &&
         !!l.start && new Date(l.start).getTime() >= sinceMs+SUPERSEDE_GRACE_MS;
     });
     // 手待ち作業への指示で、作業者がほかの手待ち作業を選んで始めた場合も「変更済み」(指示どおり手待ち作業をしている)。
     // 指示の直後(時計のずれの余裕の内)に選んでも「未実施」にしない
     var open = openByStaff[it.staffId];
-    var choseOtherIdle = !!(open && open.taskId!==it.taskId && taskMap[it.taskId] && taskMap[it.taskId].idleLikely===true &&
+    var choseOtherIdle = !!(open && open.taskId!==it.taskId && before.indexOf(open.taskId)===-1 && taskMap[it.taskId] && taskMap[it.taskId].idleLikely===true &&
       taskMap[open.taskId] && taskMap[open.taskId].idleLikely===true && open.start && new Date(open.start).getTime() >= sinceMs-SUPERSEDE_GRACE_MS);
     if(newer || otherStarted || choseOtherIdle) it.progress = 'superseded';
   });
@@ -4095,7 +4116,8 @@ function computeTodayStaffingPlan(ctx){
     it.progress = 'notFollowed';
   });
   var pendingConfirmedByStaff = {};
-  confirmed.forEach(function(it){ if(it.progress==='pending' && !pendingConfirmedByStaff[it.staffId]) pendingConfirmedByStaff[it.staffId] = it; });
+  confirmed.slice().sort(function(a,b){ return String(a.confirmedAt||'').localeCompare(String(b.confirmedAt||'')); })
+    .forEach(function(it){ if(it.progress==='pending' && !pendingConfirmedByStaff[it.staffId]) pendingConfirmedByStaff[it.staffId] = it; });
   // 出勤していない人の指示は「出勤していない」として印を付ける(画面で分かるように)。指示自体は消さない
   confirmed.forEach(function(it){ var si = staffInfo[it.staffId]; it.staffAbsent = it.progress==='pending' && !!si && !si.present; });
   // 「作業完了後の配置予定」として確定した指示(startAfterTaskId あり)は、元の作業を続けている間は「待機中」。
@@ -4104,7 +4126,10 @@ function computeTodayStaffingPlan(ctx){
   function isWaitingReservation(it){
     if(!it || !it.startAfterTaskId || it.progress!=='pending') return false;
     var info = staffInfo[it.staffId];
-    return !!info && info.currentTaskId===it.startAfterTaskId;
+    if(!info) return false;
+    if(info.currentTaskId===it.startAfterTaskId) return true;
+    // 前の指示(まだ始めていない)の作業が終わったら、とつないだ次の作業
+    return confirmed.some(function(o){ return o!==it && o.staffId===it.staffId && o.taskId===it.startAfterTaskId && (o.progress==='pending' || o.progress==='notFollowed'); });
   }
 
   // ---- 休憩をまたいだ担当の継続 ----
@@ -4249,6 +4274,7 @@ function computeTodayStaffingPlan(ctx){
   var pendingIdleByStaff = {};
   Object.keys(pendingConfirmedByStaff).forEach(function(sid){
     var it = pendingConfirmedByStaff[sid];
+    if(it.tier==='manual') return; // 管理者の手動の指示は、作業が処理済みでも手待ち作業でも、その人を押さえたままにする(自動配置で上書きしない)
     var c = calcByTask[it.taskId];
     if(!taskMap[it.taskId] || (c && c.remainingQty<=0)){ delete pendingConfirmedByStaff[sid]; return; }
     if(taskMap[it.taskId].idleLikely===true){ pendingIdleByStaff[sid] = it; delete pendingConfirmedByStaff[sid]; }
@@ -4281,7 +4307,7 @@ function computeTodayStaffingPlan(ctx){
   function movablePendingFor(sid, calc){
     var info = staffInfo[sid];
     var it = pendingConfirmedByStaff[sid];
-    if(!it || it.startAfterTaskId || it.taskId===calc.taskId) return null;
+    if(!it || it.startAfterTaskId || it.taskId===calc.taskId || it.tier==='manual') return null; // 手動の指示は入れ替えない
     if(!info || !info.present || info.excluded || info.remainMin<=0 || info.onBreak || used[sid]) return null;
     var cur = info.currentTaskId;
     if(cur && !(taskMap[cur] && taskMap[cur].idleLikely===true)) return null; // 作業(手待ち作業以外)を始めている
@@ -4570,7 +4596,7 @@ function computeTodayStaffingPlan(ctx){
   confirmed.forEach(function(it){
     var c = calcByTask[it.taskId];
     var t = taskMap[it.taskId];
-    it.maybeUnneeded = it.progress==='pending' && (!t || (c && c.remainingQty<=0));
+    it.maybeUnneeded = it.progress==='pending' && !it.forced && (!t || (c && c.remainingQty<=0)); // 管理者が手動で出した指示には出さない
   });
 
   return {
@@ -4701,7 +4727,7 @@ function nextTaskForStaff(plan, staffId, day){
     return true;
   }
   // 未実施(元の作業を続けている)の指示も、管理者が取り消すまでは作業者画面に出し続ける
-  var conf = plan.confirmed.filter(function(it){ return it.staffId===staffId && (it.progress==='pending' || it.progress==='notFollowed') && usable(it.taskId); })
+  var conf = plan.confirmed.filter(function(it){ return it.staffId===staffId && (it.progress==='pending' || it.progress==='notFollowed') && (usable(it.taskId) || (it.tier==='manual' && it.taskId!==current && it.taskId!=='BREAK')); })
     .sort(function(a,b){ return String(a.confirmedAt).localeCompare(String(b.confirmedAt)); })[0];
   // 作業完了後の配置予定(startAfterTaskId)で、元の作業をまだ続けている場合は afterTaskId を付ける(「開始してください」とは出さない)
   if(conf) return { taskId: conf.taskId, source: 'confirmed', expectedQty: conf.expectedQty,
@@ -4928,6 +4954,72 @@ async function recordManualPlacements(dateStr, added, removed){
   state.staffingSuggestion = sug;
   state.staffingSuggestionLoaded = true;
   return true;
+}
+/* 確定済みの指示一覧を保存する(他の端末での確定を消さないよう、呼び出し側で直前に読み直した prev を渡す) */
+async function saveConfirmedItems(dateStr, prev, items){
+  var nowIso = new Date().toISOString();
+  var sug = Object.assign({}, prev, {
+    version: 2, date: dateStr, status: 'confirmed', confirmedAt: prev.confirmedAt || nowIso,
+    confirmedBy: prev.confirmedBy || (state.managerSession && state.managerSession.user && state.managerSession.user.email) || '管理者',
+    confirmedItems: items,
+    assignments: items.map(function(it){ return { staffId: it.staffId, taskId: it.taskId, expectedQty: it.expectedQty, reassignFrom: it.fromTaskId||null }; })
+  });
+  var ok = await saveStaffingSuggestion(dateStr, sug);
+  if(ok===false) return false;
+  state.staffingSuggestion = sug;
+  state.staffingSuggestionLoaded = true;
+  return true;
+}
+/* 管理者が手動で指示を出す(自動配置の計算に関係なく、その人にその作業を指示する)。
+   afterCurrent: true なら「今の作業が終わったら」。手動の指示は自動配置で入れ替えない(computeTodayStaffingPlan)。 */
+async function forceManualInstruction(staffId, taskId, afterCurrent){
+  var dateStr = todayStr();
+  if(!state.day || state.day.date!==dateStr) return { ok:false, msg:'今日のデータを読み込めていません' };
+  var day = state.day;
+  var open = (day.logs||[]).find(function(l){ return l.staffId===staffId && l.end===null; });
+  if(open && open.taskId===taskId) return { ok:false, msg:'その人は、もうその作業をしています' };
+  var prev = await loadKeyJson('staffing-suggestion:'+dateStr, function(){ return {}; });
+  if(isUnverified(prev)) return { ok:false, msg:'最新の配置を読み込めませんでした。もう一度お試しください' };
+  var items = normalizeConfirmedInstructions(prev);
+  var after = null;
+  if(afterCurrent){
+    var base = manualChainBase(staffId);
+    after = base ? base.taskId : null;
+    if(after===taskId) return { ok:false, msg:'同じ作業が続いています。別の作業を選んでください' };
+  }
+  items.push({ id: uid(), staffId: staffId, taskId: taskId, tier: 'manual', forced: true, auto: false,
+    fromTaskId: (open && open.taskId!=='BREAK') ? open.taskId : null, startAfterTaskId: after,
+    expectedQty: null, reason: '管理者が手動で指示'+(after ? '(今の作業が終わったら)' : ''), confirmedAt: new Date().toISOString() });
+  if(!(await saveConfirmedItems(dateStr, prev, items))) return { ok:false, msg:'保存できませんでした' };
+  // 作業者の画面の作業一覧にも出す(担当外の作業でも、指示から始められるように)
+  var arr = day.assignments[staffId] || [];
+  if(arr.indexOf(taskId)===-1){ arr.push(taskId); day.assignments[staffId] = arr; await saveDay(day); }
+  await appendAuditLog({ action:'手動で作業を指示', target: staffById(staffId).name+' → '+taskById(taskId).name, before:null, after: after ? '「'+taskById(after).name+'」が終わったら' : 'すぐ' });
+  return { ok:true };
+}
+/* 手動で「次に」指示するときの、つなぐ先: まだ始めていない指示のうち最後に出したもの(作業完了後の予定を含む)。無ければ今の作業。
+   戻り値: { taskId, label } または null(今の作業も指示も無い) */
+function manualChainBase(staffId){
+  var plan = computeTodayStaffingPlanNow();
+  if(plan){
+    var pend = plan.confirmed.filter(function(it){ return it.staffId===staffId && (it.progress==='pending' || it.progress==='notFollowed'); })
+      .sort(function(a,b){ return String(b.confirmedAt||'').localeCompare(String(a.confirmedAt||'')); })[0];
+    if(pend) return { taskId: pend.taskId, label: '指示済みの「'+taskById(pend.taskId).name+'」' };
+  }
+  var open = state.day && (state.day.logs||[]).find(function(l){ return l.staffId===staffId && l.end===null && l.taskId!=='BREAK'; });
+  return open ? { taskId: open.taskId, label: '今の「'+taskById(open.taskId).name+'」' } : null;
+}
+/* 確定済み(まだ始めていない)の指示を取り消す */
+async function cancelConfirmedInstruction(itemId){
+  var dateStr = todayStr();
+  var prev = await loadKeyJson('staffing-suggestion:'+dateStr, function(){ return {}; });
+  if(isUnverified(prev)) return { ok:false, msg:'最新の配置を読み込めませんでした。もう一度お試しください' };
+  var items = normalizeConfirmedInstructions(prev);
+  var it = items.find(function(x){ return x.id===itemId; });
+  if(!it) return { ok:false, msg:'その指示は見つかりませんでした(ほかの端末で変更された可能性があります)' };
+  if(!(await saveConfirmedItems(dateStr, prev, items.filter(function(x){ return x.id!==itemId; })))) return { ok:false, msg:'保存できませんでした' };
+  await appendAuditLog({ action:'作業の指示を取り消し', target: staffById(it.staffId).name+' → '+taskById(it.taskId).name, before:'指示あり', after:'取り消し' });
+  return { ok:true };
 }
 /* 「次の作業を開始した=前の作業を完了した」。その作業にまだ他の作業者がいる場合は完了にしない。
    完了数量は、その時点のCSV予定数量(あとから追加されたCSVぶんは残作業になる)。 */
@@ -6851,12 +6943,14 @@ function renderStaffing(){
   }).map(function(it){
     return '<div class="stf-row" data-staffing-confirmed="'+esc(it.staffId)+'|'+esc(it.taskId)+'">'+
       '<span class="stf-row-main">'+esc(staffName(it.staffId))+'さん → '+esc(taskById(it.taskId).name)+'</span>'+
-      (it.startAfterTaskId && it.progress==='pending' && plan.staff[it.staffId] && plan.staff[it.staffId].currentTaskId===it.startAfterTaskId
+      (it.startAfterTaskId && it.progress==='pending' && plan.staff[it.staffId] && (plan.staff[it.staffId].currentTaskId===it.startAfterTaskId ||
+          plan.confirmed.some(function(o){ return o!==it && o.staffId===it.staffId && o.taskId===it.startAfterTaskId && (o.progress==='pending' || o.progress==='notFollowed'); }))
         ? '<span class="stf-badge stf-badge-pending">確定済み・'+esc(taskById(it.startAfterTaskId).name)+'の完了後に開始</span>'
         : (progressBadge[it.progress]||''))+
       (it.confirmedAt ? '<span class="stf-row-meta">'+fmtClock(it.confirmedAt)+(it.tier==='manual' ? '手動配置' : (it.auto ? '自動確定' : '確定'))+'</span>' : '')+
       (it.maybeUnneeded ? '<span style="color:var(--rust-600);font-weight:700;font-size:13px;">⚠ 不要の可能性(作業が完了しています)</span>' : '')+
       (it.staffAbsent ? '<span style="color:var(--rust-600);font-weight:700;font-size:13px;">⚠ 出勤していないため、予定人員に数えていません</span>' : '')+
+      ((it.progress==='pending' || it.progress==='notFollowed') && it.id ? '<button type="button" class="vc-manage-toggle-btn" data-cancel-instr="'+esc(it.id)+'" style="padding:2px 8px;font-size:11px;">取り消す</button>' : '')+
     '</div>';
   }).join('');
   // ---- 作業記録があるのに完了していない作業(担当者なし) ----
@@ -6874,6 +6968,35 @@ function renderStaffing(){
       '<div class="pool-hint" style="margin:0 0 6px;">休憩の開始・勤務終了で作業記録が打ち切られたまま、再開も完了の記録もありません。終わっている作業は「完了にする」を押してください(残作業量・配置案・生産性データに反映されます)。</div>'+
       unfinishedRows+
     '</div>') : '';
+  // ✋ 手動で指示を出す(自動配置の計算に関係なく、管理者が決める)
+  var mf = state.manualForm || {};
+  var mStaff = presentStaff();
+  var mTasks = tasksForToday().slice().sort(function(a,b){ return ((a.idleLikely===true)-(b.idleLikely===true)) || ((a.priorityLevel||4)-(b.priorityLevel||4)) || String(a.name).localeCompare(String(b.name), 'ja'); });
+  var mInfo = mf.staffId && plan.staff[mf.staffId];
+  var manualSection = '<details class="stf-manual" id="staffingManual"'+(state.staffingManualOpen ? ' open' : '')+'>'+
+    '<summary><b>✋ 手動で指示を出す</b> <span class="stf-row-meta">自動配置に関係なく、誰に・どの作業をさせるか決めます</span></summary>'+
+    '<div class="stf-manual-body">'+
+      '<label>スタッフ <select id="manualStaff"><option value="">選んでください</option>'+mStaff.map(function(st){
+        var inf = plan.staff[st.id];
+        var cur = inf && inf.currentTaskId ? (inf.currentTaskId==='BREAK' ? '休憩中' : taskById(inf.currentTaskId).name) : '作業なし';
+        return '<option value="'+esc(st.id)+'"'+(mf.staffId===st.id?' selected':'')+'>'+esc(st.name)+'(今: '+esc(cur)+')</option>';
+      }).join('')+'</select></label>'+
+      '<label>作業 <select id="manualTask"><option value="">選んでください</option>'+mTasks.map(function(t){
+        var c = plan.taskById[t.id];
+        var note = t.idleLikely===true ? '手待ち作業' : ('優先度'+(t.priorityLevel||4)+(c ? (c.remainingQty>0 ? '・残り'+formatNum(Math.round(c.remainingQty))+c.unit : '・処理済み') : ''));
+        return '<option value="'+esc(t.id)+'"'+(mf.taskId===t.id?' selected':'')+'>'+esc(t.name)+'('+esc(note)+')</option>';
+      }).join('')+'</select></label>'+
+      '<div class="stf-manual-timing">'+
+        '<label><input type="radio" name="manualTiming" value="now"'+(mf.timing!=='after'?' checked':'')+'> すぐ(今の作業を終えて開始)</label>'+
+        (function(){
+          var base = mf.staffId ? manualChainBase(mf.staffId) : null;
+          return '<label><input type="radio" name="manualTiming" value="after"'+(mf.timing==='after' && base ?' checked':'')+(base ? '' : ' disabled')+'> 次に('+(base ? esc(base.label)+'が終わったら' : '今の作業・指示が無いため選べません')+')</label>';
+        })()+
+      '</div>'+
+      '<button type="button" class="add-btn" id="manualSubmit">この内容で指示を出す</button>'+
+      '<div class="pool-hint" style="margin:6px 0 0;">作業者のタブレットに「📋 本日の作業指示」として出て、チャイムで知らせます。手動の指示は、自動配置で別の作業に入れ替えません。「次に」を選ぶと、指示済みの作業(無ければ今の作業)のあとにつなげます(続けて何件でもつなげられます)。「すぐ」はまだ始めていない指示を置き換えます。取り消すときは下の「確定済み」の「取り消す」を押してください。</div>'+
+    '</div>'+
+  '</details>';
   var confirmedSection = confirmedRows ? ('<div class="stf-section-title">✅ 確定済み</div><div class="stf-card" style="border-left-color:#12B76A;" id="staffingConfirmed">'+confirmedRows+'</div>') : '';
 
   // ---- ⑥ 人員が足りている作業・完了した作業(簡易表示) ----
@@ -6952,6 +7075,7 @@ function renderStaffing(){
       resvSection+
       idleNextSection+
       confirmHtml+
+      manualSection+
       unfinishedSection+
       confirmedSection+
       othersSection+
@@ -7000,6 +7124,42 @@ function bindStaffing(){
       render();
     });
   }
+  var manualEl = document.getElementById('staffingManual');
+  if(manualEl) manualEl.addEventListener('toggle', function(){ state.staffingManualOpen = manualEl.open; });
+  function readManualForm(){
+    var f = state.manualForm || (state.manualForm = {});
+    var st = document.getElementById('manualStaff'), tk = document.getElementById('manualTask');
+    var tm = document.querySelector('input[name="manualTiming"]:checked');
+    if(st) f.staffId = st.value; if(tk) f.taskId = tk.value; if(tm) f.timing = tm.value;
+    return f;
+  }
+  var mStaffEl = document.getElementById('manualStaff');
+  if(mStaffEl) mStaffEl.addEventListener('change', function(){ readManualForm(); render(); }); // 「今の作業が終わったら」を選べるかが変わる
+  ['manualTask'].forEach(function(id){ var el = document.getElementById(id); if(el) el.addEventListener('change', readManualForm); });
+  document.querySelectorAll('input[name="manualTiming"]').forEach(function(el){ el.addEventListener('change', readManualForm); });
+  var manualSubmit = document.getElementById('manualSubmit');
+  if(manualSubmit) manualSubmit.addEventListener('click', async function(){
+    var f = readManualForm();
+    if(!f.staffId || !f.taskId){ showToast('スタッフと作業を選んでください'); return; }
+    var nameS = staffById(f.staffId).name, nameT = taskById(f.taskId).name;
+    var baseC = f.timing==='after' ? manualChainBase(f.staffId) : null;
+    if(!confirm(nameS+'さんに「'+nameT+'」を'+(baseC ? baseC.label+'が終わったら' : 'すぐ')+'行うよう指示します。よろしいですか?')) return;
+    manualSubmit.disabled = true;
+    var r = await forceManualInstruction(f.staffId, f.taskId, f.timing==='after');
+    manualSubmit.disabled = false;
+    if(r.ok){ state.manualForm = {}; showToast(nameS+'さんに「'+nameT+'」を指示しました'); }
+    else showToast('⚠️ '+r.msg);
+    render();
+  });
+  document.querySelectorAll('[data-cancel-instr]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      if(!confirm('この指示を取り消します。よろしいですか?')) return;
+      el.disabled = true;
+      var r = await cancelConfirmedInstruction(el.getAttribute('data-cancel-instr'));
+      showToast(r.ok ? '指示を取り消しました' : '⚠️ '+r.msg);
+      render();
+    });
+  });
   var confirmBtn = document.getElementById('staffingConfirmBtn');
   if(confirmBtn){
     confirmBtn.addEventListener('click', async function(){
@@ -13521,7 +13681,7 @@ function autoConfirmTargets(plan){
       // 同じ作業の指示が「未実施」になっている場合は、自動で出し直さない
       if(it.taskId===p.taskId) return true;
       // 自動確定の指示を実施しなかった人には、しばらく別の指示も自動で出さない(管理者の判断に任せる)
-      return !!it.auto && nowMs-new Date(it.confirmedAt).getTime() < AUTO_CONFIRM_IGNORED_HOLD_MS;
+      return !!(it.auto || it.tier==='manual') && nowMs-new Date(it.confirmedAt).getTime() < AUTO_CONFIRM_IGNORED_HOLD_MS;
     });
   });
 }

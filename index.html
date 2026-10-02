@@ -235,6 +235,9 @@ input,select{font-family:inherit;}
 .vc-tab-body{margin-top:10px;}
 .vc-preview-row{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--paper-line);border-radius:10px;margin-bottom:6px;}
 .vc-preview-row.vc-preview-excluded{opacity:.45;}
+.bill-files{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-size:13px;}
+.bill-file{color:var(--slate-500);}
+.bill-file.is-ok{color:var(--ink-900);font-weight:600;}
 .vca-cards{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
 .vca-card{flex:1 1 150px;border:1px solid var(--paper-line);border-radius:var(--radius-lg);padding:10px 14px;background:#fff;}
 .vca-card.is-danger{border-color:#F04438;background:#FEF3F2;}
@@ -1259,6 +1262,7 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-10-02', items:[
+    '【請求データ(新しい画面)】毎月の請求書のデータを作る画面をトップページに追加しました(管理者のみ)。弥生販売のCSV(在庫1期・2期・3期・仕入明細・移動明細・売上明細・作業明細)をまとめてドラッグ&ドロップすると、請求の Excel と同じ列の並びで、保管料・入庫料・生協出庫・生協以外・移動出庫・明細1の表と、請求書鑑に入れる金額を作ります。表は「コピー」ボタンで請求の Excel に貼り付けます。売上明細は得意先(コープ・生協・パルシステム)で生協と生協以外に自動で分けます。入数・才数は kintone の商品台帳を使い、才数が登録されていない商品は1で計算して、注意事項として一覧に出します。2026年8月分のCSVで、保管料・移動出庫・諸作業料が請求の Excel と一致することを確認しました',
     '【作業量CSV取込】管理者画面の作業量CSV取込を、VC引き当て・データ更新と同じ形にしました。「📄 CSVファイルを選んで取り込む」ボタンで選ぶか、枠にCSVファイルをドラッグ&ドロップして取り込めます。対象日付・確認画面・二重取込の防止はこれまでどおりです',
     '【データ更新(新しい画面)】集計表・VC引き当てで使う共有データの更新を、トップページの「📥 データ更新」にまとめました。ロジザードの在庫・弥生の在庫(高屋・丹南)・VCの出荷指示のCSVを、まとめて選ぶかドラッグ&ドロップすると、中身から種類を見分けてそれぞれ登録します。各データの最終更新日時を一覧にし、今日まだ更新していないデータには印が付きます。VC引き当ての納品先一覧の編集もこの画面に移しました。集計表の「元データの登録」タブとVC引き当ての「取込・納品先一覧」タブは無くなり、代わりに各画面に「📥 データ更新を開く」ボタンを付けました。作業の件数のCSV取込(管理者画面)は、作業への振り分けを確認してから取り込む仕組みのため、これまでどおり管理者画面に残しています。VCの出荷指示として、Amazon VC 以外の取引先が入ったCSVは受け付けないようにしました',
     '【VC引き当て(新しい画面)】Excel「VC引き当てリスト」をロジリンクに移しました。トップページの「📦 VC引き当て」から開きます。ロジザードの出荷指示のCSV(Amazon VC)を取り込むだけで、在庫はロジザードの在庫(集計表で登録したもの・在庫数−引当数)、入数は弥生の在庫(無ければ商品台帳)を使って、品番ごとの発注数・入数・ケース数・振り分け番号(DIYは1、それ以外は納品先一覧で2か3)と、高屋・丹南どちらから出すか(高屋で足りれば高屋、だめなら丹南、どちらも足りなければ要確認)を出します。ピース引当・ケース引当(どの行も端数0の品番)・出荷先別・ダッシュボード(PO数・数量・ケース・端数・トップ10)に分かれ、並び替えと印刷ができます。「この表を集計表へ送る」で、倉庫ごとに集計表へVC番号(振り分け番号)・品番・数量を追加します。Excelとの違い: 1つの品番に振り分け番号が混ざるときは番号ごとの行に分けます(Excelは平均の番号になっていました)/高屋と丹南を合わせれば足りるときは分け方を出し、「分ける」を選べます/倉庫は品番ごとに選び直せます/納品先一覧に無い納品先は警告し、画面から番号を登録できます',
@@ -9241,6 +9245,322 @@ function bindDataHub(){
   if(d) bindVcAllocDestEditor(d);
 }
 
+/* ---------- 請求データ(毎月の請求書に貼る表を作る)。以前の Excel「保管料計算」「出庫料計算(生協・生協以外・移動出庫)」をロジリンクに移したもの ----------
+   弥生販売のCSV(在庫 1期・2期・3期、仕入明細、移動明細、売上明細、作業明細)を取り込み、請求の Excel(「2026.8請求」など)の
+   保管料・入庫料・生協出庫・生協以外・移動出庫・明細1 と同じ列の並びで表を作る。表は「コピー」して請求の Excel に貼り付ける。
+   ・入数・才数は kintone の商品台帳(product_master)。才数が登録されていない商品は 1 で計算し、注意事項として一覧に出す。
+     ただし移動の入数は、Excel と同じく移動明細の入数を使う。
+   ・在庫・仕入・移動入庫・移動出庫は、弥生の倉庫コード 0000(丹南)と 0018(高屋)を対象にする。
+   ・取り込んだCSVはこの端末の画面の中だけで計算し、保存しない(請求の元データは弥生にあるため)。 */
+var BILLING_WH = ['0000','0018'];
+var BILLING_RATES = { storage:12, inbound:15, outCase:20, outPieceCoop:25, outPieceOther:15, moveCase:20, movePiece:15 };
+var BILLING_STORAGE_METHOD = '3期制（末／10／20＋入)';
+// 移動先の名前(Excel「出庫料計算(移動出庫)」と同じ)
+var BILLING_MOVE_DEST = { 21:'RSL', 13:'CX尾道', 8:'CX桶川', 5:'桶川', 9:'CX小野' };
+function billingIsCoop(name){ return /コープ|生協|パルシステム/.test(String(name||'')); }
+function billingNum(v){ var n = Number(String(v===null||v===undefined?'':v).replace(/,/g,'')); return isFinite(n) ? n : 0; }
+/* CSVの種類を見分ける。戻り値 { kind:'stock'|'purchase'|'move'|'sales'|'work', period? } または { error } */
+function billingDetectCsv(rows, fileName){
+  var r0 = rows[0] || [];
+  var name = String(fileName||'');
+  if(r0.length>=16 && r0[0]==='' && r0[1]==='' && r0[6]==='終'){
+    var m = name.normalize('NFKC').match(/([123])\s*期/);
+    if(!m) return { error:'在庫のCSVですが、1期・2期・3期のどれか分かりません。ファイル名に「1期」「2期」「3期」を入れてください(例: 8月1期.csv)。' };
+    return { kind:'stock', period: Number(m[1]) };
+  }
+  var kind = r0[5];
+  if(kind==='14') return { kind:'purchase' };
+  if(kind==='40') return { kind:'move' };
+  if(kind==='24'){
+    if(/作業/.test(name)) return { kind:'work' };
+    if(/売上/.test(name)) return { kind:'sales' };
+    // ファイル名で分からないときは中身で: 作業明細は倉庫コード 0000・3桁の作業コード
+    var goods = rows.filter(function(r){ return r[14]==='1'; });
+    var work = goods.filter(function(r){ return r[22]==='0000' && /^\d{3}$/.test(r[15]||''); }).length;
+    return { kind: goods.length && work/goods.length>0.5 ? 'work' : 'sales' };
+  }
+  return { error:'弥生販売の在庫・仕入明細・移動明細・売上明細・作業明細のどのCSVか分かりませんでした。' };
+}
+var BILLING_KIND_LABEL = { stock:'在庫', purchase:'仕入明細', move:'移動明細', sales:'売上明細', work:'作業明細' };
+/* 計算。files: { stock:{1:rows,2:rows,3:rows}, purchase, move, sales, work } / pm: 商品台帳 { 品番: { packQty, cubicVolume } } */
+function computeBilling(files, pm){
+  var noCubic = {}, noPack = {};
+  function nameOf(code, fallback){ return fallback || ''; }
+  function pack(code){ var m = pm && pm[code]; return (m && m.packQty) ? Number(m.packQty) : null; }
+  function sai(code, name){
+    var m = pm && pm[code];
+    if(m && m.cubicVolume!==null && m.cubicVolume!==undefined && m.cubicVolume!=='') return Number(m.cubicVolume);
+    noCubic[code] = name || noCubic[code] || '';
+    return 1;
+  }
+  var inWh = function(w){ return BILLING_WH.indexOf(w)!==-1; };
+  var names = {};
+  // --- 在庫(1期・2期・3期): 品番ごとの合計 → ケース数(切り上げ。マイナスは0) ---
+  var stockCases = {};
+  [1,2,3].forEach(function(k){
+    var rows = files.stock && files.stock[k];
+    if(!rows) return;
+    var qty = {};
+    rows.forEach(function(r){
+      if(!inWh(r[5]) || !r[2]) return;
+      qty[r[2]] = (qty[r[2]]||0) + billingNum(r[11]);
+      if(r[3] && !names[r[2]]) names[r[2]] = r[3];
+    });
+    Object.keys(qty).forEach(function(code){
+      var p = pack(code);
+      var c = p ? Math.ceil(qty[code]/p) : 0;
+      if(!stockCases[code]) stockCases[code] = [0,0,0];
+      stockCases[code][k-1] = Math.max(0, c);
+    });
+  });
+  // --- 仕入(高屋・丹南、数量がプラスの行): ケース数(切り上げ。入数が無ければ1) ---
+  var buy = {};
+  (files.purchase||[]).forEach(function(r){
+    if(!inWh(r[22]) || r[14]!=='1' || !r[15]) return;
+    var q = billingNum(r[23]);
+    if(!(q>0)) return;
+    var p = pack(r[15]);
+    if(!p) noPack[r[15]] = r[17]||'';
+    buy[r[15]] = (buy[r[15]]||0) + (p ? Math.ceil(q/p) : 1);
+    if(r[17] && !names[r[15]]) names[r[15]] = r[17];
+  });
+  // --- 移動: 外の倉庫 → 高屋・丹南 は移動入庫、高屋・丹南 → 外の倉庫 は移動出庫(丹南⇔高屋は数えない) ---
+  var moveIn = {}, moveOut = [];
+  (files.move||[]).forEach(function(r){
+    var to = r[11], from = r[22], code = r[15];
+    if(!code) return;
+    var q = billingNum(r[23]), p = billingNum(r[20]);
+    if(inWh(to) && !inWh(from)){
+      moveIn[code] = (moveIn[code]||0) + (p ? Math.ceil(q/p) : 0);
+    }else if(inWh(from) && !inWh(to)){
+      var cs = p ? Math.floor(q/p) : 0, frac = q - cs*p;
+      var s = sai(code, r[17]);
+      moveOut.push([billingNum(r[3]), code, r[17]||'', q, BILLING_MOVE_DEST[Number(to)] || ('倉庫'+to), cs, s, cs*s, BILLING_RATES.moveCase, cs*s*BILLING_RATES.moveCase, frac, BILLING_RATES.movePiece, frac*BILLING_RATES.movePiece]);
+    }
+    if(r[17] && !names[code]) names[code] = r[17];
+  });
+  // --- 保管料・入庫料 ---
+  var codes = {};
+  [stockCases, buy, moveIn].forEach(function(o){ Object.keys(o).forEach(function(k){ codes[k] = true; }); });
+  var storage = [], inbound = [];
+  Object.keys(codes).sort(function(a,b){ return a<b ? -1 : (a>b ? 1 : 0); }).forEach(function(code){
+    var st = stockCases[code] || [0,0,0], b = buy[code]||0, mi = moveIn[code]||0;
+    var total = st[0]+st[1]+st[2]+b+mi;
+    if(!total) return;
+    var s = sai(code, names[code]);
+    var calc = total*s;
+    if(calc) storage.push([code, names[code]||'', BILLING_STORAGE_METHOD, st[0], st[1], st[2], b, mi, s, calc, BILLING_RATES.storage, calc*BILLING_RATES.storage]);
+    if(b+mi) inbound.push([code, names[code]||'', b, mi, s, (b+mi)*s, BILLING_RATES.inbound, (b+mi)*s*BILLING_RATES.inbound]);
+  });
+  // --- 出庫(売上明細): 返品・数量0以下・送料や経費(998-・999-)を除き、得意先で生協と生協以外に分ける ---
+  var coop = [], other = [];
+  (files.sales||[]).forEach(function(r){
+    if(r[14]!=='1' || !r[15] || /^99/.test(r[15]) || !inWh(r[22])) return;
+    var q = billingNum(r[23]);
+    if(!(q>0)) return;
+    var code = r[15], p = pack(code), cust = r[39]||'';
+    if(!p) noPack[code] = r[17]||'';
+    var cs = p ? Math.floor(q/p) : 0, frac = q - cs*(p||0);
+    var s = sai(code, r[17]);
+    var isCoop = billingIsCoop(cust), rate = isCoop ? BILLING_RATES.outPieceCoop : BILLING_RATES.outPieceOther;
+    (isCoop ? coop : other).push([billingNum(r[3]), code, r[17]||'', q, cust, cs, s, cs*s, BILLING_RATES.outCase, cs*s*BILLING_RATES.outCase, frac, rate, frac*rate]);
+  });
+  // --- 明細1(諸作業): 作業明細から消費税の行・衣類カバー(品番の最後が u)・数量も金額も0の行を除く。作業項目・作業日の順 ---
+  var work = [];
+  (files.work||[]).forEach(function(r){
+    if(r[14]==='99' || /u$/i.test(r[15]||'')) return;
+    var q = billingNum(r[23]), amt = billingNum(r[25]);
+    if(!q && !amt) return;
+    work.push([billingNum(r[3]), r[17]||'', q, billingNum(r[24]), amt, r[39]||'', (r[30] && r[30]!=='0') ? r[30] : '']); // 備考の「0」は空欄(請求の Excel と同じ)
+  });
+  work.sort(function(a,b){ return String(a[1]).localeCompare(String(b[1]), 'ja') || (a[0]-b[0]); });
+  function sum(rows, i){ return rows.reduce(function(a,r){ return a + (Number(r[i])||0); }, 0); }
+  var totals = {
+    storage: sum(storage, 11), inbound: sum(inbound, 7),
+    coop: sum(coop, 9)+sum(coop, 12), other: sum(other, 9)+sum(other, 12), moveOut: sum(moveOut, 9)+sum(moveOut, 12),
+    work: sum(work, 4)
+  };
+  // 対象月(売上・作業の日付から)
+  var months = {};
+  (files.sales||[]).concat(files.work||[]).forEach(function(r){ if(/^\d{8}$/.test(r[3]||'')) months[r[3].slice(0,6)] = (months[r[3].slice(0,6)]||0)+1; });
+  return { storage: storage, inbound: inbound, coop: coop, other: other, moveOut: moveOut, work: work, totals: totals,
+    noCubic: noCubic, noPack: noPack, months: Object.keys(months).sort() };
+}
+var BILLING_SHEETS = [
+  { key:'storage', sheet:'保管料', head:['商品コード','商品名称','計算方式','第１期 ','第２期 ','第3期 ','入庫数（仕入）','入庫数（移動）','才数','保管計算数','単価（保管）','保管料'], amountCols:[11], sumCols:[3,4,5,6,7,9,11] },
+  { key:'inbound', sheet:'入庫料', head:['商品コード','商品名称','入庫数（仕入）','入庫数（移動）','才数','入庫計算数','単価（入庫）','入庫荷役料'], amountCols:[7], sumCols:[2,3,5,7] },
+  { key:'coop', sheet:'生協出庫', head:['出荷日','商品コード','商品名','数量','得意先','ケース出荷','才数','請求計算数','単価','金額（ケース）','端数出荷','単価2','金額（端数）'], amountCols:[9,12], sumCols:[3,5,7,9,10,12] },
+  { key:'other', sheet:'生協以外', head:['出荷日','商品コード','商品名','数量','得意先','ケース出荷','才数','請求計算数','単価','金額（ケース）','端数出荷','単価2','金額（端数）'], amountCols:[9,12], sumCols:[3,5,7,9,10,12] },
+  { key:'moveOut', sheet:'移動出庫', head:['出荷日','商品コード','商品名','数量','移動先','ケース出荷','才数','請求計算数','単価','金額（ケース）','端数出荷','単価2','金額（端数）'], amountCols:[9,12], sumCols:[3,5,7,9,10,12] },
+  { key:'work', sheet:'明細1', head:['作業日','作業項目','数量','単価','金額','得意先','備考'], amountCols:[4], sumCols:[2,4] }
+];
+// 請求書鑑の行(合計を四捨五入)
+var BILLING_SUMMARY = [['保管料','storage'],['入庫作業','inbound'],['出庫作業（生協）','coop'],['出庫作業（生協以外）','other'],['出庫作業（移動）','moveOut'],['諸作業料','work']];
+function billingTsv(rows, withHead, head){
+  function cell(v){ return String(v===null||v===undefined ? '' : v).replace(/[\t\r\n]+/g,' '); }
+  return (withHead ? [head] : []).concat(rows).map(function(r){ return r.map(cell).join('\t'); }).join('\n');
+}
+function billingFmt(v){
+  if(typeof v!=='number') return esc(String(v===null||v===undefined?'':v));
+  return Number.isInteger(v) ? formatNum(v) : v.toLocaleString('ja-JP', { minimumFractionDigits:2, maximumFractionDigits:2 }); // 画面は小数第2位まで(コピーは元の値)
+}
+function renderBilling(){
+  ensureManagerSessionChecked();
+  if(!hasManagerSession()){
+    return renderManagerLoginForm('💴 請求データ', '毎月の請求書に貼る保管料・入庫料・出庫料・諸作業料の表を作ります。管理者アカウントでのログインが必要です。');
+  }
+  var b = state.billing || (state.billing = { files:{ stock:{} }, fileNames:{}, msg:'', tab:'summary', withHead:false });
+  var f = b.files;
+  var got = {
+    stock1: !!f.stock[1], stock2: !!f.stock[2], stock3: !!f.stock[3],
+    purchase: !!f.purchase, move: !!f.move, sales: !!f.sales, work: !!f.work
+  };
+  var need = [['stock1','在庫 1期'],['stock2','在庫 2期'],['stock3','在庫 3期'],['purchase','仕入明細'],['move','移動明細'],['sales','売上明細'],['work','作業明細']];
+  var checklist = '<div class="bill-files">'+need.map(function(n){
+    return '<span class="bill-file'+(got[n[0]]?' is-ok':'')+'">'+(got[n[0]]?'✅':'⬜')+' '+esc(n[1])+(b.fileNames[n[0]] ? '<span class="sk-minor"> '+esc(b.fileNames[n[0]])+'</span>' : '')+'</span>';
+  }).join('')+'</div>';
+  var anyFile = need.some(function(n){ return got[n[0]]; });
+  var calc = b.calc || null;
+  var body = '';
+  if(calc){
+    var tabs = [['summary','📋 請求書鑑の金額']].concat(BILLING_SHEETS.map(function(s){ return [s.key, s.sheet+' ('+formatNum(calc[s.key].length)+')']; })).map(function(t){
+      return '<button type="button" class="vc-tab-btn'+(b.tab===t[0]?' active':'')+'" data-bill-tab="'+t[0]+'">'+esc(t[1])+'</button>';
+    }).join('');
+    var warn = '';
+    var nc = Object.keys(calc.noCubic), np = Object.keys(calc.noPack);
+    if(nc.length) warn += '<details class="vc-warning-box"><summary><b>⚠️ 才数が登録されていない商品が'+nc.length+'件あります(1として計算しました)。</b> いずれ kintone の商品台帳に才数を登録してください。</summary><div style="margin-top:6px;">'+nc.sort().map(function(k){ return esc(k)+(calc.noCubic[k] ? ' '+esc(calc.noCubic[k]) : ''); }).join('<br>')+'</div></details>';
+    if(np.length) warn += '<details class="vc-warning-box"><summary><b>⚠️ 入数が登録されていない商品が'+np.length+'件あります。</b> 出庫はすべて端数、仕入は1ケースとして計算しました。</summary><div style="margin-top:6px;">'+np.sort().map(function(k){ return esc(k)+(calc.noPack[k] ? ' '+esc(calc.noPack[k]) : ''); }).join('<br>')+'</div></details>';
+    if(calc.months.length>1) warn += '<div class="vc-warning-box">売上明細・作業明細に、複数の月の日付が入っています('+calc.months.map(function(m){ return m.slice(0,4)+'年'+Number(m.slice(4))+'月'; }).join('・')+')。</div>';
+    var missing = need.filter(function(n){ return !got[n[0]]; }).map(function(n){ return n[1]; });
+    if(missing.length) warn += '<div class="vc-warning-box">まだ取り込んでいないCSV: '+esc(missing.join('・'))+'(そのデータの分は0で計算しています)</div>';
+    if(b.tab==='summary'){
+      var sumRows = BILLING_SUMMARY.map(function(s){ return [s[0], Math.round(calc.totals[s[1]])]; });
+      var sumAll = sumRows.reduce(function(a,r){ return a+r[1]; }, 0);
+      body = '<table class="report-table" style="max-width:520px;"><thead><tr><th>請求明細</th><th class="num">金額</th><th class="num">計算の合計</th></tr></thead><tbody>'+
+        BILLING_SUMMARY.map(function(s){ return '<tr><td>'+esc(s[0])+'</td><td class="num"><b>'+formatNum(Math.round(calc.totals[s[1]]))+'</b></td><td class="num sk-minor">'+billingFmt(calc.totals[s[1]])+'</td></tr>'; }).join('')+
+        '<tr class="sk-total"><td>計(倉庫運営委託費を除く)</td><td class="num">'+formatNum(sumAll)+'</td><td></td></tr></tbody></table>'+
+        '<div style="margin-top:8px;"><button type="button" class="add-btn" data-bill-copy="summary">📋 金額をコピー</button></div>'+
+        '<div class="pool-hint" style="margin-top:6px;">請求書鑑の「保管料」〜「諸作業料」に入れる金額です(各表の合計を四捨五入)。倉庫運営委託費・立替金・ヤマト着払送料・衣類カバー(明細2)はここでは出しません。</div>';
+    }else{
+      var sh = BILLING_SHEETS.filter(function(s){ return s.key===b.tab; })[0];
+      var rows = calc[sh.key];
+      var PREVIEW = 200;
+      var sums = sh.head.map(function(_, i){ return sh.sumCols.indexOf(i)!==-1 ? rows.reduce(function(a,r){ return a+(Number(r[i])||0); }, 0) : null; });
+      body = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">'+
+          '<button type="button" class="add-btn" data-bill-copy="'+sh.key+'">📋 '+esc(sh.sheet)+'をコピー('+formatNum(rows.length)+'行)</button>'+
+          '<label><input type="checkbox" id="billWithHead"'+(b.withHead?' checked':'')+'> 見出しの行も含める</label>'+
+        '</div>'+
+        '<div class="pool-hint" style="margin:0 0 8px;">コピーして、請求の Excel の「'+esc(sh.sheet)+'」シートの2行目(A2)に貼り付けてください。'+(rows.length>PREVIEW ? '画面には先頭の'+PREVIEW+'行だけ出しています(コピーは全行)。' : '')+'</div>'+
+        '<div style="overflow-x:auto;max-height:560px;overflow-y:auto;" data-keep-scroll="billTable"><table class="report-table shukei-table"><thead><tr>'+sh.head.map(function(h, i){ return '<th'+(typeof (rows[0]||[])[i]==='number' ? ' class="num"' : '')+'>'+esc(h)+'</th>'; }).join('')+'</tr></thead><tbody>'+
+          rows.slice(0, PREVIEW).map(function(r){ return '<tr>'+r.map(function(v, i){ return '<td'+(typeof v==='number' ? ' class="num"' : '')+'>'+(i===0 && sh.key!=='storage' && sh.key!=='inbound' ? esc(String(v)) : billingFmt(v))+'</td>'; }).join('')+'</tr>'; }).join('')+
+          '<tr class="sk-total">'+sums.map(function(v, i){ return '<td class="num">'+(i===0 ? '合計' : (v===null ? '' : billingFmt(v)))+'</td>'; }).join('')+'</tr>'+
+        '</tbody></table></div>';
+    }
+    body = '<div class="vc-tabs" style="margin-top:12px;">'+tabs+'</div>'+warn+body;
+  }
+  return '<div class="mgr-wrap"><div class="panel">'+
+    '<div class="panel-title">💴 請求データ</div>'+
+    '<div class="pool-hint" style="margin:0 0 10px;">弥生販売のCSVから、請求書(「2026.8請求」など)の保管料・入庫料・生協出庫・生協以外・移動出庫・明細1の表と、請求書鑑の金額を作ります。表はコピーして請求の Excel に貼り付けてください。'+
+      '入数・才数は kintone の商品台帳を使います。取り込んだCSVはこの画面で計算するだけで、保存しません(画面を閉じたら、もう一度取り込んでください)。</div>'+
+    (b.msg ? '<div class="vc-import-status" style="white-space:pre-line;">'+esc(b.msg)+'</div>' : '')+
+    '<div class="ll-form-group shukei-drop" data-bill-drop="1">'+
+      '<div class="ll-form-group-title">弥生販売のCSVの取り込み(まとめてOK)</div>'+
+      '<div class="pool-hint" style="margin:0 0 6px;">在庫(1期・2期・3期)・仕入明細・移動明細・売上明細・作業明細のCSVを、まとめて選ぶか、この枠にまとめてドラッグ&ドロップしてください。中身から種類を見分けます(在庫は、ファイル名の「1期」「2期」「3期」で見分けます)。売上明細は、得意先で生協と生協以外に自動で分けます。</div>'+
+      '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 CSVファイルを選んで取り込む(複数可)'+
+        '<input type="file" accept=".csv,text/csv" multiple data-bill-upload="1" style="display:none;"></label>'+
+      '<span class="shukei-drop-hint">またはCSVファイルをこの枠にドラッグ&ドロップ</span>'+
+      checklist+
+      (anyFile ? '<button type="button" class="vc-manage-toggle-btn" id="billClear" style="margin-top:8px;color:var(--rust-600);">取り込んだCSVを消す</button>' : '')+
+    '</div>'+
+    body+
+  '</div></div>';
+}
+async function billingRecalc(){
+  var b = state.billing;
+  var f = b.files;
+  var codes = {};
+  [f.purchase, f.sales].forEach(function(rows){ (rows||[]).forEach(function(r){ if(r[15]) codes[r[15]] = true; }); });
+  (f.move||[]).forEach(function(r){ if(r[15]) codes[r[15]] = true; });
+  [1,2,3].forEach(function(k){ (f.stock[k]||[]).forEach(function(r){ if(r[2] && BILLING_WH.indexOf(r[5])!==-1 && billingNum(r[11])) codes[r[2]] = true; }); });
+  var list = Object.keys(codes);
+  var pm = {};
+  if(list.length){
+    var info = await getProductMasterInfoBatch(list);
+    if(info && info.__error){ b.msg += '\n⚠️ 商品台帳(入数・才数)を読み込めませんでした: '+info.__error+'。もう一度取り込むか、画面を読み直してください。'; }
+    list.forEach(function(c){ if(info && info[c]) pm[c] = info[c]; });
+  }
+  b.calc = computeBilling(f, pm);
+}
+function bindBilling(){
+  if(!hasManagerSession()){ bindManagerLoginForm(); return; }
+  var b = state.billing;
+  if(!b) return;
+  document.querySelectorAll('[data-bill-tab]').forEach(function(el){
+    el.addEventListener('click', function(){ b.tab = el.getAttribute('data-bill-tab'); render(); });
+  });
+  var wh = document.getElementById('billWithHead');
+  if(wh) wh.addEventListener('change', function(){ b.withHead = wh.checked; });
+  var clr = document.getElementById('billClear');
+  if(clr) clr.addEventListener('click', function(){
+    if(!confirm('取り込んだCSVと計算結果を消します。よろしいですか?')) return;
+    state.billing = null; render();
+  });
+  document.querySelectorAll('[data-bill-copy]').forEach(function(btn){
+    btn.addEventListener('click', async function(){
+      var key = btn.getAttribute('data-bill-copy'), text;
+      if(key==='summary') text = BILLING_SUMMARY.map(function(s){ return s[0].trim()+'\t'+Math.round(b.calc.totals[s[1]]); }).join('\n');
+      else{
+        var sh = BILLING_SHEETS.filter(function(s){ return s.key===key; })[0];
+        text = billingTsv(b.calc[key], b.withHead, sh.head);
+      }
+      try{ await navigator.clipboard.writeText(text); showToast('コピーしました。請求の Excel に貼り付けてください'); }
+      catch(e){
+        var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+        var ok = false; try{ ok = document.execCommand('copy'); }catch(e2){}
+        document.body.removeChild(ta);
+        showToast(ok ? 'コピーしました。請求の Excel に貼り付けてください' : 'コピーできませんでした');
+      }
+    });
+  });
+  var busy = false;
+  async function run(files){
+    files = Array.prototype.slice.call(files||[]);
+    if(busy || !files.length) return;
+    busy = true;
+    var msgs = [];
+    b.msg = '読み込み中…'; render();
+    for(var i=0; i<files.length; i++){
+      var file = files[i];
+      if(!/\.csv$/i.test(file.name)){ msgs.push('⚠️ '+file.name+': CSVファイル(.csv)ではありません'); continue; }
+      var rows;
+      try{ rows = shukeiParseTable(await shukeiReadFileText(file)); }catch(e){ msgs.push('⚠️ '+file.name+': 読み込めませんでした'); continue; }
+      if(!rows.length){ msgs.push('⚠️ '+file.name+': データがありません'); continue; }
+      var d = billingDetectCsv(rows, file.name);
+      if(d.error){ msgs.push('⚠️ '+file.name+': '+d.error); continue; }
+      if(d.kind==='stock'){ b.files.stock[d.period] = rows; b.fileNames['stock'+d.period] = file.name; msgs.push('✅ 在庫 '+d.period+'期: '+file.name); }
+      else{ b.files[d.kind] = rows; b.fileNames[d.kind] = file.name; msgs.push('✅ '+BILLING_KIND_LABEL[d.kind]+': '+file.name+'('+formatNum(rows.length)+'行)'); }
+    }
+    b.msg = msgs.join('\n');
+    try{ await billingRecalc(); }catch(e){ b.msg += '\n⚠️ 計算できませんでした'; }
+    busy = false;
+    render();
+  }
+  document.querySelectorAll('[data-bill-upload]').forEach(function(inp){
+    inp.addEventListener('change', function(){ run(inp.files); });
+  });
+  document.querySelectorAll('[data-bill-drop]').forEach(function(zone){
+    ['dragenter','dragover'].forEach(function(ev){
+      zone.addEventListener(ev, function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; zone.classList.add('is-dragover'); });
+    });
+    zone.addEventListener('dragleave', function(e){ if(!zone.contains(e.relatedTarget)) zone.classList.remove('is-dragover'); });
+    zone.addEventListener('drop', function(e){
+      e.preventDefault();
+      zone.classList.remove('is-dragover');
+      run(e.dataTransfer && e.dataTransfer.files);
+    });
+  });
+}
+
 /* ---------- render root ---------- */
 function isUserBusy(){
   if(state.suppressRender) return true;
@@ -9255,7 +9575,7 @@ function isUserBusy(){
 /* ---------- 開いている画面をアドレス(#のあと)に残す ----------
    再読み込みしてもトップ画面に戻らず、同じ画面(と画面内のタブ・作業記録で選んでいる人)を開き直すため。
    例: #role=adminHub&tab=financial / #role=input&staff=<スタッフID> / #role=shukei&site=tannan&tab=diff */
-var VIEW_URL_ROLES = ['input','report','monitor','achievements','calendar','history','adminHub','settingsHub','shukei','vcAlloc','dataHub'];
+var VIEW_URL_ROLES = ['input','report','monitor','achievements','calendar','history','adminHub','settingsHub','shukei','vcAlloc','dataHub','billing'];
 function viewStateToHash(){
   if(!state.role) return '';
   var q = { role: state.role };
@@ -9345,6 +9665,7 @@ function render(){
   else if(state.role==='shukei') html += renderShukei();
   else if(state.role==='vcAlloc') html += renderVcAlloc();
   else if(state.role==='dataHub') html += renderDataHub();
+  else if(state.role==='billing') html += renderBilling();
   if(state.modal) html += renderModal();
   html += renderInstructionAlert();
   root.innerHTML = html;
@@ -9360,6 +9681,7 @@ function render(){
   if(state.role==='shukei') bindShukei();
   if(state.role==='vcAlloc') bindVcAlloc();
   if(state.role==='dataHub') bindDataHub();
+  if(state.role==='billing') bindBilling();
   document.querySelectorAll('[data-go-datahub]').forEach(function(el){
     el.addEventListener('click', function(){ state.role = 'dataHub'; state.dataHubMsg = ''; state.vcAllocData = null; render(); });
   });
@@ -9412,6 +9734,11 @@ function renderGate(){
         '<div class="gate-icon" style="background:#F0F9FF;color:#026AA2;">&#128229;</div>'+
         '<div class="gate-card-title">データ更新</div>'+
         '<div class="gate-card-desc">ロジザードの在庫・弥生の在庫・VCの出荷指示のCSVをまとめて取り込む。納品先一覧の編集。各データの最終更新日時</div>'+
+      '</button>'+
+      '<button class="gate-card" data-role="billing">'+
+        '<div class="gate-icon" style="background:#FDF2FA;color:#C11574;">&#128180;</div>'+
+        '<div class="gate-card-title">請求データ</div>'+
+        '<div class="gate-card-desc">弥生販売のCSVから、毎月の請求書に貼る保管料・入庫料・出庫料・諸作業料の表と請求書鑑の金額を作る(管理者)</div>'+
       '</button>'+
       '<button class="gate-card" data-role="adminHub">'+
         '<div class="gate-lock-badge" title="管理者ログインが必要です">&#128274;</div>'+
@@ -9520,6 +9847,7 @@ var COMMON_NAV_ITEMS = [
 ];
 var ADMIN_NAV_ITEMS = [
   { role:'adminHub', label:'管理者', icon:'👔' },
+  { role:'billing', label:'請求データ', icon:'💴' },
   { role:'settingsHub', label:'設定', icon:'⚙️' }
 ];
 function renderTopbar(){

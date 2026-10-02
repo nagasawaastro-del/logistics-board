@@ -3459,12 +3459,15 @@ function parentTaskVolumes(workVolume, caseLedger, taskId){
     caseCount: sp.withData ? sp.caseCount : null,        // ケース(商品台帳の入数で計算。記録の無い取込は含まない)
     baraCount: sp.withData ? sp.pieceCount : null,       // バラ(ピース)
     splitPartial: sp.withData>0 && sp.withData<sp.total, // ケース・バラの記録が無い取込を含む
-    vcCases: (entries && entries.length) ? vcCaseCurrentValue(entries) : null
+    vcCases: (entries && entries.length) ? vcCaseCurrentValue(entries) : null,
+    setQty: t.setKnown ? t.setQty : null,                   // 当日出荷に使うセット(CSVのブロック SET の数量)
+    setPartial: t.setKnown>0 && t.setKnown<t.importCount     // セットの数量が分からない取込を含む
   };
 }
 /* 内訳が処理した作業量。
    ピース(ピッキング) → CSV出荷数量。ただし同じ親作業に「ケース」の内訳がある場合は、ケースはそちらで数えるため バラ(ピース) を使う
-   ケース → CSVのケース数(VCは VCケース数台帳) / バラ → CSVのバラ / 件(梱包) → CSVの件数(VCはPO数) */
+   ケース → CSVのケース数(VCは VCケース数台帳) / バラ → CSVのバラ / 件(梱包) → CSVの件数(VCはPO数)
+   セット(名前に「セット」が入る内訳) → CSVのブロック略称が SET の行の数量(当日出荷に使うセット) */
 function subcatWorkload(kind, vol, hasCaseSubcat){
   var none = function(unit, reason){ return { qty:null, unit:unit, source:'', partial:false, reason:reason }; };
   if(kind==='cases'){
@@ -3477,6 +3480,11 @@ function subcatWorkload(kind, vol, hasCaseSubcat){
     var useBara = kind==='bara' || (hasCaseSubcat && !vol.isVc);
     if(!useBara) return { qty:vol.pieces, unit:'ピース', source:'CSV出荷数量', partial:false };
     return vol.baraCount!==null ? { qty:vol.baraCount, unit:'ピース', source:'CSVバラ', partial:vol.splitPartial } : none('ピース', 'ケース・バラのデータなし');
+  }
+  if(kind==='set'){
+    if(!vol.hasCsv) return none('ピース', 'CSV未取込');
+    if(vol.setQty===null) return none('ピース', 'CSVにブロック略称の列が無いか、機能追加前の取込です(取り込み直すと数えます)');
+    return { qty:vol.setQty, unit:'ピース', source:'CSVのSETブロック', partial:vol.setPartial };
   }
   if(kind==='count'){
     if(!vol.hasCsv) return none(vol.isVc ? 'PO' : '件', 'CSV未取込');
@@ -3508,6 +3516,7 @@ function computeParentTaskProductivity(task, logs, workVolume, caseLedger){
   var vol = parentTaskVolumes(workVolume, caseLedger, tid);
   var kindOf = function(n){
     if(!hasSubcats) return vol.isVc ? 'cases' : subcatVolumeKind(task.unit, task.name);
+    if(/セット/.test(n)) return 'set'; // 出荷作業の内訳「セット」(当日出荷に使うセット)。単位がピースでも全体の出荷数量は使わない
     return subcatVolumeKind(unitMap[n], n);
   };
   var hasCaseSubcat = names.some(function(n){ return kindOf(n)==='cases'; });
@@ -3785,6 +3794,8 @@ function summarizeShipperGroups(groupsSubset){
   var primaryCount = groupsSubset.length;
   var lineCount = groupsSubset.reduce(function(a,g){ return a+g.lineCount; }, 0);
   var totalQty = groupsSubset.reduce(function(a,g){ return a+g.totalQty; }, 0);
+  var setQty = groupsSubset.reduce(function(a,g){ return a+(g.setQty||0); }, 0);
+  var setLines = groupsSubset.reduce(function(a,g){ return a+(g.setLines||0); }, 0);
   var byCustomer = {};
   groupsSubset.forEach(function(g){
     var key = g.customerName || '(不明)';
@@ -3793,7 +3804,7 @@ function summarizeShipperGroups(groupsSubset){
     byCustomer[key].lineCount += g.lineCount;
     byCustomer[key].totalQty += g.totalQty;
   });
-  return { primaryCount:primaryCount, lineCount:lineCount, totalQty:totalQty, byCustomer:byCustomer };
+  return { primaryCount:primaryCount, lineCount:lineCount, totalQty:totalQty, setQty:setQty, setLines:setLines, byCustomer:byCustomer };
 }
 /* ---------- CSV → 得意先マスター照合 → 作業枠ごとの取込計画、の共通パイプライン ----------
    手動CSV取込・将来の共有フォルダ自動取込のどちらからも、この関数を呼び出す想定。
@@ -3813,6 +3824,8 @@ function buildAutoMappedImportPlan(parseResult, mapping, targetDate){
     return {
       taskId: taskId,
       primaryCount: summary.primaryCount, lineCount: summary.lineCount, totalQty: summary.totalQty,
+      // 当日出荷に使うセット(ブロック略称 SET)。ブロックの列が無いCSVでは null(分からない)
+      setQty: parseResult.hasBlock ? summary.setQty : null, setLines: parseResult.hasBlock ? summary.setLines : null,
       byCustomer: summary.byCustomer, byProduct: byProductForTask,
       shipperNos: groupsSubset.map(function(g){ return g.shipperNo; })
     };
@@ -5766,13 +5779,16 @@ function findShipperNoOverlap(newShipperNos, workVolume, taskId, excludeImportId
   return newShipperNos.filter(function(sn){ return seen[sn]; });
 }
 function wvTotalsForTask(data, taskId){
-  if(!data) return { primaryCount:0, lineCount:0, totalQty:0, importCount:0 };
+  if(!data) return { primaryCount:0, lineCount:0, totalQty:0, importCount:0, setQty:0, setKnown:0 };
   var imports = wvActiveImports(data).filter(function(i){ return i.taskId===taskId; });
+  var withSet = imports.filter(function(i){ return typeof i.setQty==='number'; });
   return {
     primaryCount: imports.reduce(function(a,i){ return a+(i.primaryCount||0); }, 0),
     lineCount: imports.reduce(function(a,i){ return a+(i.lineCount||0); }, 0),
     totalQty: imports.reduce(function(a,i){ return a+(i.totalQty||0); }, 0),
-    importCount: imports.length
+    importCount: imports.length,
+    setQty: withSet.reduce(function(a,i){ return a+i.setQty; }, 0), // 当日出荷に使うセット(ブロック SET)の数量
+    setKnown: withSet.length                                       // セットの数量が分かる取込の数(機能追加前の取込・ブロック列の無いCSVは数えない)
   };
 }
 /* ダミー商品(実績集計の対象外)。CSVの行としては読み込むが、件数・明細・出荷数量・ケース/バラ・才数・
@@ -5797,6 +5813,8 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
       var headers = parsed.meta && parsed.meta.fields ? parsed.meta.fields : [];
       var locCol = columnMap && columnMap.pickLocation;
       var invCol = columnMap && columnMap.invoiceType;
+      // ブロック略称が SET の行は、当日出荷に使うセット(内訳「セット」の作業量)。列が無いCSVでは数えない
+      var blkCol = headers.indexOf('ブロック略称')!==-1 ? 'ブロック略称' : null;
       var groups = {};
       var order = [];
       var byCustomer = {};
@@ -5825,7 +5843,7 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
             customerName: rowCustomerName,
             pickLocation: locCol ? (r[locCol]||'').trim() : '',
             invoiceType: invCol ? (r[invCol]||'').trim() : '',
-            lineCount:0, totalQty:0
+            lineCount:0, totalQty:0, setQty:0, setLines:0
           };
           order.push(shipperNo);
         }
@@ -5837,6 +5855,7 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
           qty = 0;
         }
         groups[shipperNo].totalQty += qty;
+        if(blkCol && String(r[blkCol]||'').trim().toUpperCase()==='SET'){ groups[shipperNo].setQty += qty; groups[shipperNo].setLines++; }
 
         // 荷主(取引先名)別・商品(商品ID)別の内訳(実CSVの列名で取得。無ければ「(不明)」扱い)
         var customerName = rowCustomerName;
@@ -5891,7 +5910,7 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
 
       callback({
         primaryCount: primaryCount, lineCount: lineCount, totalQty: totalQty, shipperGroups: shipperGroups,
-        rowCount: rows.length, headers: headers, missingColumns: missingColumns,
+        rowCount: rows.length, headers: headers, missingColumns: missingColumns, hasBlock: !!blkCol,
         byCustomer: byCustomerFinal, byProduct: byProductFinal, rowAnomalies: rowAnomalies,
         dummyExcluded: dummyExcluded
       });
@@ -10556,7 +10575,7 @@ function bindCsvImportPanel(){
         var keepSet = {};
         newGroups.forEach(function(g){ keepSet[g.shipperNo] = true; });
         var filteredResult = {
-          rowCount: result.rowCount, headers: result.headers, missingColumns: result.missingColumns,
+          rowCount: result.rowCount, headers: result.headers, missingColumns: result.missingColumns, hasBlock: !!result.hasBlock,
           shipperGroups: newGroups,
           byProduct: filterByProductForShipperNos(result.byProduct, keepSet)
         };
@@ -15648,6 +15667,7 @@ function bindAutoMapPreviewModal(m){
           id: importId, importedAt: new Date().toISOString(), fileName: d.fileName, taskId: p.taskId,
           taskKind: (taskById(p.taskId).taskKind) || 'normal',
           primaryCount: p.primaryCount, lineCount: p.lineCount, totalQty: p.totalQty,
+          setQty: (typeof p.setQty==='number') ? p.setQty : null, setLines: (typeof p.setLines==='number') ? p.setLines : null,
           fileFingerprint: d.fingerprint, fileSize: d.fileSize, shipperNos: p.shipperNos,
           byCustomer: p.byCustomer||{}, byProduct: p.byProduct||{},
           autoMappedGroupId: groupImportId,

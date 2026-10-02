@@ -1259,6 +1259,7 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-10-02', items:[
+    '【作業量CSV取込】管理者画面の作業量CSV取込を、VC引き当て・データ更新と同じ形にしました。「📄 CSVファイルを選んで取り込む」ボタンで選ぶか、枠にCSVファイルをドラッグ&ドロップして取り込めます。対象日付・確認画面・二重取込の防止はこれまでどおりです',
     '【データ更新(新しい画面)】集計表・VC引き当てで使う共有データの更新を、トップページの「📥 データ更新」にまとめました。ロジザードの在庫・弥生の在庫(高屋・丹南)・VCの出荷指示のCSVを、まとめて選ぶかドラッグ&ドロップすると、中身から種類を見分けてそれぞれ登録します。各データの最終更新日時を一覧にし、今日まだ更新していないデータには印が付きます。VC引き当ての納品先一覧の編集もこの画面に移しました。集計表の「元データの登録」タブとVC引き当ての「取込・納品先一覧」タブは無くなり、代わりに各画面に「📥 データ更新を開く」ボタンを付けました。作業の件数のCSV取込(管理者画面)は、作業への振り分けを確認してから取り込む仕組みのため、これまでどおり管理者画面に残しています。VCの出荷指示として、Amazon VC 以外の取引先が入ったCSVは受け付けないようにしました',
     '【VC引き当て(新しい画面)】Excel「VC引き当てリスト」をロジリンクに移しました。トップページの「📦 VC引き当て」から開きます。ロジザードの出荷指示のCSV(Amazon VC)を取り込むだけで、在庫はロジザードの在庫(集計表で登録したもの・在庫数−引当数)、入数は弥生の在庫(無ければ商品台帳)を使って、品番ごとの発注数・入数・ケース数・振り分け番号(DIYは1、それ以外は納品先一覧で2か3)と、高屋・丹南どちらから出すか(高屋で足りれば高屋、だめなら丹南、どちらも足りなければ要確認)を出します。ピース引当・ケース引当(どの行も端数0の品番)・出荷先別・ダッシュボード(PO数・数量・ケース・端数・トップ10)に分かれ、並び替えと印刷ができます。「この表を集計表へ送る」で、倉庫ごとに集計表へVC番号(振り分け番号)・品番・数量を追加します。Excelとの違い: 1つの品番に振り分け番号が混ざるときは番号ごとの行に分けます(Excelは平均の番号になっていました)/高屋と丹南を合わせれば足りるときは分け方を出し、「分ける」を選べます/倉庫は品番ごとに選び直せます/納品先一覧に無い納品先は警告し、画面から番号を登録できます',
     '【人員配置: 締切の早い作業への入れ替え】まだ始めていない指示の入れ替えを、優先度が高い作業に加えて、同じ優先度で締切が早い作業(例: 優先度2のDF 16:00 と 卸 16:30)にも行うようにしました。締切のない作業は一番遅い扱いです。入れ替えは一方向なので、指示が行ったり来たりすることはありません',
@@ -10167,9 +10168,10 @@ function bindCsvImportPanel(){
   }
   var autoMapCsvInput = document.getElementById('autoMapCsvInput');
   if(autoMapCsvInput){
-    autoMapCsvInput.addEventListener('change', async function(){
-      var file = autoMapCsvInput.files[0];
-      if(!file) return;
+    // ファイル選択・ドラッグ&ドロップ共通
+    var importAutoMapFile = async function(file){
+      if(!file || state.autoMapImporting) return;
+      if(!/\.csv$/i.test(file.name)){ showToast('CSVファイル(.csv)を選んでください'); return; }
       var targetDate = (autoMapTargetDateInput && autoMapTargetDateInput.value) || state.wvTargetDate || todayStr();
       state.autoMapImporting = true;
       render();
@@ -10254,6 +10256,21 @@ function bindCsvImportPanel(){
         autoMapCsvInput.value = '';
         showToast(errMsg);
         render();
+      });
+    };
+    autoMapCsvInput.addEventListener('change', function(){ importAutoMapFile(autoMapCsvInput.files[0]); });
+    document.querySelectorAll('[data-automap-drop]').forEach(function(zone){
+      ['dragenter','dragover'].forEach(function(ev){
+        zone.addEventListener(ev, function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; zone.classList.add('is-dragover'); });
+      });
+      zone.addEventListener('dragleave', function(e){ if(!zone.contains(e.relatedTarget)) zone.classList.remove('is-dragover'); });
+      zone.addEventListener('drop', function(e){
+        e.preventDefault();
+        zone.classList.remove('is-dragover');
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if(!files || !files.length) return;
+        if(files.length>1) showToast('1回に1ファイルずつ取り込みます(最初の「'+files[0].name+'」を取り込みます)');
+        importAutoMapFile(files[0]);
       });
     });
   }
@@ -11151,8 +11168,15 @@ function renderCsvImportPanel(){
     '<div class="panel-title">📋 作業量CSV取込</div>'+
     '<div class="pool-hint" style="margin-bottom:14px;">CSVから件数(VCはPO数)・明細数・出荷数量(ピース)を自動集計し、商品台帳の入数からケース・バラも計算します。得意先・作業枠マスターに基づいて自動振り分けします。時間の計測とは別のデータとして扱われ、パートさんへの数字入力は求めません。取込は履歴として積み上がり、既存の取込を上書きすることはありません。</div>'+
     '<div style="display:flex;gap:10px;">'+
-      '<div style="flex:1;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">対象日付</label><input type="date" id="autoMapTargetDate" value="'+(state.wvTargetDate||todayStr())+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
-      '<div style="flex:2;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">CSVファイル</label><input type="file" id="autoMapCsvInput" accept=".csv" style="display:block;"></div>'+
+      '<div style="flex:0 1 240px;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">対象日付</label><input type="date" id="autoMapTargetDate" value="'+(state.wvTargetDate||todayStr())+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
+    '</div>'+
+    // CSVファイルは、ボタンで選ぶか、枠にドラッグ&ドロップ(VC引き当て・データ更新と同じ形)
+    '<div class="ll-form-group shukei-drop" data-automap-drop="1" style="margin-top:10px;">'+
+      '<div class="ll-form-group-title">CSVファイルの取り込み</div>'+
+      '<div class="pool-hint" style="margin:0 0 6px;">ロジザードから出力した出荷のCSVを選ぶか、この枠にドラッグ&ドロップしてください(1回に1ファイル)。上の対象日付に取り込みます。取り込む前に、作業への振り分けの確認画面が出ます。</div>'+
+      '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 CSVファイルを選んで取り込む'+
+        '<input type="file" id="autoMapCsvInput" accept=".csv,text/csv" style="display:none;"></label>'+
+      '<span class="shukei-drop-hint">またはCSVファイルをこの枠にドラッグ&ドロップ</span>'+
     '</div>'+
     (state.autoMapImporting ? '<div class="empty-note">解析中...</div>' : '')+
     wvHistoryHtml+

@@ -1259,6 +1259,7 @@ function byTaskColor(getColor){
 // トップ画面の「更新履歴」から誰でも確認できます。
 var CHANGELOG = [
   { date:'2026-10-02', items:[
+    '【データ更新(新しい画面)】集計表・VC引き当てで使う共有データの更新を、トップページの「📥 データ更新」にまとめました。ロジザードの在庫・弥生の在庫(高屋・丹南)・VCの出荷指示のCSVを、まとめて選ぶかドラッグ&ドロップすると、中身から種類を見分けてそれぞれ登録します。各データの最終更新日時を一覧にし、今日まだ更新していないデータには印が付きます。VC引き当ての納品先一覧の編集もこの画面に移しました。集計表の「元データの登録」タブとVC引き当ての「取込・納品先一覧」タブは無くなり、代わりに各画面に「📥 データ更新を開く」ボタンを付けました。作業の件数のCSV取込(管理者画面)は、作業への振り分けを確認してから取り込む仕組みのため、これまでどおり管理者画面に残しています。VCの出荷指示として、Amazon VC 以外の取引先が入ったCSVは受け付けないようにしました',
     '【VC引き当て(新しい画面)】Excel「VC引き当てリスト」をロジリンクに移しました。トップページの「📦 VC引き当て」から開きます。ロジザードの出荷指示のCSV(Amazon VC)を取り込むだけで、在庫はロジザードの在庫(集計表で登録したもの・在庫数−引当数)、入数は弥生の在庫(無ければ商品台帳)を使って、品番ごとの発注数・入数・ケース数・振り分け番号(DIYは1、それ以外は納品先一覧で2か3)と、高屋・丹南どちらから出すか(高屋で足りれば高屋、だめなら丹南、どちらも足りなければ要確認)を出します。ピース引当・ケース引当(どの行も端数0の品番)・出荷先別・ダッシュボード(PO数・数量・ケース・端数・トップ10)に分かれ、並び替えと印刷ができます。「この表を集計表へ送る」で、倉庫ごとに集計表へVC番号(振り分け番号)・品番・数量を追加します。Excelとの違い: 1つの品番に振り分け番号が混ざるときは番号ごとの行に分けます(Excelは平均の番号になっていました)/高屋と丹南を合わせれば足りるときは分け方を出し、「分ける」を選べます/倉庫は品番ごとに選び直せます/納品先一覧に無い納品先は警告し、画面から番号を登録できます',
     '【人員配置: 締切の早い作業への入れ替え】まだ始めていない指示の入れ替えを、優先度が高い作業に加えて、同じ優先度で締切が早い作業(例: 優先度2のDF 16:00 と 卸 16:30)にも行うようにしました。締切のない作業は一番遅い扱いです。入れ替えは一方向なので、指示が行ったり来たりすることはありません',
     '【集計表の表示】数字の列(数量・ケース・端数・入数・弥生・ロジ・才数、在庫差異の数字の列)の見出しを右寄せにして、見出しと数字の位置をそろえました。数量の入力欄の数字も右寄せです。備考の列は、印刷で長い備考を列の中で折り返すようにしました(表からはみ出していたため)'
@@ -8412,6 +8413,7 @@ function renderShukei(){
   var siteKey = state.shukeiSite || 'takaya';
   var site = SHUKEI_SITES[siteKey];
   var tab = state.shukeiTab || 'sheet';
+  if(tab==='data') tab = 'sheet'; // 元データの登録はデータ更新の画面へ移した
   if(!state.shukeiData || state.shukeiData.site!==siteKey){
     if(!state.shukeiDataLoading){
       state.shukeiDataLoading = true;
@@ -8428,19 +8430,19 @@ function renderShukei(){
     var st = SHUKEI_SITES[k];
     return '<button type="button" class="shukei-site-btn'+(k===siteKey?' active':'')+'" data-shukei-site="'+k+'" style="--site:'+st.color+';--site-tint:'+st.tint+';">🏭 '+esc(st.name)+'</button>';
   }).join('');
-  var tabs = [['sheet','📋 集計表'],['diff','📦 在庫差異'],['data','📥 元データの登録']].map(function(t){
+  var tabs = [['sheet','📋 集計表'],['diff','📦 在庫差異']].map(function(t){
     return '<button type="button" class="vc-tab-btn'+(tab===t[0]?' active':'')+'" data-shukei-tab="'+t[0]+'">'+t[1]+'</button>';
   }).join('');
   function asOf(d){ return d && d.uploadedAt ? fmtDateTime(d.uploadedAt) : '未登録'; }
-  var status = '<div class="pool-hint" style="margin:6px 0 10px;">ロジザードの在庫: '+esc(asOf(data.logizard))+' ・ 弥生('+esc(site.name)+')の在庫: '+esc(asOf(data.yayoi))+'</div>';
+  var status = '<div class="pool-hint" style="margin:6px 0 10px;">ロジザードの在庫: '+esc(asOf(data.logizard))+' ・ 弥生('+esc(site.name)+')の在庫: '+esc(asOf(data.yayoi))+
+    ' <button type="button" class="vc-manage-toggle-btn" data-go-datahub="1" style="min-height:0;padding:3px 10px;">📥 データ更新を開く</button></div>';
   var body = '';
   if(tab==='sheet') body = renderShukeiSheet(siteKey, site, data, draft);
-  else if(tab==='diff') body = renderShukeiDiff(siteKey, site, data);
-  else body = renderShukeiDataPanel(siteKey, site, data);
+  else body = renderShukeiDiff(siteKey, site, data);
   return '<div class="mgr-wrap shukei-wrap"><div class="panel shukei-site-panel" style="--site:'+site.color+';--site-tint:'+site.tint+';">'+
     '<div class="panel-title no-print">🧾 集計表(高屋・丹南)</div>'+
     '<div class="shukei-site-tabs no-print">'+siteTabs+'</div>'+
-    (tab!=='data' ? '<div class="shukei-site-banner no-print">'+esc(site.name)+'の'+(tab==='diff'?'在庫差異':'集計表')+'を表示中</div>' : '')+
+    '<div class="shukei-site-banner no-print">'+esc(site.name)+'の'+(tab==='diff'?'在庫差異':'集計表')+'を表示中</div>'+
     '<div class="vc-tabs no-print" style="margin-top:6px;">'+tabs+'</div>'+
     '<div class="no-print">'+status+'</div>'+
     body+
@@ -8505,8 +8507,8 @@ function renderShukeiSheet(siteKey, site, data, draft){
   var oldLogi = data.logizard && data.logizard.products && Object.keys(data.logizard.products).slice(0,50).some(function(c){
     var bl = data.logizard.products[c].blocks; return Object.keys(bl).some(function(k){ return !bl[k].locQty || !bl[k].locAlloc; });
   });
-  var needData = oldLogi ? '<div class="vc-warning-box no-print">棚番の下にロケーションごとの在庫数を出し、引当済みで在庫の残らないロケーションを除くには、ロジザードの在庫のCSVをもう一度取り込んでください(「📥 元データの登録」)。</div>' : '';
-  needData += (!data.logizard || !data.yayoi) ? '<div class="vc-warning-box no-print">元データが未登録です(ロジザードの在庫・弥生の在庫)。「📥 元データの登録」からCSVを取り込んでください。未登録の間は、棚番・在庫が空欄になります。</div>' : '';
+  var needData = oldLogi ? '<div class="vc-warning-box no-print">棚番の下にロケーションごとの在庫数を出し、引当済みで在庫の残らないロケーションを除くには、ロジザードの在庫のCSVをもう一度取り込んでください(「📥 データ更新」)。</div>' : '';
+  needData += (!data.logizard || !data.yayoi) ? '<div class="vc-warning-box no-print">元データが未登録です(ロジザードの在庫・弥生の在庫)。「📥 データ更新」からCSVを取り込んでください。未登録の間は、棚番・在庫が空欄になります。</div>' : '';
   return needData+
     '<div class="shukei-print-head"><span class="shukei-site-badge">'+esc(site.name)+'</span><b>集計表(ピッキングリスト)</b> ・ 日付 '+esc(dateLabelFromStr(todayStr()))+
       ' ・ 依頼者 <input type="text" id="shukeiRequester" class="no-print" value="'+esc(draft.requester||'')+'" style="width:140px;"><span class="print-only">'+esc(draft.requester||'')+'</span>'+
@@ -8530,7 +8532,7 @@ function renderShukeiSheet(siteKey, site, data, draft){
     '<div class="pool-hint no-print" style="margin-top:6px;">入数は弥生の在庫データ(無い場合はkintoneの商品台帳)、才数はkintoneの商品台帳の値です。ケースは'+(site.caseMode==='up'?'切り上げ':'切り捨て(残りは端数)')+'で計算します。ロジはロジザードの'+esc(site.name)+'の区画('+esc(site.stockBlocks.join('・'))+')の在庫の合計です。入力中の表はこの端末に保存されます。</div>';
 }
 function renderShukeiDiff(siteKey, site, data){
-  if(!data.yayoi || !data.logizard) return '<div class="vc-warning-box">元データが未登録です(ロジザードの在庫・弥生の在庫)。「📥 元データの登録」から貼り付けてください。</div>';
+  if(!data.yayoi || !data.logizard) return '<div class="vc-warning-box">元データが未登録です(ロジザードの在庫・弥生の在庫)。「📥 データ更新」から貼り付けてください。</div>';
   ensureShukeiProductMaster(Object.keys(data.yayoi.products||{}));
   var all = shukeiStockDiffRows(siteKey, data, state.shukeiPm);
   var onlyDiff = state.shukeiDiffOnly!==false;
@@ -8554,32 +8556,12 @@ function renderShukeiDiff(siteKey, site, data){
     '<div style="overflow-x:auto;max-height:560px;overflow-y:auto;" data-keep-scroll="shukeiDiff"><table class="report-table shukei-table"><thead><tr>'+dh('商品コード','code')+dh('商品名','name')+dh('弥生('+site.name+')','yayoi')+dh('ロジザード','logi')+dh('差異(弥生−ロジ)','diff')+dh('ケース数(ロジ)','cases')+dh('才数','cubic')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div class="pool-hint no-print" style="margin-top:6px;">ロジザードは'+esc(site.name)+'の区画('+esc(site.stockBlocks.join('・'))+')の在庫の合計、ケース数はロジザードの在庫 ÷ 入数 の切り上げ、才数はkintoneの商品台帳の値です。</div>';
 }
-function renderShukeiDataPanel(siteKey, site, data){
-  function info(label, d, unit){
-    return '<li><b>'+esc(label)+'</b>: '+(d && d.uploadedAt ? esc(fmtDateTime(d.uploadedAt))+'・'+formatNum(d.rowCount||0)+unit : '未登録')+'</li>';
-  }
-  var yb = data.yayoiBySite || {};
-  return (state.shukeiUploadMsg ? '<div class="vc-import-status" style="white-space:pre-line;">'+esc(state.shukeiUploadMsg)+'</div>' : '')+
-    '<div class="ll-form-group shukei-drop" data-shukei-drop="all" style="margin-bottom:14px;">'+
-      '<div class="ll-form-group-title">CSVファイルの取り込み(高屋・丹南 まとめて)</div>'+
-      '<div class="pool-hint" style="margin:0 0 6px;">ロジザードの在庫のCSVと、弥生の在庫のCSV(「高屋在庫.csv」「丹南在庫.csv」「全外部倉庫.csv」など)を、まとめて選ぶか、この枠にまとめてドラッグ&ドロップしてください。ファイルの中身から種類を見分けます。'+
-        '弥生の在庫は倉庫コードで高屋('+esc(SHUKEI_SITES.takaya.yayoiWarehouse)+')・丹南('+esc(SHUKEI_SITES.tannan.yayoiWarehouse)+')に分けて登録します(全外部倉庫なら1つで両方)。</div>'+
-      '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 CSVファイルを選んで取り込む(複数可)'+
-        '<input type="file" accept=".csv,text/csv" multiple data-shukei-upload="all" style="display:none;"></label>'+
-      '<span class="shukei-drop-hint">またはCSVファイルをこの枠にドラッグ&ドロップ</span>'+
-      '<ul class="pool-hint" style="margin:10px 0 0;padding-left:18px;">'+
-        info('ロジザードの在庫(高屋・丹南 共通)', data.logizard, '行')+
-        Object.keys(SHUKEI_SITES).map(function(k){ return info('弥生の在庫('+SHUKEI_SITES[k].name+')', yb[k], '商品'); }).join('')+
-      '</ul>'+
-    '</div>'+
-    '<div class="pool-hint">登録したデータは、ロジリンクを使う全員で共有されます。以前のデータは新しいデータに置き換わります。</div>';
-}
 function bindShukei(){
   document.querySelectorAll('[data-shukei-site]').forEach(function(el){
-    el.addEventListener('click', function(){ state.shukeiSite = el.getAttribute('data-shukei-site'); state.shukeiUploadMsg = ''; state.shukeiSheetSort = null; state.shukeiDiffSort = null; render(); });
+    el.addEventListener('click', function(){ state.shukeiSite = el.getAttribute('data-shukei-site'); state.shukeiSheetSort = null; state.shukeiDiffSort = null; render(); });
   });
   document.querySelectorAll('[data-shukei-tab]').forEach(function(el){
-    el.addEventListener('click', function(){ state.shukeiTab = el.getAttribute('data-shukei-tab'); state.shukeiUploadMsg = ''; render(); });
+    el.addEventListener('click', function(){ state.shukeiTab = el.getAttribute('data-shukei-tab'); render(); });
   });
   var siteKey = state.shukeiSite || 'takaya';
   var draft = state.shukeiDraft;
@@ -8670,59 +8652,6 @@ function bindShukei(){
   if(pr) pr.addEventListener('click', function(){ window.print(); });
   var only = document.getElementById('shukeiDiffOnly');
   if(only) only.addEventListener('change', function(){ state.shukeiDiffOnly = only.checked; render(); });
-  // CSVファイルの取り込み(ファイル選択・ドラッグ&ドロップ共通。複数可)。中身からロジザードの在庫か弥生の在庫かを見分け、
-  // 弥生は倉庫コードで高屋・丹南に分けて登録する
-  async function importShukeiFiles(files, btn){
-    files = Array.prototype.slice.call(files||[]);
-    if(!files.length) return;
-    var msgs = [], saved = 0;
-    if(btn) btn.disabled = true;
-    for(var fi=0; fi<files.length; fi++){
-      var file = files[fi];
-      if(!/\.csv$/i.test(file.name)){ msgs.push('⚠️ '+file.name+': CSVファイル(.csv)ではないため取り込みませんでした'); continue; }
-      var text;
-      try{ text = await shukeiReadFileText(file); }
-      catch(e){ msgs.push('⚠️ '+file.name+': ファイルを読み込めませんでした'); continue; }
-      var targets = []; // { key, label, parsed }
-      var head = (shukeiParseTable(text)[0] || []);
-      if(head.indexOf('ブロック略称')!==-1){
-        targets.push({ key: SHUKEI_KEYS.logizard, label: 'ロジザードの在庫', parsed: shukeiParseLogizard(text) });
-      }else{
-        var sites = shukeiYayoiSitesIn(text);
-        if(!sites.length){ msgs.push('⚠️ '+file.name+': ロジザードの在庫・弥生の在庫(高屋・丹南)のどちらのCSVか分かりませんでした'); continue; }
-        sites.forEach(function(k){ targets.push({ key: SHUKEI_KEYS.yayoi(k), label: '弥生('+SHUKEI_SITES[k].name+')の在庫', parsed: shukeiParseYayoi(text, SHUKEI_SITES[k]) }); });
-      }
-      for(var ti=0; ti<targets.length; ti++){
-        var t = targets[ti];
-        if(t.parsed.error){ msgs.push('⚠️ '+file.name+'('+t.label+'): '+t.parsed.error); continue; }
-        t.parsed.uploadedAt = new Date().toISOString();
-        var ok = await persistKey(t.key, t.parsed);
-        if(!ok){ msgs.push('⚠️ '+t.label+'を保存できませんでした('+file.name+')'); continue; }
-        await appendAuditLog({ action:'集計表の元データを登録', target: t.label, before:null, after: formatNum(t.parsed.rowCount)+'件' });
-        msgs.push('✅ '+t.label+'を登録しました('+file.name+'・'+formatNum(t.parsed.rowCount)+'件)');
-        saved++;
-      }
-    }
-    if(btn) btn.disabled = false;
-    state.shukeiUploadMsg = msgs.join('\n');
-    if(saved) state.shukeiData = null; // 読み直す
-    render();
-  }
-  document.querySelectorAll('[data-shukei-upload]').forEach(function(btn){
-    btn.addEventListener('change', function(){ importShukeiFiles(btn.files, btn); });
-  });
-  document.querySelectorAll('[data-shukei-drop]').forEach(function(zone){
-    ['dragenter','dragover'].forEach(function(ev){
-      zone.addEventListener(ev, function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; zone.classList.add('is-dragover'); });
-    });
-    zone.addEventListener('dragleave', function(e){ if(!zone.contains(e.relatedTarget)) zone.classList.remove('is-dragover'); });
-    zone.addEventListener('drop', function(e){
-      e.preventDefault();
-      zone.classList.remove('is-dragover');
-      var files = e.dataTransfer && e.dataTransfer.files;
-      if(files && files.length) importShukeiFiles(files, zone.querySelector('[data-shukei-upload]'));
-    });
-  });
 }
 
 /* ---------- VC引き当て。以前の Excel「VC引き当てリスト」をロジリンクに移したもの ----------
@@ -8733,7 +8662,7 @@ function bindShukei(){
    ・振り分け番号: 取引先が「アマゾン VC(DIY)」なら1、それ以外は納品先一覧(納品先コード→番号)。集計表のVC番号に使い、
      ピッキングでは同じ番号でパレットをまとめる。1つの品番に番号が混ざるときは番号ごとの行に分ける(Excel は平均になっていた)。
    ・どの行も端数が0の品番は「ケース」、それ以外は「ピース」の表に分ける(Excel の2つの貼り付けシートと同じ)。
-   ・在庫は集計表で登録したロジザードの在庫、入数は弥生の在庫(無ければ kintone の商品台帳)を使う。新しく取り込むのは出荷指示のCSVだけ。
+   ・在庫は共有のロジザードの在庫、入数は弥生の在庫(無ければ kintone の商品台帳)を使う。出荷指示・在庫の取込と納品先一覧は「データ更新」の画面。
    ・「集計表へ送る」で、倉庫ごとに集計表(この端末の入力中の表)へ VC番号=振り分け番号・品番・数量 を追加する。 */
 var VC_ALLOC_KEYS = { order:'vc-alloc-order', dests:'vc-alloc-dest-groups' };
 var VC_ALLOC_BLOCKS = { takaya:['A','B','C','D','E','AA'], tannan:['F','G','H','HOME','I','J','K'] };
@@ -8767,6 +8696,12 @@ function vcAllocParseOrder(text){
     if(/^\d{8}$/.test(d)) dates[d.slice(0,4)+'-'+d.slice(4,6)+'-'+d.slice(6,8)] = true;
   });
   if(!lines.length) return { error:'出荷指示数のある行がありません。' };
+  // Amazon VC 以外の取引先が入ったCSV(作業の件数の取込用など)は受け付けない
+  if(ix['取引先名']!==undefined){
+    var other = {};
+    rows.slice(1).forEach(function(r){ var c = col(r,'取引先名'); if(c && !/VC/i.test(c)) other[c] = true; });
+    if(Object.keys(other).length) return { error:'Amazon VC 以外の取引先('+Object.keys(other).slice(0,3).join('・')+')が入っています。VCの出荷指示だけを出力したCSVを選んでください(作業の件数のCSV取込は管理者画面の「CSV取込」です)。' };
+  }
   return { lines: lines, rowCount: lines.length, workDates: Object.keys(dates).sort() };
 }
 /* ロジザードの在庫(集計表で登録したもの)の、区画の合計の「在庫数 − 引当数」 */
@@ -8908,6 +8843,7 @@ async function loadVcAllocData(){
 }
 function renderVcAlloc(){
   var tab = state.vcAllocTab || 'dash';
+  if(tab==='data') tab = 'dash'; // 取込はデータ更新の画面へ移した
   if(!state.vcAllocData){
     if(!state.vcAllocLoading){
       state.vcAllocLoading = true;
@@ -8920,7 +8856,7 @@ function renderVcAlloc(){
   var order = d.order;
   if(order && order.lines) ensureShukeiProductMaster(Object.keys(order.lines.reduce(function(a,l){ a[l[0]] = 1; return a; }, {})));
   var calc = order && order.lines ? computeVcAlloc(order, d.dests, d.stock, state.shukeiPm) : null;
-  var tabs = [['dash','📊 ダッシュボード'],['piece','🧩 ピース引当'],['case','📦 ケース引当'],['dest','🚚 出荷先別'],['data','📥 取込・納品先一覧']].map(function(t){
+  var tabs = [['dash','📊 ダッシュボード'],['piece','🧩 ピース引当'],['case','📦 ケース引当'],['dest','🚚 出荷先別']].map(function(t){
     var n = '';
     if(calc && (t[0]==='piece' || t[0]==='case')) n = ' ('+calc.products.filter(function(p){ return p.kind===t[0]; }).length+')';
     return '<button type="button" class="vc-tab-btn'+(tab===t[0]?' active':'')+'" data-vca-tab="'+t[0]+'">'+t[1]+n+'</button>';
@@ -8928,18 +8864,18 @@ function renderVcAlloc(){
   var lz = d.stock && d.stock.logizard;
   var status = '<div class="pool-hint" style="margin:6px 0 10px;">出荷指示: '+(order && order.uploadedAt ? esc(fmtDateTime(order.uploadedAt))+'取込'+(order.workDates && order.workDates.length ? '(出荷作業日 '+esc(order.workDates.map(dateLabelFromStr).join('・'))+')' : '') : '未取込')+
     ' ・ ロジザードの在庫: '+(lz && lz.uploadedAt ? esc(fmtDateTime(lz.uploadedAt)) : '未登録')+
-    ' <button type="button" class="vc-manage-toggle-btn" id="vcaReload" style="min-height:0;padding:3px 10px;">🔄 読み直す</button></div>';
+    ' <button type="button" class="vc-manage-toggle-btn" id="vcaReload" style="min-height:0;padding:3px 10px;">🔄 読み直す</button>'+
+    ' <button type="button" class="vc-manage-toggle-btn" data-go-datahub="1" style="min-height:0;padding:3px 10px;">📥 データ更新を開く</button></div>';
   var warn = '';
   if(calc){
     var unk = Object.keys(calc.unknownDests);
-    if(unk.length) warn += '<div class="vc-warning-box">納品先一覧に無い納品先があります: '+esc(unk.map(function(k){ return k+'('+calc.unknownDests[k]+')'; }).join('、'))+'。振り分け番号が「?」になります。「📥 取込・納品先一覧」で番号を登録してください。</div>';
-    if(!lz) warn += '<div class="vc-warning-box">ロジザードの在庫が登録されていません。集計表の「📥 元データの登録」でロジザードの在庫のCSVを取り込んでください。</div>';
+    if(unk.length) warn += '<div class="vc-warning-box">納品先一覧に無い納品先があります: '+esc(unk.map(function(k){ return k+'('+calc.unknownDests[k]+')'; }).join('、'))+'。振り分け番号が「?」になります。「📥 データ更新」の納品先一覧で番号を登録してください。</div>';
+    if(!lz) warn += '<div class="vc-warning-box">ロジザードの在庫が登録されていません。「📥 データ更新」でロジザードの在庫のCSVを取り込んでください。</div>';
     else if(order.uploadedAt && lz.uploadedAt && lz.uploadedAt < order.uploadedAt && Date.parse(order.uploadedAt)-Date.parse(lz.uploadedAt) > 12*3600000)
-      warn += '<div class="vc-warning-box">ロジザードの在庫が出荷指示より古いデータです('+esc(fmtDateTime(lz.uploadedAt))+')。最新の在庫を集計表の「📥 元データの登録」で取り込むと、優先倉庫が正確になります。</div>';
+      warn += '<div class="vc-warning-box">ロジザードの在庫が出荷指示より古いデータです('+esc(fmtDateTime(lz.uploadedAt))+')。最新の在庫を「📥 データ更新」で取り込むと、優先倉庫が正確になります。</div>';
   }
   var body;
-  if(tab==='data') body = renderVcAllocDataPanel(d, calc);
-  else if(!calc) body = '<div class="empty-note">出荷指示のCSVがまだ取り込まれていません。「📥 取込・納品先一覧」で取り込んでください。</div>';
+  if(!calc) body = '<div class="empty-note">VCの出荷指示のCSVがまだ取り込まれていません。「📥 データ更新」で取り込んでください。</div>';
   else if(tab==='dash') body = renderVcAllocDash(calc);
   else if(tab==='dest') body = renderVcAllocDests(calc);
   else body = renderVcAllocTable(calc, tab);
@@ -9046,33 +8982,15 @@ function renderVcAllocDests(calc){
     '<tr class="sk-total"><td colspan="3">合計 '+formatNum(list.length)+'か所</td><td class="num">'+formatNum(calc.poCount)+'</td><td class="num">'+formatNum(calc.totals.lines)+'</td><td class="num">'+formatNum(calc.totals.qty)+'</td></tr>'+
     '</tbody></table>';
 }
-function renderVcAllocDataPanel(d, calc){
+/* 納品先一覧(納品先コード → 振り分け番号)の編集。データ更新の画面に出す */
+function renderVcAllocDestEditor(d, calc){
   var editable = !isReadOnlyAccount();
-  var order = d.order;
   var groups = vcAllocDestGroups(d.dests);
   var names = {};
   if(calc) calc.dests.forEach(function(x){ names[x.id] = x.name; });
   var unk = calc ? Object.keys(calc.unknownDests) : [];
   var codes = Object.keys(groups).sort();
-  var lz = d.stock && d.stock.logizard;
-  var hasAlloc = lz && lz.products && Object.keys(lz.products).some(function(k){ var b = lz.products[k].blocks; return Object.keys(b).some(function(x){ return !!b[x].locAlloc; }); });
-  return (editable ? '<div class="ll-form-group shukei-drop" data-vca-drop="1" style="margin-bottom:14px;">'+
-      '<div class="ll-form-group-title">出荷指示のCSVの取り込み</div>'+
-      '<div class="pool-hint" style="margin:0 0 6px;">ロジザードから出力した Amazon VC の出荷指示のCSV(以前 Excel の「受注ケース振り分け(貼付)」に貼っていたもの)を選ぶか、この枠にドラッグ&ドロップしてください。前に取り込んだ出荷指示は置き換わります(倉庫を手で変えた分も消えます)。</div>'+
-      '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 CSVファイルを選んで取り込む'+
-        '<input type="file" accept=".csv,text/csv" data-vca-upload="1" style="display:none;"></label>'+
-      '<span class="shukei-drop-hint">またはCSVファイルをこの枠にドラッグ&ドロップ</span>'+
-      (order && order.uploadedAt ? '<div class="pool-hint" style="margin:8px 0 0;">取込済み: '+esc(order.fileName||'')+' ・ '+esc(fmtDateTime(order.uploadedAt))+' ・ '+formatNum(order.rowCount||0)+'行</div>' : '')+
-    '</div>' : '')+
-    '<div class="ll-form-group" style="margin-bottom:14px;">'+
-      '<div class="ll-form-group-title">在庫・入数(集計表で登録したデータを使います)</div>'+
-      '<ul class="pool-hint" style="margin:0;padding-left:18px;">'+
-        '<li><b>ロジザードの在庫</b>: '+(lz && lz.uploadedAt ? esc(fmtDateTime(lz.uploadedAt))+(hasAlloc ? '' : '(引当数が入っていない以前のデータです。もう一度取り込んでください)') : '未登録')+'</li>'+
-        Object.keys(SHUKEI_SITES).map(function(k){ var y = d.stock && d.stock.yayoiBySite && d.stock.yayoiBySite[k]; return '<li><b>弥生の在庫('+esc(SHUKEI_SITES[k].name)+')</b>: '+(y && y.uploadedAt ? esc(fmtDateTime(y.uploadedAt)) : '未登録')+'(入数に使います。無い品番は kintone の商品台帳)</li>'; }).join('')+
-      '</ul>'+
-      '<button type="button" class="vc-manage-toggle-btn" id="vcaGoShukeiData" style="margin-top:8px;">🧾 集計表の「元データの登録」を開く</button>'+
-    '</div>'+
-    '<div class="ll-form-group">'+
+  return '<div class="ll-form-group">'+
       '<div class="ll-form-group-title">納品先一覧(納品先コード → 振り分け番号)</div>'+
       '<div class="pool-hint" style="margin:0 0 6px;">取引先が「アマゾン VC(DIY)」の行は、納品先にかかわらず振り分け番号1です。'+(d.dests ? '' : 'まだ一度も保存していないため、Excel の納品先一覧(84か所)を使っています。')+'</div>'+
       (unk.length ? '<div class="vc-warning-box">一覧に無い納品先: '+unk.map(function(k){ return '<b>'+esc(k)+'</b>('+esc(calc.unknownDests[k])+')'+(editable ? ' <button type="button" class="vc-manage-toggle-btn" data-vca-quick="'+esc(k)+'" data-vca-quick-g="2" style="min-height:0;padding:2px 8px;">2にする</button><button type="button" class="vc-manage-toggle-btn" data-vca-quick="'+esc(k)+'" data-vca-quick-g="3" style="min-height:0;padding:2px 8px;">3にする</button>' : ''); }).join('<br>')+'</div>' : '')+
@@ -9107,8 +9025,6 @@ function bindVcAlloc(){
       render();
     });
   });
-  var gs = document.getElementById('vcaGoShukeiData');
-  if(gs) gs.addEventListener('click', function(){ state.role = 'shukei'; state.shukeiTab = 'data'; render(); });
   var d = state.vcAllocData;
   if(!d) return;
   async function saveOrder(order, action, after){
@@ -9149,44 +9065,14 @@ function bindVcAlloc(){
   });
   var go = document.getElementById('vcaGoShukei');
   if(go) go.addEventListener('click', function(){ state.role = 'shukei'; state.shukeiTab = 'sheet'; state.vcAllocMsg = ''; render(); });
-  // 出荷指示のCSVの取り込み
-  async function importOrderFile(file){
-    if(!file) return;
-    if(!/\.csv$/i.test(file.name)){ state.vcAllocMsg = '⚠️ '+esc(file.name)+': CSVファイル(.csv)ではありません'; render(); return; }
-    var text;
-    try{ text = await shukeiReadFileText(file); }catch(e){ state.vcAllocMsg = '⚠️ ファイルを読み込めませんでした'; render(); return; }
-    var p = vcAllocParseOrder(text);
-    if(p.error){ state.vcAllocMsg = '⚠️ '+esc(file.name)+': '+esc(p.error); render(); return; }
-    if(d.order && d.order.lines && !confirm('前に取り込んだ出荷指示('+fmtDateTime(d.order.uploadedAt)+'・'+d.order.rowCount+'行)を、'+file.name+'('+p.rowCount+'行)に置き換えます。よろしいですか?')) return;
-    p.uploadedAt = new Date().toISOString();
-    p.fileName = file.name;
-    p.overrides = {};
-    if(!(await saveOrder(p, 'VC引き当ての出荷指示を取込', file.name+'・'+p.rowCount+'行'))) return;
-    d.order = p;
-    state.vcAllocMsg = '✅ '+esc(file.name)+'を取り込みました('+formatNum(p.rowCount)+'行)';
-    state.vcAllocTab = 'dash';
-    render();
-  }
-  document.querySelectorAll('[data-vca-upload]').forEach(function(inp){
-    inp.addEventListener('change', function(){ importOrderFile(inp.files && inp.files[0]); });
-  });
-  document.querySelectorAll('[data-vca-drop]').forEach(function(zone){
-    ['dragenter','dragover'].forEach(function(ev){
-      zone.addEventListener(ev, function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; zone.classList.add('is-dragover'); });
-    });
-    zone.addEventListener('dragleave', function(e){ if(!zone.contains(e.relatedTarget)) zone.classList.remove('is-dragover'); });
-    zone.addEventListener('drop', function(e){
-      e.preventDefault();
-      zone.classList.remove('is-dragover');
-      var files = e.dataTransfer && e.dataTransfer.files;
-      if(files && files.length) importOrderFile(files[0]);
-    });
-  });
+}
+/* 納品先一覧の編集の操作(データ更新の画面) */
+function bindVcAllocDestEditor(d){
   // 納品先一覧
   async function saveDests(groups, after){
     var obj = { groups: groups, updatedAt: new Date().toISOString() };
     var ok = await persistKey(VC_ALLOC_KEYS.dests, obj);
-    if(!ok){ state.vcAllocMsg = '⚠️ 納品先一覧を保存できませんでした'; render(); return; }
+    if(!ok){ state.dataHubMsg = '⚠️ 納品先一覧を保存できませんでした'; render(); return; }
     await appendAuditLog({ action:'VC引き当ての納品先一覧を変更', target:'納品先一覧', before:null, after: after });
     d.dests = obj; render();
   }
@@ -9213,6 +9099,147 @@ function bindVcAlloc(){
   });
 }
 
+/* ---------- データ更新(共有データの取込をまとめた画面) ----------
+   集計表・VC引き当てで使う共有データ(ロジザードの在庫・弥生の在庫・VCの出荷指示・納品先一覧)をここで更新する。
+   CSVはまとめて選ぶ/ドラッグ&ドロップでき、中身から種類を見分ける。
+   管理者のCSV取込(作業の件数。作業への振り分けを確認してから取り込む)は、間違って取り込まないよう、ここには入れない。 */
+function sharedDataKindOf(text){
+  var head = shukeiParseTable(text)[0] || [];
+  if(head.indexOf('ブロック略称')!==-1) return 'logizard';
+  if(head.indexOf('商品ID')!==-1 && head.indexOf('出荷指示数')!==-1 && head.indexOf('出荷先ID')!==-1) return 'vcOrder';
+  if(shukeiYayoiSitesIn(text).length) return 'yayoi';
+  return null;
+}
+function localDateOfIso(iso){
+  var d = new Date(iso);
+  if(isNaN(d.getTime())) return '';
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+/* CSVファイル(複数可)を種類ごとに登録する。戻り値: メッセージ(文字列)の配列 */
+async function importSharedDataFiles(files){
+  files = Array.prototype.slice.call(files||[]);
+  var msgs = [];
+  for(var fi=0; fi<files.length; fi++){
+    var file = files[fi];
+    if(!/\.csv$/i.test(file.name)){ msgs.push('⚠️ '+file.name+': CSVファイル(.csv)ではないため取り込みませんでした'); continue; }
+    var text;
+    try{ text = await shukeiReadFileText(file); }
+    catch(e){ msgs.push('⚠️ '+file.name+': ファイルを読み込めませんでした'); continue; }
+    var kind = sharedDataKindOf(text);
+    var targets = []; // { key, label, parsed, unit }
+    if(kind==='logizard') targets.push({ key: SHUKEI_KEYS.logizard, label: 'ロジザードの在庫', parsed: shukeiParseLogizard(text), unit:'行' });
+    else if(kind==='yayoi') shukeiYayoiSitesIn(text).forEach(function(k){ targets.push({ key: SHUKEI_KEYS.yayoi(k), label: '弥生('+SHUKEI_SITES[k].name+')の在庫', parsed: shukeiParseYayoi(text, SHUKEI_SITES[k]), unit:'商品' }); });
+    else if(kind==='vcOrder'){
+      var p = vcAllocParseOrder(text);
+      if(!p.error){
+        var cur = await loadKeyJson(VC_ALLOC_KEYS.order, function(){ return null; });
+        if(cur && cur.lines && !confirm('前に取り込んだVCの出荷指示('+fmtDateTime(cur.uploadedAt)+'・'+cur.rowCount+'行)を、'+file.name+'('+p.rowCount+'行)に置き換えます。手で選び直した倉庫も消えます。よろしいですか?')){
+          msgs.push('— '+file.name+': 取り込みをやめました'); continue;
+        }
+        p.fileName = file.name;
+        p.overrides = {};
+      }
+      targets.push({ key: VC_ALLOC_KEYS.order, label: 'VCの出荷指示', parsed: p, unit:'行' });
+    }else{
+      msgs.push('⚠️ '+file.name+': ロジザードの在庫・弥生の在庫(高屋・丹南)・VCの出荷指示のどのCSVか分かりませんでした');
+      continue;
+    }
+    for(var ti=0; ti<targets.length; ti++){
+      var t = targets[ti];
+      if(t.parsed.error){ msgs.push('⚠️ '+file.name+'('+t.label+'): '+t.parsed.error); continue; }
+      t.parsed.uploadedAt = new Date().toISOString();
+      var ok = await persistKey(t.key, t.parsed);
+      if(!ok){ msgs.push('⚠️ '+t.label+'を保存できませんでした('+file.name+')'); continue; }
+      await appendAuditLog({ action:'共有データを更新', target: t.label, before:null, after: file.name+'・'+formatNum(t.parsed.rowCount)+t.unit });
+      msgs.push('✅ '+t.label+'を更新しました('+file.name+'・'+formatNum(t.parsed.rowCount)+t.unit+')');
+    }
+  }
+  // 集計表・VC引き当て・この画面は、開いたときに読み直す
+  state.shukeiData = null;
+  state.vcAllocData = null;
+  return msgs;
+}
+function renderDataHub(){
+  if(!state.vcAllocData){
+    if(!state.vcAllocLoading){
+      state.vcAllocLoading = true;
+      loadVcAllocData().then(function(d){ state.vcAllocData = d; state.vcAllocLoading = false; render(); })
+        .catch(function(){ state.vcAllocLoading = false; });
+    }
+    return '<div class="mgr-wrap"><div class="panel"><div class="panel-title">📥 データ更新</div><div class="pool-hint">読み込み中…</div></div></div>';
+  }
+  var d = state.vcAllocData;
+  var editable = !isReadOnlyAccount();
+  var st = d.stock || {};
+  var yb = st.yayoiBySite || {};
+  var today = todayStr();
+  function row(label, obj, detail, usedBy){
+    var at = obj && obj.uploadedAt;
+    var fresh = at && localDateOfIso(at)===today;
+    return '<tr><td><b>'+esc(label)+'</b></td>'+
+      '<td>'+(at ? esc(fmtDateTime(at)) : '<span class="vca-site is-none">未登録</span>')+
+        (at && !fresh ? ' <span class="vca-site is-split">今日まだ更新していません</span>' : '')+'</td>'+
+      '<td>'+esc(detail||'')+'</td><td class="sk-minor">'+esc(usedBy)+'</td></tr>';
+  }
+  var lz = st.logizard, order = d.order;
+  var lzOld = lz && lz.products && Object.keys(lz.products).slice(0,50).some(function(c){ var b = lz.products[c].blocks; return Object.keys(b).some(function(k){ return !b[k].locAlloc; }); });
+  var calc = order && order.lines ? computeVcAlloc(order, d.dests, st, state.shukeiPm) : null;
+  return '<div class="mgr-wrap"><div class="panel">'+
+    '<div class="panel-title">📥 データ更新</div>'+
+    '<div class="pool-hint" style="margin:0 0 10px;">集計表・VC引き当てで使う共有データの更新をまとめた画面です。登録したデータはロジリンクを使う全員で共有され、前のデータは新しいデータに置き換わります。'+
+      '作業の件数のCSV取込は、これまでどおり管理者画面の「CSV取込」で行います。</div>'+
+    (state.dataHubMsg ? '<div class="vc-import-status" style="white-space:pre-line;">'+esc(state.dataHubMsg)+'</div>' : '')+
+    (editable ? '<div class="ll-form-group shukei-drop" data-hub-drop="1" style="margin-bottom:14px;">'+
+      '<div class="ll-form-group-title">CSVファイルの取り込み(まとめてOK)</div>'+
+      '<div class="pool-hint" style="margin:0 0 6px;">次のCSVを、まとめて選ぶか、この枠にまとめてドラッグ&ドロップしてください。ファイルの中身から種類を見分けます。<br>'+
+        '・ロジザードの在庫 ・弥生の在庫(「高屋在庫.csv」「丹南在庫.csv」「全外部倉庫.csv」など。倉庫コードで高屋('+esc(SHUKEI_SITES.takaya.yayoiWarehouse)+')・丹南('+esc(SHUKEI_SITES.tannan.yayoiWarehouse)+')に分けます) ・ロジザードの Amazon VC の出荷指示</div>'+
+      '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 CSVファイルを選んで取り込む(複数可)'+
+        '<input type="file" accept=".csv,text/csv" multiple data-hub-upload="1" style="display:none;"></label>'+
+      '<span class="shukei-drop-hint">またはCSVファイルをこの枠にドラッグ&ドロップ</span>'+
+    '</div>' : '')+
+    '<div class="ll-form-group" style="margin-bottom:14px;">'+
+      '<div class="ll-form-group-title">今のデータ <button type="button" class="vc-manage-toggle-btn" id="hubReload" style="min-height:0;padding:3px 10px;margin-left:6px;">🔄 読み直す</button></div>'+
+      '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>データ</th><th>最終更新</th><th>内容</th><th>使う画面</th></tr></thead><tbody>'+
+        row('ロジザードの在庫', lz, lz ? formatNum(lz.rowCount||0)+'行'+(lzOld ? '(引当数の無い以前の形。取り込み直してください)' : '') : '', '集計表・在庫差異・VC引き当て')+
+        Object.keys(SHUKEI_SITES).map(function(k){ var y = yb[k]; return row('弥生の在庫('+SHUKEI_SITES[k].name+')', y, y ? formatNum(y.rowCount||0)+'商品' : '', '集計表・在庫差異・VC引き当て(入数)'); }).join('')+
+        row('VCの出荷指示', order, order ? formatNum(order.rowCount||0)+'行'+(order.workDates && order.workDates.length ? '・出荷作業日 '+order.workDates.map(dateLabelFromStr).join('・') : '')+(order.fileName ? '・'+order.fileName : '') : '', 'VC引き当て')+
+        '<tr><td><b>納品先一覧</b></td><td>'+(d.dests && d.dests.updatedAt ? esc(fmtDateTime(d.dests.updatedAt))+'に変更' : '初期値(Excel の一覧)')+'</td><td>'+formatNum(Object.keys(vcAllocDestGroups(d.dests)).length)+'か所</td><td class="sk-minor">VC引き当て(振り分け番号)</td></tr>'+
+      '</tbody></table></div>'+
+    '</div>'+
+    renderVcAllocDestEditor(d, calc)+
+  '</div></div>';
+}
+function bindDataHub(){
+  var rl = document.getElementById('hubReload');
+  if(rl) rl.addEventListener('click', function(){ state.vcAllocData = null; state.shukeiData = null; state.dataHubMsg = ''; render(); });
+  var busy = false;
+  async function run(files){
+    if(busy || !files || !files.length) return;
+    busy = true;
+    state.dataHubMsg = '取り込み中…'; render();
+    try{ state.dataHubMsg = (await importSharedDataFiles(files)).join('\n'); }
+    catch(e){ state.dataHubMsg = '⚠️ 取り込みに失敗しました'; }
+    busy = false;
+    render();
+  }
+  document.querySelectorAll('[data-hub-upload]').forEach(function(inp){
+    inp.addEventListener('change', function(){ run(inp.files); });
+  });
+  document.querySelectorAll('[data-hub-drop]').forEach(function(zone){
+    ['dragenter','dragover'].forEach(function(ev){
+      zone.addEventListener(ev, function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; zone.classList.add('is-dragover'); });
+    });
+    zone.addEventListener('dragleave', function(e){ if(!zone.contains(e.relatedTarget)) zone.classList.remove('is-dragover'); });
+    zone.addEventListener('drop', function(e){
+      e.preventDefault();
+      zone.classList.remove('is-dragover');
+      run(e.dataTransfer && e.dataTransfer.files);
+    });
+  });
+  var d = state.vcAllocData;
+  if(d) bindVcAllocDestEditor(d);
+}
+
 /* ---------- render root ---------- */
 function isUserBusy(){
   if(state.suppressRender) return true;
@@ -9227,7 +9254,7 @@ function isUserBusy(){
 /* ---------- 開いている画面をアドレス(#のあと)に残す ----------
    再読み込みしてもトップ画面に戻らず、同じ画面(と画面内のタブ・作業記録で選んでいる人)を開き直すため。
    例: #role=adminHub&tab=financial / #role=input&staff=<スタッフID> / #role=shukei&site=tannan&tab=diff */
-var VIEW_URL_ROLES = ['input','report','monitor','achievements','calendar','history','adminHub','settingsHub','shukei','vcAlloc'];
+var VIEW_URL_ROLES = ['input','report','monitor','achievements','calendar','history','adminHub','settingsHub','shukei','vcAlloc','dataHub'];
 function viewStateToHash(){
   if(!state.role) return '';
   var q = { role: state.role };
@@ -9316,6 +9343,7 @@ function render(){
   else if(state.role==='settingsHub') html += renderSettingsHub();
   else if(state.role==='shukei') html += renderShukei();
   else if(state.role==='vcAlloc') html += renderVcAlloc();
+  else if(state.role==='dataHub') html += renderDataHub();
   if(state.modal) html += renderModal();
   html += renderInstructionAlert();
   root.innerHTML = html;
@@ -9330,6 +9358,10 @@ function render(){
   if(state.role==='settingsHub') bindSettingsHub();
   if(state.role==='shukei') bindShukei();
   if(state.role==='vcAlloc') bindVcAlloc();
+  if(state.role==='dataHub') bindDataHub();
+  document.querySelectorAll('[data-go-datahub]').forEach(function(el){
+    el.addEventListener('click', function(){ state.role = 'dataHub'; state.dataHubMsg = ''; state.vcAllocData = null; render(); });
+  });
   if(state.modal) bindModal();
   var instrClose = document.getElementById('instrAlertClose');
   if(instrClose) instrClose.addEventListener('click', function(){ state.instructionAlert = null; render(); });
@@ -9374,6 +9406,11 @@ function renderGate(){
         '<div class="gate-icon" style="background:#FFF4ED;color:#C4320A;">&#128230;</div>'+
         '<div class="gate-card-title">VC引き当て</div>'+
         '<div class="gate-card-desc">Amazon VCの出荷指示から、品番ごとの数量・ケース・振り分け番号と、高屋・丹南どちらから出すかを出して集計表へ送る</div>'+
+      '</button>'+
+      '<button class="gate-card" data-role="dataHub">'+
+        '<div class="gate-icon" style="background:#F0F9FF;color:#026AA2;">&#128229;</div>'+
+        '<div class="gate-card-title">データ更新</div>'+
+        '<div class="gate-card-desc">ロジザードの在庫・弥生の在庫・VCの出荷指示のCSVをまとめて取り込む。納品先一覧の編集。各データの最終更新日時</div>'+
       '</button>'+
       '<button class="gate-card" data-role="adminHub">'+
         '<div class="gate-lock-badge" title="管理者ログインが必要です">&#128274;</div>'+
@@ -9477,7 +9514,8 @@ var COMMON_NAV_ITEMS = [
   { role:'monitor', label:'モニター', icon:'🖥' },
   { role:'calendar', label:'カレンダー', icon:'📅' },
   { role:'shukei', label:'集計表', icon:'🧾' },
-  { role:'vcAlloc', label:'VC引当', icon:'📦' }
+  { role:'vcAlloc', label:'VC引当', icon:'📦' },
+  { role:'dataHub', label:'データ更新', icon:'📥' }
 ];
 var ADMIN_NAV_ITEMS = [
   { role:'adminHub', label:'管理者', icon:'👔' },

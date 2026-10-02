@@ -75,6 +75,12 @@ input,select{font-family:inherit;}
   color:var(--ink-900);margin:0 0 8px;letter-spacing:-.01em;
 }
 .gate-sub{font-size:14px;color:var(--slate-500);margin:0 0 36px;max-width:440px;line-height:1.6;}
+.gate-status{width:100%;max-width:920px;margin:-18px 0 22px;border:1px solid var(--paper-line);border-radius:12px;background:#fff;padding:10px 14px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;font-size:12.5px;color:var(--ink-900);text-align:left;}
+.gate-status-title{font-weight:800;font-size:13px;width:100%;}
+.gate-status-group{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;width:100%;}
+.gate-status-sub{font-size:11px;color:var(--slate-500);font-weight:700;min-width:84px;}
+.gate-status-item.is-none{color:#B42318;}
+.gate-status-flag{display:inline-block;background:#FFFAEB;color:#B54708;border-radius:6px;padding:0 6px;font-size:11px;font-weight:700;}
 .gate-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;width:100%;max-width:920px;}
 .gate-card{
   position:relative;background:var(--paper-50);border:1px solid var(--paper-line);border-radius:var(--radius-lg,14px);padding:26px 20px;
@@ -1550,6 +1556,7 @@ var CHANGELOG = [
     '実際にコードを実行するテストで、各画面から他画面へホームを経由せず直接移動できること、管理者専用ナビが未ログイン時は表示されずログアウト後に消えること、そして最も重要な点として「state.roleを不正に管理者画面へ直接切り替えても、未ログインならページの中身(データ)は一切表示されずログインフォームのみが出ること」を確認しました。既存の全回帰テスト(39スイート)にも影響はありません'
   ]},
   { date:'2026-10-03', items:[
+    '【トップページ: データの更新状況】トップページに、共有データ(ロジザードの在庫・弥生の在庫(高屋・丹南)・VCの出荷指示)と kintone から同期したデータ(商品台帳・作業単価(管理者のみ))の最終更新日時を表示するようにしました。今日まだ更新していない共有データには「今日まだ」と出ます。「📥 データ更新を開く」から取り込めます',
     '【調査結果】「作業を指定して取り込む」の廃止・取込履歴の常時表示・荷主出荷番号単位のグローバルな重複防止(削除済みデータも重複扱いになる仕様を含む)・本日の作業へのCSV件数/ピース数表示は、いずれも既に実装済みであることを確認しました。今回は、まだ無かった2点(取込データの編集・モニターへのCSV表示)のみを実装しています',
     '【新機能】取込履歴の各行に「編集」ボタンを追加しました。CSVを再取込することなく、既存の取込データの「紐付け先の作業枠」だけを変更できます。CSV明細・荷主出荷番号・数量・取込日時・得意先情報などの元データは一切変更されません。変更内容は既存の操作履歴に記録されます(新しいデータ構造は追加していません)',
     '【新機能】モニター表示の各作業者カードに、現在計測中の親作業に紐付いているCSV情報(出荷件数・ピース数)を表示するようにしました。「本日の状況」と全く同じ集計関数(wvTotalsForTask)を使っているため、画面間で数字が食い違うことはありません。作業者ごとの表示構成(誰が何をしているか)は変更していません。内訳作業ごとに同じ数字が重複表示されることもありません',
@@ -9175,6 +9182,8 @@ async function importSharedDataFiles(files){
       var ok = await persistKey(t.key, t.parsed);
       if(!ok){ msgs.push('⚠️ '+t.label+'を保存できませんでした('+file.name+')'); continue; }
       await appendAuditLog({ action:'共有データを更新', target: t.label, before:null, after: file.name+'・'+formatNum(t.parsed.rowCount)+t.unit });
+      var metaName = t.key===SHUKEI_KEYS.logizard ? 'logizard' : (t.key===VC_ALLOC_KEYS.order ? 'vcOrder' : (t.key===SHUKEI_KEYS.yayoi('takaya') ? 'yayoi:takaya' : (t.key===SHUKEI_KEYS.yayoi('tannan') ? 'yayoi:tannan' : null)));
+      if(metaName) await recordSharedDataMeta(metaName, { at: t.parsed.uploadedAt, detail: formatNum(t.parsed.rowCount)+t.unit });
       msgs.push('✅ '+t.label+'を更新しました('+file.name+'・'+formatNum(t.parsed.rowCount)+t.unit+')');
     }
   }
@@ -9711,6 +9720,82 @@ function render(){
   syncViewToUrl();
 }
 
+/* ---------- トップページの「データの更新状況」 ----------
+   共有データ(ロジザード・弥生の在庫、VCの出荷指示)と、kintone から同期したデータ(商品台帳・作業単価)の最終更新日時。
+   在庫などのデータは大きいため、取り込むたびに日時だけを shared-data-meta に記録し、トップページではそれを読む。
+   記録の無い(この機能より前に取り込んだ)データだけ、元のデータから日時を読む(画面を開いている間に1回)。 */
+var SHARED_DATA_META_KEY = 'shared-data-meta';
+async function recordSharedDataMeta(name, info){
+  try{
+    var m = await loadKeyJson(SHARED_DATA_META_KEY, function(){ return {}; });
+    if(isUnverified(m)) return;
+    m[name] = info;
+    await persistKey(SHARED_DATA_META_KEY, m);
+  }catch(e){}
+  state.gateDataStatus = null; // トップページで読み直す
+}
+var GATE_STATUS_SOURCES = [
+  { name:'logizard', label:'ロジザードの在庫', key: function(){ return SHUKEI_KEYS.logizard; }, unit:'行' },
+  { name:'yayoi:takaya', label:'弥生の在庫(高屋)', key: function(){ return SHUKEI_KEYS.yayoi('takaya'); }, unit:'商品' },
+  { name:'yayoi:tannan', label:'弥生の在庫(丹南)', key: function(){ return SHUKEI_KEYS.yayoi('tannan'); }, unit:'商品' },
+  { name:'vcOrder', label:'VCの出荷指示', key: function(){ return VC_ALLOC_KEYS.order; }, unit:'行' }
+];
+async function loadGateDataStatus(){
+  var meta = await loadKeyJson(SHARED_DATA_META_KEY, function(){ return {}; }) || {};
+  var out = {};
+  state.gateMetaFill = state.gateMetaFill || {};
+  for(var i=0; i<GATE_STATUS_SOURCES.length; i++){
+    var src = GATE_STATUS_SOURCES[i];
+    if(meta[src.name]){ out[src.name] = meta[src.name]; continue; }
+    if(!Object.prototype.hasOwnProperty.call(state.gateMetaFill, src.name)){
+      var d = await loadKeyJson(src.key(), function(){ return null; });
+      state.gateMetaFill[src.name] = (d && d.uploadedAt) ? { at: d.uploadedAt, detail: formatNum(d.rowCount||0)+src.unit } : null;
+    }
+    out[src.name] = state.gateMetaFill[src.name];
+  }
+  // kintone 商品台帳(入数・才数)の同期
+  var ks = await loadKintoneSyncStatus();
+  out.kintoneProduct = (ks && ks.fetchedAt) ? { at: ks.fetchedAt, detail: formatNum(ks.savedCount||0)+'件' } : null;
+  // kintone 作業単価マスタの同期(管理者のみ読める)
+  if(hasManagerSession() && window.__supabaseClient){
+    try{
+      var res = await window.__supabaseClient.from('work_price_master').select('updated_at').order('updated_at', { ascending:false }).limit(1);
+      out.kintonePrice = (!res.error && res.data && res.data[0]) ? { at: res.data[0].updated_at, detail:'' } : null;
+    }catch(e){}
+  }
+  return out;
+}
+function renderGateDataStatus(){
+  if(!hasDataAccess() || !state.appDataLoaded) return '';
+  if(!state.gateStatusLoading && (!state.gateDataStatus || Date.now()-(state.gateDataStatusAt||0) > 60000)){
+    state.gateStatusLoading = true;
+    loadGateDataStatus().then(function(st){
+      state.gateDataStatus = st; state.gateDataStatusAt = Date.now(); state.gateStatusLoading = false;
+      if(!state.role) render();
+    }).catch(function(){ state.gateStatusLoading = false; state.gateDataStatusAt = Date.now(); });
+  }
+  var st = state.gateDataStatus;
+  if(!st) return '<div class="gate-status"><span class="gate-status-title">🗂 データの更新状況</span><span class="sk-minor">読み込み中…</span></div>';
+  var today = todayStr();
+  function item(label, x, daily){
+    var fresh = x && localDateOfIso(x.at)===today;
+    var cls = !x ? 'is-none' : (daily && !fresh ? 'is-stale' : '');
+    return '<span class="gate-status-item '+cls+'"><b>'+esc(label)+'</b> '+
+      (x ? esc(fmtDateTime(x.at))+(x.detail ? '<span class="sk-minor">('+esc(x.detail)+')</span>' : '') : '未登録')+
+      (daily && x && !fresh ? ' <span class="gate-status-flag">今日まだ</span>' : '')+'</span>';
+  }
+  return '<div class="gate-status">'+
+    '<span class="gate-status-title">🗂 データの更新状況</span>'+
+    '<div class="gate-status-group"><span class="gate-status-sub">共有データ</span>'+
+      GATE_STATUS_SOURCES.map(function(src){ return item(src.label, st[src.name], true); }).join('')+
+    '</div>'+
+    '<div class="gate-status-group"><span class="gate-status-sub">kintone(API)</span>'+
+      item('商品台帳(入数・才数)', st.kintoneProduct, false)+
+      (hasManagerSession() ? item('作業単価', st.kintonePrice, false) : '')+
+    '</div>'+
+    '<button type="button" class="vc-manage-toggle-btn" id="gateGoDataHub" style="min-height:0;padding:3px 10px;">📥 データ更新を開く</button>'+
+  '</div>';
+}
 /* ---------- GATE ---------- */
 function renderGate(){
   return ''+
@@ -9718,6 +9803,7 @@ function renderGate(){
     '<div class="gate-eyebrow">Warehouse Dispatch Board</div>'+
     '<h1 class="gate-title">LOGI LINK</h1>'+
     '<p class="gate-sub">このアプリのデータは全員で共有されます。使う画面の役割を選んでください。</p>'+
+    renderGateDataStatus()+
     '<div class="gate-grid">'+
       '<button class="gate-card" data-role="input"'+readOnlyBlockedAttrs('input')+(isRoleBlockedForAccount('input')?' title="'+READONLY_BLOCKED_TITLE+'"':'')+'>'+
         '<div class="gate-icon" style="background:#FFFAEB;color:#4338CA;">&#9997;</div>'+
@@ -9821,6 +9907,8 @@ function bindGate(){
       if(role==='input' || role==='adminHub') requestFreshTodayData(); // 本日の作業系の画面は最新データで再計算する
     });
   });
+  var hubBtn = document.getElementById('gateGoDataHub');
+  if(hubBtn) hubBtn.addEventListener('click', function(){ state.role = 'dataHub'; state.dataHubMsg = ''; state.vcAllocData = null; render(); startPolling(); });
   var openBtn = document.getElementById('changelogOpenBtn');
   if(openBtn) openBtn.addEventListener('click', function(){
     state.showChangelog = true;
@@ -14277,6 +14365,7 @@ async function syncProductMasterFromKintone(settings){
       fetchedCount: data.fetchedCount, savedCount: data.savedCount,
       skippedNoProductCode: data.skippedNoProductCode, fetchedAt: data.fetchedAt
     };
+    state.gateDataStatus = null;
     if(!(await saveKintoneSyncStatus(status))){
       console.error('[LOGI LINK] kintone同期は成功しましたが、同期状況の保存に失敗しました');
     }
@@ -15675,6 +15764,7 @@ function bindAutoMapPreviewModal(m){
         });
       }
       var saveOk = await saveWorkVolume(d.targetDate, targetData);
+      state.gateDataStatus = null; // トップページの「データの更新状況」を読み直す
       if(d.targetDate===todayStr()) state.workVolume = targetData;
       if(state.wvTargetDate===d.targetDate) state.wvViewData = targetData;
       if(saveOk){

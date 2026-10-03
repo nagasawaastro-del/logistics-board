@@ -122,6 +122,7 @@ input,select{font-family:inherit;}
 .stock-use.mid{color:#B54708;font-weight:700;}
 .stock-use.hi{color:#B42318;font-weight:800;}
 .stock-cap-input{width:90px;text-align:right;}
+.stock-csv{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0 2px;}
 .gate-links{display:flex;gap:18px;justify-content:center;align-items:baseline;flex-wrap:wrap;}
 
 .changelog-card{background:var(--paper-50);border-radius:16px;padding:28px;max-width:480px;width:100%;max-height:80vh;overflow-y:auto;text-align:left;box-shadow:var(--shadow-lg);}
@@ -1585,6 +1586,8 @@ var CHANGELOG = [
     '実際にコードを実行するテストで、各画面から他画面へホームを経由せず直接移動できること、管理者専用ナビが未ログイン時は表示されずログアウト後に消えること、そして最も重要な点として「state.roleを不正に管理者画面へ直接切り替えても、未ログインならページの中身(データ)は一切表示されずログインフォームのみが出ること」を確認しました。既存の全回帰テスト(39スイート)にも影響はありません'
   ]},
   { date:'2026-10-03', items:[
+    '【CSV出力】収支(今見ている内訳と合計)・実績(表示中の作業記録)・生産性・VC引当(今のタブの表)・集計表(入力中の表・在庫差異)・請求(各表と請求書鑑の金額)に「CSV出力」ボタンを付けました。Excel でそのまま開けます',
+    '【在庫: CSV出力】管理 → 在庫の分析をCSVで出せるようにしました(ブロック別・ロケーション別・品番別・推移・才数不明)。Excelでそのまま開けます',
     '【在庫: 容量の単位と40ftコンテナ換算】在庫の容量を、才・m³・面積(m²・坪+積める高さ)・40ftコンテナの本数のどれでも入れられるようにしました(中では才に直して使用率を出します)。在庫の量を「40ftコンテナ 約○本分」(40ftドライの内容積67.7m³ = 約2,433才で換算)でも出すようにしました',
     '【在庫(新しいタブ)】管理に「在庫」タブを追加しました。ロジザードの在庫から、高屋・丹南・ブロックごとの在庫のボリューム(才数・m³・ケース・ピース・品番数・ロケ数)と、棚ごとの才数・少量のロケ(1才以下、まとめる候補)・混載のロケ・才数の多いロケを出します。ブロックごとに容量(才)を入れると使用率が出ます。ロジザードの在庫を取り込んだ日ごとに記録を残し、才数の推移(グラフ)と7日前との比較を出します。入数・才数の分からない商品は「才数不明」に一覧で出します',
     '【説明書】トップページの一番下の「説明書(PDF)」から、使い方・設定方法・できることをまとめた説明書をダウンロードできるようにしました。機能を直すたびに説明書も更新します',
@@ -6615,12 +6618,13 @@ function renderLogManagementTab(){
   }
 
   return '<div class="mgr-wrap"><div class="panel">'+
-    '<div class="panel-title">🗓 実績管理</div>'+
+    '<div class="panel-title">実績</div>'+
     '<div class="pool-hint" style="margin-bottom:12px;">作業日ごと(期間指定可)に実績(作業時間の記録)をまとめて確認・削除・日付変更できます。進行中の実績は安全のため対象になりません。個別の内容修正(時刻の訂正等)は、管理者→今日の状況の各実績の「編集」から行えます。</div>'+
     '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;">'+
       '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">開始日</label><input type="date" id="logMgmtStartDate" value="'+state.logMgmtStartDate+'"></div>'+
       '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">終了日</label><input type="date" id="logMgmtEndDate" value="'+state.logMgmtEndDate+'"></div>'+
       '<button type="button" class="add-btn" id="logMgmtLoadBtn">表示する</button>'+
+      (state.logMgmtEntries ? csvButton('logMgmt') : '')+
     '</div>'+
     body+
   '</div></div>';
@@ -6787,10 +6791,10 @@ function renderProductivityTab(){
   }).join('') || '<div class="empty-note">まだ生産性データがありません。下のボタンで実績から作成してください。</div>';
 
   return '<div class="mgr-wrap"><div class="panel">'+
-    '<div class="panel-title">📈 生産性</div>'+
+    '<div class="panel-title">生産性</div>'+
     '<div class="pool-hint" style="margin-bottom:10px;">作業種別×作業者ごとの生産性実績です。繰り返し作業は日をまたいで1作業として集計されます。複数人が同時に従事した日は個人の実績には使われません(作業全体の標準値のみ更新されます)。個人の実績が5日未満の場合、人員配置では作業全体の標準値が使われます。表示対象は、現在の作業マスタに存在する有効な作業のみです。</div>'+
     (orphanedCount>0 ? '<div class="pool-hint" style="margin-bottom:10px;color:var(--warning-600);">⚠️ 現在の作業マスタに存在しない生産性データが'+orphanedCount+'件あります(削除・アーカイブ済みの作業など)。実績自体は保持されていますが、この画面・人員配置には反映されません。</div>' : '')+
-    '<button type="button" class="add-btn" id="staffingRefreshProductivityBtn" style="margin-bottom:14px;">生産性データを最新の実績で更新する</button>'+
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;"><button type="button" class="add-btn" id="staffingRefreshProductivityBtn">生産性データを最新の実績で更新する</button>'+csvButton('productivity')+'</div>'+
     rows+
   '</div></div>';
 }
@@ -7584,7 +7588,7 @@ function renderFinancial(){
       '<button type="button" class="add-btn" id="finRunAnalyticsBtn">この期間で集計</button>'+
     '</div>'+
     periodHtml+
-    '<div class="vc-tabs sticky-tabs">'+axisTabs+'</div>'+
+    '<div class="vc-tabs sticky-tabs">'+axisTabs+(state.finAnalyticsRows ? '<span style="margin-left:auto;">'+csvButton('fin')+'</span>' : '')+'</div>'+
     '<div class="vc-tab-body">'+analyticsBody+'</div>'+
   '</div>';
 
@@ -8680,7 +8684,7 @@ function renderShukeiSheet(siteKey, site, data, draft){
       '<button type="button" class="add-btn" id="shukeiAddRow">＋ 行を追加</button>'+
       '<button type="button" class="vc-manage-toggle-btn" id="shukeiPasteToggle">まとめて貼り付け</button>'+
       '<button type="button" class="vc-manage-toggle-btn" id="shukeiSort">並び替え(棚番順)</button>'+
-      '<button type="button" class="vc-manage-toggle-btn" id="shukeiPrint">🖨 印刷</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="shukeiPrint">印刷</button>'+csvButton('shukeiSheet')+
       '<button type="button" class="vc-manage-toggle-btn" id="shukeiClear" style="color:var(--rust-600);">新規作成(入力を消す)</button>'+
     '</div>'+
     (state.shukeiPasteOpen ? '<div class="no-print" style="margin-bottom:8px;">'+
@@ -8713,7 +8717,7 @@ function renderShukeiDiff(siteKey, site, data){
   return '<div class="no-print" style="display:flex;gap:12px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">'+
       '<label><input type="checkbox" id="shukeiDiffOnly"'+(onlyDiff?' checked':'')+'> 差異のある商品だけ表示</label>'+
       '<span class="pool-hint" style="margin:0;">'+formatNum(all.filter(function(r){ return r.diff!==0; }).length)+'件に差異 / 全'+formatNum(all.length)+'件</span>'+
-      '<button type="button" class="vc-manage-toggle-btn" id="shukeiPrint">🖨 印刷</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="shukeiPrint">印刷</button>'+csvButton('shukeiDiff')+
     '</div>'+
     '<div class="shukei-print-head"><span class="shukei-site-badge">'+esc(site.name)+'</span><b>在庫差異</b> ・ '+esc(dateLabelFromStr(todayStr()))+'</div>'+
     '<div style="overflow-x:auto;max-height:560px;overflow-y:auto;" data-keep-scroll="shukeiDiff"><table class="report-table shukei-table"><thead><tr>'+dh('商品コード','code')+dh('商品名','name')+dh('弥生('+site.name+')','yayoi')+dh('ロジザード','logi')+dh('差異(弥生−ロジ)','diff')+dh('ケース数(ロジ)','cases')+dh('才数','cubic')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
@@ -9027,7 +9031,7 @@ function renderVcAlloc(){
   var lz = d.stock && d.stock.logizard;
   var status = '<div class="pool-hint" style="margin:6px 0 10px;">出荷指示: '+(order && order.uploadedAt ? esc(fmtDateTime(order.uploadedAt))+'取込'+(order.workDates && order.workDates.length ? '(出荷作業日 '+esc(order.workDates.map(dateLabelFromStr).join('・'))+')' : '') : '未取込')+
     ' ・ ロジザードの在庫: '+(lz && lz.uploadedAt ? esc(fmtDateTime(lz.uploadedAt)) : '未登録')+
-    ' <button type="button" class="vc-manage-toggle-btn" id="vcaReload" style="min-height:0;padding:3px 10px;">🔄 読み直す</button>'+
+    ' <button type="button" class="vc-manage-toggle-btn" id="vcaReload" style="min-height:0;padding:3px 10px;">読み直す</button> '+(order && order.lines ? csvButton('vcAlloc', 'この表をCSV出力') : '')+
     (hasManagerSession() ? ' <button type="button" class="vc-manage-toggle-btn" data-go-datahub="1" style="min-height:0;padding:3px 10px;">データ取込を開く</button>' : '')+'</div>';
   var warn = '';
   if(calc){
@@ -9657,7 +9661,7 @@ function renderBilling(){
       body = '<table class="report-table" style="max-width:520px;"><thead><tr><th>請求明細</th><th class="num">金額</th><th class="num">計算の合計</th></tr></thead><tbody>'+
         BILLING_SUMMARY.map(function(s){ return '<tr><td>'+esc(s[0])+(s[1]==='work' && b.workSource==='kintone' && b.wr ? '<span class="sk-minor">(作業日報)</span>' : '')+'</td><td class="num"><b>'+formatNum(Math.round(totalsUsed[s[1]]))+'</b></td><td class="num sk-minor">'+billingFmt(totalsUsed[s[1]])+'</td></tr>'; }).join('')+
         '<tr class="sk-total"><td>計(倉庫運営委託費を除く)</td><td class="num">'+formatNum(sumAll)+'</td><td></td></tr></tbody></table>'+
-        '<div style="margin-top:8px;"><button type="button" class="add-btn" data-bill-copy="summary">📋 金額をコピー</button></div>'+
+        '<div style="margin-top:8px;display:flex;gap:8px;"><button type="button" class="add-btn" data-bill-copy="summary">金額をコピー</button>'+csvButton('billing:summary')+'</div>'+
         '<div class="pool-hint" style="margin-top:6px;">請求書鑑の「保管料」〜「諸作業料」に入れる金額です(各表の合計を四捨五入)。倉庫運営委託費・立替金・ヤマト着払送料・衣類カバー(明細2)はここでは出しません。</div>';
     }else{
       var sh = BILLING_SHEETS.filter(function(s){ return s.key===b.tab; })[0];
@@ -9666,7 +9670,7 @@ function renderBilling(){
       var PREVIEW = 200;
       var sums = sh.head.map(function(_, i){ return sh.sumCols.indexOf(i)!==-1 ? rows.reduce(function(a,r){ return a+(Number(r[i])||0); }, 0) : null; });
       body = workSrc+'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">'+
-          '<button type="button" class="add-btn" data-bill-copy="'+sh.key+'">📋 '+esc(sh.sheet)+'をコピー('+formatNum(rows.length)+'行)</button>'+
+          csvButton('billing:'+sh.key)+'<button type="button" class="add-btn" data-bill-copy="'+sh.key+'">📋 '+esc(sh.sheet)+'をコピー('+formatNum(rows.length)+'行)</button>'+
           '<label><input type="checkbox" id="billWithHead"'+(b.withHead?' checked':'')+'> 見出しの行も含める</label>'+
         '</div>'+
         '<div class="pool-hint" style="margin:0 0 8px;">コピーして、請求の Excel の「'+esc(sh.sheet)+'」シートの2行目(A2)に貼り付けてください。'+(rows.length>PREVIEW ? '画面には先頭の'+PREVIEW+'行だけ出しています(コピーは全行)。' : '')+'</div>'+
@@ -10188,7 +10192,7 @@ async function loadStockAnalysis(){
       }
     }
   }
-  return { lz: lz, calc: calc, capacity: isUnverified(r[1]) ? {} : (r[1]||{}), snaps: snaps };
+  return { lz: lz, calc: calc, capacity: isUnverified(r[1]) ? {} : (r[1]||{}), snaps: snaps, pm: pm, yb: stock && stock.yayoiBySite };
 }
 function stockFmtCube(v){ return v===null || v===undefined ? '―' : (Math.round(v*10)/10).toLocaleString('ja-JP', { maximumFractionDigits:1 }); }
 /* 推移の小さなグラフ(才数。高屋・丹南) */
@@ -10319,9 +10323,63 @@ function renderStockTab(){
   return '<div class="mgr-wrap"><div class="panel">'+
     '<div class="panel-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">在庫 <span class="pool-hint" style="font-weight:400;margin:0;">ロジザード '+esc(fmtDateTime(st.lz.uploadedAt))+' ・ 記録 '+snaps.length+'日分</span>'+
       '<button type="button" class="vc-manage-toggle-btn" id="stockReload" style="min-height:0;padding:3px 10px;margin-left:8px;">読み直す</button></div>'+
+    '<div class="stock-csv no-print"><span class="pool-hint" style="margin:0;">CSV出力:</span>'+
+      [['blocks','ブロック別'],['locs','ロケーション別'],['products','品番別'],['trend','推移'],['missing','才数不明']].map(function(x){ return csvButton('stock:'+x[0], x[1]); }).join('')+
+    '</div>'+
     '<div class="vc-tabs sticky-tabs">'+tabs+'</div>'+
     body+
   '</div></div>';
+}
+/* 在庫の分析をCSVで出す(Excelで開けるように、UTF-8・BOM付き)。kind: blocks / locs / products / trend / missing */
+function exportStockCsv(kind){
+  var st = state.stockData;
+  if(!st || !st.calc) return;
+  var c = st.calc, cap = st.capacity || {}, d = localDateOfIso(st.lz.uploadedAt), r1 = function(v){ return Math.round(v*100)/100; };
+  var rows;
+  if(kind==='blocks'){
+    rows = [['在庫日','拠点','ブロック','才数','40ftコンテナ換算(本)','m3','ケース','ピース','品番数','ロケ数','1ロケあたり才数','容量(才)','使用率(%)','才数不明のピース']];
+    Object.keys(c.blocks).sort().forEach(function(b){
+      var x = c.blocks[b], cv = stockCapSai(cap[b]);
+      rows.push([d, stockSiteName(stockSiteOfBlock(b)), b, r1(x.cube), r1(x.cube/STOCK_FT40_SAI), r1(x.cube*STOCK_SAI_M3), r1(x.cases), x.qty, x.skus, x.locs, x.locs ? r1(x.cube/x.locs) : '', cv ? r1(cv) : '', cv ? r1(x.cube/cv*100) : '', x.unknownQty]);
+    });
+  }else if(kind==='locs'){
+    rows = [['在庫日','拠点','ブロック','棚','ロケーション','才数','ピース','品番数','品番','才数不明を含む']];
+    c.locs.slice().sort(function(a,b){ return a.block.localeCompare(b.block) || String(a.loc).localeCompare(String(b.loc), 'ja', { numeric:true }); }).forEach(function(l){
+      rows.push([d, stockSiteName(l.site), l.block, l.rack, l.loc, r1(l.cube), l.qty, l.skus.length, l.skus.join(' '), l.unknown ? 'はい' : '']);
+    });
+  }else if(kind==='products'){
+    rows = [['在庫日','品番','商品名','入数','1ケースの才数','拠点','ピース','ケース','才数','ロケ数','ブロック・ロケーション']];
+    var P = st.lz.products || {}, pm = st.pm || {}, yb = st.yb || {};
+    Object.keys(P).sort().forEach(function(code){
+      var pack = null;
+      Object.keys(SHUKEI_SITES).forEach(function(k){ var y = yb[k] && yb[k].products && yb[k].products[code]; if(!pack && y && y.packQty) pack = y.packQty; });
+      if(!pack && pm[code] && pm[code].packQty) pack = Number(pm[code].packQty);
+      var sai = (pm[code] && pm[code].cubicVolume!==null && pm[code].cubicVolume!==undefined && pm[code].cubicVolume!=='') ? Number(pm[code].cubicVolume) : null;
+      var bySite = {};
+      Object.keys(P[code].blocks||{}).forEach(function(b){
+        var x = P[code].blocks[b], site = stockSiteOfBlock(b), o = bySite[site] || (bySite[site] = { qty:0, locs:[] });
+        var per = (x.locQty && Object.keys(x.locQty).length) ? x.locQty : { '': x.qty };
+        Object.keys(per).forEach(function(loc){ var q = Number(per[loc])||0; if(q<=0) return; o.qty += q; o.locs.push(b+(loc ? ':'+loc : '')+'('+q+')'); });
+      });
+      Object.keys(bySite).forEach(function(site){
+        var o = bySite[site]; if(!o.qty) return;
+        var cases = pack ? o.qty/pack : null;
+        rows.push([d, code, P[code].name||'', pack||'', sai===null ? '' : sai, stockSiteName(site), o.qty, cases===null ? '' : r1(cases), (cases!==null && sai!==null) ? r1(cases*sai) : '', o.locs.length, o.locs.join(' ')]);
+      });
+    });
+  }else if(kind==='trend'){
+    rows = [['在庫日','区分','拠点・ブロック','才数','40ftコンテナ換算(本)','ケース','ピース','品番数','ロケ数']];
+    (st.snaps||[]).forEach(function(sn){
+      Object.keys(sn.sites||{}).forEach(function(k){ var x = sn.sites[k]; rows.push([sn.date, '拠点', stockSiteName(k), r1(x.cube), r1(x.cube/STOCK_FT40_SAI), r1(x.cases), x.qty, x.skus, x.locs]); });
+      Object.keys(sn.blocks||{}).sort().forEach(function(b){ var x = sn.blocks[b]; rows.push([sn.date, 'ブロック', b, r1(x.cube), r1(x.cube/STOCK_FT40_SAI), r1(x.cases), x.qty, x.skus, x.locs]); });
+    });
+  }else{
+    rows = [['品番','商品名','足りないもの']];
+    Object.keys(c.noPack).sort().forEach(function(k){ rows.push([k, c.noPack[k], '入数']); });
+    Object.keys(c.noSai).sort().forEach(function(k){ rows.push([k, c.noSai[k], '才数']); });
+  }
+  var names = { blocks:'ブロック別', locs:'ロケーション別', products:'品番別', trend:'推移', missing:'才数不明' };
+  downloadCSV('在庫_'+names[kind]+'_'+d+'.csv', rows);
 }
 function bindStockTab(){
   document.querySelectorAll('[data-stock-tab]').forEach(function(el){
@@ -10350,6 +10408,127 @@ function bindStockTab(){
   });
 }
 
+/* ---------- 各画面のCSV出力 ----------
+   画面のボタン(data-csv="名前" または "名前:引数")を押すと、その画面で見ている表をCSVで保存する(downloadCSV: Excel で開けるUTF-8・BOM付き)。 */
+function csvButton(key, label){ return '<button type="button" class="vc-manage-toggle-btn no-print" data-csv="'+esc(key)+'">'+esc(label||'CSV出力')+'</button>'; }
+function csvTime(iso){ if(!iso) return ''; var d = new Date(iso); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function csvRound(v, n){ if(v===null || v===undefined || v==='' || !isFinite(Number(v))) return ''; var m = Math.pow(10, n===undefined ? 2 : n); return Math.round(Number(v)*m)/m; }
+var CSV_EXPORTERS = {
+  // 収支: 今見ている内訳(日別・月別・得意先別・商品別・作業別)と合計
+  fin: function(){
+    var axis = state.finAxis || 'date', rows0 = state.finAnalyticsRows;
+    if(!rows0){ showToast('先に期間を選んで集計してください'); return; }
+    var list = axis==='month' ? finMonthRows(rows0) : rows0;
+    var axisName = { date:'日付', month:'月', customer:'得意先', product:'商品', task:'作業' }[axis];
+    var head = ['期間の開始','期間の終了', axisName].concat(axis==='product' ? ['商品コード'] : []).concat(['出荷件数','PO数','明細数','出荷数量(ピース)','ケース','バラ','人時','売上','人件費','粗利','粗利率(%)']);
+    var range = state.finPeriodRange || [state.finStartDate, state.finEndDate];
+    var rows = [head];
+    function line(name, r, code){
+      return [range[0], range[1], name].concat(axis==='product' ? [code||''] : []).concat([r.shipmentCount||0, r.poCount||0, r.lineCount||0, r.totalQty||0,
+        (r.caseQty===null || r.caseQty===undefined) ? '' : r.caseQty, (r.fractionQty===null || r.fractionQty===undefined) ? '' : r.fractionQty,
+        csvRound(r.personHours, 2), Math.round(r.sales||0), Math.round(r.laborCost||0), Math.round(r.grossProfit||0), csvRound(r.margin, 1)]);
+    }
+    list.forEach(function(r){ rows.push(line(axis==='date' ? r.date : (axis==='month' ? r.date : r.label), r, r.productCode)); });
+    rows.push(line('合計', sumFinancialRows(list)));
+    downloadCSV('収支_'+axisName+'別_'+range[0]+'_'+range[1]+'.csv', rows);
+  },
+  // 実績: 表示中の期間・絞り込みの作業記録
+  logMgmt: function(){
+    if(!state.logMgmtEntries){ showToast('先に期間を選んで「表示する」を押してください'); return; }
+    var rows = [['日付','スタッフ','作業','開始','終了','作業時間(分)','内訳の時間(分)','状態']];
+    getFilteredLogMgmtEntries().forEach(function(e){
+      var l = e.log, end = l.end ? new Date(l.end).getTime() : null;
+      var mins = end ? Math.round((end - new Date(l.start).getTime())/60000) : '';
+      var sub = logSubTimesMap(l);
+      rows.push([e.dateStr, staffById(l.staffId).name, taskById(l.taskId==='BREAK' ? 'BREAK' : l.taskId).name, csvTime(l.start), l.end ? csvTime(l.end) : '',
+        mins, Object.keys(sub).map(function(k){ return k+':'+Math.round(sub[k]/60000); }).join(' '), l.end ? '' : '作業中']);
+    });
+    downloadCSV('実績_'+state.logMgmtStartDate+'_'+state.logMgmtEndDate+'.csv', rows);
+  },
+  // 生産性: 作業全体・スタッフごと・内訳ごと
+  productivity: function(){
+    var master = state.productivityMaster || {};
+    var rows = [['作業','区分','名前','作業量','単位','作業時間(時間)','生産性(1時間あたり)','サンプル(日)']];
+    Object.keys(master).forEach(function(key){
+      var info = resolveProductivityDisplayInfo(key);
+      if(!info.valid) return;
+      var m = master[key], ta = m.taskAverage || {};
+      rows.push([info.name, '作業全体', '', csvRound(ta.totalQty, 1), '', csvRound(ta.totalHours, 2), ta.totalHours>0 ? csvRound(ta.totalQty/ta.totalHours, 1) : '', ta.sampleCount||0]);
+      Object.keys(m.byStaff||{}).forEach(function(sid){
+        var x = m.byStaff[sid];
+        rows.push([info.name, 'スタッフ', staffById(sid).name, csvRound(x.totalQty, 1), '', csvRound(x.totalHours, 2), x.totalHours>0 ? csvRound(x.totalQty/x.totalHours, 1) : '', x.sampleCount||0]);
+      });
+      Object.keys(m.bySubcat||{}).forEach(function(sc){
+        var sr = subcatProductivityRateFor(master, key, sc), t = m.bySubcat[sc].taskAverage || {};
+        rows.push([info.name, '内訳', sc, csvRound(t.totalQty, 1), sr.unit||'', csvRound(t.totalHours, 2), sr.rate ? csvRound(sr.rate, 1) : '', t.sampleCount||'']);
+      });
+    });
+    downloadCSV('生産性_'+todayStr()+'.csv', rows);
+  },
+  // VC引当: 今のタブ(ダッシュボード=全品番 / ピース引当 / ケース引当 / 出荷先別)
+  vcAlloc: function(){
+    var d = state.vcAllocData;
+    if(!d || !d.order || !d.order.lines){ showToast('出荷指示が取り込まれていません'); return; }
+    var calc = computeVcAlloc(d.order, d.dests, d.stock, state.shukeiPm), tab = state.vcAllocTab || 'dash';
+    var day = (d.order.workDates && d.order.workDates[0]) || todayStr();
+    if(tab==='dest'){
+      var rows = [['納品先コード','出荷先名','振り分け番号','PO数','行数','数量']];
+      calc.dests.slice().sort(function(a,b){ return b.qty-a.qty; }).forEach(function(x){ rows.push([x.id, x.name, x.group||'', Object.keys(x.pos).length, x.lines, x.qty]); });
+      downloadCSV('VC引当_出荷先別_'+day+'.csv', rows); return;
+    }
+    var rows2 = [['区分','振り分け番号','品番','商品名','発注数','品番計','入数','ケース数','高屋の在庫','丹南の在庫','倉庫','備考']];
+    calc.rows.filter(function(r){ return tab==='dash' || r.p.kind===tab; })
+      .sort(function(a,b){ return shukeiCompareValues(vcAllocSortValue('group',a), vcAllocSortValue('group',b), 'asc') || (b.qty-a.qty) || shukeiCompareValues(a.p.code, b.p.code, 'asc'); })
+      .forEach(function(r){ var p = r.p; rows2.push([p.kind==='case' ? 'ケース' : 'ピース', r.group, p.code, p.name, r.qty, p.qty, p.pack||'', p.casesUp===null ? '' : p.casesUp, p.takaya, p.tannan, vcAllocSiteLabel(p), vcAllocNote(p)]); });
+    downloadCSV('VC引当_'+({ dash:'全品番', piece:'ピース引当', 'case':'ケース引当' })[tab]+'_'+day+'.csv', rows2);
+  },
+  // 集計表: 入力中の表(棚番とロケの在庫つき)
+  shukeiSheet: function(){
+    var siteKey = state.shukeiSite || 'takaya', site = SHUKEI_SITES[siteKey], draft = state.shukeiDraft, data = state.shukeiData || {};
+    if(!draft || !draft.rows.length){ showToast('集計表に行がありません'); return; }
+    var head = ['No','VC番号','品番','商品名','数量','ケース'].concat(site.showFraction ? ['端数'] : []).concat(['入数']).concat(site.zones).concat(['弥生','ロジ','才数','備考']);
+    var rows = [head];
+    draft.rows.forEach(function(r, i){
+      var v = shukeiComputeRow(siteKey, r, data, state.shukeiPm);
+      rows.push([i+1, r.vc||'', v.code, v.name, v.qty||'', v.cases===null ? '' : v.cases].concat(site.showFraction ? [v.fraction===null ? '' : v.fraction] : []).concat([v.packQty||''])
+        .concat(site.zones.map(function(z){ return (v.zoneLocs[z]||[]).map(function(l){ return l.loc+(l.qty===null ? '' : '('+l.qty+')'); }).join(' '); }))
+        .concat([v.yayoi===null ? '' : v.yayoi, v.logi===null ? '' : v.logi, v.cubic===null ? '' : v.cubic, r.note||'']));
+    });
+    downloadCSV('集計表_'+site.name+'_'+todayStr()+'.csv', rows);
+  },
+  // 集計表: 在庫差異
+  shukeiDiff: function(){
+    var siteKey = state.shukeiSite || 'takaya', site = SHUKEI_SITES[siteKey];
+    var list = shukeiStockDiffRows(siteKey, state.shukeiData || {}, state.shukeiPm);
+    if(state.shukeiDiffOnly) list = list.filter(function(r){ return r.diff!==0; });
+    var rows = [['商品コード','商品名','弥生('+site.name+')','ロジザード','差異(弥生−ロジ)','ケース数(ロジ)','才数']];
+    list.forEach(function(r){ rows.push([r.code, r.name, r.yayoi, r.logi, r.diff, r.cases===null ? '' : r.cases, r.cubic===null ? '' : r.cubic]); });
+    downloadCSV('在庫差異_'+site.name+'_'+todayStr()+'.csv', rows);
+  },
+  // 請求: 表ごと(保管料・入庫料・生協出庫・生協以外・移動出庫・明細1)と請求書鑑の金額
+  billing: function(key){
+    var b = state.billing;
+    if(!b || !b.calc){ showToast('先にCSVを取り込んでください'); return; }
+    var month = (b.calc.months && b.calc.months[0]) || todayStr().replace(/-/g,'').slice(0,6);
+    if(key==='summary'){
+      var tu = billingTotals(b), rows = [['請求明細','金額','計算の合計']];
+      BILLING_SUMMARY.forEach(function(x){ rows.push([x[0].trim(), Math.round(tu[x[1]]), csvRound(tu[x[1]], 3)]); });
+      downloadCSV('請求_請求書鑑の金額_'+month+'.csv', rows); return;
+    }
+    var sh = BILLING_SHEETS.filter(function(x){ return x.key===key; })[0];
+    downloadCSV('請求_'+sh.sheet+'_'+month+'.csv', [sh.head].concat(billingRowsFor(b, key)));
+  },
+  stock: function(kind){ exportStockCsv(kind); }
+};
+function bindCsvButtons(){
+  document.querySelectorAll('[data-csv]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var v = el.getAttribute('data-csv'), i = v.indexOf(':');
+      var key = i===-1 ? v : v.slice(0,i), arg = i===-1 ? undefined : v.slice(i+1);
+      try{ if(CSV_EXPORTERS[key]) CSV_EXPORTERS[key](arg); }catch(e){ console.error('[LOGI LINK] CSV出力に失敗しました', e); showToast('CSVを作れませんでした'); }
+    });
+  });
+}
 /* ---------- render root ---------- */
 function isUserBusy(){
   if(state.suppressRender) return true;
@@ -10474,6 +10653,7 @@ function render(){
   if(state.role==='vcAlloc') bindVcAlloc();
   if(state.role==='dataHub') bindDataHub();
   if(state.role==='billing') bindBilling();
+  bindCsvButtons();
   document.querySelectorAll('[data-go-datahub]').forEach(function(el){
     el.addEventListener('click', function(){ state.role = 'adminHub'; state.adminHubTab = 'data'; state.dataHubMsg = ''; state.vcAllocData = null; render(); });
   });

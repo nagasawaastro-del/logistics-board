@@ -116,6 +116,7 @@ input,select{font-family:inherit;}
 .gate-card-desc{font-size:12.5px;color:var(--slate-500);line-height:1.5;}
 .changelog-link{background:transparent;border:none;color:var(--slate-500);font-size:12px;text-decoration:underline;margin-top:28px;cursor:pointer;}
 .changelog-link:hover{color:var(--ink-900);}
+.gate-links{display:flex;gap:18px;justify-content:center;align-items:baseline;flex-wrap:wrap;}
 
 .changelog-card{background:var(--paper-50);border-radius:16px;padding:28px;max-width:480px;width:100%;max-height:80vh;overflow-y:auto;text-align:left;box-shadow:var(--shadow-lg);}
 .changelog-title{font-family:var(--font-display);font-weight:700;font-size:18px;margin-bottom:18px;color:var(--ink-900);}
@@ -1578,6 +1579,7 @@ var CHANGELOG = [
     '実際にコードを実行するテストで、各画面から他画面へホームを経由せず直接移動できること、管理者専用ナビが未ログイン時は表示されずログアウト後に消えること、そして最も重要な点として「state.roleを不正に管理者画面へ直接切り替えても、未ログインならページの中身(データ)は一切表示されずログインフォームのみが出ること」を確認しました。既存の全回帰テスト(39スイート)にも影響はありません'
   ]},
   { date:'2026-10-03', items:[
+    '【説明書】トップページの一番下の「説明書(PDF)」から、使い方・設定方法・できることをまとめた説明書をダウンロードできるようにしました。機能を直すたびに説明書も更新します',
     '【タブを固定】下へスクロールしても、上のメニュー・管理と設定のタブ・画面の中のタブ(VC引当・集計表・請求・収支の切り替え)が画面の上に残るようにしました',
     '【トップページ: データの更新状況】データごとのタイルに分け、今日更新したもの=緑、前の日のままのもの=オレンジ、未登録=赤で分かるようにしました。日時は「今日 12:20」「昨日 12:20」のように出します',
     '【不具合修正: 作業日報の対応表】「(単価なし)」「(紐付けない)」を選ぶと、名前の似た候補がまた出て、元に戻ったように見える不具合を直しました。選んだ「単価なし」「紐付けない」はそのまま残ります。「単価なし」を選んだ作業内容は、収支の売上・請求の明細1に入れず、注意にも出しません',
@@ -10329,7 +10331,8 @@ function renderGate(){
       gateCard('adminHub', '#EFEBE2', '#1B2333', '&#128100;', '管理', '今日・人員配置・実績・生産性・収支・請求・データ取込', true)+
       gateCard('settingsHub', '#F4EEE4', '#8A6A3B', '&#9881;', '設定', 'スタッフ・作業・得意先と単価・勤務時間など', true)+
     '</div>'+
-    '<button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
+    '<div class="gate-links"><button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
+      '<a class="changelog-link" href="manual.pdf" target="_blank" rel="noopener" download="LOGI LINK 説明書.pdf">説明書(PDF)</a></div>'+
     renderGateAccountLine()+
   '</div>';
 }

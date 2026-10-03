@@ -1556,6 +1556,7 @@ var CHANGELOG = [
     '実際にコードを実行するテストで、各画面から他画面へホームを経由せず直接移動できること、管理者専用ナビが未ログイン時は表示されずログアウト後に消えること、そして最も重要な点として「state.roleを不正に管理者画面へ直接切り替えても、未ログインならページの中身(データ)は一切表示されずログインフォームのみが出ること」を確認しました。既存の全回帰テスト(39スイート)にも影響はありません'
   ]},
   { date:'2026-10-03', items:[
+    '【作業日報(kintone)の連携】kintoneの作業日報アプリ(396)の日報を取り込めるようにしました(設定 → kintone連携設定 → 作業日報)。日報の作業内容ごとに、作業単価マスタの項目(単価)とロジリンクの作業を「対応表」で決めると、①収支: 日報の日付の売上に「数量 × 単価」が入り、紐付けた作業の売上になります(作業別では、その作業の作業時間の人件費と並びます)。②請求データの明細1を、弥生の作業明細の代わりに作業日報から作れます(弥生の作業明細も取り込んであれば、突き合わせて違いを出します)。単価はいつも対応表の単価です。トップページの「データの更新状況」に作業日報の同期日時も出ます',
     '【トップページ: データの更新状況】トップページに、共有データ(ロジザードの在庫・弥生の在庫(高屋・丹南)・VCの出荷指示)と kintone から同期したデータ(商品台帳・作業単価(管理者のみ))の最終更新日時を表示するようにしました。今日まだ更新していない共有データには「今日まだ」と出ます。「📥 データ更新を開く」から取り込めます',
     '【調査結果】「作業を指定して取り込む」の廃止・取込履歴の常時表示・荷主出荷番号単位のグローバルな重複防止(削除済みデータも重複扱いになる仕様を含む)・本日の作業へのCSV件数/ピース数表示は、いずれも既に実装済みであることを確認しました。今回は、まだ無かった2点(取込データの編集・モニターへのCSV表示)のみを実装しています',
     '【新機能】取込履歴の各行に「編集」ボタンを追加しました。CSVを再取込することなく、既存の取込データの「紐付け先の作業枠」だけを変更できます。CSV明細・荷主出荷番号・数量・取込日時・得意先情報などの元データは一切変更されません。変更内容は既存の操作履歴に記録されます(新しいデータ構造は追加していません)',
@@ -7348,6 +7349,10 @@ function renderFinancialNotices(n){
   if(n.missingWageStaffIds && n.missingWageStaffIds.length){
     items.push('時給が分からないスタッフ: '+n.missingWageStaffIds.map(function(sid){ return staffById(sid).name; }).join('・')+'(この人の作業時間は人件費に入っていません。「設定 → スタッフ設定」で時給か標準時給を設定してください)');
   }
+  if(n.workReportUnmapped && n.workReportUnmapped.length){
+    items.push('作業日報の作業内容のうち、対応表で単価が決まっていないもの: '+n.workReportUnmapped.join('・')+'(売上に入っていません。「設定 → kintone連携設定 → 作業日報」の対応表で選んでください)');
+  }
+  if(n.workReportError) items.push(n.workReportError);
   if(!items.length) return '';
   return '<div class="vc-warning-box" style="margin-top:10px;">'+items.map(function(t){ return '<div>⚠️ '+esc(t)+'</div>'; }).join('')+'</div>';
 }
@@ -7380,7 +7385,7 @@ function renderFinancial(){
     if(!state.finSummaryLoading){
       state.finSummaryLoading = true;
       var wantDate = dateStr;
-      Promise.all([loadDayByDate(wantDate), getWorkVolumeForDate(wantDate)]).then(function(r){
+      Promise.all([loadDayByDate(wantDate), getWorkVolumeForDate(wantDate), ensureWorkReportRange(wantDate, wantDate).catch(function(){})]).then(function(r){
         state.finSummaryData = { date: wantDate, day: r[0], wv: r[1] };
       }).catch(function(){ state.finSummaryData = { date: wantDate, day: null, wv: null }; })
         .then(function(){ state.finSummaryLoading = false; render(); });
@@ -7984,6 +7989,7 @@ function aggregateDays(days){
   return { perStaff: perStaff, perTask: perTask };
 }
 async function collectDaysAndVolumeForRange(startDate, endDate){
+  if(hasManagerSession()){ try{ await ensureWorkReportRange(startDate, endDate); }catch(e){} }
   var dates = [];
   var d = new Date(startDate+'T00:00:00');
   var end = new Date(endDate+'T00:00:00');
@@ -8007,7 +8013,7 @@ async function collectDaysAndVolumeForRange(startDate, endDate){
 /* 日付別の収支(1日ごとに computeFinancialSummary と同じ計算)。期間の合計にも使う。
    行: { key(日付), label, date, shipmentCount, poCount, lineCount, totalQty, personHours, sales, laborCost, grossProfit, margin } */
 function computeFinancialByDate(byDate){
-  var unpriced = {}, cubicMissing = 0, missingWage = {}, unsetItems = null;
+  var unpriced = {}, cubicMissing = 0, missingWage = {}, unsetItems = null, wrUnmapped = {};
   var rows = [];
   (byDate||[]).forEach(function(x){
     var sm = computeFinancialSummary(x.date, x.day || { logs: [] }, x.wv || emptyWorkVolume());
@@ -8020,12 +8026,13 @@ function computeFinancialByDate(byDate){
     (sm.unpricedCustomers||[]).forEach(function(c){ unpriced[c] = true; });
     cubicMissing += sm.cubicMissingCases||0;
     (sm.missingWageStaffIds||[]).forEach(function(id){ missingWage[id] = true; });
+    (sm.workReportUnmapped||[]).forEach(function(n){ wrUnmapped[n] = true; });
     unsetItems = sm.unsetItems;
     if(!(sm.totalSales || sm.laborCost || qty || sm.totalHours)) return; // 記録の無い日(休日など)は出さない
     rows.push({ key: x.date, label: dateLabelFromStr(x.date), date: x.date, shipmentCount: ship, poCount: po, lineCount: lines, totalQty: qty,
       personHours: sm.totalHours||0, sales: sm.totalSales, laborCost: sm.laborCost, grossProfit: sm.grossProfit, margin: sm.margin });
   });
-  rows.meta = { unpricedCustomers: Object.keys(unpriced), cubicMissingCases: cubicMissing, missingWageStaffIds: Object.keys(missingWage), unsetItems: unsetItems || [] };
+  rows.meta = { unpricedCustomers: Object.keys(unpriced), cubicMissingCases: cubicMissing, missingWageStaffIds: Object.keys(missingWage), unsetItems: unsetItems || [], workReportUnmapped: Object.keys(wrUnmapped) };
   return rows;
 }
 /* 表の合計行用 */
@@ -8135,6 +8142,30 @@ async function computeAnalytics(days, volumes, axis, filterCustomer){
     });
   }
 
+  // 作業日報(kintone)の売上(期間内の日付)。作業別は紐付けた作業(人件費はその作業の作業時間)、得意先別は日報の得意先
+  var wrUnmapped = {};
+  if((axis==='task' || axis==='customer') && state.workReportCache && state.finStartDate && state.finEndDate){
+    var tidsByName = {};
+    Object.keys(agg.perTask).forEach(function(tid){ if(tid!=='BREAK'){ var n = taskById(tid).name; (tidsByName[n] = tidsByName[n]||[]).push(tid); } });
+    var dd = state.finStartDate;
+    while(dd<=state.finEndDate){
+      workReportLinesForDate(dd).forEach(function(x){
+        if(x.amount===null){ wrUnmapped[x.workName||'(作業内容なし)'] = true; return; }
+        if(axis==='customer'){ addToGroup(x.customer||'(得意先なし)', x.customer||'(得意先なし)', 'wr', 'normal', x.customer||'', 0, 0, 0, x.amount); return; }
+        var name = x.taskName || x.workName;
+        var tids = x.taskName ? (tidsByName[x.taskName]||[]) : [];
+        var existing = tids.filter(function(t){ return groups[t]; })[0];
+        if(existing){ groups[existing].sales += x.amount; return; }
+        var key = 'wrtask:'+name;
+        if(!groups[key]){
+          groups[key] = { key:key, label:name, shipmentCount:0, poCount:0, lineCount:0, totalQty:0, personHours:0, laborCost:0, sales:0, customerName:null, taskIds:{} };
+          tids.forEach(function(t){ groups[key].personHours += taskHours[t]||0; groups[key].laborCost += labor.byTask[t]||0; });
+        }
+        groups[key].sales += x.amount;
+      });
+      dd = wrDateAdd(dd, 1);
+    }
+  }
   var rows = Object.keys(groups).map(function(k){
     var g = groups[k];
     var laborCost = g.laborCost;
@@ -8154,7 +8185,7 @@ async function computeAnalytics(days, volumes, axis, filterCustomer){
   rows.sort(function(a,b){ return b.sales-a.sales; });
   // 画面で知らせる注意(単価が当てはまらない得意先・才数の無いケース・時給の分からないスタッフ)
   rows.meta = { unpricedCustomers: Object.keys(unpricedCustomers), cubicMissingCases: cubicMissingCases,
-    missingWageStaffIds: labor.missingStaffIds, unsetItems: model.unsetItems };
+    missingWageStaffIds: labor.missingStaffIds, unsetItems: model.unsetItems, workReportUnmapped: Object.keys(wrUnmapped) };
   return rows;
 }
 /* 1日分の収支。売上は kintone 作業単価 × その日のCSVの得意先ごとの数量、人件費はスタッフごとの(作業時間 × 時給)。
@@ -8186,6 +8217,23 @@ function computeFinancialSummary(dateStr, day, workVolume){
       if(q.casesWithoutCubic && model.items.some(function(it){ return it.unit==='才' && (it.allCustomers || it.customers[cust]); })) cubicMissingCases += q.casesWithoutCubic;
     });
   });
+  // 作業日報(kintone)の売上: 数量 × 対応表の単価。紐付けた作業(その日に記録がある作業)の売上にする
+  var wrUnmapped = {};
+  var nameToTid = {};
+  ((day && day.logs) || []).forEach(function(l){ if(l.taskId!=='BREAK') nameToTid[taskById(l.taskId).name] = l.taskId; });
+  workReportLinesForDate(dateStr).forEach(function(x){
+    if(x.amount===null){ wrUnmapped[x.workName||'(作業内容なし)'] = true; return; }
+    var tid = x.taskName ? (nameToTid[x.taskName] || ('wr:'+x.taskName)) : ('wr:'+x.workName);
+    var t = byTask[tid] || (byTask[tid] = { taskId: tid, taskName: x.taskName || x.workName, pieces:0, sales:0 });
+    t.sales += x.amount;
+    t.reportSales = (t.reportSales||0) + x.amount;
+    var cust = x.customer || '(得意先なし)';
+    var c = byCustomer[cust] || (byCustomer[cust] = { customerName: cust, qty: emptyPriceQty(), sales:0, lines:{} });
+    c.sales += x.amount;
+    var lk = 'wr:'+x.workName+':'+x.unitPrice;
+    var e = c.lines[lk] || (c.lines[lk] = { workName: x.workName+'(作業日報)', unit: '日報', unitPrice: x.unitPrice, qty:0, amount:0 });
+    e.qty += x.qty; e.amount += x.amount;
+  });
   var rows = Object.keys(byTask).map(function(k){ return byTask[k]; }).sort(function(a,b){ return b.sales-a.sales; });
   var customerRows = Object.keys(byCustomer).map(function(k){
     var c = byCustomer[k];
@@ -8196,7 +8244,8 @@ function computeFinancialSummary(dateStr, day, workVolume){
   var margin = totalSales>0 ? (grossProfit/totalSales*100) : 0;
   return { rows: rows, customerRows: customerRows, totalSales: totalSales, laborCost: labor.total, totalHours: labor.hours,
     grossProfit: grossProfit, margin: margin, unpricedCustomers: Object.keys(unpriced), cubicMissingCases: cubicMissingCases,
-    missingWageStaffIds: labor.missingStaffIds, unsetItems: model.unsetItems };
+    missingWageStaffIds: labor.missingStaffIds, unsetItems: model.unsetItems, workReportUnmapped: Object.keys(wrUnmapped),
+    workReportError: (state.workReportCache && state.workReportCache.error) || '' };
 }
 
 /* ---------- 集計表(高屋・丹南)。以前の Excel「高屋集計表」「丹南集計表」をロジリンクに移したもの ----------
@@ -9432,6 +9481,57 @@ function billingFmt(v){
   if(typeof v!=='number') return esc(String(v===null||v===undefined?'':v));
   return Number.isInteger(v) ? formatNum(v) : v.toLocaleString('ja-JP', { minimumFractionDigits:2, maximumFractionDigits:2 }); // 画面は小数第2位まで(コピーは元の値)
 }
+/* 請求データ: 明細1の元(弥生の作業明細 / kintoneの作業日報)を選んだ結果の行と合計 */
+function billingRowsFor(b, key){
+  if(key==='work' && b.workSource==='kintone' && b.wr) return b.wr.rows;
+  return b.calc[key];
+}
+function billingTotals(b){
+  var t = Object.assign({}, b.calc.totals);
+  if(b.workSource==='kintone' && b.wr) t.work = b.wr.total;
+  return t;
+}
+function billingDefaultMonth(b){
+  var m = b.calc && b.calc.months && b.calc.months[0];
+  if(m) return m.slice(0,4)+'-'+m.slice(4,6);
+  var d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
+function renderBillingWorkSource(b){
+  var ym = b.wrMonth || billingDefaultMonth(b);
+  var hasYayoi = !!(b.files && b.files.work);
+  var html = '<div class="ll-form-group" style="margin-bottom:10px;">'+
+    '<div class="ll-form-group-title">明細1の元にするデータ</div>'+
+    '<label style="margin-right:14px;"><input type="radio" name="billWorkSrc" value="yayoi" data-bill-worksrc="1"'+(b.workSource!=='kintone'?' checked':'')+'> 弥生の作業明細CSV'+(hasYayoi ? '' : '(未取込)')+'</label>'+
+    '<label><input type="radio" name="billWorkSrc" value="kintone" data-bill-worksrc="1"'+(b.workSource==='kintone'?' checked':'')+(b.wr ? '' : ' disabled')+'> kintoneの作業日報'+(b.wr ? '('+esc(b.wr.ym)+')' : '')+'</label>'+
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">'+
+      '<input type="month" id="billWrMonth" value="'+esc(ym)+'">'+
+      '<button type="button" class="vc-manage-toggle-btn" id="billWrBuild"'+(b.wrBusy?' disabled':'')+'>📝 作業日報から明細1を作る</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="billWrSync"'+(b.wrBusy?' disabled':'')+'>🔄 kintoneから取得し直して作る</button>'+
+    '</div>'+
+    (b.wrMsg ? '<div class="pool-hint" style="margin-top:6px;">'+esc(b.wrMsg)+'</div>' : '')+
+    '<div class="pool-hint" style="margin:6px 0 0;">作業日報の単価は「設定 → kintone連携設定 → 作業日報」の対応表で決めた作業単価マスタの単価です。</div>';
+  if(b.wr){
+    var un = Object.keys(b.wr.unmapped);
+    if(b.wr.error) html += '<div class="vc-warning-box" style="margin-top:8px;">'+esc(b.wr.error)+'</div>';
+    if(un.length) html += '<div class="vc-warning-box" style="margin-top:8px;">⚠️ 対応表で単価が決まっていない作業内容があります(単価・金額が空欄の行): '+esc(un.map(function(n){ return n+'('+b.wr.unmapped[n]+'行)'; }).join('・'))+'</div>';
+    if(hasYayoi){
+      var cmp = billingCompareWork(b.calc.work, b.wr.rows);
+      var yTot = b.calc.totals.work, rTot = b.wr.total;
+      html += '<div class="pool-hint" style="margin-top:8px;"><b>弥生の作業明細と突き合わせ</b>: 弥生 '+formatNum(b.calc.work.length)+'行・'+formatNum(Math.round(yTot))+'円 / 作業日報 '+formatNum(b.wr.rows.length)+'行・'+formatNum(Math.round(rTot))+'円(差 '+formatNum(Math.round(rTot-yTot))+'円)。'+
+        '作業日・作業項目・得意先・数量が一致しない行: 弥生だけ '+cmp.onlyYayoi.length+'行・作業日報だけ '+cmp.onlyReport.length+'行</div>';
+      if(cmp.onlyYayoi.length || cmp.onlyReport.length){
+        var fmtR = function(r){ return '<tr><td>'+esc(String(r[0]))+'</td><td>'+esc(r[1])+'</td><td class="num">'+billingFmt(r[2])+'</td><td>'+esc(r[5])+'</td><td>'+esc(r[6]||'')+'</td></tr>'; };
+        html += '<details style="margin-top:6px;"><summary class="pool-hint" style="cursor:pointer;">一致しない行を見る</summary>'+
+          '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px;margin-top:6px;">'+
+            '<div><div class="sk-minor"><b>弥生だけ</b></div><table class="report-table" style="font-size:12px;"><tbody>'+cmp.onlyYayoi.slice(0,100).map(fmtR).join('')+'</tbody></table></div>'+
+            '<div><div class="sk-minor"><b>作業日報だけ</b></div><table class="report-table" style="font-size:12px;"><tbody>'+cmp.onlyReport.slice(0,100).map(fmtR).join('')+'</tbody></table></div>'+
+          '</div></details>';
+      }
+    }
+  }
+  return html+'</div>';
+}
 function renderBilling(){
   ensureManagerSessionChecked();
   if(!hasManagerSession()){
@@ -9448,7 +9548,8 @@ function renderBilling(){
     return '<span class="bill-file'+(got[n[0]]?' is-ok':'')+'">'+(got[n[0]]?'✅':'⬜')+' '+esc(n[1])+(b.fileNames[n[0]] ? '<span class="sk-minor"> '+esc(b.fileNames[n[0]])+'</span>' : '')+'</span>';
   }).join('')+'</div>';
   var anyFile = need.some(function(n){ return got[n[0]]; });
-  var calc = b.calc || null;
+  if(!b.calc) b.calc = computeBilling({ stock:{} }, {}); // CSVが無くても、作業日報から明細1を作れるように
+  var calc = b.calc;
   var body = '';
   if(calc){
     var tabs = [['summary','📋 請求書鑑の金額']].concat(BILLING_SHEETS.map(function(s){ return [s.key, s.sheet+' ('+formatNum(calc[s.key].length)+')']; })).map(function(t){
@@ -9462,19 +9563,21 @@ function renderBilling(){
     var missing = need.filter(function(n){ return !got[n[0]]; }).map(function(n){ return n[1]; });
     if(missing.length) warn += '<div class="vc-warning-box">まだ取り込んでいないCSV: '+esc(missing.join('・'))+'(そのデータの分は0で計算しています)</div>';
     if(b.tab==='summary'){
-      var sumRows = BILLING_SUMMARY.map(function(s){ return [s[0], Math.round(calc.totals[s[1]])]; });
+      var totalsUsed = billingTotals(b);
+      var sumRows = BILLING_SUMMARY.map(function(s){ return [s[0], Math.round(totalsUsed[s[1]])]; });
       var sumAll = sumRows.reduce(function(a,r){ return a+r[1]; }, 0);
       body = '<table class="report-table" style="max-width:520px;"><thead><tr><th>請求明細</th><th class="num">金額</th><th class="num">計算の合計</th></tr></thead><tbody>'+
-        BILLING_SUMMARY.map(function(s){ return '<tr><td>'+esc(s[0])+'</td><td class="num"><b>'+formatNum(Math.round(calc.totals[s[1]]))+'</b></td><td class="num sk-minor">'+billingFmt(calc.totals[s[1]])+'</td></tr>'; }).join('')+
+        BILLING_SUMMARY.map(function(s){ return '<tr><td>'+esc(s[0])+(s[1]==='work' && b.workSource==='kintone' && b.wr ? '<span class="sk-minor">(作業日報)</span>' : '')+'</td><td class="num"><b>'+formatNum(Math.round(totalsUsed[s[1]]))+'</b></td><td class="num sk-minor">'+billingFmt(totalsUsed[s[1]])+'</td></tr>'; }).join('')+
         '<tr class="sk-total"><td>計(倉庫運営委託費を除く)</td><td class="num">'+formatNum(sumAll)+'</td><td></td></tr></tbody></table>'+
         '<div style="margin-top:8px;"><button type="button" class="add-btn" data-bill-copy="summary">📋 金額をコピー</button></div>'+
         '<div class="pool-hint" style="margin-top:6px;">請求書鑑の「保管料」〜「諸作業料」に入れる金額です(各表の合計を四捨五入)。倉庫運営委託費・立替金・ヤマト着払送料・衣類カバー(明細2)はここでは出しません。</div>';
     }else{
       var sh = BILLING_SHEETS.filter(function(s){ return s.key===b.tab; })[0];
-      var rows = calc[sh.key];
+      var rows = billingRowsFor(b, sh.key);
+      var workSrc = sh.key==='work' ? renderBillingWorkSource(b) : '';
       var PREVIEW = 200;
       var sums = sh.head.map(function(_, i){ return sh.sumCols.indexOf(i)!==-1 ? rows.reduce(function(a,r){ return a+(Number(r[i])||0); }, 0) : null; });
-      body = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">'+
+      body = workSrc+'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">'+
           '<button type="button" class="add-btn" data-bill-copy="'+sh.key+'">📋 '+esc(sh.sheet)+'をコピー('+formatNum(rows.length)+'行)</button>'+
           '<label><input type="checkbox" id="billWithHead"'+(b.withHead?' checked':'')+'> 見出しの行も含める</label>'+
         '</div>'+
@@ -9526,6 +9629,27 @@ function bindBilling(){
   document.querySelectorAll('[data-bill-tab]').forEach(function(el){
     el.addEventListener('click', function(){ b.tab = el.getAttribute('data-bill-tab'); render(); });
   });
+  document.querySelectorAll('[data-bill-worksrc]').forEach(function(el){
+    el.addEventListener('change', function(){ b.workSource = el.value; render(); });
+  });
+  var ymEl = document.getElementById('billWrMonth');
+  if(ymEl) ymEl.addEventListener('change', function(){ b.wrMonth = ymEl.value; });
+  var wrBtn = document.getElementById('billWrBuild'), wrSync = document.getElementById('billWrSync');
+  async function buildWr(withSync){
+    var ym = b.wrMonth || billingDefaultMonth(b);
+    if(!/^\d{4}-\d{2}$/.test(ym)){ alert('月を選んでください'); return; }
+    b.wrBusy = true; b.wrMsg = withSync ? 'kintoneから取得しています…' : '読み込み中…'; render();
+    if(withSync){
+      var range = wrMonthRange(ym);
+      var r = await syncWorkReportFromKintone(range[0], range[1]);
+      if(!r.ok){ b.wrBusy = false; b.wrMsg = '⚠️ '+r.error; render(); return; }
+    }
+    try{ b.wr = await billingBuildWorkFromReport(ym); b.workSource = 'kintone'; b.wrMsg = ''; }
+    catch(e){ b.wrMsg = '⚠️ 作業日報を読み込めませんでした'; }
+    b.wrBusy = false; render();
+  }
+  if(wrBtn) wrBtn.addEventListener('click', function(){ buildWr(false); });
+  if(wrSync) wrSync.addEventListener('click', function(){ buildWr(true); });
   var wh = document.getElementById('billWithHead');
   if(wh) wh.addEventListener('change', function(){ b.withHead = wh.checked; });
   var clr = document.getElementById('billClear');
@@ -9536,10 +9660,10 @@ function bindBilling(){
   document.querySelectorAll('[data-bill-copy]').forEach(function(btn){
     btn.addEventListener('click', async function(){
       var key = btn.getAttribute('data-bill-copy'), text;
-      if(key==='summary') text = BILLING_SUMMARY.map(function(s){ return s[0].trim()+'\t'+Math.round(b.calc.totals[s[1]]); }).join('\n');
+      if(key==='summary'){ var tu = billingTotals(b); text = BILLING_SUMMARY.map(function(s){ return s[0].trim()+'\t'+Math.round(tu[s[1]]); }).join('\n'); }
       else{
         var sh = BILLING_SHEETS.filter(function(s){ return s.key===key; })[0];
-        text = billingTsv(b.calc[key], b.withHead, sh.head);
+        text = billingTsv(billingRowsFor(b, key), b.withHead, sh.head);
       }
       try{ await navigator.clipboard.writeText(text); showToast('コピーしました。請求の Excel に貼り付けてください'); }
       catch(e){
@@ -9587,6 +9711,270 @@ function bindBilling(){
       run(e.dataTransfer && e.dataTransfer.files);
     });
   });
+}
+
+/* ---------- 作業日報(kintone 作業日報アプリ 396 の写し) ----------
+   kintone → Edge Function「sync-work-report」→ Supabase の work_report_rows → ここで読む(管理者のみ)。
+   日報の作業内容ごとに「対応表」(kv: work-report-mapping)で、kintone 作業単価マスタの項目(単価)とロジリンクの作業を決める。
+   ・収支: 日報の日付の売上に「数量 × 単価(対応表の項目の単価)」を足す。紐付けた作業の売上になる(人件費はその作業の作業時間)。
+   ・請求データ: 月の作業日報から明細1を作る(弥生の作業明細と突き合わせもできる)。
+   対応表で単価が決まっていない作業内容は売上に入れず、注意として知らせる。 */
+var WORK_REPORT_SYNC_FUNCTION_NAME = 'sync-work-report';
+var WORK_REPORT_MAPPING_KEY = 'work-report-mapping';
+var WORK_REPORT_STATUS_KEY = 'work-report-sync-status';
+function wrDateAdd(dateStr, days){
+  var d = new Date(dateStr+'T00:00:00'); d.setDate(d.getDate()+days);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function wrMonthRange(ym){ // 'YYYY-MM' → [初日, 末日]
+  var y = Number(ym.slice(0,4)), m = Number(ym.slice(5,7));
+  var last = new Date(y, m, 0).getDate();
+  return [ym+'-01', ym+'-'+String(last).padStart(2,'0')];
+}
+async function syncWorkReportFromKintone(from, to){
+  if(!hasManagerSession()) return { ok:false, error:'管理者としてログインしてください。' };
+  await refreshAuthState();
+  if(!hasManagerSession()) return { ok:false, error:'管理者としてログインしてください。' };
+  var c = window.__supabaseClient;
+  if(!c || !c.functions || typeof c.functions.invoke!=='function') return { ok:false, error:'Supabaseの関数呼び出しが利用できません。' };
+  try{
+    var res = await c.functions.invoke(WORK_REPORT_SYNC_FUNCTION_NAME, { body: { from: from, to: to } });
+    if(res.error){
+      console.error('[LOGI LINK] 作業日報同期(Edge Function)でエラー', res.error);
+      return { ok:false, error: await describeFunctionsError(res.error) };
+    }
+    var data = res.data;
+    if(typeof data==='string'){ try{ data = JSON.parse(data); }catch(e){ data = null; } }
+    if(!data || !data.ok) return { ok:false, error: (data && data.error) ? data.error : 'Edge Functionから想定外の応答がありました。' };
+    var status = { syncedAt: data.syncedAt, from: data.from, to: data.to, reportCount: data.reportCount, rowCount: data.rowCount };
+    await persistKey(WORK_REPORT_STATUS_KEY, status);
+    state.workReportCache = null; // 読み直す
+    state.gateDataStatus = null;
+    return { ok:true, result: status };
+  }catch(e){
+    console.error('[LOGI LINK] 作業日報同期(Edge Function)への接続に失敗しました', e);
+    return { ok:false, error:'Edge Functionへの接続に失敗しました。' };
+  }
+}
+async function fetchWorkReportRows(from, to){
+  var c = window.__supabaseClient;
+  if(!hasManagerSession() || !c || typeof c.from!=='function') return { ok:false, rows:[] };
+  var out = [], page = 1000;
+  for(var off=0; off<200000; off+=page){
+    var res = await c.from('work_report_rows').select('kintone_record_id,row_no,work_date,worker,work_name,customer_name,qty,note')
+      .gte('work_date', from).lte('work_date', to).order('work_date').order('kintone_record_id').order('row_no').range(off, off+page-1);
+    if(res.error) return { ok:false, rows:[], missingTable: /work_report_rows|does not exist|Could not find/i.test(String(res.error.message||'')) };
+    out = out.concat(res.data||[]);
+    if(!res.data || res.data.length<page) break;
+  }
+  return { ok:true, rows: out };
+}
+/* from〜to の作業日報を読み込んでおく(読み込み済みの期間は読み直さない)。state.workReportCache.byDate[日付] = 行の配列 */
+async function ensureWorkReportRange(from, to){
+  if(!hasManagerSession()) return;
+  var cache = state.workReportCache || (state.workReportCache = { ranges:[], byDate:{}, error:'' });
+  if(cache.ranges.some(function(r){ return r[0]<=from && r[1]>=to; })) return;
+  var r = await fetchWorkReportRows(from, to);
+  if(!r.ok){ cache.error = r.missingTable ? '作業日報のテーブルがまだありません(supabase/work_report.sql を実行してください)。' : '作業日報を読み込めませんでした。'; return; }
+  cache.error = '';
+  var d = from;
+  while(d<=to){ cache.byDate[d] = []; d = wrDateAdd(d, 1); }
+  r.rows.forEach(function(x){ (cache.byDate[x.work_date] || (cache.byDate[x.work_date] = [])).push(x); });
+  cache.ranges.push([from, to]);
+}
+async function loadWorkReportMapping(){
+  var m = await loadKeyJson(WORK_REPORT_MAPPING_KEY, function(){ return {}; });
+  state.workReportMapping = isUnverified(m) ? (state.workReportMapping || {}) : (m || {});
+  return state.workReportMapping;
+}
+/* 作業単価マスタの項目(recordId → { workName, unitPrice })。収支(fetchFinancialData)・設定画面のどちらかで読み込んだもの */
+function wrPriceList(){
+  var wp = state.workPriceMaster;
+  return (wp && wp.ok && wp.prices) ? wp.prices : (state.workPriceList || []);
+}
+function wrPriceById(rid){
+  return wrPriceList().filter(function(p){ return p.recordId===String(rid); })[0] || null;
+}
+/* その日の作業日報の行に、対応表の単価・作業を付ける。unitPrice / amount が null は対応表で単価が決まっていない行 */
+function workReportLinesForDate(dateStr){
+  var cache = state.workReportCache;
+  var rows = (cache && cache.byDate[dateStr]) || [];
+  var mp = state.workReportMapping || {};
+  return rows.map(function(r){
+    var m = mp[r.work_name||''] || {};
+    var p = m.priceRecordId ? wrPriceById(m.priceRecordId) : null;
+    var price = (p && typeof p.unitPrice==='number') ? p.unitPrice : null;
+    var qty = Number(r.qty)||0;
+    return { row: r, workName: r.work_name||'', customer: r.customer_name||'', qty: qty, note: r.note||'',
+      unitPrice: price, amount: price===null ? null : qty*price, taskName: m.taskName || null };
+  });
+}
+/* 似た名前の候補(作業単価マスタの項目・ロジリンクの作業)。全角半角・空白・かっこ・送り仮名の違いを無視して、2文字ずつの一致で比べる */
+function wrNorm(s){
+  return String(s||'').normalize('NFKC').replace(/[\s()（）\[\]【】・、,.]/g,'').replace(/[えエ]/g,'').toLowerCase();
+}
+function wrSimilarity(a, b){
+  a = wrNorm(a); b = wrNorm(b);
+  if(!a || !b) return 0;
+  if(a===b) return 1;
+  var codeA = (a.match(/^\d{3}-\d{2,3}[a-z]?/)||[])[0], codeB = (b.match(/^\d{3}-\d{2,3}[a-z]?/)||[])[0];
+  if(codeA && codeB) return codeA===codeB ? 0.95 : 0; // 品番で始まるもの同士は品番で決める
+  if(Math.min(a.length, b.length)>=3 && (a.indexOf(b)!==-1 || b.indexOf(a)!==-1)) return 0.8; // 片方の名前がもう片方に入っている(例: セット生産)
+  function grams(s){ var g = {}; for(var i=0;i<s.length-1;i++){ var k = s.slice(i,i+2); g[k] = (g[k]||0)+1; } return g; }
+  var ga = grams(a), gb = grams(b), inter = 0, na = 0, nb = 0;
+  Object.keys(ga).forEach(function(k){ na += ga[k]; if(gb[k]) inter += Math.min(ga[k], gb[k]); });
+  Object.keys(gb).forEach(function(k){ nb += gb[k]; });
+  return (na+nb) ? 2*inter/(na+nb) : 0;
+}
+function wrBestMatch(name, candidates, getName, min){
+  var best = null, score = 0, need = min||0.45;
+  candidates.forEach(function(c){ var s = wrSimilarity(name, getName(c)); if(s>=need && s>score){ score = s; best = c; } });
+  return best;
+}
+function wrTaskNames(){
+  var names = {};
+  (state.templates||[]).forEach(function(t){ if(!t.archived && t.name) names[t.name] = true; });
+  (state.backlog||[]).forEach(function(t){ if(!t.archived && t.name) names[t.name] = true; });
+  return Object.keys(names).sort(function(a,b){ return a.localeCompare(b, 'ja'); });
+}
+/* ---------- 設定画面(kintone連携設定)の「作業日報」パネル ---------- */
+function renderWorkReportPanel(){
+  if(!hasManagerSession()) return '';
+  var today = todayStr();
+  var lookFrom = wrDateAdd(today, -120);
+  if(!state.workReportPanelLoading && (!state.workReportCache || !state.workReportCache.ranges.some(function(r){ return r[0]<=lookFrom && r[1]>=today; }) || !state.workReportMapping || !state.workReportStatusLoaded)){
+    state.workReportPanelLoading = true;
+    Promise.all([ensureWorkReportRange(lookFrom, today), loadWorkReportMapping(), loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; })])
+      .then(function(r){ state.workReportStatus = r[2]; })
+      .catch(function(){})
+      .then(function(){ state.workReportStatusLoaded = true; state.workReportPanelLoading = false; render(); });
+  }
+  var f = state.workReportForm || (state.workReportForm = { from: wrDateAdd(today.slice(0,8)+'01', -1).slice(0,8)+'01', to: today });
+  var st = state.workReportStatus;
+  var syncing = !!state.workReportSyncing;
+  var msg = syncing ? '<div class="empty-note">kintoneから取得しています。しばらくお待ちください...</div>' :
+    (state.workReportSyncError ? '<div class="vc-warning-box">⚠️ '+esc(state.workReportSyncError)+'</div>' :
+    (state.workReportSyncResult ? '<div class="vc-import-status">作業日報の同期完了: '+esc(state.workReportSyncResult.from)+'〜'+esc(state.workReportSyncResult.to)+' ・ 日報 '+formatNum(state.workReportSyncResult.reportCount)+'件・'+formatNum(state.workReportSyncResult.rowCount)+'行</div>' : ''));
+  // 対応表: 直近120日の日報に出てくる作業内容
+  var cache = state.workReportCache;
+  var counts = {};
+  if(cache) Object.keys(cache.byDate).forEach(function(d){ if(d>=lookFrom) cache.byDate[d].forEach(function(r){ var k = r.work_name||''; if(k) counts[k] = (counts[k]||0)+1; }); });
+  var mp = state.workReportMapping || {};
+  var prices = wrPriceList();
+  var tasks = wrTaskNames();
+  var names = Object.keys(counts).concat(Object.keys(mp).filter(function(k){ return !counts[k]; })).sort(function(a,b){ return (counts[b]||0)-(counts[a]||0) || a.localeCompare(b,'ja'); });
+  var pending = 0;
+  var rowsHtml = names.map(function(n){
+    var m = mp[n] || {};
+    var sugP = !m.priceRecordId ? wrBestMatch(n, prices, function(p){ return p.workName; }) : null;
+    var sugT = !m.taskName ? wrBestMatch(n, tasks, function(t){ return t; }) : null;
+    if(sugP || sugT) pending++;
+    var selP = m.priceRecordId || (sugP ? sugP.recordId : '');
+    var selT = m.taskName || (sugT || '');
+    var p = selP ? wrPriceById(selP) : null;
+    return '<tr><td><b>'+esc(n)+'</b></td><td class="num">'+formatNum(counts[n]||0)+'</td>'+
+      '<td><select data-wr-price="'+esc(n)+'" style="max-width:300px;"><option value="">(単価なし・売上に入れない)</option>'+
+        prices.map(function(x){ return '<option value="'+esc(x.recordId)+'"'+(x.recordId===selP?' selected':'')+'>'+esc(x.workName)+'('+esc(formatWorkPrice(x.unitPrice))+')</option>'; }).join('')+
+      '</select>'+(sugP ? ' <span class="vca-site is-split">候補</span>' : '')+'</td>'+
+      '<td class="num">'+(p ? esc(formatWorkPrice(p.unitPrice)) : '―')+'</td>'+
+      '<td><select data-wr-task="'+esc(n)+'" style="max-width:220px;"><option value="">(紐付けない)</option>'+
+        tasks.map(function(t){ return '<option value="'+esc(t)+'"'+(t===selT?' selected':'')+'>'+esc(t)+'</option>'; }).join('')+
+      '</select>'+(sugT ? ' <span class="vca-site is-split">候補</span>' : '')+'</td></tr>';
+  }).join('') || '<tr><td colspan="5" class="empty-note">まだ作業日報がありません。上の「kintoneから作業日報を取得」を押してください。</td></tr>';
+  return '<div class="panel" id="workReportPanel" style="margin-top:16px;">'+
+    '<div class="panel-title">📝 作業日報(kintone 作業日報アプリ)</div>'+
+    '<div class="pool-hint" style="margin-bottom:12px;">kintoneの作業日報アプリ(アプリID 396)の、日報の中の1行(作業内容・得意先・数量・備考)を取り込みます。取り込んだ日報は、下の対応表で決めた単価で、日報の日付の収支(売上)に入り、紐付けたロジリンクの作業の売上になります。請求データの明細1も作れます。APIトークンはSupabase側に登録し、ここには入力しません。</div>'+
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'+
+      '<input type="date" id="wrFrom" value="'+esc(f.from)+'"> 〜 <input type="date" id="wrTo" value="'+esc(f.to)+'">'+
+      '<button type="button" class="add-btn" id="wrSyncBtn"'+(syncing?' disabled':'')+'>🔄 kintoneから作業日報を取得</button>'+
+      '<span class="pool-hint" style="margin:0;">最終同期: '+(st && st.syncedAt ? esc(fmtDateTime(st.syncedAt))+'('+esc(st.from)+'〜'+esc(st.to)+')' : '―')+'</span>'+
+    '</div>'+
+    '<div style="margin-top:8px;">'+msg+'</div>'+
+    (cache && cache.error ? '<div class="vc-warning-box">'+esc(cache.error)+'</div>' : '')+
+    '<div class="ll-form-group-title" style="margin-top:14px;">作業内容の対応表(直近120日に出てきた作業内容)</div>'+
+    '<div class="pool-hint" style="margin:0 0 6px;">日報の作業内容ごとに、作業単価マスタの項目(単価)と、ロジリンクの作業を選んでください。選ぶとすぐ保存されます。名前の似たものを「候補」として選んであります(まだ保存されていません)。'+
+      (prices.length ? '' : ' 作業単価マスタが読み込まれていません(上の「作業単価マスタ」で取得してください)。')+'</div>'+
+    (pending ? '<button type="button" class="vc-manage-toggle-btn" id="wrSaveSuggest" style="margin-bottom:8px;">候補をまとめて保存('+pending+'件)</button>' : '')+
+    '<div style="overflow-x:auto;max-height:480px;overflow-y:auto;" data-keep-scroll="wrMapTable"><table class="report-table" style="font-size:12.5px;"><thead><tr><th>日報の作業内容</th><th class="num">行数</th><th>作業単価マスタの項目</th><th class="num">単価</th><th>ロジリンクの作業</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div>'+
+  '</div>';
+}
+async function saveWorkReportMappingEntry(name, patch){
+  var m = await loadKeyJson(WORK_REPORT_MAPPING_KEY, function(){ return {}; });
+  if(isUnverified(m)){ showToast('対応表を読み込めなかったため、保存しませんでした'); return false; }
+  Object.keys(patch).forEach(function(n){
+    var e = Object.assign({}, m[n]||{}, patch[n]);
+    if(!e.priceRecordId) delete e.priceRecordId;
+    if(!e.taskName) delete e.taskName;
+    if(Object.keys(e).length) m[n] = e; else delete m[n];
+  });
+  var ok = await persistKey(WORK_REPORT_MAPPING_KEY, m);
+  if(ok){
+    state.workReportMapping = m;
+    await appendAuditLog({ action:'作業日報の対応表を変更', target: Object.keys(patch).join('・'), before:null, after: Object.keys(patch).map(function(n){ var p = patch[n]; return (p.priceRecordId!==undefined ? '単価:'+((wrPriceById(p.priceRecordId)||{}).workName||'なし') : '')+(p.taskName!==undefined ? ' 作業:'+(p.taskName||'なし') : ''); }).join(' / ') });
+  }else showToast('保存できませんでした');
+  return ok;
+}
+function bindWorkReportPanel(){
+  var fromEl = document.getElementById('wrFrom'), toEl = document.getElementById('wrTo');
+  if(fromEl) fromEl.addEventListener('change', function(){ state.workReportForm.from = fromEl.value; });
+  if(toEl) toEl.addEventListener('change', function(){ state.workReportForm.to = toEl.value; });
+  var btn = document.getElementById('wrSyncBtn');
+  if(btn) btn.addEventListener('click', async function(){
+    var f = state.workReportForm;
+    if(!f.from || !f.to || f.from>f.to){ alert('期間を正しく選んでください'); return; }
+    state.workReportSyncing = true; state.workReportSyncError = ''; state.workReportSyncResult = null; render();
+    var r = await syncWorkReportFromKintone(f.from, f.to);
+    state.workReportSyncing = false;
+    if(r.ok){ state.workReportSyncResult = r.result; state.workReportStatus = r.result; await appendAuditLog({ action:'kintoneから作業日報を取得', target: f.from+'〜'+f.to, before:null, after: r.result.rowCount+'行' }); }
+    else state.workReportSyncError = r.error;
+    render();
+  });
+  document.querySelectorAll('[data-wr-price]').forEach(function(el){
+    el.addEventListener('change', async function(){ var p = {}; p[el.getAttribute('data-wr-price')] = { priceRecordId: el.value }; await saveWorkReportMappingEntry(el.getAttribute('data-wr-price'), p); render(); });
+  });
+  document.querySelectorAll('[data-wr-task]').forEach(function(el){
+    el.addEventListener('change', async function(){ var p = {}; p[el.getAttribute('data-wr-task')] = { taskName: el.value }; await saveWorkReportMappingEntry(el.getAttribute('data-wr-task'), p); render(); });
+  });
+  var sug = document.getElementById('wrSaveSuggest');
+  if(sug) sug.addEventListener('click', async function(){
+    var patch = {};
+    document.querySelectorAll('[data-wr-price]').forEach(function(el){ var n = el.getAttribute('data-wr-price'); var m = (state.workReportMapping||{})[n]||{}; if(!m.priceRecordId && el.value) (patch[n] = patch[n]||{}).priceRecordId = el.value; });
+    document.querySelectorAll('[data-wr-task]').forEach(function(el){ var n = el.getAttribute('data-wr-task'); var m = (state.workReportMapping||{})[n]||{}; if(!m.taskName && el.value) (patch[n] = patch[n]||{}).taskName = el.value; });
+    if(!Object.keys(patch).length) return;
+    if(!confirm(Object.keys(patch).length+'件の作業内容の候補を保存します。よろしいですか?')) return;
+    await saveWorkReportMappingEntry(null, patch); render();
+  });
+}
+/* ---------- 請求データ: 作業日報から明細1を作る ---------- */
+async function billingBuildWorkFromReport(ym){
+  var range = wrMonthRange(ym);
+  if(!state.workPriceMaster || !state.workPriceMaster.ok) state.workPriceMaster = await fetchWorkPriceMaster();
+  await loadWorkReportMapping();
+  state.workReportCache = null; // 請求は最新の写しで作る
+  await ensureWorkReportRange(range[0], range[1]);
+  var rows = [], unmapped = {};
+  var d = range[0];
+  while(d<=range[1]){
+    workReportLinesForDate(d).forEach(function(x){
+      if(x.unitPrice===null) unmapped[x.workName||'(作業内容なし)'] = (unmapped[x.workName||'(作業内容なし)']||0)+1;
+      rows.push([Number(d.replace(/-/g,'')), x.workName, x.qty, x.unitPrice===null ? '' : x.unitPrice, x.amount===null ? '' : x.amount, x.customer, x.note]);
+    });
+    d = wrDateAdd(d, 1);
+  }
+  rows.sort(function(a,b){ return String(a[1]).localeCompare(String(b[1]), 'ja') || (a[0]-b[0]); });
+  return { ym: ym, rows: rows, unmapped: unmapped, error: (state.workReportCache && state.workReportCache.error) || '',
+    total: rows.reduce(function(a,r){ return a+(Number(r[4])||0); }, 0) };
+}
+/* 弥生の作業明細(明細1)と作業日報の明細1の突き合わせ: 作業日・作業項目・得意先・数量が同じ行を組にし、残りを出す */
+function billingCompareWork(yayoiRows, reportRows){
+  function key(r){ return [r[0], wrNorm(r[1]), wrNorm(r[5]), Number(r[2])||0].join('|'); }
+  var pool = {};
+  yayoiRows.forEach(function(r){ var k = key(r); (pool[k] = pool[k]||[]).push(r); });
+  var onlyReport = [];
+  reportRows.forEach(function(r){ var k = key(r); if(pool[k] && pool[k].length) pool[k].shift(); else onlyReport.push(r); });
+  var onlyYayoi = [];
+  Object.keys(pool).forEach(function(k){ onlyYayoi = onlyYayoi.concat(pool[k]); });
+  return { onlyYayoi: onlyYayoi, onlyReport: onlyReport };
 }
 
 /* ---------- render root ---------- */
@@ -9756,6 +10144,9 @@ async function loadGateDataStatus(){
   // kintone 商品台帳(入数・才数)の同期
   var ks = await loadKintoneSyncStatus();
   out.kintoneProduct = (ks && ks.fetchedAt) ? { at: ks.fetchedAt, detail: formatNum(ks.savedCount||0)+'件' } : null;
+  // kintone 作業日報の同期
+  var ws = await loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; });
+  out.kintoneReport = (ws && ws.syncedAt) ? { at: ws.syncedAt, detail: (ws.from||'')+'〜'+(ws.to||'') } : null;
   // kintone 作業単価マスタの同期(管理者のみ読める)
   if(hasManagerSession() && window.__supabaseClient){
     try{
@@ -9792,6 +10183,7 @@ function renderGateDataStatus(){
     '<div class="gate-status-group"><span class="gate-status-sub">kintone(API)</span>'+
       item('商品台帳(入数・才数)', st.kintoneProduct, false)+
       (hasManagerSession() ? item('作業単価', st.kintonePrice, false) : '')+
+      item('作業日報', st.kintoneReport, false)+
     '</div>'+
     '<button type="button" class="vc-manage-toggle-btn" id="gateGoDataHub" style="min-height:0;padding:3px 10px;">📥 データ更新を開く</button>'+
   '</div>';
@@ -10207,7 +10599,7 @@ function renderKintoneProductSettingsPanel(){
       '<button type="button" class="add-btn" id="kintoneSyncBtn" '+(syncing?'disabled':'')+'>🔄 kintoneから商品マスタを取得</button>'+
       '<div style="margin-top:10px;">'+statusHtml+'</div>'+
     '</div>'+
-  '</div>'+renderWorkPriceMasterPanel()+'</div>';
+  '</div>'+renderWorkPriceMasterPanel()+renderWorkReportPanel()+'</div>';
 }
 /* 単価は小数もあり得るため、formatNum(整数に丸める)ではなくそのまま表示する */
 function formatWorkPrice(n){
@@ -10359,6 +10751,7 @@ function bindWorkPriceAssignmentEditor(){
 }
 function bindWorkPriceMasterPanel(){
   bindWorkPriceAssignmentEditor();
+  bindWorkReportPanel();
   var btn = document.getElementById('workPriceSyncBtn');
   if(!btn) return;
   btn.addEventListener('click', async function(){
@@ -14414,6 +14807,9 @@ async function fetchFinancialData(){
     state.financialPriceModel = buildWorkPriceModel(r[0].prices, r[1].ok ? r[1].byRecordId : {});
     state.financialPriceModel.assignmentsError = r[1].ok ? '' : r[1].reason;
     state.financialWages = r[2];
+    // 作業日報(kintone)の単価・対応表と、直近2か月の日報(それより前は期間を選んだときに読む)
+    state.workPriceList = r[0].prices;
+    try{ await loadWorkReportMapping(); await ensureWorkReportRange(wrDateAdd(todayStr(), -62), todayStr()); }catch(e){}
   }catch(e){
     state.financialLoadError = '収支データの取得に失敗しました';
     state.financialPriceModel = null;

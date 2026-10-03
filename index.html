@@ -1559,6 +1559,7 @@ var CHANGELOG = [
     '実際にコードを実行するテストで、各画面から他画面へホームを経由せず直接移動できること、管理者専用ナビが未ログイン時は表示されずログアウト後に消えること、そして最も重要な点として「state.roleを不正に管理者画面へ直接切り替えても、未ログインならページの中身(データ)は一切表示されずログインフォームのみが出ること」を確認しました。既存の全回帰テスト(39スイート)にも影響はありません'
   ]},
   { date:'2026-10-03', items:[
+    '【不具合修正: 作業日報の対応表】「(単価なし)」「(紐付けない)」を選ぶと、名前の似た候補がまた出て、元に戻ったように見える不具合を直しました。選んだ「単価なし」「紐付けない」はそのまま残ります。「単価なし」を選んだ作業内容は、収支の売上・請求の明細1に入れず、注意にも出しません',
     '【画面の整理】トップページを「現場」(作業記録・集計・モニター・カレンダー・集計表・VC引当)と「管理」(作業量CSV取込・管理・設定)に分けました。作業量CSV取込はトップから1回で開けます。管理のタブは「今日・人員配置・実績・生産性・収支・請求・データ取込」にし、データ更新・請求データ・作業量CSV取込・kintoneの同期を管理の中にまとめました(データ取込に、作業量CSV・在庫とVCのCSV・kintoneの同期が並びます)。設定のタブは「基本・スタッフ・作業・勤務時間・得意先・単価・操作履歴・システム」にし、得意先と作業の対応・作業単価の得意先と計算単位・作業日報の対応表・VC引当の納品先一覧を「得意先・単価」にまとめ、kintoneの商品台帳の接続設定は「システム」に移しました。タブ・メニュー・見出しの絵文字を外し、説明文を短くしました',
     '【収支】期間のボタン(今日・昨日・今週・今月・先月)を上に置き、押すとすぐ集計します。開いたときは今月を自動で集計し、期間の合計(売上・人件費・粗利・利益率)を上に出します。内訳は「日別・月別・得意先別・商品別・作業別」で切り替えます(月別は新しく追加)。1日の細かい内訳は下の「1日の内訳」に出します',
     '【データ更新は管理者のみ】「📥 データ更新」(ロジザード・弥生の在庫、VCの出荷指示の取込、納品先一覧)は、管理者アカウントでログインしたときだけ使えるようにしました。メニューも管理者用に移しました。請求データのカードにも鍵の印を付けました',
@@ -8201,7 +8202,7 @@ async function computeAnalytics(days, volumes, axis, filterCustomer){
     var dd = state.finStartDate;
     while(dd<=state.finEndDate){
       workReportLinesForDate(dd).forEach(function(x){
-        if(x.amount===null){ wrUnmapped[x.workName||'(作業内容なし)'] = true; return; }
+        if(x.amount===null){ if(!x.noPrice) wrUnmapped[x.workName||'(作業内容なし)'] = true; return; }
         if(axis==='customer'){ addToGroup(x.customer||'(得意先なし)', x.customer||'(得意先なし)', 'wr', 'normal', x.customer||'', 0, 0, 0, x.amount); return; }
         var name = x.taskName || x.workName;
         var tids = x.taskName ? (tidsByName[x.taskName]||[]) : [];
@@ -8273,7 +8274,7 @@ function computeFinancialSummary(dateStr, day, workVolume){
   var nameToTid = {};
   ((day && day.logs) || []).forEach(function(l){ if(l.taskId!=='BREAK') nameToTid[taskById(l.taskId).name] = l.taskId; });
   workReportLinesForDate(dateStr).forEach(function(x){
-    if(x.amount===null){ wrUnmapped[x.workName||'(作業内容なし)'] = true; return; }
+    if(x.amount===null){ if(!x.noPrice) wrUnmapped[x.workName||'(作業内容なし)'] = true; return; }
     var tid = x.taskName ? (nameToTid[x.taskName] || ('wr:'+x.taskName)) : ('wr:'+x.workName);
     var t = byTask[tid] || (byTask[tid] = { taskId: tid, taskName: x.taskName || x.workName, pieces:0, sales:0 });
     t.sales += x.amount;
@@ -9863,7 +9864,8 @@ function workReportLinesForDate(dateStr){
     var price = (p && typeof p.unitPrice==='number') ? p.unitPrice : null;
     var qty = Number(r.qty)||0;
     return { row: r, workName: r.work_name||'', customer: r.customer_name||'', qty: qty, note: r.note||'',
-      unitPrice: price, amount: price===null ? null : qty*price, taskName: m.taskName || null };
+      unitPrice: price, amount: price===null ? null : qty*price, taskName: m.taskName || null,
+      noPrice: Object.prototype.hasOwnProperty.call(m, 'priceRecordId') && !m.priceRecordId }; // 対応表で「単価なし」を選んだ
   });
 }
 /* 似た名前の候補(作業単価マスタの項目・ロジリンクの作業)。全角半角・空白・かっこ・送り仮名の違いを無視して、2文字ずつの一致で比べる */
@@ -9923,14 +9925,15 @@ function renderWorkReportPanel(){
   var pending = 0;
   var rowsHtml = names.map(function(n){
     var m = mp[n] || {};
-    var sugP = !m.priceRecordId ? wrBestMatch(n, prices, function(p){ return p.workName; }) : null;
-    var sugT = !m.taskName ? wrBestMatch(n, tasks, function(t){ return t; }) : null;
+    var hasP = Object.prototype.hasOwnProperty.call(m, 'priceRecordId'), hasT = Object.prototype.hasOwnProperty.call(m, 'taskName');
+    var sugP = !hasP ? wrBestMatch(n, prices, function(p){ return p.workName; }) : null;
+    var sugT = !hasT ? wrBestMatch(n, tasks, function(t){ return t; }) : null;
     if(sugP || sugT) pending++;
-    var selP = m.priceRecordId || (sugP ? sugP.recordId : '');
-    var selT = m.taskName || (sugT || '');
+    var selP = hasP ? (m.priceRecordId||'') : (sugP ? sugP.recordId : '');
+    var selT = hasT ? (m.taskName||'') : (sugT || '');
     var p = selP ? wrPriceById(selP) : null;
     return '<tr><td><b>'+esc(n)+'</b></td><td class="num">'+formatNum(counts[n]||0)+'</td>'+
-      '<td><select data-wr-price="'+esc(n)+'" style="max-width:300px;"><option value="">(単価なし・売上に入れない)</option>'+
+      '<td><select data-wr-price="'+esc(n)+'" style="max-width:300px;"><option value="">(単価なし・売上と請求に入れない)</option>'+
         (selP && !p ? '<option value="'+esc(selP)+'" selected>(作業単価マスタ レコード'+esc(selP)+')</option>' : '')+
         prices.map(function(x){ return '<option value="'+esc(x.recordId)+'"'+(x.recordId===selP?' selected':'')+'>'+esc(x.workName)+'('+esc(formatWorkPrice(x.unitPrice))+')</option>'; }).join('')+
       '</select>'+(sugP ? ' <span class="vca-site is-split">候補</span>' : '')+'</td>'+
@@ -9958,10 +9961,8 @@ async function saveWorkReportMappingEntry(name, patch){
   var m = await loadKeyJson(WORK_REPORT_MAPPING_KEY, function(){ return {}; });
   if(isUnverified(m)){ showToast('対応表を読み込めなかったため、保存しませんでした'); return false; }
   Object.keys(patch).forEach(function(n){
-    var e = Object.assign({}, m[n]||{}, patch[n]);
-    if(!e.priceRecordId) delete e.priceRecordId;
-    if(!e.taskName) delete e.taskName;
-    if(Object.keys(e).length) m[n] = e; else delete m[n];
+    // 「単価なし」「紐付けない」も空の値として残す(残さないと、また候補が出て元に戻ったように見える)
+    m[n] = Object.assign({}, m[n]||{}, patch[n]);
   });
   var ok = await persistKey(WORK_REPORT_MAPPING_KEY, m);
   if(ok){
@@ -9996,8 +9997,8 @@ function bindWorkReportPanel(){
   var sug = document.getElementById('wrSaveSuggest');
   if(sug) sug.addEventListener('click', async function(){
     var patch = {};
-    document.querySelectorAll('[data-wr-price]').forEach(function(el){ var n = el.getAttribute('data-wr-price'); var m = (state.workReportMapping||{})[n]||{}; if(!m.priceRecordId && el.value) (patch[n] = patch[n]||{}).priceRecordId = el.value; });
-    document.querySelectorAll('[data-wr-task]').forEach(function(el){ var n = el.getAttribute('data-wr-task'); var m = (state.workReportMapping||{})[n]||{}; if(!m.taskName && el.value) (patch[n] = patch[n]||{}).taskName = el.value; });
+    document.querySelectorAll('[data-wr-price]').forEach(function(el){ var n = el.getAttribute('data-wr-price'); var m = (state.workReportMapping||{})[n]||{}; if(!Object.prototype.hasOwnProperty.call(m,'priceRecordId') && el.value) (patch[n] = patch[n]||{}).priceRecordId = el.value; });
+    document.querySelectorAll('[data-wr-task]').forEach(function(el){ var n = el.getAttribute('data-wr-task'); var m = (state.workReportMapping||{})[n]||{}; if(!Object.prototype.hasOwnProperty.call(m,'taskName') && el.value) (patch[n] = patch[n]||{}).taskName = el.value; });
     if(!Object.keys(patch).length) return;
     if(!confirm(Object.keys(patch).length+'件の作業内容の候補を保存します。よろしいですか?')) return;
     await saveWorkReportMappingEntry(null, patch); render();
@@ -10014,6 +10015,7 @@ async function billingBuildWorkFromReport(ym){
   var d = range[0];
   while(d<=range[1]){
     workReportLinesForDate(d).forEach(function(x){
+      if(x.noPrice) return; // 「単価なし」(請求しない)作業内容は明細1に入れない
       if(x.unitPrice===null) unmapped[x.workName||'(作業内容なし)'] = (unmapped[x.workName||'(作業内容なし)']||0)+1;
       rows.push([Number(d.replace(/-/g,'')), x.workName, x.qty, x.unitPrice===null ? '' : x.unitPrice, x.amount===null ? '' : x.amount, x.customer, x.note]);
     });

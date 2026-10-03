@@ -81,6 +81,9 @@ input,select{font-family:inherit;}
 .gate-status-sub{font-size:11px;color:var(--slate-500);font-weight:700;min-width:84px;}
 .gate-status-item.is-none{color:#B42318;}
 .gate-status-flag{display:inline-block;background:#FFFAEB;color:#B54708;border-radius:6px;padding:0 6px;font-size:11px;font-weight:700;}
+.gate-section-title{width:100%;max-width:920px;font-size:13px;font-weight:800;color:var(--ink-900);margin:6px 0 8px;text-align:left;}
+.gate-section-title span{font-size:11px;font-weight:600;color:var(--slate-500);margin-left:6px;}
+.gate-grid + .gate-section-title{margin-top:22px;}
 .gate-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;width:100%;max-width:920px;}
 .gate-card{
   position:relative;background:var(--paper-50);border:1px solid var(--paper-line);border-radius:var(--radius-lg,14px);padding:26px 20px;
@@ -1556,6 +1559,9 @@ var CHANGELOG = [
     '実際にコードを実行するテストで、各画面から他画面へホームを経由せず直接移動できること、管理者専用ナビが未ログイン時は表示されずログアウト後に消えること、そして最も重要な点として「state.roleを不正に管理者画面へ直接切り替えても、未ログインならページの中身(データ)は一切表示されずログインフォームのみが出ること」を確認しました。既存の全回帰テスト(39スイート)にも影響はありません'
   ]},
   { date:'2026-10-03', items:[
+    '【画面の整理】トップページを「現場」(作業記録・集計・モニター・カレンダー・集計表・VC引当)と「管理」(作業量CSV取込・管理・設定)に分けました。作業量CSV取込はトップから1回で開けます。管理のタブは「今日・人員配置・実績・生産性・収支・請求・データ取込」にし、データ更新・請求データ・作業量CSV取込・kintoneの同期を管理の中にまとめました(データ取込に、作業量CSV・在庫とVCのCSV・kintoneの同期が並びます)。設定のタブは「基本・スタッフ・作業・勤務時間・得意先・単価・操作履歴・システム」にし、得意先と作業の対応・作業単価の得意先と計算単位・作業日報の対応表・VC引当の納品先一覧を「得意先・単価」にまとめ、kintoneの商品台帳の接続設定は「システム」に移しました。タブ・メニュー・見出しの絵文字を外し、説明文を短くしました',
+    '【収支】期間のボタン(今日・昨日・今週・今月・先月)を上に置き、押すとすぐ集計します。開いたときは今月を自動で集計し、期間の合計(売上・人件費・粗利・利益率)を上に出します。内訳は「日別・月別・得意先別・商品別・作業別」で切り替えます(月別は新しく追加)。1日の細かい内訳は下の「1日の内訳」に出します',
+    '【データ更新は管理者のみ】「📥 データ更新」(ロジザード・弥生の在庫、VCの出荷指示の取込、納品先一覧)は、管理者アカウントでログインしたときだけ使えるようにしました。メニューも管理者用に移しました。請求データのカードにも鍵の印を付けました',
     '【作業日報(kintone)の連携】kintoneの作業日報アプリ(396)の日報を取り込めるようにしました(設定 → kintone連携設定 → 作業日報)。日報の作業内容ごとに、作業単価マスタの項目(単価)とロジリンクの作業を「対応表」で決めると、①収支: 日報の日付の売上に「数量 × 単価」が入り、紐付けた作業の売上になります(作業別では、その作業の作業時間の人件費と並びます)。②請求データの明細1を、弥生の作業明細の代わりに作業日報から作れます(弥生の作業明細も取り込んであれば、突き合わせて違いを出します)。単価はいつも対応表の単価です。トップページの「データの更新状況」に作業日報の同期日時も出ます',
     '【トップページ: データの更新状況】トップページに、共有データ(ロジザードの在庫・弥生の在庫(高屋・丹南)・VCの出荷指示)と kintone から同期したデータ(商品台帳・作業単価(管理者のみ))の最終更新日時を表示するようにしました。今日まだ更新していない共有データには「今日まだ」と出ます。「📥 データ更新を開く」から取り込めます',
     '【調査結果】「作業を指定して取り込む」の廃止・取込履歴の常時表示・荷主出荷番号単位のグローバルな重複防止(削除済みデータも重複扱いになる仕様を含む)・本日の作業へのCSV件数/ピース数表示は、いずれも既に実装済みであることを確認しました。今回は、まだ無かった2点(取込データの編集・モニターへのCSV表示)のみを実装しています',
@@ -7427,10 +7433,17 @@ function renderFinancial(){
     '<div class="pool-hint" style="margin-top:8px;">総稼働'+summary.totalHours.toFixed(1)+'時間 ・ '+esc(dateLabelFromStr(dateStr))+'分 ・ 売上はkintoneの作業単価 × 得意先ごとの数量、人件費はスタッフごとの(作業時間 × 時給)です。作業ごとの売上は、その作業で扱った得意先ごとの数量から計算しています。</div>';
   }
 
+  if(!state.finAxis) state.finAxis = 'date';
+  // 開いたときは今月を自動で集計する(「集計する」を押さなくても期間の合計が見えるように)
+  if(state.financialPriceModel && !state.finPeriodRows && !state.finAnalyticsLoading && !state.finAutoRan){
+    state.finAutoRan = true;
+    var pr0 = finPresetRange('thisMonth');
+    state.finStartDate = pr0[0]; state.finEndDate = pr0[1]; state.finPreset = 'thisMonth';
+    setTimeout(runFinancialPeriod, 0);
+  }
   if(!state.finStartDate) state.finStartDate = todayDate;
   if(!state.finEndDate) state.finEndDate = todayDate;
-  if(!state.finAxis) state.finAxis = 'date';
-  var axisLabels = { date:'日付別', customer:'荷主別', product:'商品別', task:'作業種別別' };
+  var axisLabels = { date:'日別', month:'月別', customer:'得意先別', product:'商品別', task:'作業別' };
   var axisTabs = Object.keys(axisLabels).map(function(a){
     return '<button type="button" class="vc-tab-btn'+(state.finAxis===a?' active':'')+'" data-fin-axis="'+a+'">'+axisLabels[a]+'</button>';
   }).join('');
@@ -7450,22 +7463,23 @@ function renderFinancial(){
   }
   if(state.finAnalyticsLoading){
     analyticsBody = '<div class="empty-note">集計中...</div>';
-  }else if(state.finAnalyticsRows && state.finAxis==='date'){
-    var dRows = state.finAnalyticsRows;
+  }else if(state.finAnalyticsRows && (state.finAxis==='date' || state.finAxis==='month')){
+    var isMonth = state.finAxis==='month';
+    var dRows = isMonth ? finMonthRows(state.finAnalyticsRows) : state.finAnalyticsRows;
     var dt = sumFinancialRows(dRows);
     function dateRowHtml(label, r, isTotal){
       return '<tr'+(isTotal?' class="fin-total-row"':'')+'><td>'+label+'</td>'+
         '<td class="num">'+formatNum(r.shipmentCount)+'</td><td class="num">'+formatNum(r.poCount)+'</td><td class="num">'+formatNum(r.lineCount)+'</td><td class="num">'+formatNum(r.totalQty)+'</td>'+
         '<td class="num">'+r.personHours.toFixed(1)+'h</td><td class="num">¥'+formatNum(Math.round(r.sales))+'</td><td class="num">¥'+formatNum(Math.round(r.laborCost))+'</td>'+
         '<td class="num">¥'+formatNum(Math.round(r.grossProfit))+'</td><td class="num">'+r.margin.toFixed(1)+'%</td>'+
-        '<td class="num">'+(isTotal ? '' : '<button type="button" class="vc-manage-toggle-btn" data-fin-show-day="'+esc(r.date)+'">この日の内訳</button>')+'</td></tr>';
+        '<td class="num">'+(isTotal || isMonth ? '' : '<button type="button" class="vc-manage-toggle-btn" data-fin-show-day="'+esc(r.date)+'">内訳</button>')+'</td></tr>';
     }
     analyticsBody = renderFinancialNotices(dRows.meta)+
-      '<div style="overflow-x:auto;"><table class="report-table" style="margin-top:10px;"><thead><tr><th>日付</th><th>出荷件数</th><th>PO数</th><th>明細数</th><th>出荷数量(ピース)</th><th>人時(実測)</th><th>売上</th><th>人件費</th><th>粗利</th><th>粗利率</th><th></th></tr></thead><tbody>'+
+      '<div style="overflow-x:auto;"><table class="report-table" style="margin-top:10px;"><thead><tr><th>'+(isMonth ? '月' : '日付')+'</th><th>出荷件数</th><th>PO数</th><th>明細数</th><th>出荷数量(ピース)</th><th>人時(実測)</th><th>売上</th><th>人件費</th><th>粗利</th><th>粗利率</th><th></th></tr></thead><tbody>'+
         (dRows.map(function(r){ return dateRowHtml(esc(r.label), r, false); }).join('') || '<tr><td colspan="11" style="color:var(--slate-500);">この期間に記録のある日がありません</td></tr>')+
-        (dRows.length ? dateRowHtml('合計('+dRows.length+'日)', dt, true) : '')+
+        (dRows.length ? dateRowHtml('合計('+dRows.length+(isMonth ? 'か月' : '日')+')', dt, true) : '')+
       '</tbody></table></div>'+
-      '<div class="pool-hint" style="margin-top:8px;">1日ごとの売上(kintoneの作業単価 × その日のCSVの得意先ごとの数量)と人件費(スタッフごとの作業時間 × 時給)です。作業記録もCSVも無い日は出していません。「この日の内訳」で、上の欄にその日の得意先ごとの内訳を出します。</div>';
+      '<div class="pool-hint" style="margin-top:8px;">作業記録もCSVも無い日は出していません。'+(isMonth ? '' : '「内訳」で、下の「1日の内訳」にその日の得意先ごとの内訳を出します。')+'</div>';
   }else if(state.finAnalyticsRows){
     if(state.finDrillCustomer){
       analyticsBody += '<div class="vc-import-status">「'+esc(state.finDrillCustomer)+'」の商品別 <button type="button" class="vc-manage-toggle-btn" id="finDrillBackBtn" style="margin-left:8px;">荷主一覧に戻る</button></div>';
@@ -7523,16 +7537,19 @@ function renderFinancial(){
       '<div class="pool-hint" style="margin-top:8px;">※売上はkintoneの作業単価 × 得意先ごとの数量です(商品別の「件」単位の売上は、得意先の件数を明細数の割合で商品に按分しています)。「人時(推計)」「人件費」は、作業枠全体の実測(人件費はスタッフごとの作業時間 × 時給)を、荷主/商品ごとの出荷数量の割合で配分した推計値です(実測ではありません)。「出荷数量(ピース)」はCSVの出荷引当数の合計、「ケース」「バラ」は取込時に商品台帳の入数で1明細ごとに計算した値です(入数が無い商品はすべてバラ)。ケース・バラの記録が無い取込(機能追加前)は「データなし」、一部に無い場合は※を付けています。'+
       (state.finAxis==='customer' ? '荷主別のケース・バラは、取込時の商品別の記録が荷主ごとに分かれていないため表示していません。' : '')+'</div>';
   }else{
-    analyticsBody = '<div class="empty-note">期間を選び「集計する」を押してください。</div>';
+    analyticsBody = '<div class="empty-note">期間を選んでください。</div>';
   }
 
-  var analyticsPanel = '<div class="panel" style="margin-top:16px;">'+
-    '<div class="panel-title">📊 収支・分析</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">期間・集計軸を切り替えて、荷主別/商品別/作業種別別に売上・原価・粗利を分析します。</div>'+
+  var presets = [['today','今日'],['yesterday','昨日'],['thisWeek','今週'],['thisMonth','今月'],['lastMonth','先月']].map(function(p){
+    return '<button type="button" class="vc-tab-btn'+(state.finPreset===p[0]?' active':'')+'" data-fin-preset="'+p[0]+'">'+p[1]+'</button>';
+  }).join('');
+  var analyticsPanel = '<div class="panel">'+
+    '<div class="panel-title">収支 <button class="pill-btn" id="mgrLogoutBtn" style="margin-left:10px;">ログアウト</button></div>'+
     '<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px;">'+
+      '<div class="vc-tabs" style="margin:0;border:none;padding:0;">'+presets+'</div>'+
       '<div><label style="font-size:11px;color:var(--slate-500);display:block;">開始日</label><input type="date" id="finStartDateInput" value="'+state.finStartDate+'"></div>'+
       '<div><label style="font-size:11px;color:var(--slate-500);display:block;">終了日</label><input type="date" id="finEndDateInput" value="'+state.finEndDate+'"></div>'+
-      '<button type="button" class="add-btn" id="finRunAnalyticsBtn">集計する</button>'+
+      '<button type="button" class="add-btn" id="finRunAnalyticsBtn">この期間で集計</button>'+
     '</div>'+
     periodHtml+
     '<div class="vc-tabs">'+axisTabs+'</div>'+
@@ -7540,15 +7557,57 @@ function renderFinancial(){
   '</div>';
 
   return '<div class="mgr-wrap">'+
-    '<div class="panel">'+
-      '<div class="panel-title">💰 収支・分析 <button class="pill-btn" id="mgrLogoutBtn" style="margin-left:10px;">ログアウト</button></div>'+
+    analyticsPanel+
+    '<div class="panel" style="margin-top:16px;" id="finDayPanel">'+
+      '<div class="panel-title">1日の内訳</div>'+
       dayNav+
       loadingOrError+
       summaryHtml+
     '</div>'+
-    analyticsPanel+
-    '<div class="pool-hint" style="margin-top:14px;">単価は「設定 → kintone連携設定 → 作業単価マスタ」(kintoneから取得・得意先と計算単位を設定)、時給は「設定 → スタッフ設定」で設定します。</div>'+
+    '<div class="pool-hint" style="margin-top:14px;">単価は「設定 → 得意先・単価」、時給は「設定 → スタッフ」で設定します。</div>'+
   '</div>';
+}
+/* 収支の期間のボタン(今日・昨日・今週・今月・先月)→ [開始日, 終了日] */
+function finPresetRange(p){
+  var t = todayStr();
+  if(p==='yesterday'){ var y = wrDateAdd(t, -1); return [y, y]; }
+  if(p==='thisWeek'){ var d = new Date(t+'T00:00:00'); var back = (d.getDay()+6)%7; return [wrDateAdd(t, -back), t]; } // 月曜から
+  if(p==='thisMonth') return [t.slice(0,8)+'01', t];
+  if(p==='lastMonth'){ var lastDay = wrDateAdd(t.slice(0,8)+'01', -1); return [lastDay.slice(0,8)+'01', lastDay]; }
+  return [t, t];
+}
+/* 期間の集計(期間の合計・日別・月別・得意先別・商品別・作業別) */
+async function runFinancialPeriod(){
+  if(state.finStartDate > state.finEndDate){ showToast('開始日が終了日より後になっています'); return; }
+  state.finAnalyticsLoading = true;
+  state.finDrillCustomer = null;
+  render();
+  try{
+    var collected = await collectDaysAndVolumeForRange(state.finStartDate, state.finEndDate);
+    // 期間の合計・日別・月別は、日ごとの収支(1日の内訳と同じ計算)から出す
+    state.finPeriodRows = computeFinancialByDate(collected.byDate);
+    state.finPeriodRange = [state.finStartDate, state.finEndDate];
+    state.finPeriodCollected = collected;
+    state.finAnalyticsRows = (state.finAxis==='date' || state.finAxis==='month') ? state.finPeriodRows : await computeAnalytics(collected.days, collected.volumes, state.finAxis, null);
+  }catch(e){ showToast('集計できませんでした'); }
+  state.finAnalyticsLoading = false;
+  render();
+}
+/* 日別の行を月ごとにまとめる */
+function finMonthRows(dayRows){
+  var by = {}, order = [];
+  (dayRows||[]).forEach(function(r){
+    var k = r.date.slice(0,7);
+    if(!by[k]){ by[k] = []; order.push(k); }
+    by[k].push(r);
+  });
+  var out = order.map(function(k){
+    var t = sumFinancialRows(by[k]);
+    t.key = k; t.date = k; t.label = Number(k.slice(0,4))+'年'+Number(k.slice(5,7))+'月('+by[k].length+'日)';
+    return t;
+  });
+  out.meta = dayRows && dayRows.meta;
+  return out;
 }
 function bindFinancial(){
   if(!hasManagerSession()){
@@ -7577,7 +7636,7 @@ function bindFinancial(){
       state.finAnalyticsRows = null;
       var c = state.finPeriodCollected;
       if(c && state.finPeriodRange && state.finPeriodRange[0]===state.finStartDate && state.finPeriodRange[1]===state.finEndDate){
-        if(state.finAxis==='date'){ state.finAnalyticsRows = state.finPeriodRows; render(); return; }
+        if(state.finAxis==='date' || state.finAxis==='month'){ state.finAnalyticsRows = state.finPeriodRows; render(); return; }
         state.finAnalyticsLoading = true; render();
         state.finAnalyticsRows = await computeAnalytics(c.days, c.volumes, state.finAxis, null);
         state.finAnalyticsLoading = false;
@@ -7604,25 +7663,17 @@ function bindFinancial(){
   var dayTodayBtn = document.getElementById('finDayTodayBtn');
   if(dayTodayBtn) dayTodayBtn.addEventListener('click', function(){ showSummaryDay(todayStr()); });
   document.querySelectorAll('[data-fin-show-day]').forEach(function(el){
-    el.addEventListener('click', function(){ showSummaryDay(el.getAttribute('data-fin-show-day')); window.scrollTo(0, 0); });
+    el.addEventListener('click', function(){ showSummaryDay(el.getAttribute('data-fin-show-day')); setTimeout(function(){ var p = document.getElementById('finDayPanel'); if(p) p.scrollIntoView({ behavior:'smooth' }); }, 300); });
   });
   var finRunAnalyticsBtn = document.getElementById('finRunAnalyticsBtn');
-  if(finRunAnalyticsBtn){
-    finRunAnalyticsBtn.addEventListener('click', async function(){
-      if(state.finStartDate > state.finEndDate){ showToast('開始日が終了日より後になっています'); return; }
-      state.finAnalyticsLoading = true;
-      state.finDrillCustomer = null;
-      render();
-      var collected = await collectDaysAndVolumeForRange(state.finStartDate, state.finEndDate);
-      // 期間の合計・日付別は、日ごとの収支(上の欄と同じ計算)から出す
-      state.finPeriodRows = computeFinancialByDate(collected.byDate);
-      state.finPeriodRange = [state.finStartDate, state.finEndDate];
-      state.finPeriodCollected = collected;
-      state.finAnalyticsRows = state.finAxis==='date' ? state.finPeriodRows : await computeAnalytics(collected.days, collected.volumes, state.finAxis, null);
-      state.finAnalyticsLoading = false;
-      render();
+  if(finRunAnalyticsBtn) finRunAnalyticsBtn.addEventListener('click', function(){ state.finPreset = null; runFinancialPeriod(); });
+  document.querySelectorAll('[data-fin-preset]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var p = el.getAttribute('data-fin-preset'), r = finPresetRange(p);
+      state.finPreset = p; state.finStartDate = r[0]; state.finEndDate = r[1];
+      runFinancialPeriod();
     });
-  }
+  });
   document.querySelectorAll('[data-fin-drill]').forEach(function(el){
     el.addEventListener('click', async function(){
       var customerName = el.getAttribute('data-fin-drill');
@@ -8515,12 +8566,12 @@ function renderShukei(){
   }).join('');
   function asOf(d){ return d && d.uploadedAt ? fmtDateTime(d.uploadedAt) : '未登録'; }
   var status = '<div class="pool-hint" style="margin:6px 0 10px;">ロジザードの在庫: '+esc(asOf(data.logizard))+' ・ 弥生('+esc(site.name)+')の在庫: '+esc(asOf(data.yayoi))+
-    ' <button type="button" class="vc-manage-toggle-btn" data-go-datahub="1" style="min-height:0;padding:3px 10px;">📥 データ更新を開く</button></div>';
+    (hasManagerSession() ? ' <button type="button" class="vc-manage-toggle-btn" data-go-datahub="1" style="min-height:0;padding:3px 10px;">データ取込を開く</button>' : '')+'</div>';
   var body = '';
   if(tab==='sheet') body = renderShukeiSheet(siteKey, site, data, draft);
   else body = renderShukeiDiff(siteKey, site, data);
   return '<div class="mgr-wrap shukei-wrap"><div class="panel shukei-site-panel" style="--site:'+site.color+';--site-tint:'+site.tint+';">'+
-    '<div class="panel-title no-print">🧾 集計表(高屋・丹南)</div>'+
+    '<div class="panel-title no-print">集計表(高屋・丹南)</div>'+
     '<div class="shukei-site-tabs no-print">'+siteTabs+'</div>'+
     '<div class="shukei-site-banner no-print">'+esc(site.name)+'の'+(tab==='diff'?'在庫差異':'集計表')+'を表示中</div>'+
     '<div class="vc-tabs no-print" style="margin-top:6px;">'+tabs+'</div>'+
@@ -8945,22 +8996,22 @@ function renderVcAlloc(){
   var status = '<div class="pool-hint" style="margin:6px 0 10px;">出荷指示: '+(order && order.uploadedAt ? esc(fmtDateTime(order.uploadedAt))+'取込'+(order.workDates && order.workDates.length ? '(出荷作業日 '+esc(order.workDates.map(dateLabelFromStr).join('・'))+')' : '') : '未取込')+
     ' ・ ロジザードの在庫: '+(lz && lz.uploadedAt ? esc(fmtDateTime(lz.uploadedAt)) : '未登録')+
     ' <button type="button" class="vc-manage-toggle-btn" id="vcaReload" style="min-height:0;padding:3px 10px;">🔄 読み直す</button>'+
-    ' <button type="button" class="vc-manage-toggle-btn" data-go-datahub="1" style="min-height:0;padding:3px 10px;">📥 データ更新を開く</button></div>';
+    (hasManagerSession() ? ' <button type="button" class="vc-manage-toggle-btn" data-go-datahub="1" style="min-height:0;padding:3px 10px;">データ取込を開く</button>' : '')+'</div>';
   var warn = '';
   if(calc){
     var unk = Object.keys(calc.unknownDests);
-    if(unk.length) warn += '<div class="vc-warning-box">納品先一覧に無い納品先があります: '+esc(unk.map(function(k){ return k+'('+calc.unknownDests[k]+')'; }).join('、'))+'。振り分け番号が「?」になります。「📥 データ更新」の納品先一覧で番号を登録してください。</div>';
-    if(!lz) warn += '<div class="vc-warning-box">ロジザードの在庫が登録されていません。「📥 データ更新」でロジザードの在庫のCSVを取り込んでください。</div>';
+    if(unk.length) warn += '<div class="vc-warning-box">納品先一覧に無い納品先があります: '+esc(unk.map(function(k){ return k+'('+calc.unknownDests[k]+')'; }).join('、'))+'。振り分け番号が「?」になります。「設定 → 得意先・単価」の納品先一覧で番号を登録してください。</div>';
+    if(!lz) warn += '<div class="vc-warning-box">ロジザードの在庫が登録されていません。「管理 → データ取込」でロジザードの在庫のCSVを取り込んでください。</div>';
     else if(order.uploadedAt && lz.uploadedAt && lz.uploadedAt < order.uploadedAt && Date.parse(order.uploadedAt)-Date.parse(lz.uploadedAt) > 12*3600000)
-      warn += '<div class="vc-warning-box">ロジザードの在庫が出荷指示より古いデータです('+esc(fmtDateTime(lz.uploadedAt))+')。最新の在庫を「📥 データ更新」で取り込むと、優先倉庫が正確になります。</div>';
+      warn += '<div class="vc-warning-box">ロジザードの在庫が出荷指示より古いデータです('+esc(fmtDateTime(lz.uploadedAt))+')。最新の在庫を「管理 → データ取込」で取り込むと、優先倉庫が正確になります。</div>';
   }
   var body;
-  if(!calc) body = '<div class="empty-note">VCの出荷指示のCSVがまだ取り込まれていません。「📥 データ更新」で取り込んでください。</div>';
+  if(!calc) body = '<div class="empty-note">VCの出荷指示のCSVがまだ取り込まれていません。「管理 → データ取込」で取り込んでください。</div>';
   else if(tab==='dash') body = renderVcAllocDash(calc);
   else if(tab==='dest') body = renderVcAllocDests(calc);
   else body = renderVcAllocTable(calc, tab);
   return '<div class="mgr-wrap shukei-wrap"><div class="panel">'+
-    '<div class="panel-title no-print">📦 VC引き当て</div>'+
+    '<div class="panel-title no-print">VC引当</div>'+
     '<div class="vc-tabs no-print">'+tabs+'</div>'+
     '<div class="no-print">'+status+warn+'</div>'+
     (state.vcAllocMsg ? '<div class="vc-import-status no-print" style="white-space:pre-line;">'+state.vcAllocMsg+'</div>' : '')+
@@ -9071,7 +9122,7 @@ function renderVcAllocDestEditor(d, calc){
   var unk = calc ? Object.keys(calc.unknownDests) : [];
   var codes = Object.keys(groups).sort();
   return '<div class="ll-form-group">'+
-      '<div class="ll-form-group-title">納品先一覧(納品先コード → 振り分け番号)</div>'+
+      '<div class="ll-form-group-title">納品先コード → 振り分け番号</div>'+
       '<div class="pool-hint" style="margin:0 0 6px;">取引先が「アマゾン VC(DIY)」の行は、納品先にかかわらず振り分け番号1です。'+(d.dests ? '' : 'まだ一度も保存していないため、Excel の納品先一覧(84か所)を使っています。')+'</div>'+
       (unk.length ? '<div class="vc-warning-box">一覧に無い納品先: '+unk.map(function(k){ return '<b>'+esc(k)+'</b>('+esc(calc.unknownDests[k])+')'+(editable ? ' <button type="button" class="vc-manage-toggle-btn" data-vca-quick="'+esc(k)+'" data-vca-quick-g="2" style="min-height:0;padding:2px 8px;">2にする</button><button type="button" class="vc-manage-toggle-btn" data-vca-quick="'+esc(k)+'" data-vca-quick-g="3" style="min-height:0;padding:2px 8px;">3にする</button>' : ''); }).join('<br>')+'</div>' : '')+
       (editable ? '<div style="display:flex;gap:8px;align-items:center;margin:8px 0;flex-wrap:wrap;">'+
@@ -9242,13 +9293,17 @@ async function importSharedDataFiles(files){
   return msgs;
 }
 function renderDataHub(){
+  ensureManagerSessionChecked();
+  if(!hasManagerSession()){
+    return renderManagerLoginForm('データ取込', '管理者アカウントでログインしてください。');
+  }
   if(!state.vcAllocData){
     if(!state.vcAllocLoading){
       state.vcAllocLoading = true;
       loadVcAllocData().then(function(d){ state.vcAllocData = d; state.vcAllocLoading = false; render(); })
         .catch(function(){ state.vcAllocLoading = false; });
     }
-    return '<div class="mgr-wrap"><div class="panel"><div class="panel-title">📥 データ更新</div><div class="pool-hint">読み込み中…</div></div></div>';
+    return '<div class="panel" style="margin-top:14px;"><div class="panel-title">在庫・VCの出荷指示</div><div class="pool-hint">読み込み中…</div></div>';
   }
   var d = state.vcAllocData;
   var editable = !isReadOnlyAccount();
@@ -9266,10 +9321,9 @@ function renderDataHub(){
   var lz = st.logizard, order = d.order;
   var lzOld = lz && lz.products && Object.keys(lz.products).slice(0,50).some(function(c){ var b = lz.products[c].blocks; return Object.keys(b).some(function(k){ return !b[k].locAlloc; }); });
   var calc = order && order.lines ? computeVcAlloc(order, d.dests, st, state.shukeiPm) : null;
-  return '<div class="mgr-wrap"><div class="panel">'+
-    '<div class="panel-title">📥 データ更新</div>'+
-    '<div class="pool-hint" style="margin:0 0 10px;">集計表・VC引き当てで使う共有データの更新をまとめた画面です。登録したデータはロジリンクを使う全員で共有され、前のデータは新しいデータに置き換わります。'+
-      '作業の件数のCSV取込は、これまでどおり管理者画面の「CSV取込」で行います。</div>'+
+  return '<div class="panel" style="margin-top:14px;">'+
+    '<div class="panel-title">在庫・VCの出荷指示</div>'+
+    '<div class="pool-hint" style="margin:0 0 10px;">集計表・VC引当で使うデータです。取り込むと前のデータと置き換わります。</div>'+
     (state.dataHubMsg ? '<div class="vc-import-status" style="white-space:pre-line;">'+esc(state.dataHubMsg)+'</div>' : '')+
     (editable ? '<div class="ll-form-group shukei-drop" data-hub-drop="1" style="margin-bottom:14px;">'+
       '<div class="ll-form-group-title">CSVファイルの取り込み(まとめてOK)</div>'+
@@ -9288,10 +9342,10 @@ function renderDataHub(){
         '<tr><td><b>納品先一覧</b></td><td>'+(d.dests && d.dests.updatedAt ? esc(fmtDateTime(d.dests.updatedAt))+'に変更' : '初期値(Excel の一覧)')+'</td><td>'+formatNum(Object.keys(vcAllocDestGroups(d.dests)).length)+'か所</td><td class="sk-minor">VC引き当て(振り分け番号)</td></tr>'+
       '</tbody></table></div>'+
     '</div>'+
-    renderVcAllocDestEditor(d, calc)+
-  '</div></div>';
+  '</div>';
 }
 function bindDataHub(){
+  if(!hasManagerSession()){ bindManagerLoginForm(); return; }
   var rl = document.getElementById('hubReload');
   if(rl) rl.addEventListener('click', function(){ state.vcAllocData = null; state.shukeiData = null; state.dataHubMsg = ''; render(); });
   var busy = false;
@@ -9318,8 +9372,6 @@ function bindDataHub(){
       run(e.dataTransfer && e.dataTransfer.files);
     });
   });
-  var d = state.vcAllocData;
-  if(d) bindVcAllocDestEditor(d);
 }
 
 /* ---------- 請求データ(毎月の請求書に貼る表を作る)。以前の Excel「保管料計算」「出庫料計算(生協・生協以外・移動出庫)」をロジリンクに移したもの ----------
@@ -9535,7 +9587,7 @@ function renderBillingWorkSource(b){
 function renderBilling(){
   ensureManagerSessionChecked();
   if(!hasManagerSession()){
-    return renderManagerLoginForm('💴 請求データ', '毎月の請求書に貼る保管料・入庫料・出庫料・諸作業料の表を作ります。管理者アカウントでのログインが必要です。');
+    return renderManagerLoginForm('請求', '管理者アカウントでログインしてください。');
   }
   var b = state.billing || (state.billing = { files:{ stock:{} }, fileNames:{}, msg:'', tab:'summary', withHead:false });
   var f = b.files;
@@ -9590,7 +9642,7 @@ function renderBilling(){
     body = '<div class="vc-tabs" style="margin-top:12px;">'+tabs+'</div>'+warn+body;
   }
   return '<div class="mgr-wrap"><div class="panel">'+
-    '<div class="panel-title">💴 請求データ</div>'+
+    '<div class="panel-title">請求データ</div>'+
     '<div class="pool-hint" style="margin:0 0 10px;">弥生販売のCSVから、請求書(「2026.8請求」など)の保管料・入庫料・生協出庫・生協以外・移動出庫・明細1の表と、請求書鑑の金額を作ります。表はコピーして請求の Excel に貼り付けてください。'+
       '入数・才数は kintone の商品台帳を使います。取り込んだCSVはこの画面で計算するだけで、保存しません(画面を閉じたら、もう一度取り込んでください)。</div>'+
     (b.msg ? '<div class="vc-import-status" style="white-space:pre-line;">'+esc(b.msg)+'</div>' : '')+
@@ -9783,14 +9835,19 @@ async function ensureWorkReportRange(from, to){
   cache.ranges.push([from, to]);
 }
 async function loadWorkReportMapping(){
+  var seq = state.workReportMappingSeq || 0;
   var m = await loadKeyJson(WORK_REPORT_MAPPING_KEY, function(){ return {}; });
+  // 読み込み中にこの画面で対応表を保存していたら、古い読み込み結果で上書きしない
+  if((state.workReportMappingSeq || 0)!==seq) return state.workReportMapping;
   state.workReportMapping = isUnverified(m) ? (state.workReportMapping || {}) : (m || {});
   return state.workReportMapping;
 }
 /* 作業単価マスタの項目(recordId → { workName, unitPrice })。収支(fetchFinancialData)・設定画面のどちらかで読み込んだもの */
 function wrPriceList(){
   var wp = state.workPriceMaster;
-  return (wp && wp.ok && wp.prices) ? wp.prices : (state.workPriceList || []);
+  var list = (wp && wp.ok && wp.prices && wp.prices.length) ? wp.prices : ((state.workPriceList && state.workPriceList.length) ? state.workPriceList : null);
+  if(list) state.workPriceListCache = list;
+  return list || state.workPriceListCache || [];
 }
 function wrPriceById(rid){
   return wrPriceList().filter(function(p){ return p.recordId===String(rid); })[0] || null;
@@ -9874,31 +9931,30 @@ function renderWorkReportPanel(){
     var p = selP ? wrPriceById(selP) : null;
     return '<tr><td><b>'+esc(n)+'</b></td><td class="num">'+formatNum(counts[n]||0)+'</td>'+
       '<td><select data-wr-price="'+esc(n)+'" style="max-width:300px;"><option value="">(単価なし・売上に入れない)</option>'+
+        (selP && !p ? '<option value="'+esc(selP)+'" selected>(作業単価マスタ レコード'+esc(selP)+')</option>' : '')+
         prices.map(function(x){ return '<option value="'+esc(x.recordId)+'"'+(x.recordId===selP?' selected':'')+'>'+esc(x.workName)+'('+esc(formatWorkPrice(x.unitPrice))+')</option>'; }).join('')+
       '</select>'+(sugP ? ' <span class="vca-site is-split">候補</span>' : '')+'</td>'+
       '<td class="num">'+(p ? esc(formatWorkPrice(p.unitPrice)) : '―')+'</td>'+
       '<td><select data-wr-task="'+esc(n)+'" style="max-width:220px;"><option value="">(紐付けない)</option>'+
+        (selT && tasks.indexOf(selT)===-1 ? '<option value="'+esc(selT)+'" selected>'+esc(selT)+'</option>' : '')+
         tasks.map(function(t){ return '<option value="'+esc(t)+'"'+(t===selT?' selected':'')+'>'+esc(t)+'</option>'; }).join('')+
       '</select>'+(sugT ? ' <span class="vca-site is-split">候補</span>' : '')+'</td></tr>';
-  }).join('') || '<tr><td colspan="5" class="empty-note">まだ作業日報がありません。上の「kintoneから作業日報を取得」を押してください。</td></tr>';
+  }).join('') || '<tr><td colspan="5" class="empty-note">まだ作業日報がありません(「管理 → データ取込」で取得してください)。</td></tr>';
   return '<div class="panel" id="workReportPanel" style="margin-top:16px;">'+
-    '<div class="panel-title">📝 作業日報(kintone 作業日報アプリ)</div>'+
-    '<div class="pool-hint" style="margin-bottom:12px;">kintoneの作業日報アプリ(アプリID 396)の、日報の中の1行(作業内容・得意先・数量・備考)を取り込みます。取り込んだ日報は、下の対応表で決めた単価で、日報の日付の収支(売上)に入り、紐付けたロジリンクの作業の売上になります。請求データの明細1も作れます。APIトークンはSupabase側に登録し、ここには入力しません。</div>'+
-    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'+
-      '<input type="date" id="wrFrom" value="'+esc(f.from)+'"> 〜 <input type="date" id="wrTo" value="'+esc(f.to)+'">'+
-      '<button type="button" class="add-btn" id="wrSyncBtn"'+(syncing?' disabled':'')+'>🔄 kintoneから作業日報を取得</button>'+
-      '<span class="pool-hint" style="margin:0;">最終同期: '+(st && st.syncedAt ? esc(fmtDateTime(st.syncedAt))+'('+esc(st.from)+'〜'+esc(st.to)+')' : '―')+'</span>'+
-    '</div>'+
+    '<div class="panel-title">作業日報の対応表(kintone)</div>'+
+    '<div class="pool-hint" style="margin-bottom:8px;">日報の作業内容ごとに単価とロジリンクの作業を決めると、収支の売上と請求の明細1に使われます。</div>'+
+    '<div class="pool-hint" style="margin:0;">最終同期: '+(st && st.syncedAt ? esc(fmtDateTime(st.syncedAt))+'('+esc(st.from)+'〜'+esc(st.to)+')' : '―')+' ・ 取得は「管理 → データ取込」で行います。</div>'+
     '<div style="margin-top:8px;">'+msg+'</div>'+
     (cache && cache.error ? '<div class="vc-warning-box">'+esc(cache.error)+'</div>' : '')+
     '<div class="ll-form-group-title" style="margin-top:14px;">作業内容の対応表(直近120日に出てきた作業内容)</div>'+
     '<div class="pool-hint" style="margin:0 0 6px;">日報の作業内容ごとに、作業単価マスタの項目(単価)と、ロジリンクの作業を選んでください。選ぶとすぐ保存されます。名前の似たものを「候補」として選んであります(まだ保存されていません)。'+
-      (prices.length ? '' : ' 作業単価マスタが読み込まれていません(上の「作業単価マスタ」で取得してください)。')+'</div>'+
+      (prices.length ? '' : ' 作業単価が読み込まれていません(「管理 → データ取込」で取得してください)。')+'</div>'+
     (pending ? '<button type="button" class="vc-manage-toggle-btn" id="wrSaveSuggest" style="margin-bottom:8px;">候補をまとめて保存('+pending+'件)</button>' : '')+
     '<div style="overflow-x:auto;max-height:480px;overflow-y:auto;" data-keep-scroll="wrMapTable"><table class="report-table" style="font-size:12.5px;"><thead><tr><th>日報の作業内容</th><th class="num">行数</th><th>作業単価マスタの項目</th><th class="num">単価</th><th>ロジリンクの作業</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div>'+
   '</div>';
 }
 async function saveWorkReportMappingEntry(name, patch){
+  state.workReportMappingSeq = (state.workReportMappingSeq || 0) + 1; // 保存中に始まった読み込みの結果も使わない
   var m = await loadKeyJson(WORK_REPORT_MAPPING_KEY, function(){ return {}; });
   if(isUnverified(m)){ showToast('対応表を読み込めなかったため、保存しませんでした'); return false; }
   Object.keys(patch).forEach(function(n){
@@ -9909,7 +9965,9 @@ async function saveWorkReportMappingEntry(name, patch){
   });
   var ok = await persistKey(WORK_REPORT_MAPPING_KEY, m);
   if(ok){
+    state.workReportMappingSeq = (state.workReportMappingSeq || 0) + 1;
     state.workReportMapping = m;
+    showToast('対応表を保存しました');
     await appendAuditLog({ action:'作業日報の対応表を変更', target: Object.keys(patch).join('・'), before:null, after: Object.keys(patch).map(function(n){ var p = patch[n]; return (p.priceRecordId!==undefined ? '単価:'+((wrPriceById(p.priceRecordId)||{}).workName||'なし') : '')+(p.taskName!==undefined ? ' 作業:'+(p.taskName||'なし') : ''); }).join(' / ') });
   }else showToast('保存できませんでした');
   return ok;
@@ -10066,6 +10124,9 @@ function render(){
     syncViewToUrl();
     return;
   }
+  // データ更新・請求データは、管理の中のタブに移した(以前のアドレス・ボタンから来たときはそのタブを開く)
+  if(state.role==='dataHub'){ state.role = 'adminHub'; state.adminHubTab = 'data'; }
+  if(state.role==='billing'){ state.role = 'adminHub'; state.adminHubTab = 'billing'; }
   var html = '';
   if(state.role !== 'monitor'){
     html += renderTopbar();
@@ -10099,7 +10160,7 @@ function render(){
   if(state.role==='dataHub') bindDataHub();
   if(state.role==='billing') bindBilling();
   document.querySelectorAll('[data-go-datahub]').forEach(function(el){
-    el.addEventListener('click', function(){ state.role = 'dataHub'; state.dataHubMsg = ''; state.vcAllocData = null; render(); });
+    el.addEventListener('click', function(){ state.role = 'adminHub'; state.adminHubTab = 'data'; state.dataHubMsg = ''; state.vcAllocData = null; render(); });
   });
   if(state.modal) bindModal();
   var instrClose = document.getElementById('instrAlertClose');
@@ -10166,7 +10227,7 @@ function renderGateDataStatus(){
     }).catch(function(){ state.gateStatusLoading = false; state.gateDataStatusAt = Date.now(); });
   }
   var st = state.gateDataStatus;
-  if(!st) return '<div class="gate-status"><span class="gate-status-title">🗂 データの更新状況</span><span class="sk-minor">読み込み中…</span></div>';
+  if(!st) return '<div class="gate-status"><span class="gate-status-title">データの更新状況</span><span class="sk-minor">読み込み中…</span></div>';
   var today = todayStr();
   function item(label, x, daily){
     var fresh = x && localDateOfIso(x.at)===today;
@@ -10176,7 +10237,7 @@ function renderGateDataStatus(){
       (daily && x && !fresh ? ' <span class="gate-status-flag">今日まだ</span>' : '')+'</span>';
   }
   return '<div class="gate-status">'+
-    '<span class="gate-status-title">🗂 データの更新状況</span>'+
+    '<span class="gate-status-title">データの更新状況</span>'+
     '<div class="gate-status-group"><span class="gate-status-sub">共有データ</span>'+
       GATE_STATUS_SOURCES.map(function(src){ return item(src.label, st[src.name], true); }).join('')+
     '</div>'+
@@ -10185,70 +10246,44 @@ function renderGateDataStatus(){
       (hasManagerSession() ? item('作業単価', st.kintonePrice, false) : '')+
       item('作業日報', st.kintoneReport, false)+
     '</div>'+
-    '<button type="button" class="vc-manage-toggle-btn" id="gateGoDataHub" style="min-height:0;padding:3px 10px;">📥 データ更新を開く</button>'+
+    (hasManagerSession() ? '<button type="button" class="vc-manage-toggle-btn" id="gateGoDataHub" style="min-height:0;padding:3px 10px;">データ取込を開く</button>' : '')+
   '</div>';
 }
 /* ---------- GATE ---------- */
+/* トップページのカード。adminTab を渡すと、管理の画面のそのタブを開く */
+function gateCard(role, bg, fg, icon, title, desc, locked, adminTab){
+  return '<button class="gate-card" data-role="'+role+'"'+(adminTab ? ' data-admin-tab="'+adminTab+'"' : '')+'>'+
+    (locked ? '<div class="gate-lock-badge" title="管理者ログインが必要です">&#128274;</div>' : '')+
+    '<div class="gate-icon" style="background:'+bg+';color:'+fg+';">'+icon+'</div>'+
+    '<div class="gate-card-title">'+esc(title)+'</div>'+
+    '<div class="gate-card-desc">'+esc(desc)+'</div>'+
+  '</button>';
+}
 function renderGate(){
   return ''+
   '<div class="gate">'+
     '<div class="gate-eyebrow">Warehouse Dispatch Board</div>'+
     '<h1 class="gate-title">LOGI LINK</h1>'+
-    '<p class="gate-sub">このアプリのデータは全員で共有されます。使う画面の役割を選んでください。</p>'+
+    '<p class="gate-sub">使う画面を選んでください。</p>'+
     renderGateDataStatus()+
+    '<div class="gate-section-title">現場</div>'+
     '<div class="gate-grid">'+
       '<button class="gate-card" data-role="input"'+readOnlyBlockedAttrs('input')+(isRoleBlockedForAccount('input')?' title="'+READONLY_BLOCKED_TITLE+'"':'')+'>'+
         '<div class="gate-icon" style="background:#FFFAEB;color:#4338CA;">&#9997;</div>'+
         '<div class="gate-card-title">作業記録</div>'+
-        '<div class="gate-card-desc">'+(isRoleBlockedForAccount('input') ? '閲覧専用アカウントでは使用できません' : 'タップだけで作業の開始・切り替え・終了を記録(VCはケース数も入力)')+'</div>'+
+        '<div class="gate-card-desc">'+(isRoleBlockedForAccount('input') ? '閲覧専用アカウントでは使えません' : '作業の開始・切り替え・終了')+'</div>'+
       '</button>'+
-      '<button class="gate-card" data-role="report">'+
-        '<div class="gate-icon" style="background:#EEF0FB;color:#4C5FD5;">&#128202;</div>'+
-        '<div class="gate-card-title">集計</div>'+
-        '<div class="gate-card-desc">日別・期間別にスタッフ/作業ごとの実績を集計</div>'+
-      '</button>'+
-      '<button class="gate-card" data-role="monitor">'+
-        '<div class="gate-icon" style="background:#111827;color:#F2A93B;">&#128225;</div>'+
-        '<div class="gate-card-title">モニター表示</div>'+
-        '<div class="gate-card-desc">共有モニターに稼働状況をリアルタイム表示</div>'+
-      '</button>'+
-      '<button class="gate-card" data-role="calendar">'+
-        '<div class="gate-icon" style="background:#EFF8FF;color:#175CD3;">&#128197;</div>'+
-        '<div class="gate-card-title">カレンダー</div>'+
-        '<div class="gate-card-desc">'+(isReadOnlyAccount() ? '登録済みの作業・出勤予定を月ごとに確認(閲覧のみ)' : '登録済みの作業・出勤予定を月ごとに確認して編集')+'</div>'+
-      '</button>'+
-      '<button class="gate-card" data-role="shukei">'+
-        '<div class="gate-icon" style="background:#ECFDF3;color:#027A48;">&#129534;</div>'+
-        '<div class="gate-card-title">集計表(高屋・丹南)</div>'+
-        '<div class="gate-card-desc">VC番号・品番・数量から入数・ケース・棚番・在庫・才数を出して印刷。弥生とロジザードの在庫差異</div>'+
-      '</button>'+
-      '<button class="gate-card" data-role="vcAlloc">'+
-        '<div class="gate-icon" style="background:#FFF4ED;color:#C4320A;">&#128230;</div>'+
-        '<div class="gate-card-title">VC引き当て</div>'+
-        '<div class="gate-card-desc">Amazon VCの出荷指示から、品番ごとの数量・ケース・振り分け番号と、高屋・丹南どちらから出すかを出して集計表へ送る</div>'+
-      '</button>'+
-      '<button class="gate-card" data-role="dataHub">'+
-        '<div class="gate-icon" style="background:#F0F9FF;color:#026AA2;">&#128229;</div>'+
-        '<div class="gate-card-title">データ更新</div>'+
-        '<div class="gate-card-desc">ロジザードの在庫・弥生の在庫・VCの出荷指示のCSVをまとめて取り込む。納品先一覧の編集。各データの最終更新日時</div>'+
-      '</button>'+
-      '<button class="gate-card" data-role="billing">'+
-        '<div class="gate-icon" style="background:#FDF2FA;color:#C11574;">&#128180;</div>'+
-        '<div class="gate-card-title">請求データ</div>'+
-        '<div class="gate-card-desc">弥生販売のCSVから、毎月の請求書に貼る保管料・入庫料・出庫料・諸作業料の表と請求書鑑の金額を作る(管理者)</div>'+
-      '</button>'+
-      '<button class="gate-card" data-role="adminHub">'+
-        '<div class="gate-lock-badge" title="管理者ログインが必要です">&#128274;</div>'+
-        '<div class="gate-icon" style="background:#EFEBE2;color:#1B2333;">&#128100;</div>'+
-        '<div class="gate-card-title">管理者</div>'+
-        '<div class="gate-card-desc">今日の状況・人員配置・生産性・収支分析(管理者ログインが必要です)</div>'+
-      '</button>'+
-      '<button class="gate-card" data-role="settingsHub">'+
-        '<div class="gate-lock-badge" title="管理者ログインが必要です">&#128274;</div>'+
-        '<div class="gate-icon" style="background:#F4EEE4;color:#8A6A3B;">&#9881;</div>'+
-        '<div class="gate-card-title">設定</div>'+
-        '<div class="gate-card-desc">作業設定・勤務時間設定・マスター設定・操作履歴など(管理者ログインが必要です)</div>'+
-      '</button>'+
+      gateCard('report', '#EEF0FB', '#4C5FD5', '&#128202;', '集計', '日別・期間の実績', false)+
+      gateCard('monitor', '#111827', '#F2A93B', '&#128225;', 'モニター', '稼働状況を大きく表示', false)+
+      gateCard('calendar', '#EFF8FF', '#175CD3', '&#128197;', 'カレンダー', isReadOnlyAccount() ? '作業・出勤予定を見る' : '作業・出勤予定を見る・直す', false)+
+      gateCard('shukei', '#ECFDF3', '#027A48', '&#129534;', '集計表', '高屋・丹南のピッキングリストと在庫差異', false)+
+      gateCard('vcAlloc', '#FFF4ED', '#C4320A', '&#128230;', 'VC引当', 'VCの出荷指示から倉庫と振り分け番号を決める', false)+
+    '</div>'+
+    '<div class="gate-section-title">管理 <span>ログインが必要です</span></div>'+
+    '<div class="gate-grid">'+
+      gateCard('adminHub', '#F0F9FF', '#026AA2', '&#128229;', '作業量CSV取込', '出荷のCSVを取り込む', true, 'data')+
+      gateCard('adminHub', '#EFEBE2', '#1B2333', '&#128100;', '管理', '今日・人員配置・実績・生産性・収支・請求・データ取込', true)+
+      gateCard('settingsHub', '#F4EEE4', '#8A6A3B', '&#9881;', '設定', 'スタッフ・作業・得意先と単価・勤務時間など', true)+
     '</div>'+
     '<button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
     renderGateAccountLine()+
@@ -10294,13 +10329,15 @@ function bindGate(){
       var role = btn.getAttribute('data-role');
       if(isRoleBlockedForAccount(role)) return; // 閲覧専用アカウントでは開かない
       state.role = role;
+      var adminTab = btn.getAttribute('data-admin-tab');
+      if(adminTab) state.adminHubTab = adminTab;
       render();
       startPolling();
       if(role==='input' || role==='adminHub') requestFreshTodayData(); // 本日の作業系の画面は最新データで再計算する
     });
   });
   var hubBtn = document.getElementById('gateGoDataHub');
-  if(hubBtn) hubBtn.addEventListener('click', function(){ state.role = 'dataHub'; state.dataHubMsg = ''; state.vcAllocData = null; render(); startPolling(); });
+  if(hubBtn) hubBtn.addEventListener('click', function(){ state.role = 'adminHub'; state.adminHubTab = 'data'; state.dataHubMsg = ''; state.vcAllocData = null; render(); startPolling(); });
   var openBtn = document.getElementById('changelogOpenBtn');
   if(openBtn) openBtn.addEventListener('click', function(){
     state.showChangelog = true;
@@ -10336,18 +10373,16 @@ function bindChangelogModal(){
 
 /* ---------- TOPBAR ---------- */
 var COMMON_NAV_ITEMS = [
-  { role:'input', label:'作業記録', icon:'📋' },
-  { role:'report', label:'集計', icon:'📊' },
-  { role:'monitor', label:'モニター', icon:'🖥' },
-  { role:'calendar', label:'カレンダー', icon:'📅' },
-  { role:'shukei', label:'集計表', icon:'🧾' },
-  { role:'vcAlloc', label:'VC引当', icon:'📦' },
-  { role:'dataHub', label:'データ更新', icon:'📥' }
+  { role:'input', label:'作業記録' },
+  { role:'report', label:'集計' },
+  { role:'monitor', label:'モニター' },
+  { role:'calendar', label:'カレンダー' },
+  { role:'shukei', label:'集計表' },
+  { role:'vcAlloc', label:'VC引当' }
 ];
 var ADMIN_NAV_ITEMS = [
-  { role:'adminHub', label:'管理者', icon:'👔' },
-  { role:'billing', label:'請求データ', icon:'💴' },
-  { role:'settingsHub', label:'設定', icon:'⚙️' }
+  { role:'adminHub', label:'管理' },
+  { role:'settingsHub', label:'設定' }
 ];
 function renderTopbar(){
   var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'集計表(高屋・丹南)'}[state.role];
@@ -10359,10 +10394,10 @@ function renderTopbar(){
   var navItems = COMMON_NAV_ITEMS.slice();
   if(hasManagerSession()) navItems = navItems.concat(ADMIN_NAV_ITEMS);
   var navHtml = '<div class="topbar-nav">'+
-    '<button type="button" class="topbar-nav-item'+(!state.role?' active':'')+'" data-nav-role="">🏠 ホーム</button>'+
+    '<button type="button" class="topbar-nav-item'+(!state.role?' active':'')+'" data-nav-role="">ホーム</button>'+
     navItems.map(function(item){
       return '<button type="button" class="topbar-nav-item'+(state.role===item.role?' active':'')+'" data-nav-role="'+item.role+'"'+
-        (isRoleBlockedForAccount(item.role) ? readOnlyBlockedAttrs(item.role)+' title="'+READONLY_BLOCKED_TITLE+'"' : '')+'>'+item.icon+' '+item.label+'</button>';
+        (isRoleBlockedForAccount(item.role) ? readOnlyBlockedAttrs(item.role)+' title="'+READONLY_BLOCKED_TITLE+'"' : '')+'>'+(item.icon ? item.icon+' ' : '')+item.label+'</button>';
     }).join('')+
   '</div>';
   return ''+
@@ -10492,22 +10527,23 @@ function renderDailyChecklist(){
   '</div>';
 }
 var ADMIN_HUB_TABS = [
-  { key:'today', label:'今日の状況', icon:'📋' },
-  { key:'csvImport', label:'CSV取込', icon:'📥' },
-  { key:'logMgmt', label:'実績管理', icon:'🗓' },
-  { key:'staffing', label:'人員配置', icon:'👥' },
-  { key:'productivity', label:'生産性', icon:'📈' },
-  { key:'financial', label:'収支・分析', icon:'💰' }
+  { key:'today', label:'今日' },
+  { key:'staffing', label:'人員配置' },
+  { key:'logMgmt', label:'実績' },
+  { key:'productivity', label:'生産性' },
+  { key:'financial', label:'収支' },
+  { key:'billing', label:'請求' },
+  { key:'data', label:'データ取込' }
 ];
 function renderAdminHub(){
   ensureManagerSessionChecked();
   if(!hasManagerSession()){
-    return renderManagerLoginForm('👔 管理者', 'この画面は出退勤・作業割り当て・人員配置・生産性・収支など、管理業務全般を扱います。閲覧・操作には管理者アカウントでのログインが必要です。');
+    return renderManagerLoginForm('管理', '管理者アカウントでログインしてください。');
   }
-  if(!state.adminHubTab) state.adminHubTab = 'today';
+  if(!state.adminHubTab || state.adminHubTab==='csvImport') state.adminHubTab = state.adminHubTab==='csvImport' ? 'data' : 'today';
   var tabsHtml = '<div class="vc-tabs" style="margin:0 0 14px;">'+
     ADMIN_HUB_TABS.map(function(t){
-      return '<button type="button" class="vc-tab-btn'+(state.adminHubTab===t.key?' active':'')+'" data-admin-hub-tab="'+t.key+'">'+t.icon+' '+t.label+'</button>';
+      return '<button type="button" class="vc-tab-btn'+(state.adminHubTab===t.key?' active':'')+'" data-admin-hub-tab="'+t.key+'">'+t.label+'</button>';
     }).join('')+
   '</div>';
   var body;
@@ -10515,10 +10551,80 @@ function renderAdminHub(){
   else if(state.adminHubTab==='productivity') body = renderProductivityTab();
   else if(state.adminHubTab==='financial') body = renderFinancial();
   else if(state.adminHubTab==='logMgmt') body = renderLogManagementTab();
-  else if(state.adminHubTab==='csvImport') body = '<div class="mgr-wrap">'+renderCsvImportPanel()+'</div>';
+  else if(state.adminHubTab==='billing') body = renderBilling();
+  else if(state.adminHubTab==='data') body = '<div class="mgr-wrap">'+renderCsvImportPanel()+renderDataHub()+renderKintoneSyncPanel()+'</div>';
   else body = renderManager();
   // 各画面は自前の外枠(mgr-wrap等)を持っているため、タブバーをその内側の先頭に差し込む
   return body.replace(/^(<div[^>]*>)/, '$1'+tabsHtml);
+}
+/* ---------- データ取込の中の「kintoneの同期」(商品台帳・作業単価・作業日報) ---------- */
+function renderKintoneSyncPanel(){
+  if(!state.kSyncLoaded && !state.kSyncLoading){
+    state.kSyncLoading = true;
+    Promise.all([loadKintoneProductSettings(), loadKintoneSyncStatus(), fetchWorkPriceMaster(), loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; })])
+      .then(function(r){ state.kintoneProductSettings = r[0]; state.kintoneSyncStatus = r[1]; state.workPriceMaster = r[2]; state.workReportStatus = r[3]; })
+      .catch(function(){})
+      .then(function(){ state.kSyncLoaded = true; state.kSyncLoading = false; render(); });
+  }
+  var busy = state.kSyncBusy || '';
+  var ps = state.kintoneSyncStatus, wp = state.workPriceMaster, ws = state.workReportStatus;
+  var f = state.workReportForm || (state.workReportForm = { from: wrDateAdd(todayStr().slice(0,8)+'01', -1).slice(0,8)+'01', to: todayStr() });
+  function row(label, at, extra, btnId, more){
+    return '<tr><td><b>'+esc(label)+'</b></td><td>'+(at ? esc(fmtDateTime(at)) : '―')+(extra ? '<span class="sk-minor"> '+esc(extra)+'</span>' : '')+'</td>'+
+      '<td>'+(more||'')+'<button type="button" class="vc-manage-toggle-btn" id="'+btnId+'"'+(busy?' disabled':'')+'>'+(busy===btnId ? '取得中…' : 'kintoneから取得')+'</button></td></tr>';
+  }
+  return '<div class="panel" style="margin-top:14px;">'+
+    '<div class="panel-title">kintoneの同期</div>'+
+    (state.kSyncMsg ? '<div class="vc-import-status" style="white-space:pre-line;">'+esc(state.kSyncMsg)+'</div>' : '')+
+    '<table class="report-table"><thead><tr><th>データ</th><th>最終同期</th><th></th></tr></thead><tbody>'+
+      row('商品台帳(入数・才数)', ps && ps.fetchedAt, ps ? formatNum(ps.savedCount||0)+'件' : '', 'kSyncProduct')+
+      row('作業単価', wp && wp.lastSyncedAt, wp && wp.prices ? formatNum(wp.prices.length)+'件' : '', 'kSyncPrice')+
+      row('作業日報', ws && ws.syncedAt, ws ? (ws.from||'')+'〜'+(ws.to||'') : '', 'kSyncReport',
+        '<input type="date" id="kSyncFrom" value="'+esc(f.from)+'"> 〜 <input type="date" id="kSyncTo" value="'+esc(f.to)+'"> ')+
+    '</tbody></table>'+
+    '<div class="pool-hint" style="margin-top:6px;">対応表(作業単価の得意先・計算単位、作業日報の対応表)は「設定 → 得意先・単価」で決めます。</div>'+
+  '</div>';
+}
+function bindKintoneSyncPanel(){
+  var fromEl = document.getElementById('kSyncFrom'), toEl = document.getElementById('kSyncTo');
+  if(fromEl) fromEl.addEventListener('change', function(){ state.workReportForm.from = fromEl.value; });
+  if(toEl) toEl.addEventListener('change', function(){ state.workReportForm.to = toEl.value; });
+  async function run(id, fn){
+    if(state.kSyncBusy) return;
+    state.kSyncBusy = id; state.kSyncMsg = ''; render();
+    try{ state.kSyncMsg = await fn(); }catch(e){ state.kSyncMsg = '⚠️ 取得できませんでした'; }
+    state.kSyncBusy = ''; state.gateDataStatus = null; render();
+  }
+  var p = document.getElementById('kSyncProduct');
+  if(p) p.addEventListener('click', function(){ run('kSyncProduct', async function(){
+    var st = state.kintoneProductSettings || await loadKintoneProductSettings();
+    if(!st || !st.kintoneAppId) return '⚠️ 商品台帳のkintoneアプリIDが未設定です(設定 → システム)。';
+    var r = await syncProductMasterFromKintone(st);
+    if(!r.ok) return '⚠️ 商品台帳: '+r.error;
+    state.kintoneSyncStatus = r.status;
+    await appendAuditLog({ action:'kintone商品マスタ同期', target:'product_master', before:null, after: '取得'+r.status.fetchedCount+'件・保存'+r.status.savedCount+'件' });
+    return '✅ 商品台帳を取得しました('+formatNum(r.status.savedCount)+'件)';
+  }); });
+  var w = document.getElementById('kSyncPrice');
+  if(w) w.addEventListener('click', function(){ run('kSyncPrice', async function(){
+    var r = await syncWorkPriceMasterFromKintone();
+    if(!r.ok) return '⚠️ 作業単価: '+r.error;
+    await appendAuditLog({ action:'kintone作業単価マスタ同期', target:'work_price_master', before:null, after: '取得'+r.result.fetchedCount+'件・保存'+r.result.savedCount+'件・削除'+r.result.deletedCount+'件' });
+    state.workPriceMaster = await fetchWorkPriceMaster();
+    state.financialPriceModel = null; // 収支は次に開いたときに読み直す
+    return '✅ 作業単価を取得しました('+formatNum(r.result.savedCount)+'件)';
+  }); });
+  var rp = document.getElementById('kSyncReport');
+  if(rp) rp.addEventListener('click', function(){ run('kSyncReport', async function(){
+    var f = state.workReportForm;
+    if(!f.from || !f.to || f.from>f.to) return '⚠️ 作業日報の期間を正しく選んでください';
+    var r = await syncWorkReportFromKintone(f.from, f.to);
+    if(!r.ok) return '⚠️ 作業日報: '+r.error;
+    state.workReportStatus = r.result;
+    state.financialPriceModel = null;
+    await appendAuditLog({ action:'kintoneから作業日報を取得', target: f.from+'〜'+f.to, before:null, after: r.result.rowCount+'行' });
+    return '✅ 作業日報を取得しました('+esc(f.from)+'〜'+esc(f.to)+'・'+formatNum(r.result.rowCount)+'行)';
+  }); });
 }
 function bindAdminHub(){
   if(!hasManagerSession()){
@@ -10541,13 +10647,14 @@ function bindAdminHub(){
   else if(state.adminHubTab==='productivity') bindProductivityTab();
   else if(state.adminHubTab==='financial') bindFinancial();
   else if(state.adminHubTab==='logMgmt') bindLogManagementTab();
-  else if(state.adminHubTab==='csvImport') bindCsvImportPanel();
+  else if(state.adminHubTab==='billing') bindBilling();
+  else if(state.adminHubTab==='data'){ bindCsvImportPanel(); bindDataHub(); bindKintoneSyncPanel(); }
   else bindManager();
 }
 function renderKintoneProductSettingsPanel(){
   ensureManagerSessionChecked();
   if(!hasManagerSession()){
-    return renderManagerLoginForm('🔌 kintone連携設定', 'この画面は商品マスタの取得設定を扱います。閲覧・操作には管理者アカウントでのログインが必要です。');
+    return renderManagerLoginForm('kintoneの接続', '管理者アカウントでログインしてください。');
   }
   if(state.kintoneProductSettings===null){
     loadKintoneProductSettings().then(function(s){ state.kintoneProductSettings = s; return loadKintoneSyncStatus(); }).then(function(st){ state.kintoneSyncStatus = st; render(); });
@@ -10572,8 +10679,8 @@ function renderKintoneProductSettingsPanel(){
     '</div>';
   }
 
-  return '<div class="mgr-wrap"><div class="panel">'+
-    '<div class="panel-title">🔌 kintone連携設定(商品マスタ)</div>'+
+  return '<div class="panel" style="margin-top:14px;">'+
+    '<div class="panel-title">kintoneの接続(商品台帳)</div>'+
     '<div class="pool-hint" style="margin-bottom:14px;">kintoneの商品マスタを取得するための設定です。APIトークンなどの秘密情報はここには入力しません(Supabase側で安全に管理します)。設定方法は「kintone連携_セットアップ手順」をご覧ください。</div>'+
 
     '<label style="font-size:12px;font-weight:700;display:block;margin-bottom:4px;">Edge Function URL</label>'+
@@ -10595,11 +10702,8 @@ function renderKintoneProductSettingsPanel(){
 
     '<button type="button" class="add-btn" id="kintoneSettingsSaveBtn" style="margin-top:6px;">設定を保存</button>'+
 
-    '<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--paper-line);">'+
-      '<button type="button" class="add-btn" id="kintoneSyncBtn" '+(syncing?'disabled':'')+'>🔄 kintoneから商品マスタを取得</button>'+
-      '<div style="margin-top:10px;">'+statusHtml+'</div>'+
-    '</div>'+
-  '</div>'+renderWorkPriceMasterPanel()+renderWorkReportPanel()+'</div>';
+    '<div class="pool-hint" style="margin-top:12px;">商品台帳の取得は「管理 → データ取込」で行います。</div>'+
+  '</div>';
 }
 /* 単価は小数もあり得るため、formatNum(整数に丸める)ではなくそのまま表示する */
 function formatWorkPrice(n){
@@ -10634,7 +10738,7 @@ function renderWorkPriceMasterPanel(){
   }else if(!wp.ok){
     body = '<div class="vc-warning-box">'+esc(wp.reason)+'</div>';
   }else if(!wp.prices.length){
-    body = '<div class="empty-note">まだ同期されていません。「kintoneから作業単価マスタを取得」を押してください。</div>';
+    body = '<div class="empty-note">まだ取得していません(「管理 → データ取込」で取得してください)。</div>';
   }else{
     var statusCounts = {};
     wp.prices.forEach(function(p){ var k = p.status||'(なし)'; statusCounts[k] = (statusCounts[k]||0)+1; });
@@ -10697,9 +10801,9 @@ function renderWorkPriceMasterPanel(){
       '</tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
   return '<div class="panel" id="workPriceMasterPanel" style="margin-top:16px;">'+
-    '<div class="panel-title">💴 作業単価マスタ(kintone 作業単価アプリ)</div>'+
-    '<div class="pool-hint" style="margin-bottom:12px;">kintoneの作業単価アプリ(アプリID 501)の内容を取り込んで表示します。アプリIDと項目の対応はSupabase側で固定しており、APIトークンなどの秘密情報はここには入力しません。収支・分析の売上は、ここの単価と、項目ごとに設定した得意先・計算単位で計算します(得意先・計算単位が未設定の項目は売上に入りません)。</div>'+
-    '<button type="button" class="add-btn" id="workPriceSyncBtn" '+(syncing?'disabled':'')+'>🔄 kintoneから作業単価マスタを取得</button>'+
+    '<div class="panel-title">作業単価(kintone)</div>'+
+    '<div class="pool-hint" style="margin-bottom:8px;">項目ごとに、当てはめる得意先と計算単位を決めます(決めていない項目は収支の売上に入りません)。</div>'+
+    '<div class="pool-hint" style="margin:0;">kintoneからの取得は「管理 → データ取込」で行います。</div>'+
     '<div style="margin-top:10px;">'+statusHtml+'</div>'+
     '<div style="margin-top:12px;">'+body+'</div>'+
   '</div>';
@@ -10825,7 +10929,24 @@ function bindKintoneProductSettingsPanel(){
       render();
     });
   }
-  bindWorkPriceMasterPanel();
+}
+/* 設定 → 得意先・単価 の中の「納品先一覧」(VC引当の振り分け番号) */
+function renderDestListPanel(){
+  if(!state.vcAllocData){
+    if(!state.vcAllocLoading){
+      state.vcAllocLoading = true;
+      loadVcAllocData().then(function(d){ state.vcAllocData = d; state.vcAllocLoading = false; render(); }).catch(function(){ state.vcAllocLoading = false; });
+    }
+    return '<div class="panel" style="margin-top:16px;"><div class="panel-title">VC引当の納品先一覧</div><div class="pool-hint">読み込み中…</div></div>';
+  }
+  var d = state.vcAllocData;
+  var calc = d.order && d.order.lines ? computeVcAlloc(d.order, d.dests, d.stock, state.shukeiPm) : null;
+  return '<div class="panel" style="margin-top:16px;"><div class="panel-title">VC引当の納品先一覧</div>'+
+    (state.dataHubMsg ? '<div class="vc-import-status">'+esc(state.dataHubMsg)+'</div>' : '')+
+    renderVcAllocDestEditor(d, calc)+'</div>';
+}
+function bindDestListPanel(){
+  if(state.vcAllocData) bindVcAllocDestEditor(state.vcAllocData);
 }
 function renderCustomerMappingPanel(){
   if(state.customerTaskMapping===null){
@@ -10865,8 +10986,8 @@ function renderCustomerMappingPanel(){
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">まだ登録がありません</td></tr>';
 
   return '<div class="panel">'+
-    '<div class="panel-title">🔗 得意先・作業枠マスター</div>'+
-    '<div class="pool-hint" style="margin-bottom:14px;">CSVの「取引先名」から、自動的にどの作業枠に取り込むかを判定するための対応表です。完全一致(全角/半角の違いは吸収)のみで判定し、あいまいな推測は行いません。登録の無い得意先は「未紐付け」として自動取込されません。</div>'+
+    '<div class="panel-title">得意先と作業の対応(作業量CSV)</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">作業量CSVの「取引先名」をどの作業に取り込むかの対応です(名前が完全に一致したものだけ)。</div>'+
     formHtml+
     '<table class="report-table"><thead><tr><th>得意先名</th><th>作業枠</th><th>状態</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>'+
   '</div>';
@@ -11985,16 +12106,16 @@ function renderCsvImportPanel(){
   }).join('') || '<div class="empty-note">削除済みの取込はありません</div>';
 
   var wvHistoryHtml = pastDatesHtml+
-    '<div class="panel-title" style="font-size:15px;margin-top:18px;">📜 取込履歴('+esc(dateLabelFromStr(wvTargetDate))+')</div>'+
+    '<div class="panel-title" style="font-size:15px;margin-top:18px;">取込履歴('+esc(dateLabelFromStr(wvTargetDate))+')</div>'+
     '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>作業</th><th>合計</th><th>明細</th><th>出荷数量</th><th>ケース / バラ</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
     '<details class="vc-manage-details" id="wvDeletedDetails" '+(state.wvDeletedOpen?'open':'')+' style="margin-top:12px;">'+
-      '<summary>🗑 削除済み'+(wvDeletedImports.length?'('+wvDeletedImports.length+'件)':'')+'</summary>'+
+      '<summary>削除済み'+(wvDeletedImports.length?'('+wvDeletedImports.length+'件)':'')+'</summary>'+
       '<div class="vc-slip-list" style="margin-top:8px;">'+wvDeletedHtml+'</div>'+
     '</details>';
 
   workVolumePanel = '<div class="panel" style="margin-top:14px;">'+
-    '<div class="panel-title">📋 作業量CSV取込</div>'+
-    '<div class="pool-hint" style="margin-bottom:14px;">CSVから件数(VCはPO数)・明細数・出荷数量(ピース)を自動集計し、商品台帳の入数からケース・バラも計算します。得意先・作業枠マスターに基づいて自動振り分けします。時間の計測とは別のデータとして扱われ、パートさんへの数字入力は求めません。取込は履歴として積み上がり、既存の取込を上書きすることはありません。</div>'+
+    '<div class="panel-title">作業量CSV取込</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">出荷のCSVから件数・明細数・出荷数量・ケース・バラを数え、得意先ごとに作業へ振り分けます。取込は履歴として残ります。</div>'+
     '<div style="display:flex;gap:10px;">'+
       '<div style="flex:0 1 240px;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">対象日付</label><input type="date" id="autoMapTargetDate" value="'+(state.wvTargetDate||todayStr())+'" style="width:100%;border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
     '</div>'+
@@ -12058,25 +12179,25 @@ function renderSettingsPanels(){
   return { shiftPanel:shiftPanel, breakPanel:breakPanel, achievementPanel:achievementPanel, accountInfoHtml:accountInfoHtml, backupPanel:backupPanel };
 }
 var SETTINGS_HUB_TABS = [
-  { key:'basic', label:'基本設定', icon:'🏠' },
-  { key:'staff', label:'スタッフ設定', icon:'🧑' },
-  { key:'task', label:'作業マスタ', icon:'📦' },
-  { key:'shift', label:'勤務時間設定', icon:'⏰' },
-  { key:'customerMapping', label:'得意先・作業枠マスター', icon:'🔗' },
-  { key:'kintoneProduct', label:'kintone連携設定', icon:'🔌' },
-  { key:'history', label:'操作履歴', icon:'📜' },
-  { key:'system', label:'システム設定', icon:'🔧' }
+  { key:'basic', label:'基本' },
+  { key:'staff', label:'スタッフ' },
+  { key:'task', label:'作業' },
+  { key:'shift', label:'勤務時間' },
+  { key:'master', label:'得意先・単価' },
+  { key:'history', label:'操作履歴' },
+  { key:'system', label:'システム' }
 ];
 function renderSettingsHub(){
   ensureManagerSessionChecked();
   if(!hasManagerSession()){
-    return renderManagerLoginForm('⚙️ 設定', 'この画面はスタッフ設定・作業設定・マスター設定・操作履歴など、システム設定全般を扱います。閲覧・操作には管理者アカウントでのログインが必要です。');
+    return renderManagerLoginForm('設定', '管理者アカウントでログインしてください。');
   }
   if(!state.settingsHubTab) state.settingsHubTab = 'basic';
-  var tabsHtml = '<div class="panel-title" style="font-size:20px;margin-bottom:4px;">⚙️ 設定</div>'+
+  if(state.settingsHubTab==='customerMapping' || state.settingsHubTab==='kintoneProduct') state.settingsHubTab = 'master'; // 以前のタブ
+  var tabsHtml = '<div class="panel-title" style="font-size:20px;margin-bottom:4px;">設定</div>'+
     '<div class="vc-tabs" style="margin:0 0 14px;flex-wrap:wrap;">'+
     SETTINGS_HUB_TABS.map(function(t){
-      return '<button type="button" class="vc-tab-btn'+(state.settingsHubTab===t.key?' active':'')+'" data-settings-hub-tab="'+t.key+'">'+t.icon+' '+t.label+'</button>';
+      return '<button type="button" class="vc-tab-btn'+(state.settingsHubTab===t.key?' active':'')+'" data-settings-hub-tab="'+t.key+'">'+t.label+'</button>';
     }).join('')+
   '</div>';
 
@@ -12085,19 +12206,17 @@ function renderSettingsHub(){
     body = renderRegister();
   }else if(state.settingsHubTab==='history'){
     body = renderHistory();
-  }else if(state.settingsHubTab==='kintoneProduct'){
-    body = renderKintoneProductSettingsPanel();
+  }else if(state.settingsHubTab==='master'){
+    body = '<div class="mgr-wrap">'+renderCustomerMappingPanel()+renderWorkPriceMasterPanel()+renderWorkReportPanel()+renderDestListPanel()+'</div>';
   }else{
     var panels = renderSettingsPanels();
     var content;
     if(state.settingsHubTab==='staff'){
       content = renderStaffSettingsPanel() + renderStaffWagesPanel();
-    }else if(state.settingsHubTab==='customerMapping'){
-      content = renderCustomerMappingPanel();
     }else if(state.settingsHubTab==='shift'){
       content = panels.shiftPanel + panels.breakPanel;
     }else if(state.settingsHubTab==='system'){
-      content = panels.accountInfoHtml + panels.backupPanel;
+      content = panels.accountInfoHtml + panels.backupPanel + renderKintoneProductSettingsPanel();
     }else{ // basic
       content = panels.achievementPanel;
     }
@@ -12119,8 +12238,8 @@ function bindSettingsHub(){
   if(state.settingsHubTab==='task') bindRegister();
   else if(state.settingsHubTab==='history') bindHistory();
   else if(state.settingsHubTab==='staff'){ bindStaffSettingsPanel(); bindStaffWagesPanel(); }
-  else if(state.settingsHubTab==='customerMapping') bindCustomerMappingPanel();
-  else if(state.settingsHubTab==='kintoneProduct') bindKintoneProductSettingsPanel();
+  else if(state.settingsHubTab==='master'){ bindCustomerMappingPanel(); bindWorkPriceMasterPanel(); bindDestListPanel(); }
+  else if(state.settingsHubTab==='system'){ bindSettings(); bindKintoneProductSettingsPanel(); }
   else bindSettings();
 }
 

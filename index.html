@@ -1586,6 +1586,8 @@ var CHANGELOG = [
     '実際にコードを実行するテストで、各画面から他画面へホームを経由せず直接移動できること、管理者専用ナビが未ログイン時は表示されずログアウト後に消えること、そして最も重要な点として「state.roleを不正に管理者画面へ直接切り替えても、未ログインならページの中身(データ)は一切表示されずログインフォームのみが出ること」を確認しました。既存の全回帰テスト(39スイート)にも影響はありません'
   ]},
   { date:'2026-10-03', items:[
+    '【在庫は誰でも見られるように】在庫(在庫の量・ブロック・ロケーション・自動診断・CSV出力)を、管理の中からトップページの「現場」に移し、ログインなしで見られるようにしました(上のメニューにも「在庫」を追加)。容量を変えられるのは、管理者でログインしているときだけです',
+    '【在庫の自動診断】管理 → 在庫の上に「🩺 在庫の自動診断」を付けました(人員配置の自動診断と同じく、AIは使わずルールで判定)。容量に対する使用率(80%・90%)、7日前からの在庫の増減、欠品の心配(在庫が3日分の出荷に足りない商品)、動かない在庫(出荷記録で一度も出荷のない商品と、その才数・保管料の目安)、在庫が多めの商品(180日分より多い)、多くのロケに分かれている商品、少量・混載のロケ、才数の分からない在庫を知らせます。出荷のペースは作業量CSVの商品別の出荷数量(直近30日分の取込)から出します。品番別のCSVにも出荷数・1日あたり出荷・在庫日数を足しました',
     '【CSV出力】収支(今見ている内訳と合計)・実績(表示中の作業記録)・生産性・VC引当(今のタブの表)・集計表(入力中の表・在庫差異)・請求(各表と請求書鑑の金額)に「CSV出力」ボタンを付けました。Excel でそのまま開けます',
     '【在庫: CSV出力】管理 → 在庫の分析をCSVで出せるようにしました(ブロック別・ロケーション別・品番別・推移・才数不明)。Excelでそのまま開けます',
     '【在庫: 容量の単位と40ftコンテナ換算】在庫の容量を、才・m³・面積(m²・坪+積める高さ)・40ftコンテナの本数のどれでも入れられるようにしました(中では才に直して使用率を出します)。在庫の量を「40ftコンテナ 約○本分」(40ftドライの内容積67.7m³ = 約2,433才で換算)でも出すようにしました',
@@ -9328,7 +9330,7 @@ async function importSharedDataFiles(files){
   state.vcAllocData = null;
   state.stockData = null;
   if(msgs.some(function(m){ return m.indexOf('✅ ロジザードの在庫')===0; })){
-    try{ state.stockData = await loadStockAnalysis(); msgs.push('✅ 在庫の記録を残しました(管理 → 在庫で推移が見られます)'); }catch(e){}
+    try{ state.stockData = await loadStockAnalysis(); msgs.push('✅ 在庫の記録を残しました(トップの「在庫」で推移が見られます)'); }catch(e){}
   }
   return msgs;
 }
@@ -10192,7 +10194,8 @@ async function loadStockAnalysis(){
       }
     }
   }
-  return { lz: lz, calc: calc, capacity: isUnverified(r[1]) ? {} : (r[1]||{}), snaps: snaps, pm: pm, yb: stock && stock.yayoiBySite };
+  var ship = await loadStockShipments();
+  return { lz: lz, calc: calc, capacity: isUnverified(r[1]) ? {} : (r[1]||{}), snaps: snaps, pm: pm, yb: stock && stock.yayoiBySite, ship: ship };
 }
 function stockFmtCube(v){ return v===null || v===undefined ? '―' : (Math.round(v*10)/10).toLocaleString('ja-JP', { maximumFractionDigits:1 }); }
 /* 推移の小さなグラフ(才数。高屋・丹南) */
@@ -10219,6 +10222,115 @@ function stockTrendSvg(snaps){
     '<text x="2" y="'+(y(max)+4).toFixed(1)+'" font-size="10" fill="#667085">'+stockFmtCube(max)+'</text>'+
     lines+labels+'</svg>'+
     '<div class="pool-hint" style="margin:2px 0 0;"><span style="color:#1D4ED8;font-weight:700;">━ 高屋</span> <span style="color:#15803D;font-weight:700;">━ 丹南</span>(才数)</div>';
+}
+/* 出荷の記録: 作業量CSVで取り込んだ商品別の出荷数量(直近 STOCK_SHIP_DAYS 日分の取込のある日)。
+   CSVで取り込んでいない出荷は入らない。戻り値 { days, from, to, byCode: { 品番: 数量 } } */
+var STOCK_SHIP_DAYS = 30;
+async function loadStockShipments(){
+  var dates = (await listWorkVolumeDates()).slice(0, STOCK_SHIP_DAYS);
+  var byCode = {}, used = [];
+  for(var i=0;i<dates.length;i++){
+    var wv = await loadWorkVolumeOrEmpty(dates[i]);
+    var imps = wvActiveImports(wv);
+    if(!imps.length) continue;
+    used.push(dates[i]);
+    imps.forEach(function(imp){ Object.keys(imp.byProduct||{}).forEach(function(c){ byCode[c] = (byCode[c]||0) + (Number(imp.byProduct[c].totalQty)||0); }); });
+  }
+  used.sort();
+  return { days: used.length, from: used[0]||'', to: used[used.length-1]||'', byCode: byCode };
+}
+/* 在庫の自動診断(AIは使わない)。人員配置の自動診断と同じく、気にすべき点を重要な順に文章で並べる。
+   戻り値: [{ level:'danger'|'warn'|'info', text }] */
+var STOCK_DIAG = { useDanger:90, useWarn:80, growWarn:10, shortDays:3, slowDays:180, minShipDays:10, spreadLocs:4, unknownShare:5 };
+function computeStockDiagnostics(st){
+  var out = [];
+  if(!st || !st.calc) return out;
+  var c = st.calc, cap = st.capacity || {}, snaps = st.snaps || [], ship = st.ship || { days:0, byCode:{} };
+  function top(list, n, f, unit){ return list.slice(0, n).map(f).join('、')+(list.length>n ? ' ほか'+(list.length-n)+(unit||'品番') : ''); }
+  function perDayText(v){ return v<1 ? (Math.round(v*10)/10)+'' : formatNum(Math.round(v)); }
+  function daysText(v){ return v>3650 ? '10年以上' : '約'+formatNum(Math.round(v))+'日分'; }
+  // 1. 容量に対する使用率
+  Object.keys(c.blocks).forEach(function(b){
+    var cv = stockCapSai(cap[b]); if(!cv) return;
+    var u = c.blocks[b].cube/cv*100;
+    if(u>=STOCK_DIAG.useDanger) out.push({ level:'danger', text:'ブロック'+b+': 使用率 '+u.toFixed(0)+'%(容量 '+stockFmtCube(cv)+'才 に '+stockFmtCube(c.blocks[b].cube)+'才)。ほぼいっぱいです。ほかのブロックへの移動や、動かない在庫の整理を検討してください' });
+    else if(u>=STOCK_DIAG.useWarn) out.push({ level:'warn', text:'ブロック'+b+': 使用率 '+u.toFixed(0)+'%。空きが少なくなっています' });
+  });
+  // 2. 7日前(なければいちばん古い記録)からの増減
+  if(snaps.length>1){
+    var last = snaps[snaps.length-1], target = wrDateAdd(last.date, -7);
+    var prev = snaps.filter(function(x){ return x.date<=target; }).pop() || snaps[0];
+    if(prev.date!==last.date){
+      Object.keys(last.sites||{}).forEach(function(k){
+        var a = last.sites[k].cube, b0 = prev.sites[k] ? prev.sites[k].cube : 0;
+        if(!b0) return;
+        var pct = (a-b0)/b0*100, when = Number(prev.date.slice(5,7))+'/'+Number(prev.date.slice(8,10));
+        if(pct>=STOCK_DIAG.growWarn) out.push({ level:'warn', text: stockSiteName(k)+': '+when+'から在庫が '+pct.toFixed(1)+'% 増えています(+'+stockFmtCube(a-b0)+'才、40ftコンテナ 約'+stockFt40(a-b0)+'本分)' });
+        else if(Math.abs(pct)>=5) out.push({ level:'info', text: stockSiteName(k)+': '+when+'から在庫が '+(pct>0?'+':'')+pct.toFixed(1)+'%('+(pct>0?'+':'')+stockFmtCube(a-b0)+'才)' });
+      });
+    }
+  }
+  // 3〜5. 出荷のペース(作業量CSVの出荷記録)から: 欠品の心配・動かない在庫・在庫日数の長い商品
+  var P = (st.lz && st.lz.products) || {};
+  var stockQty = {};
+  Object.keys(P).forEach(function(code){ var q = 0; Object.keys(P[code].blocks||{}).forEach(function(b){ q += Number(P[code].blocks[b].qty)||0; }); if(q>0) stockQty[code] = q; });
+  function codeCube(code){
+    var pm = st.pm || {}, m = pm[code], q = stockQty[code]||0;
+    var pack = null;
+    Object.keys(SHUKEI_SITES).forEach(function(k){ var y = st.yb && st.yb[k] && st.yb[k].products && st.yb[k].products[code]; if(!pack && y && y.packQty) pack = y.packQty; });
+    if(!pack && m && m.packQty) pack = Number(m.packQty);
+    var sai = (m && m.cubicVolume!==null && m.cubicVolume!==undefined && m.cubicVolume!=='') ? Number(m.cubicVolume) : null;
+    return (pack && sai!==null) ? q/pack*sai : null;
+  }
+  if(ship.days>=1){
+    var perDay = {};
+    Object.keys(ship.byCode).forEach(function(code){ perDay[code] = ship.byCode[code]/ship.days; });
+    var short = Object.keys(stockQty).filter(function(code){ return perDay[code]>0 && stockQty[code]/perDay[code] < STOCK_DIAG.shortDays; })
+      .sort(function(a,b){ return stockQty[a]/perDay[a] - stockQty[b]/perDay[b]; });
+    if(short.length) out.push({ level:'danger', text:'欠品の心配: 今の在庫が '+STOCK_DIAG.shortDays+'日分(最近の出荷ペース)に足りない商品が '+short.length+'品番あります。'+top(short, 5, function(code){ return code+'(在庫'+formatNum(stockQty[code])+'・1日約'+perDayText(perDay[code])+')'; }) });
+    if(ship.days>=STOCK_DIAG.minShipDays){
+      var still = Object.keys(stockQty).filter(function(code){ return !ship.byCode[code]; });
+      var stillCube = 0; still.forEach(function(code){ var v = codeCube(code); if(v) stillCube += v; });
+      still.sort(function(a,b){ return (codeCube(b)||0) - (codeCube(a)||0); });
+      if(still.length) out.push({ level:'warn', text:'動かない在庫: '+ship.days+'日分の出荷記録('+ship.from+'〜'+ship.to+')で一度も出荷のない商品が '+still.length+'品番・約'+stockFmtCube(stillCube)+'才(40ftコンテナ 約'+stockFt40(stillCube)+'本分、保管料の目安 月約'+formatNum(Math.round(stillCube*12*3))+'円)あります。才数の多い順: '+top(still, 5, function(code){ return code+'('+stockFmtCube(codeCube(code)||0)+'才)'; }) });
+      var slow = Object.keys(stockQty).filter(function(code){ return perDay[code]>0 && stockQty[code]/perDay[code] > STOCK_DIAG.slowDays; })
+        .sort(function(a,b){ return stockQty[b]/perDay[b] - stockQty[a]/perDay[a]; });
+      if(slow.length) out.push({ level:'info', text:'在庫が多めの商品: 最近の出荷ペースで '+STOCK_DIAG.slowDays+'日分より多い在庫がある商品が '+slow.length+'品番あります。'+top(slow, 5, function(code){ return code+'('+daysText(stockQty[code]/perDay[code])+')'; }) });
+    }else{
+      out.push({ level:'info', text:'出荷の記録が '+ship.days+'日分しかないため、動かない在庫・在庫日数の診断はまだ出していません('+STOCK_DIAG.minShipDays+'日分たまると出します)' });
+    }
+  }
+  // 6. 同じ品番が同じ拠点の多くのロケに分かれている
+  var spread = {};
+  c.locs.forEach(function(l){ l.skus.forEach(function(code){ var k = code+'|'+l.site; spread[k] = (spread[k]||0) + 1; }); });
+  var spreadList = Object.keys(spread).filter(function(k){ return spread[k]>=STOCK_DIAG.spreadLocs; }).sort(function(a,b){ return spread[b]-spread[a]; });
+  if(spreadList.length) out.push({ level:'info', text:'分かれて置かれている商品: 同じ拠点の '+STOCK_DIAG.spreadLocs+'か所以上のロケにある商品が '+spreadList.length+'件あります(まとめるとロケが空きます)。'+top(spreadList, 5, function(k){ var p = k.split('|'); return p[0]+'('+stockSiteName(p[1])+' '+spread[k]+'か所)'; }, '件') });
+  // 7. 少量のロケ・混載のロケ
+  var small = c.locs.filter(function(l){ return !l.unknown && l.cube<=STOCK_SMALL_LOC_SAI; });
+  if(small.length) out.push({ level:'info', text:'少量のロケ: '+STOCK_SMALL_LOC_SAI+'才以下しか入っていないロケが '+small.length+'か所あります(まとめる候補。在庫 → ロケーションで確認)' });
+  var mixed = c.locs.filter(function(l){ return l.skus.length>=3; });
+  if(mixed.length) out.push({ level:'info', text:'混載のロケ: 3品番以上が入っているロケが '+mixed.length+'か所あります(ピッキングの取り違いに注意)' });
+  // 8. 才数の分からない在庫
+  var totalQty = 0, unknownQty = 0;
+  Object.keys(c.sites).forEach(function(k){ totalQty += c.sites[k].qty; unknownQty += c.sites[k].unknownQty; });
+  if(totalQty && unknownQty/totalQty*100 >= STOCK_DIAG.unknownShare){
+    out.push({ level:'warn', text:'才数の分からない在庫が '+formatNum(unknownQty)+'ピース('+(unknownQty/totalQty*100).toFixed(0)+'%)あり、才数・使用率に入っていません。kintone の商品台帳に入数・才数を登録してください(在庫 → 才数不明)' });
+  }
+  var order = { danger:0, warn:1, info:2 };
+  out.sort(function(a,b){ return order[a.level]-order[b.level]; });
+  return out;
+}
+function renderStockDiagnostics(st){
+  var list = computeStockDiagnostics(st);
+  var icon = { danger:'🔴', warn:'🟠', info:'🔵' };
+  var nD = list.filter(function(d){ return d.level==='danger'; }).length, nW = list.filter(function(d){ return d.level==='warn'; }).length;
+  var ship = st.ship || {};
+  return '<details class="stf-diag" id="stockDiag"'+(state.stockDiagOpen===false ? '' : ' open')+'>'+
+    '<summary><b>🩺 在庫の自動診断</b> <span class="stf-row-meta">'+(nD ? '要対応 '+nD+'件・' : '')+(nW ? '確認 '+nW+'件・' : '')+'全'+list.length+'件</span></summary>'+
+    (list.length ? '<ul class="stf-diag-list">'+list.map(function(d){ return '<li class="stf-diag-'+d.level+'">'+icon[d.level]+' '+esc(d.text)+'</li>'; }).join('')+'</ul>'
+      : '<div class="pool-hint" style="margin:6px 0 0;">気になる点はありません</div>')+
+    '<div class="pool-hint" style="margin:6px 0 0;">ロジザードの在庫・容量・在庫の記録と、作業量CSVの出荷記録('+(ship.days ? esc(ship.from)+'〜'+esc(ship.to)+'の'+ship.days+'日分' : 'なし')+')から自動で出しています(AIは使っていません)。CSVで取り込んでいない出荷は数に入りません。</div>'+
+  '</details>';
 }
 function renderStockTab(){
   var st = state.stockData;
@@ -10275,15 +10387,16 @@ function renderStockTab(){
         return '<tr><td><b>'+esc(b)+'</b></td><td>'+esc(stockSiteName(stockSiteOfBlock(b)))+'</td><td class="num">'+stockFmtCube(x.cube)+(x.unknownQty ? '<span class="sk-minor">※</span>' : '')+'</td><td class="num">'+stockFt40(x.cube)+'本</td>'+
           '<td class="num">'+(total ? (x.cube/total*100).toFixed(1)+'%' : '')+'</td><td class="num">'+formatNum(Math.round(x.cases))+'</td><td class="num">'+formatNum(x.skus)+'</td><td class="num">'+formatNum(x.locs)+'</td>'+
           '<td class="num">'+(x.locs ? stockFmtCube(x.cube/x.locs) : '')+'</td>'+
+          (!hasManagerSession() ? '<td style="white-space:nowrap;">'+(capV ? esc(String(capE.value))+esc((STOCK_CAP_UNITS.filter(function(u){ return u[0]===capE.unit; })[0]||['',''])[1].replace(/\(.*\)/,''))+(capE.height ? '・高さ'+esc(String(capE.height))+'m' : '')+(capE.unit!=='sai' ? '<div class="sk-minor">= '+stockFmtCube(capV)+'才</div>' : '') : '<span class="sk-minor">未入力</span>')+'</td>' :
           '<td style="white-space:nowrap;"><input type="number" min="0" step="any" class="stock-cap-input" data-stock-cap="'+esc(b)+'" data-cap-field="value" value="'+esc(String(capE.value||''))+'" placeholder="未入力"> '+
             '<select data-stock-cap="'+esc(b)+'" data-cap-field="unit">'+STOCK_CAP_UNITS.map(function(u){ return '<option value="'+u[0]+'"'+(capE.unit===u[0]?' selected':'')+'>'+u[1]+'</option>'; }).join('')+'</select>'+
             (area ? ' 高さ <input type="number" min="0" step="0.1" class="stock-cap-input" style="width:60px;" data-stock-cap="'+esc(b)+'" data-cap-field="height" value="'+esc(String(capE.height||''))+'" placeholder="m">m' : '')+
-            (capV && capE.unit!=='sai' ? '<div class="sk-minor">= '+stockFmtCube(capV)+'才</div>' : (area && !capV && capE.value ? '<div class="sk-minor" style="color:#B54708;">高さを入れてください</div>' : ''))+'</td>'+
+            (capV && capE.unit!=='sai' ? '<div class="sk-minor">= '+stockFmtCube(capV)+'才</div>' : (area && !capV && capE.value ? '<div class="sk-minor" style="color:#B54708;">高さを入れてください</div>' : ''))+'</td>')+
           '<td class="num">'+(use===null ? '' : '<span class="stock-use '+(use>=90?'hi':(use>=70?'mid':''))+'">'+use.toFixed(0)+'%</span>')+'</td>'+
           '<td>'+(p ? diff(x.cube, p.cube) : '')+'</td></tr>';
       }).join('')+
       '</tbody></table></div>'+
-      '<div class="pool-hint" style="margin-top:6px;">容量を入れると使用率が出ます(入れるとすぐ保存)。単位は 才・m³・面積(m²・坪。積める高さも入れる)・40ftコンテナの本数から選べ、中では才に直して比べます。'+
+      '<div class="pool-hint" style="margin-top:6px;">容量を入れると使用率が出ます(入れるとすぐ保存。管理者でログインしたときだけ変えられます)。単位は 才・m³・面積(m²・坪。積める高さも入れる)・40ftコンテナの本数から選べ、中では才に直して比べます。'+
       '40ft換算は 40ftドライコンテナの内容積 '+STOCK_FT40_M3+'m³(約'+formatNum(Math.round(STOCK_FT40_SAI))+'才)で割った本数です(実際に積めるのはその8〜9割)。※ = 入数か才数の分からない商品を含む(その分は才数に入っていません)。</div>';
   }else if(tab==='locs'){
     var blockList = Object.keys(c.blocks).sort();
@@ -10326,6 +10439,7 @@ function renderStockTab(){
     '<div class="stock-csv no-print"><span class="pool-hint" style="margin:0;">CSV出力:</span>'+
       [['blocks','ブロック別'],['locs','ロケーション別'],['products','品番別'],['trend','推移'],['missing','才数不明']].map(function(x){ return csvButton('stock:'+x[0], x[1]); }).join('')+
     '</div>'+
+    renderStockDiagnostics(st)+
     '<div class="vc-tabs sticky-tabs">'+tabs+'</div>'+
     body+
   '</div></div>';
@@ -10348,7 +10462,10 @@ function exportStockCsv(kind){
       rows.push([d, stockSiteName(l.site), l.block, l.rack, l.loc, r1(l.cube), l.qty, l.skus.length, l.skus.join(' '), l.unknown ? 'はい' : '']);
     });
   }else if(kind==='products'){
-    rows = [['在庫日','品番','商品名','入数','1ケースの才数','拠点','ピース','ケース','才数','ロケ数','ブロック・ロケーション']];
+    var ship = st.ship || { days:0, byCode:{} };
+    rows = [['在庫日','品番','商品名','入数','1ケースの才数','拠点','ピース','ケース','才数','ロケ数','ブロック・ロケーション','出荷数('+ship.days+'日分)','1日あたり出荷','在庫日数(全拠点)']];
+    var allQty = {};
+    Object.keys(st.lz.products||{}).forEach(function(code){ var q = 0; Object.keys(st.lz.products[code].blocks||{}).forEach(function(b){ q += Number(st.lz.products[code].blocks[b].qty)||0; }); allQty[code] = q; });
     var P = st.lz.products || {}, pm = st.pm || {}, yb = st.yb || {};
     Object.keys(P).sort().forEach(function(code){
       var pack = null;
@@ -10364,7 +10481,9 @@ function exportStockCsv(kind){
       Object.keys(bySite).forEach(function(site){
         var o = bySite[site]; if(!o.qty) return;
         var cases = pack ? o.qty/pack : null;
-        rows.push([d, code, P[code].name||'', pack||'', sai===null ? '' : sai, stockSiteName(site), o.qty, cases===null ? '' : r1(cases), (cases!==null && sai!==null) ? r1(cases*sai) : '', o.locs.length, o.locs.join(' ')]);
+        var sq = ship.byCode[code]||0, pd = ship.days ? sq/ship.days : 0;
+        rows.push([d, code, P[code].name||'', pack||'', sai===null ? '' : sai, stockSiteName(site), o.qty, cases===null ? '' : r1(cases), (cases!==null && sai!==null) ? r1(cases*sai) : '', o.locs.length, o.locs.join(' '),
+          ship.days ? sq : '', ship.days ? r1(pd) : '', pd>0 ? Math.round(allQty[code]/pd) : (ship.days ? '出荷なし' : '')]);
       });
     });
   }else if(kind==='trend'){
@@ -10382,6 +10501,8 @@ function exportStockCsv(kind){
   downloadCSV('在庫_'+names[kind]+'_'+d+'.csv', rows);
 }
 function bindStockTab(){
+  var dg = document.getElementById('stockDiag');
+  if(dg) dg.addEventListener('toggle', function(){ state.stockDiagOpen = dg.open; });
   document.querySelectorAll('[data-stock-tab]').forEach(function(el){
     el.addEventListener('click', function(){ state.stockTab = el.getAttribute('data-stock-tab'); render(); });
   });
@@ -10391,6 +10512,7 @@ function bindStockTab(){
   if(sel) sel.addEventListener('change', function(){ state.stockLocBlock = sel.value; render(); });
   document.querySelectorAll('[data-stock-cap]').forEach(function(el){
     el.addEventListener('change', async function(){
+      if(!hasManagerSession()){ showToast('容量を変えられるのは管理者だけです'); return; }
       var b = el.getAttribute('data-stock-cap'), field = el.getAttribute('data-cap-field');
       var cap = await loadKeyJson(STOCK_CAPACITY_KEY, function(){ return {}; });
       if(isUnverified(cap)){ showToast('容量を読み込めなかったため、保存しませんでした'); return; }
@@ -10543,7 +10665,7 @@ function isUserBusy(){
 /* ---------- 開いている画面をアドレス(#のあと)に残す ----------
    再読み込みしてもトップ画面に戻らず、同じ画面(と画面内のタブ・作業記録で選んでいる人)を開き直すため。
    例: #role=adminHub&tab=financial / #role=input&staff=<スタッフID> / #role=shukei&site=tannan&tab=diff */
-var VIEW_URL_ROLES = ['input','report','monitor','achievements','calendar','history','adminHub','settingsHub','shukei','vcAlloc','dataHub','billing'];
+var VIEW_URL_ROLES = ['input','report','monitor','achievements','calendar','history','adminHub','settingsHub','shukei','vcAlloc','dataHub','billing','stock'];
 function viewStateToHash(){
   if(!state.role) return '';
   var q = { role: state.role };
@@ -10621,6 +10743,7 @@ function render(){
   // データ更新・請求データは、管理の中のタブに移した(以前のアドレス・ボタンから来たときはそのタブを開く)
   if(state.role==='dataHub'){ state.role = 'adminHub'; state.adminHubTab = 'data'; }
   if(state.role==='billing'){ state.role = 'adminHub'; state.adminHubTab = 'billing'; }
+  if(state.role==='adminHub' && state.adminHubTab==='stock'){ state.role = 'stock'; } // 在庫は誰でも見られる画面に移した
   var html = '';
   if(state.role !== 'monitor'){
     html += renderTopbar();
@@ -10637,6 +10760,7 @@ function render(){
   else if(state.role==='vcAlloc') html += renderVcAlloc();
   else if(state.role==='dataHub') html += renderDataHub();
   else if(state.role==='billing') html += renderBilling();
+  else if(state.role==='stock') html += renderStockTab();
   if(state.modal) html += renderModal();
   html += renderInstructionAlert();
   root.innerHTML = html;
@@ -10653,6 +10777,7 @@ function render(){
   if(state.role==='vcAlloc') bindVcAlloc();
   if(state.role==='dataHub') bindDataHub();
   if(state.role==='billing') bindBilling();
+  if(state.role==='stock') bindStockTab();
   bindCsvButtons();
   document.querySelectorAll('[data-go-datahub]').forEach(function(el){
     el.addEventListener('click', function(){ state.role = 'adminHub'; state.adminHubTab = 'data'; state.dataHubMsg = ''; state.vcAllocData = null; render(); });
@@ -10794,11 +10919,12 @@ function renderGate(){
       gateCard('calendar', '#EFF8FF', '#175CD3', '&#128197;', 'カレンダー', isReadOnlyAccount() ? '作業・出勤予定を見る' : '作業・出勤予定を見る・直す', false)+
       gateCard('shukei', '#ECFDF3', '#027A48', '&#129534;', '集計表', '高屋・丹南のピッキングリストと在庫差異', false)+
       gateCard('vcAlloc', '#FFF4ED', '#C4320A', '&#128230;', 'VC引当', 'VCの出荷指示から倉庫と振り分け番号を決める', false)+
+      gateCard('stock', '#F4F3FF', '#5925DC', '&#127970;', '在庫', '在庫の量・ロケの使い方・自動診断', false)+
     '</div>'+
     '<div class="gate-section-title">管理 <span>ログインが必要です</span></div>'+
     '<div class="gate-grid">'+
       gateCard('adminHub', '#F0F9FF', '#026AA2', '&#128229;', '作業量CSV取込', '出荷のCSVを取り込む', true, 'data')+
-      gateCard('adminHub', '#EFEBE2', '#1B2333', '&#128100;', '管理', '今日・人員配置・実績・生産性・収支・請求・在庫・データ取込', true)+
+      gateCard('adminHub', '#EFEBE2', '#1B2333', '&#128100;', '管理', '今日・人員配置・実績・生産性・収支・請求・データ取込', true)+
       gateCard('settingsHub', '#F4EEE4', '#8A6A3B', '&#9881;', '設定', 'スタッフ・作業・得意先と単価・勤務時間など', true)+
     '</div>'+
     '<div class="gate-links"><button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
@@ -10895,7 +11021,8 @@ var COMMON_NAV_ITEMS = [
   { role:'monitor', label:'モニター' },
   { role:'calendar', label:'カレンダー' },
   { role:'shukei', label:'集計表' },
-  { role:'vcAlloc', label:'VC引当' }
+  { role:'vcAlloc', label:'VC引当' },
+  { role:'stock', label:'在庫' }
 ];
 var ADMIN_NAV_ITEMS = [
   { role:'adminHub', label:'管理' },
@@ -11050,7 +11177,6 @@ var ADMIN_HUB_TABS = [
   { key:'productivity', label:'生産性' },
   { key:'financial', label:'収支' },
   { key:'billing', label:'請求' },
-  { key:'stock', label:'在庫' },
   { key:'data', label:'データ取込' }
 ];
 function renderAdminHub(){
@@ -11070,7 +11196,6 @@ function renderAdminHub(){
   else if(state.adminHubTab==='financial') body = renderFinancial();
   else if(state.adminHubTab==='logMgmt') body = renderLogManagementTab();
   else if(state.adminHubTab==='billing') body = renderBilling();
-  else if(state.adminHubTab==='stock') body = renderStockTab();
   else if(state.adminHubTab==='data') body = '<div class="mgr-wrap">'+renderCsvImportPanel()+renderDataHub()+renderKintoneSyncPanel()+'</div>';
   else body = renderManager();
   // 各画面は自前の外枠(mgr-wrap等)を持っているため、タブバーをその内側の先頭に差し込む
@@ -11167,7 +11292,6 @@ function bindAdminHub(){
   else if(state.adminHubTab==='financial') bindFinancial();
   else if(state.adminHubTab==='logMgmt') bindLogManagementTab();
   else if(state.adminHubTab==='billing') bindBilling();
-  else if(state.adminHubTab==='stock') bindStockTab();
   else if(state.adminHubTab==='data'){ bindCsvImportPanel(); bindDataHub(); bindKintoneSyncPanel(); }
   else bindManager();
 }

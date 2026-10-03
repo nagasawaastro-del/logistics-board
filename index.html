@@ -254,6 +254,10 @@ input,select{font-family:inherit;}
 }
 .vc-select-shortcut-btn:hover{border-color:var(--amber-500);color:var(--amber-600);}
 .vc-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0;border-bottom:1px solid var(--paper-line);padding-bottom:8px;}
+/* スクロールしてもタブを上に残す: 上のメニュー(--topbar-h)の下に管理・設定のタブ(--hubtabs-h)、その下に画面の中のタブ */
+.hub-tabs{position:sticky;top:var(--topbar-h,0px);z-index:16;background:var(--paper-100);padding-top:8px;}
+.sticky-tabs{position:sticky;top:calc(var(--topbar-h,0px) + var(--hubtabs-h,0px));z-index:15;background:var(--paper-50,#fff);padding-top:6px;}
+@media print{.hub-tabs,.sticky-tabs{position:static;}}
 .vc-tab-btn{background:var(--paper-100);border:1px solid var(--paper-line);border-radius:10px;padding:6px 12px;font-size:12px;font-weight:600;color:var(--slate-500);}
 .vc-tab-btn.active{background:var(--ink-900);color:#fff;border-color:var(--ink-900);}
 .vc-tab-body{margin-top:10px;}
@@ -1574,6 +1578,7 @@ var CHANGELOG = [
     '実際にコードを実行するテストで、各画面から他画面へホームを経由せず直接移動できること、管理者専用ナビが未ログイン時は表示されずログアウト後に消えること、そして最も重要な点として「state.roleを不正に管理者画面へ直接切り替えても、未ログインならページの中身(データ)は一切表示されずログインフォームのみが出ること」を確認しました。既存の全回帰テスト(39スイート)にも影響はありません'
   ]},
   { date:'2026-10-03', items:[
+    '【タブを固定】下へスクロールしても、上のメニュー・管理と設定のタブ・画面の中のタブ(VC引当・集計表・請求・収支の切り替え)が画面の上に残るようにしました',
     '【トップページ: データの更新状況】データごとのタイルに分け、今日更新したもの=緑、前の日のままのもの=オレンジ、未登録=赤で分かるようにしました。日時は「今日 12:20」「昨日 12:20」のように出します',
     '【不具合修正: 作業日報の対応表】「(単価なし)」「(紐付けない)」を選ぶと、名前の似た候補がまた出て、元に戻ったように見える不具合を直しました。選んだ「単価なし」「紐付けない」はそのまま残ります。「単価なし」を選んだ作業内容は、収支の売上・請求の明細1に入れず、注意にも出しません',
     '【画面の整理】トップページを「現場」(作業記録・集計・モニター・カレンダー・集計表・VC引当)と「管理」(作業量CSV取込・管理・設定)に分けました。作業量CSV取込はトップから1回で開けます。管理のタブは「今日・人員配置・実績・生産性・収支・請求・データ取込」にし、データ更新・請求データ・作業量CSV取込・kintoneの同期を管理の中にまとめました(データ取込に、作業量CSV・在庫とVCのCSV・kintoneの同期が並びます)。設定のタブは「基本・スタッフ・作業・勤務時間・得意先・単価・操作履歴・システム」にし、得意先と作業の対応・作業単価の得意先と計算単位・作業日報の対応表・VC引当の納品先一覧を「得意先・単価」にまとめ、kintoneの商品台帳の接続設定は「システム」に移しました。タブ・メニュー・見出しの絵文字を外し、説明文を短くしました',
@@ -7569,7 +7574,7 @@ function renderFinancial(){
       '<button type="button" class="add-btn" id="finRunAnalyticsBtn">この期間で集計</button>'+
     '</div>'+
     periodHtml+
-    '<div class="vc-tabs">'+axisTabs+'</div>'+
+    '<div class="vc-tabs sticky-tabs">'+axisTabs+'</div>'+
     '<div class="vc-tab-body">'+analyticsBody+'</div>'+
   '</div>';
 
@@ -8578,7 +8583,7 @@ function renderShukei(){
     var st = SHUKEI_SITES[k];
     return '<button type="button" class="shukei-site-btn'+(k===siteKey?' active':'')+'" data-shukei-site="'+k+'" style="--site:'+st.color+';--site-tint:'+st.tint+';">🏭 '+esc(st.name)+'</button>';
   }).join('');
-  var tabs = [['sheet','📋 集計表'],['diff','📦 在庫差異']].map(function(t){
+  var tabs = [['sheet','集計表'],['diff','在庫差異']].map(function(t){
     return '<button type="button" class="vc-tab-btn'+(tab===t[0]?' active':'')+'" data-shukei-tab="'+t[0]+'">'+t[1]+'</button>';
   }).join('');
   function asOf(d){ return d && d.uploadedAt ? fmtDateTime(d.uploadedAt) : '未登録'; }
@@ -8591,7 +8596,7 @@ function renderShukei(){
     '<div class="panel-title no-print">集計表(高屋・丹南)</div>'+
     '<div class="shukei-site-tabs no-print">'+siteTabs+'</div>'+
     '<div class="shukei-site-banner no-print">'+esc(site.name)+'の'+(tab==='diff'?'在庫差異':'集計表')+'を表示中</div>'+
-    '<div class="vc-tabs no-print" style="margin-top:6px;">'+tabs+'</div>'+
+    '<div class="vc-tabs no-print sticky-tabs" style="margin-top:6px;">'+tabs+'</div>'+
     '<div class="no-print">'+status+'</div>'+
     body+
   '</div></div>';
@@ -9004,7 +9009,7 @@ function renderVcAlloc(){
   var order = d.order;
   if(order && order.lines) ensureShukeiProductMaster(Object.keys(order.lines.reduce(function(a,l){ a[l[0]] = 1; return a; }, {})));
   var calc = order && order.lines ? computeVcAlloc(order, d.dests, d.stock, state.shukeiPm) : null;
-  var tabs = [['dash','📊 ダッシュボード'],['piece','🧩 ピース引当'],['case','📦 ケース引当'],['dest','🚚 出荷先別']].map(function(t){
+  var tabs = [['dash','ダッシュボード'],['piece','ピース引当'],['case','ケース引当'],['dest','出荷先別']].map(function(t){
     var n = '';
     if(calc && (t[0]==='piece' || t[0]==='case')) n = ' ('+calc.products.filter(function(p){ return p.kind===t[0]; }).length+')';
     return '<button type="button" class="vc-tab-btn'+(tab===t[0]?' active':'')+'" data-vca-tab="'+t[0]+'">'+t[1]+n+'</button>';
@@ -9029,7 +9034,7 @@ function renderVcAlloc(){
   else body = renderVcAllocTable(calc, tab);
   return '<div class="mgr-wrap shukei-wrap"><div class="panel">'+
     '<div class="panel-title no-print">VC引当</div>'+
-    '<div class="vc-tabs no-print">'+tabs+'</div>'+
+    '<div class="vc-tabs no-print sticky-tabs">'+tabs+'</div>'+
     '<div class="no-print">'+status+warn+'</div>'+
     (state.vcAllocMsg ? '<div class="vc-import-status no-print" style="white-space:pre-line;">'+state.vcAllocMsg+'</div>' : '')+
     body+
@@ -9621,7 +9626,7 @@ function renderBilling(){
   var calc = b.calc;
   var body = '';
   if(calc){
-    var tabs = [['summary','📋 請求書鑑の金額']].concat(BILLING_SHEETS.map(function(s){ return [s.key, s.sheet+' ('+formatNum(calc[s.key].length)+')']; })).map(function(t){
+    var tabs = [['summary','請求書鑑の金額']].concat(BILLING_SHEETS.map(function(s){ return [s.key, s.sheet+' ('+formatNum(calc[s.key].length)+')']; })).map(function(t){
       return '<button type="button" class="vc-tab-btn'+(b.tab===t[0]?' active':'')+'" data-bill-tab="'+t[0]+'">'+esc(t[1])+'</button>';
     }).join('');
     var warn = '';
@@ -9656,7 +9661,7 @@ function renderBilling(){
           '<tr class="sk-total">'+sums.map(function(v, i){ return '<td class="num">'+(i===0 ? '合計' : (v===null ? '' : billingFmt(v)))+'</td>'; }).join('')+'</tr>'+
         '</tbody></table></div>';
     }
-    body = '<div class="vc-tabs" style="margin-top:12px;">'+tabs+'</div>'+warn+body;
+    body = '<div class="vc-tabs sticky-tabs" style="margin-top:12px;">'+tabs+'</div>'+warn+body;
   }
   return '<div class="mgr-wrap"><div class="panel">'+
     '<div class="panel-title">請求データ</div>'+
@@ -10185,7 +10190,18 @@ function render(){
   if(instrClose) instrClose.addEventListener('click', function(){ state.instructionAlert = null; render(); });
   restoreScroll();
   syncViewToUrl();
+  updateStickyOffsets();
 }
+/* 固定するタブの位置(上のメニュー・管理と設定のタブの高さ)。画面の幅でメニューが折り返すため、描画のたびに測る */
+function updateStickyOffsets(){
+  try{
+    var tb = document.querySelector('.topbar'), hub = document.querySelector('.hub-tabs');
+    var root = document.documentElement.style;
+    root.setProperty('--topbar-h', (tb ? tb.offsetHeight : 0)+'px');
+    root.setProperty('--hubtabs-h', (hub ? hub.offsetHeight : 0)+'px');
+  }catch(e){}
+}
+window.addEventListener('resize', function(){ updateStickyOffsets(); });
 
 /* ---------- トップページの「データの更新状況」 ----------
    共有データ(ロジザード・弥生の在庫、VCの出荷指示)と、kintone から同期したデータ(商品台帳・作業単価)の最終更新日時。
@@ -10569,7 +10585,7 @@ function renderAdminHub(){
     return renderManagerLoginForm('管理', '管理者アカウントでログインしてください。');
   }
   if(!state.adminHubTab || state.adminHubTab==='csvImport') state.adminHubTab = state.adminHubTab==='csvImport' ? 'data' : 'today';
-  var tabsHtml = '<div class="vc-tabs" style="margin:0 0 14px;">'+
+  var tabsHtml = '<div class="vc-tabs hub-tabs" style="margin:0 0 14px;">'+
     ADMIN_HUB_TABS.map(function(t){
       return '<button type="button" class="vc-tab-btn'+(state.adminHubTab===t.key?' active':'')+'" data-admin-hub-tab="'+t.key+'">'+t.label+'</button>';
     }).join('')+
@@ -12223,7 +12239,7 @@ function renderSettingsHub(){
   if(!state.settingsHubTab) state.settingsHubTab = 'basic';
   if(state.settingsHubTab==='customerMapping' || state.settingsHubTab==='kintoneProduct') state.settingsHubTab = 'master'; // 以前のタブ
   var tabsHtml = '<div class="panel-title" style="font-size:20px;margin-bottom:4px;">設定</div>'+
-    '<div class="vc-tabs" style="margin:0 0 14px;flex-wrap:wrap;">'+
+    '<div class="vc-tabs hub-tabs" style="margin:0 0 14px;flex-wrap:wrap;">'+
     SETTINGS_HUB_TABS.map(function(t){
       return '<button type="button" class="vc-tab-btn'+(state.settingsHubTab===t.key?' active':'')+'" data-settings-hub-tab="'+t.key+'">'+t.label+'</button>';
     }).join('')+

@@ -76,7 +76,22 @@ input,select{font-family:inherit;}
 }
 .gate-sub{font-size:14px;color:var(--slate-500);margin:0 0 36px;max-width:440px;line-height:1.6;}
 .gate-status{width:100%;max-width:920px;margin:-18px 0 22px;border:1px solid var(--paper-line);border-radius:12px;background:#fff;padding:10px 14px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;font-size:12.5px;color:var(--ink-900);text-align:left;}
-.gate-status-title{font-weight:800;font-size:13px;width:100%;}
+.gate-status-title{font-weight:800;font-size:13px;}
+.gs-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;width:100%;}
+.gs-legend{font-size:11px;color:var(--slate-500);display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+.gs-legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-left:6px;}
+.gs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;width:100%;}
+.gs-tile{border:1px solid var(--paper-line);border-left:5px solid #98A2B3;border-radius:10px;padding:7px 10px;background:#fff;}
+.gs-label{font-size:11.5px;color:var(--slate-500);font-weight:700;}
+.gs-when{font-size:15px;font-weight:800;color:var(--ink-900);margin-top:1px;}
+.gs-detail{font-size:11px;color:var(--slate-500);}
+.gs-tile.is-ok,.gs-legend i.is-ok{border-left-color:#12B76A;}
+.gs-legend i.is-ok{background:#12B76A;}
+.gs-tile.is-stale{border-left-color:#F79009;background:#FFFCF5;}
+.gs-legend i.is-stale{background:#F79009;}
+.gs-tile.is-none{border-left-color:#F04438;background:#FEF3F2;}
+.gs-tile.is-none .gs-when{color:#B42318;}
+.gs-legend i.is-none{background:#F04438;}
 .gate-status-group{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;width:100%;}
 .gate-status-sub{font-size:11px;color:var(--slate-500);font-weight:700;min-width:84px;}
 .gate-status-item.is-none{color:#B42318;}
@@ -1559,6 +1574,7 @@ var CHANGELOG = [
     '実際にコードを実行するテストで、各画面から他画面へホームを経由せず直接移動できること、管理者専用ナビが未ログイン時は表示されずログアウト後に消えること、そして最も重要な点として「state.roleを不正に管理者画面へ直接切り替えても、未ログインならページの中身(データ)は一切表示されずログインフォームのみが出ること」を確認しました。既存の全回帰テスト(39スイート)にも影響はありません'
   ]},
   { date:'2026-10-03', items:[
+    '【トップページ: データの更新状況】データごとのタイルに分け、今日更新したもの=緑、前の日のままのもの=オレンジ、未登録=赤で分かるようにしました。日時は「今日 12:20」「昨日 12:20」のように出します',
     '【不具合修正: 作業日報の対応表】「(単価なし)」「(紐付けない)」を選ぶと、名前の似た候補がまた出て、元に戻ったように見える不具合を直しました。選んだ「単価なし」「紐付けない」はそのまま残ります。「単価なし」を選んだ作業内容は、収支の売上・請求の明細1に入れず、注意にも出しません',
     '【画面の整理】トップページを「現場」(作業記録・集計・モニター・カレンダー・集計表・VC引当)と「管理」(作業量CSV取込・管理・設定)に分けました。作業量CSV取込はトップから1回で開けます。管理のタブは「今日・人員配置・実績・生産性・収支・請求・データ取込」にし、データ更新・請求データ・作業量CSV取込・kintoneの同期を管理の中にまとめました(データ取込に、作業量CSV・在庫とVCのCSV・kintoneの同期が並びます)。設定のタブは「基本・スタッフ・作業・勤務時間・得意先・単価・操作履歴・システム」にし、得意先と作業の対応・作業単価の得意先と計算単位・作業日報の対応表・VC引当の納品先一覧を「得意先・単価」にまとめ、kintoneの商品台帳の接続設定は「システム」に移しました。タブ・メニュー・見出しの絵文字を外し、説明文を短くしました',
     '【収支】期間のボタン(今日・昨日・今週・今月・先月)を上に置き、押すとすぐ集計します。開いたときは今月を自動で集計し、期間の合計(売上・人件費・粗利・利益率)を上に出します。内訳は「日別・月別・得意先別・商品別・作業別」で切り替えます(月別は新しく追加)。1日の細かい内訳は下の「1日の内訳」に出します',
@@ -10209,7 +10225,8 @@ async function loadGateDataStatus(){
   out.kintoneProduct = (ks && ks.fetchedAt) ? { at: ks.fetchedAt, detail: formatNum(ks.savedCount||0)+'件' } : null;
   // kintone 作業日報の同期
   var ws = await loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; });
-  out.kintoneReport = (ws && ws.syncedAt) ? { at: ws.syncedAt, detail: (ws.from||'')+'〜'+(ws.to||'') } : null;
+  var md = function(d){ return d ? Number(d.slice(5,7))+'/'+Number(d.slice(8,10)) : ''; };
+  out.kintoneReport = (ws && ws.syncedAt) ? { at: ws.syncedAt, detail: md(ws.from)+'〜'+md(ws.to)+'の日報' } : null;
   // kintone 作業単価マスタの同期(管理者のみ読める)
   if(hasManagerSession() && window.__supabaseClient){
     try{
@@ -10230,25 +10247,34 @@ function renderGateDataStatus(){
   }
   var st = state.gateDataStatus;
   if(!st) return '<div class="gate-status"><span class="gate-status-title">データの更新状況</span><span class="sk-minor">読み込み中…</span></div>';
-  var today = todayStr();
-  function item(label, x, daily){
-    var fresh = x && localDateOfIso(x.at)===today;
-    var cls = !x ? 'is-none' : (daily && !fresh ? 'is-stale' : '');
-    return '<span class="gate-status-item '+cls+'"><b>'+esc(label)+'</b> '+
-      (x ? esc(fmtDateTime(x.at))+(x.detail ? '<span class="sk-minor">('+esc(x.detail)+')</span>' : '') : '未登録')+
-      (daily && x && !fresh ? ' <span class="gate-status-flag">今日まだ</span>' : '')+'</span>';
+  var today = todayStr(), yesterday = wrDateAdd(today, -1);
+  // 1つのデータ = 1つのタイル。今日更新済み=緑、前の日のまま=オレンジ、未登録=赤(kintoneは毎日でなくてよいので灰色)
+  function when(iso){
+    var d = localDateOfIso(iso), t = new Date(iso);
+    var hm = String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');
+    if(d===today) return '今日 '+hm;
+    if(d===yesterday) return '昨日 '+hm;
+    return Number(d.slice(5,7))+'/'+Number(d.slice(8,10))+' '+hm;
   }
+  function tile(label, x, daily){
+    var fresh = x && localDateOfIso(x.at)===today;
+    var cls = !x ? 'is-none' : (fresh ? 'is-ok' : (daily ? 'is-stale' : 'is-neutral'));
+    return '<div class="gs-tile '+cls+'"><div class="gs-label">'+esc(label)+'</div>'+
+      '<div class="gs-when">'+(x ? esc(when(x.at)) : '未登録')+'</div>'+
+      (x && x.detail ? '<div class="gs-detail">'+esc(x.detail)+'</div>' : '')+'</div>';
+  }
+  var names = { 'logizard':'ロジザード在庫', 'yayoi:takaya':'弥生在庫 高屋', 'yayoi:tannan':'弥生在庫 丹南', 'vcOrder':'VC出荷指示' };
   return '<div class="gate-status">'+
-    '<span class="gate-status-title">データの更新状況</span>'+
-    '<div class="gate-status-group"><span class="gate-status-sub">共有データ</span>'+
-      GATE_STATUS_SOURCES.map(function(src){ return item(src.label, st[src.name], true); }).join('')+
+    '<div class="gs-head"><span class="gate-status-title">データの更新状況</span>'+
+      '<span class="gs-legend"><i class="is-ok"></i>今日更新 <i class="is-stale"></i>前の日のまま <i class="is-none"></i>未登録</span>'+
+      (hasManagerSession() ? '<button type="button" class="vc-manage-toggle-btn" id="gateGoDataHub" style="min-height:0;padding:3px 10px;margin-left:auto;">データ取込を開く</button>' : '')+
     '</div>'+
-    '<div class="gate-status-group"><span class="gate-status-sub">kintone(API)</span>'+
-      item('商品台帳(入数・才数)', st.kintoneProduct, false)+
-      (hasManagerSession() ? item('作業単価', st.kintonePrice, false) : '')+
-      item('作業日報', st.kintoneReport, false)+
+    '<div class="gs-grid">'+
+      GATE_STATUS_SOURCES.map(function(src){ return tile(names[src.name] || src.label, st[src.name], true); }).join('')+
+      tile('kintone 商品台帳', st.kintoneProduct, false)+
+      (hasManagerSession() ? tile('kintone 作業単価', st.kintonePrice, false) : '')+
+      tile('kintone 作業日報', st.kintoneReport, false)+
     '</div>'+
-    (hasManagerSession() ? '<button type="button" class="vc-manage-toggle-btn" id="gateGoDataHub" style="min-height:0;padding:3px 10px;">データ取込を開く</button>' : '')+
   '</div>';
 }
 /* ---------- GATE ---------- */

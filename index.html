@@ -1184,6 +1184,27 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
     return { data: res ? res.data : null };
   }
 
+  /* ---- 通信量を減らす(2026-10-04): 読んだ値を版(updated_at)と一緒に端末に覚えておき、
+     4秒更新では最初に「版だけ」をまとめて確かめ(checkVersions、数百バイト)、版が変わったキーだけを読み直す。
+     書き込んだ値も覚えておく。版の確認から VER_SNAP_MS 以上たっていたら、今までどおり毎回読む(古い値を使い続けない)。 ---- */
+  var kvCache = {};       // key → { value, ver }
+  var verSnap = null;     // { at, vers: { key: 版 または null(キーが無い) } }
+  var recentKeys = {};    // 最近読んだキー → 時刻(版を確かめる対象)
+  var VER_SNAP_MS = 6000;
+  function cachePut(key, value, ver){
+    if(ver){ kvCache[key] = { value: value, ver: ver }; recentKeys[key] = Date.now(); } else delete kvCache[key];
+    if(verSnap) verSnap.vers[key] = ver || null;
+  }
+  // 競合したときは、覚えている値と版を捨てて、次は必ずデータベースから読む
+  function forgetCache(key){ delete kvCache[key]; if(verSnap) delete verSnap.vers[key]; }
+  function cachedIfFresh(key){
+    if(!verSnap || Date.now()-verSnap.at > VER_SNAP_MS || !Object.prototype.hasOwnProperty.call(verSnap.vers, key)) return undefined;
+    var v = verSnap.vers[key];
+    if(v===null) return null; // キーが無い
+    var c = kvCache[key];
+    return (c && c.ver===v) ? c : undefined;
+  }
+
   window.storage = {
     /* 書き込み操作の通し番号。4秒更新(pollTick)が「自分の取得中に書き込みが
        あったか」を判定し、保存前に取得した古いデータで画面の状態を上書きしない
@@ -1197,27 +1218,54 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
        呼び出し元はこの2つを区別し、読み込み失敗を「空データ」として扱わないこと。 */
     get: async function(key, shared){
       if(!client) throw makeStorageError('read', key, new Error('Supabase未設定です(config.jsを確認してください)'), 'other');
-      var r = await runQuery('read', key, function(){ return client.from('kv_store').select('value').eq('key', key).maybeSingle(); });
+      recentKeys[key] = Date.now();
+      var c = cachedIfFresh(key);
+      if(c===null) throw makeNotFoundError(key);
+      if(c) return { key: key, value: c.value };
+      var r = await runQuery('read', key, function(){ return client.from('kv_store').select('value,updated_at').eq('key', key).maybeSingle(); });
       if(r.error){ console.error('[LOGI LINK] 読み込みに失敗しました', key, r.error.kind, r.error.cause||r.error); throw r.error; }
-      if(!r.data) throw makeNotFoundError(key);
+      if(!r.data){ cachePut(key, null, null); throw makeNotFoundError(key); }
+      cachePut(key, r.data.value, r.data.updated_at);
       return { key: key, value: r.data.value };
+    },
+    /* 最近読んだキー(と extraKeys)の版をまとめて確かめる(4秒更新の最初に呼ぶ)。失敗しても何もしない(毎回読む動きに戻る) */
+    checkVersions: async function(extraKeys){
+      if(!client) return;
+      var now = Date.now(), keys = {};
+      Object.keys(recentKeys).forEach(function(k){ if(now-recentKeys[k] < 120000) keys[k] = true; else delete recentKeys[k]; });
+      (extraKeys||[]).forEach(function(k){ keys[k] = true; });
+      var list = Object.keys(keys);
+      if(!list.length){ verSnap = null; return; }
+      var r = await runQuery('read', 'versions', function(){ return client.from('kv_store').select('key,updated_at').in('key', list); });
+      if(r.error){ verSnap = null; return; }
+      var vers = {};
+      list.forEach(function(k){ vers[k] = null; });
+      (r.data||[]).forEach(function(row){ vers[row.key] = row.updated_at; });
+      verSnap = { at: Date.now(), vers: vers };
     },
     /* 成功時は { key, value }。失敗時は例外(StorageError)を投げる。
        失敗は reportWriteFailure でアプリ本体にも必ず通知される。 */
     set: async function(key, value, shared){
       guardWrite('write', key);
       window.storage.writeSeq++;
-      var r = await runQuery('write', key, function(){ return client.from('kv_store').upsert({ key: key, value: value }, { onConflict: 'key' }).select('value').maybeSingle(); });
+      // 保存した値そのものは返してもらわない(通信量を減らす)。版だけ受け取って覚えておく
+      var r = await runQuery('write', key, function(){ return client.from('kv_store').upsert({ key: key, value: value }, { onConflict: 'key' }).select('updated_at').maybeSingle(); });
       if(r.error){ reportWriteFailure(r.error); throw r.error; }
+      cachePut(key, value, r.data && r.data.updated_at);
       return { key: key, value: value };
     },
     /* 値と、その値の版(updated_at)を一緒に取得する。キーが無い場合は例外にせず
        missing:true を返す(通信エラー時のみ例外)。 */
     getVersioned: async function(key){
       if(!client) throw makeStorageError('read', key, new Error('Supabase未設定です(config.jsを確認してください)'), 'other');
+      recentKeys[key] = Date.now();
+      var c = cachedIfFresh(key);
+      if(c===null) return { key: key, value: null, version: null, missing: true };
+      if(c) return { key: key, value: c.value, version: c.ver, missing: false };
       var r = await runQuery('read', key, function(){ return client.from('kv_store').select('value,updated_at').eq('key', key).maybeSingle(); });
       if(r.error){ console.error('[LOGI LINK] 読み込みに失敗しました', key, r.error.kind, r.error.cause||r.error); throw r.error; }
-      if(!r.data) return { key: key, value: null, version: null, missing: true };
+      if(!r.data){ cachePut(key, null, null); return { key: key, value: null, version: null, missing: true }; }
+      cachePut(key, r.data.value, r.data.updated_at);
       return { key: key, value: r.data.value, version: r.data.updated_at, missing: false };
     },
     /* 取得時と同じ版(updated_at)のままの場合だけ書き込む(楽観ロック)。
@@ -1230,17 +1278,20 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
       if(version===null || version===undefined){
         var ins = await runQuery('write', key, function(){ return client.from('kv_store').insert({ key: key, value: value }).select('updated_at'); });
         if(ins.error){
-          if(ins.error.cause && ins.error.cause.code==='23505') return { ok:false, conflict:true };
+          if(ins.error.cause && ins.error.cause.code==='23505'){ forgetCache(key); return { ok:false, conflict:true }; }
           reportWriteFailure(ins.error);
           return { ok:false, error: ins.error };
         }
-        return { ok:true, version: (ins.data && ins.data[0]) ? ins.data[0].updated_at : null };
+        var insVer = (ins.data && ins.data[0]) ? ins.data[0].updated_at : null;
+        cachePut(key, value, insVer);
+        return { ok:true, version: insVer };
       }
       var up = await runQuery('write', key, function(){ return client.from('kv_store').update({ value: value }).eq('key', key).eq('updated_at', version).select('updated_at'); });
       if(up.error){ reportWriteFailure(up.error); return { ok:false, error: up.error }; }
       /* 0件更新は「他端末が先に更新した(版が変わった)」か「RLSで対象行が見えない/更新できない」のどちらか。
          呼び出し元(saveMergedList)は読み直して再試行するため、ここでは従来どおり競合として返す。 */
-      if(!up.data || !up.data.length) return { ok:false, conflict:true };
+      if(!up.data || !up.data.length){ forgetCache(key); return { ok:false, conflict:true }; }
+      cachePut(key, value, up.data[0].updated_at);
       return { ok:true, version: up.data[0].updated_at };
     },
     delete: async function(key, shared){
@@ -1248,6 +1299,7 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
       window.storage.writeSeq++;
       var r = await runQuery('delete', key, function(){ return client.from('kv_store').delete().eq('key', key); });
       if(r.error){ reportWriteFailure(r.error); throw r.error; }
+      cachePut(key, null, null);
       return { key: key, deleted: true };
     },
     list: async function(prefix, shared){
@@ -1578,6 +1630,7 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-04', items:[
+    '【通信量を減らす】データベースの通信量が月の上限を超えて止まったため、通信量を大きく減らしました。読んだデータを端末に覚えておき、4秒ごとの更新では最初に「変わったかどうか」だけを確かめて、変わったデータだけを読み直します。画面が見えていない(別のタブ・スリープ中)ときは更新を止め、見えたらすぐ読み直します。保存したときに、保存した内容をそのまま送り返してもらうのをやめました。画面の動きは今までと同じです',
     '【調査結果】このアプリはURLルーティングを一切使用しておらず(単一のstate変数で画面切替)、「URLを直接入力してのアクセス」という概念自体が存在しないことを確認しました。ただし、その等価にあたる「state.roleを不正に管理者画面へ直接切り替える」操作に対する保護は、以前のセッションで実装済みの各画面自身の認証チェック(hasManagerSession())により、既に確保されていることを確認しました(今回変更していません)',
     '全画面共通のトップバー(実績入力・集計・モニター・カレンダーなど、ページ上部に既存で表示されていた共通部分)に、他の主要画面へ直接移動できるナビゲーションを追加しました。現在の画面はハイライト表示されます',
     '管理者・設定への項目は、実際にログイン済みの場合のみナビゲーションに表示されます。判定には既存の権限確認の仕組み(ADMIN_GATED_ROLES/hasManagerSession)をそのまま利用しており、新しい権限管理は作っていません',
@@ -2710,8 +2763,8 @@ async function persistKey(key, obj){
      staff           : 現場端末(実績入力・集計・カレンダー・モニター)
      monitor         : 閲覧専用(モニター表示など。保存・自動補正は行わない)
    ログインしていても、ロールが manager/admin でなければ管理者として扱わない。 */
-var KNOWN_APP_ROLES = ['admin','manager','staff','monitor'];
-var ROLE_RANK = { admin:4, manager:3, staff:2, monitor:1 };
+var KNOWN_APP_ROLES = ['admin','manager','staff','monitor','factory']; // factory = 生産管理者(生産管理の編集だけ。ロジリンクの管理画面は使えない)
+var ROLE_RANK = { admin:4, manager:3, staff:2, monitor:1, factory:1 };
 var deviceSessionBackup = null; // 現場端末で管理者が一時ログインする前の端末セッション
 var roleRpcMissing = { app_role:false, is_manager:false }; // Supabase側に関数が未作成と分かったら、以降は呼ばない
 var authSwitching = false;      // この端末自身のログイン切替中(認証イベントの二重処理を防ぐ)
@@ -10926,6 +10979,12 @@ function renderGate(){
       gateCard('adminHub', '#F0F9FF', '#026AA2', '&#128229;', '作業量CSV取込', '出荷のCSVを取り込む', true, 'data')+
       gateCard('adminHub', '#EFEBE2', '#1B2333', '&#128100;', '管理', '今日・人員配置・実績・生産性・収支・請求・データ取込', true)+
       gateCard('settingsHub', '#F4EEE4', '#8A6A3B', '&#9881;', '設定', 'スタッフ・作業・得意先と単価・勤務時間など', true)+
+      '<a class="gate-card" href="factory.html" style="text-decoration:none;color:inherit;">'+
+        '<div class="gate-lock-badge" title="ログインが必要です">&#128274;</div>'+
+        '<div class="gate-icon" style="background:#E7F7F5;color:#1D7A70;">&#9986;</div>'+
+        '<div class="gate-card-title">生産管理</div>'+
+        '<div class="gate-card-desc">不織布加工の製品・受注・生産計画・資材・生産実績・品質</div>'+
+      '</a>'+
     '</div>'+
     '<div class="gate-links"><button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
       '<a class="changelog-link" href="manual.pdf" target="_blank" rel="noopener" download="LOGI LINK 説明書.pdf">説明書(PDF)</a></div>'+
@@ -10970,6 +11029,7 @@ function bindGate(){
   document.querySelectorAll('.gate-card').forEach(function(btn){
     btn.addEventListener('click', function(){
       var role = btn.getAttribute('data-role');
+      if(!role) return; // 生産管理など、別のページへのリンクのカード
       if(isRoleBlockedForAccount(role)) return; // 閲覧専用アカウントでは開かない
       state.role = role;
       var adminTab = btn.getAttribute('data-admin-tab');
@@ -12829,8 +12889,93 @@ var SETTINGS_HUB_TABS = [
   { key:'shift', label:'勤務時間' },
   { key:'master', label:'得意先・単価' },
   { key:'history', label:'操作履歴' },
+  { key:'accounts', label:'アカウント' },
   { key:'system', label:'システム' }
 ];
+/* ---------- 設定 → アカウント(admin だけ) ----------
+   ログイン用のアカウントの一覧・追加・役割の変更・パスワードの再設定。処理は Edge Function「manage-accounts」(service_role)で行う。 */
+var ACCOUNT_ROLES = [['admin','システム管理者(すべて)'],['manager','ロジリンクの管理者'],['factory','生産管理者(生産管理の編集)']];
+function accountRoleLabel(r){ var x = ACCOUNT_ROLES.filter(function(a){ return a[0]===r; })[0]; return x ? x[1] : (r ? r : '役割なし(使えない)'); }
+async function callManageAccounts(body){
+  var c = window.__supabaseClient;
+  if(!c || !c.functions) return { ok:false, error:'Supabaseの関数呼び出しが利用できません。' };
+  try{
+    var res = await c.functions.invoke('manage-accounts', { body: body });
+    if(res.error) return { ok:false, error: await describeFunctionsError(res.error) };
+    var d = res.data; if(typeof d==='string'){ try{ d = JSON.parse(d); }catch(e){ d = null; } }
+    return d || { ok:false, error:'想定外の応答がありました。' };
+  }catch(e){ return { ok:false, error:'Edge Functionへの接続に失敗しました。' }; }
+}
+function renderAccountsPanel(){
+  if(state.authRole!=='admin') return '<div class="mgr-wrap"><div class="panel"><div class="panel-title">アカウント</div><div class="pool-hint">アカウントの管理は admin のアカウントだけができます。</div></div></div>';
+  var a = state.accounts || (state.accounts = { list:null, loading:false, msg:'', form:{ email:'', password:'', role:'factory' } });
+  if(!a.list && !a.loading){
+    a.loading = true;
+    callManageAccounts({ action:'list' }).then(function(r){ a.loading = false; if(r.ok) a.list = r.accounts; else { a.list = []; a.msg = '⚠️ '+r.error; } render(); });
+  }
+  var me = state.managerSession && state.managerSession.user ? state.managerSession.user.id : '';
+  var rows = (a.list||[]).slice().sort(function(x,y){ return String(x.email).localeCompare(String(y.email)); }).map(function(u){
+    return '<tr><td><b>'+esc(u.email||'')+'</b>'+(u.id===me ? ' <span class="sk-minor">(自分)</span>' : '')+'</td>'+
+      '<td><select data-acct-role="'+esc(u.id)+'"'+(u.id===me ? ' disabled' : '')+'><option value="">役割なし(使えない)</option>'+
+        ACCOUNT_ROLES.map(function(r){ return '<option value="'+r[0]+'"'+(u.role===r[0]?' selected':'')+'>'+esc(r[1])+'</option>'; }).join('')+'</select></td>'+
+      '<td class="sk-minor">'+(u.createdAt ? esc(fmtDateTime(u.createdAt)) : '')+'</td><td class="sk-minor">'+(u.lastSignInAt ? esc(fmtDateTime(u.lastSignInAt)) : 'まだ')+'</td>'+
+      '<td><button type="button" class="vc-manage-toggle-btn" data-acct-pw="'+esc(u.id)+'" data-acct-email="'+esc(u.email||'')+'">パスワードを再設定</button></td></tr>';
+  }).join('') || '<tr><td colspan="5" class="empty-note">'+(a.loading ? '読み込み中…' : 'アカウントがありません')+'</td></tr>';
+  var f = a.form;
+  return '<div class="mgr-wrap"><div class="panel">'+
+    '<div class="panel-title">アカウント</div>'+
+    '<div class="pool-hint" style="margin:0 0 10px;">ログイン用のアカウントの追加と役割の変更です(admin だけ)。生産管理者は生産管理(factory.html)の編集だけができ、ロジリンクの管理・設定は開けません。現場の画面(作業記録・在庫など)はアカウントなしで使えます。</div>'+
+    (a.msg ? '<div class="vc-import-status" style="white-space:pre-line;">'+esc(a.msg)+'</div>' : '')+
+    '<div class="ll-form-group" style="margin-bottom:14px;"><div class="ll-form-group-title">アカウントを追加</div>'+
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'+
+        '<input type="email" id="acctEmail" placeholder="メールアドレス" value="'+esc(f.email)+'" style="width:240px;">'+
+        '<input type="text" id="acctPassword" placeholder="初めのパスワード(8文字以上)" value="'+esc(f.password)+'" style="width:200px;" autocomplete="off">'+
+        '<select id="acctRole">'+ACCOUNT_ROLES.map(function(r){ return '<option value="'+r[0]+'"'+(f.role===r[0]?' selected':'')+'>'+esc(r[1])+'</option>'; }).join('')+'</select>'+
+        '<button type="button" class="add-btn" id="acctAdd"'+(a.busy?' disabled':'')+'>追加</button>'+
+      '</div>'+
+      '<div class="pool-hint" style="margin:6px 0 0;">初めのパスワードは、本人に直接伝えてください(チャットやメールに残さないでください)。</div>'+
+    '</div>'+
+    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>メールアドレス</th><th>役割</th><th>作成</th><th>最終ログイン</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+  '</div></div>';
+}
+function bindAccountsPanel(){
+  var a = state.accounts; if(!a || state.authRole!=='admin') return;
+  ['acctEmail','acctPassword'].forEach(function(id){ var el = document.getElementById(id); if(el) el.addEventListener('input', function(){ a.form[id==='acctEmail'?'email':'password'] = el.value; }); });
+  var rs = document.getElementById('acctRole'); if(rs) rs.addEventListener('change', function(){ a.form.role = rs.value; });
+  async function run(body, okMsg, audit){
+    a.busy = true; a.msg = ''; render();
+    var r = await callManageAccounts(body);
+    a.busy = false;
+    if(r.ok){ a.msg = '✅ '+okMsg; a.list = null; if(audit) await appendAuditLog(audit); }
+    else a.msg = '⚠️ '+r.error;
+    render();
+  }
+  var add = document.getElementById('acctAdd');
+  if(add) add.addEventListener('click', function(){
+    var f = a.form;
+    if(!f.email || !f.password){ alert('メールアドレスと初めのパスワードを入れてください'); return; }
+    if(!confirm(f.email+' を「'+accountRoleLabel(f.role)+'」で追加します。よろしいですか?')) return;
+    var email = f.email, role = f.role;
+    a.form = { email:'', password:'', role: f.role };
+    run({ action:'create', email: email, password: f.password, role: role }, email+' を追加しました', { action:'アカウントを追加', target: email, before:null, after: accountRoleLabel(role) });
+  });
+  document.querySelectorAll('[data-acct-role]').forEach(function(el){
+    el.addEventListener('change', function(){
+      var u = (a.list||[]).filter(function(x){ return x.id===el.getAttribute('data-acct-role'); })[0];
+      var role = el.value || null;
+      if(!confirm((u ? u.email : '')+' の役割を「'+accountRoleLabel(role)+'」に変えます。よろしいですか?')){ render(); return; }
+      run({ action:'setRole', userId: el.getAttribute('data-acct-role'), role: role }, '役割を変えました', { action:'アカウントの役割を変更', target: u ? u.email : '', before: u ? accountRoleLabel(u.role) : null, after: accountRoleLabel(role) });
+    });
+  });
+  document.querySelectorAll('[data-acct-pw]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var email = el.getAttribute('data-acct-email');
+      var pw = prompt(email+' の新しいパスワード(8文字以上)を入れてください。本人に直接伝えてください。');
+      if(!pw) return;
+      run({ action:'setPassword', userId: el.getAttribute('data-acct-pw'), password: pw }, email+' のパスワードを再設定しました', { action:'パスワードを再設定', target: email, before:null, after:null });
+    });
+  });
+}
 function renderSettingsHub(){
   ensureManagerSessionChecked();
   if(!hasManagerSession()){
@@ -12840,7 +12985,7 @@ function renderSettingsHub(){
   if(state.settingsHubTab==='customerMapping' || state.settingsHubTab==='kintoneProduct') state.settingsHubTab = 'master'; // 以前のタブ
   var tabsHtml = '<div class="panel-title" style="font-size:20px;margin-bottom:4px;">設定</div>'+
     '<div class="vc-tabs hub-tabs" style="margin:0 0 14px;flex-wrap:wrap;">'+
-    SETTINGS_HUB_TABS.map(function(t){
+    SETTINGS_HUB_TABS.filter(function(t){ return t.key!=='accounts' || state.authRole==='admin'; }).map(function(t){
       return '<button type="button" class="vc-tab-btn'+(state.settingsHubTab===t.key?' active':'')+'" data-settings-hub-tab="'+t.key+'">'+t.label+'</button>';
     }).join('')+
   '</div>';
@@ -12850,6 +12995,8 @@ function renderSettingsHub(){
     body = renderRegister();
   }else if(state.settingsHubTab==='history'){
     body = renderHistory();
+  }else if(state.settingsHubTab==='accounts'){
+    body = renderAccountsPanel();
   }else if(state.settingsHubTab==='master'){
     body = '<div class="mgr-wrap">'+renderCustomerMappingPanel()+renderWorkPriceMasterPanel()+renderWorkReportPanel()+renderDestListPanel()+'</div>';
   }else{
@@ -12882,6 +13029,7 @@ function bindSettingsHub(){
   if(state.settingsHubTab==='task') bindRegister();
   else if(state.settingsHubTab==='history') bindHistory();
   else if(state.settingsHubTab==='staff'){ bindStaffSettingsPanel(); bindStaffWagesPanel(); }
+  else if(state.settingsHubTab==='accounts') bindAccountsPanel();
   else if(state.settingsHubTab==='master'){ bindCustomerMappingPanel(); bindWorkPriceMasterPanel(); bindDestListPanel(); }
   else if(state.settingsHubTab==='system'){ bindSettings(); bindKintoneProductSettingsPanel(); }
   else bindSettings();
@@ -17758,6 +17906,7 @@ async function pollTick(){
   if(!state.role) return;
   if(pendingSaves>0) return;
   if(isUserBusy()) return;
+  if(typeof document!=='undefined' && document.hidden) return; // 画面が見えていないときは読み直さない(通信量を減らす。見えたらすぐ読み直す)
   pollTickRunning = true;
   try{
     // 前回の保存に失敗した作業一覧・繰り返し作業は、最新データとマージして再保存する
@@ -17765,6 +17914,8 @@ async function pollTick(){
     if(canAutoWrite() && listSaveDirty['task-backlog']) await saveBacklog(state.backlog);
     if(canAutoWrite() && listSaveDirty['task-templates']) await saveTemplates(state.templates);
     if(pendingSaves>0 || isUserBusy()) return;
+    // 通信量を減らす: 最近読んだデータの版だけをまとめて確かめ、変わったものだけを読み直す
+    if(window.storage.checkVersions) await window.storage.checkVersions(['day:'+todayStr(), 'work-volume:'+todayStr()]);
     /* 取得中にこの端末が書き込みを行った場合、取得したデータはその書き込みより
        古い可能性がある。古いデータで画面の状態を上書きすると、直後の保存で
        書き込んだ内容(開始したばかりの実績など)を消してしまうため、適用しない。 */
@@ -17878,6 +18029,8 @@ function startPolling(){
   if(pollHandle) return;
   pollHandle = setInterval(pollTick, 4000);
 }
+// 画面がふたたび見えたら、すぐ最新に読み直す(見えていない間は4秒更新を止めている)
+document.addEventListener('visibilitychange', function(){ if(!document.hidden && pollHandle) pollTick(); });
 function setupGlobalFocusTracking(){
   var FIELD_TAGS = {INPUT:1, SELECT:1, TEXTAREA:1};
   document.addEventListener('focusin', function(e){

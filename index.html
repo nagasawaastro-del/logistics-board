@@ -1113,15 +1113,20 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="usage-meter.js"></script>
 <script>
 (function(){
   "use strict";
   var cfg = window.SUPABASE_CONFIG || {};
   var client = null;
+  // 通信量の目安を数える(usage-meter.js)。読み込めなかったときは数えずに今までどおり動く
+  var meter = window.LogiUsageMeter ? window.LogiUsageMeter.create({ lsKey:'logilink-usage', suffix:'', label: function(){ return typeof window.__usageDeviceLabel==='function' ? window.__usageDeviceLabel() : ''; } }) : null;
   if(cfg.url && cfg.anonKey && cfg.url.indexOf('YOUR-PROJECT')===-1){
-    client = window.supabase.createClient(cfg.url, cfg.anonKey);
+    client = meter ? window.supabase.createClient(cfg.url, cfg.anonKey, { global: { fetch: meter.fetch } }) : window.supabase.createClient(cfg.url, cfg.anonKey);
+    if(meter) meter.setClient(client);
   }
   window.__supabaseClient = client;
+  window.__usageMeter = meter;
 
   /* ---------- エラーの分類 ----------
      Supabase(PostgREST)のエラーや通信エラーを、画面に出す理由ごとに分類する。
@@ -1136,6 +1141,8 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
     var code = String(err.code||'');
     var status = Number(err.status||0);
     var msg = String(err.message||err.msg||'').toLowerCase();
+    // Supabase が通信量などの上限でプロジェクトを止めたとき(402 / "restricted ... exceed_egress_quota")
+    if(status===402 || msg.indexOf('exceed_egress_quota')!==-1 || msg.indexOf('service for this project is restricted')!==-1) return 'restricted';
     if(code==='42501' || status===403 || msg.indexOf('row-level security')!==-1 || msg.indexOf('permission denied')!==-1) return 'permission';
     if(code==='PGRST301' || code==='PGRST302' || status===401 || msg.indexOf('jwt')!==-1) return 'auth';
     if(msg.indexOf('failed to fetch')!==-1 || msg.indexOf('networkerror')!==-1 || msg.indexOf('network request failed')!==-1 || msg.indexOf('load failed')!==-1) return 'network';
@@ -1176,11 +1183,29 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
       throw e1;
     }
   }
+  /* データベースが上限で止められたときは、全画面の上に赤い帯を出す(何が起きたか分かるように) */
+  function showRestrictedBanner(){
+    try{
+      if(document.getElementById('dbRestrictedBanner')) return;
+      var d = document.createElement('div');
+      d.id = 'dbRestrictedBanner';
+      d.setAttribute('style', 'position:fixed;left:0;right:0;top:0;z-index:9999;background:#B42318;color:#fff;padding:10px 16px;font-size:14px;font-weight:700;text-align:center;line-height:1.5;');
+      d.textContent = 'データベース(Supabase)が使用量の上限で止められています。データの読み書きができません。システム担当に連絡してください(Supabase の Usage / Billing を確認)。';
+      document.body.appendChild(d);
+    }catch(e){}
+  }
   async function runQuery(op, key, fn){
     var res;
     try{ res = await fn(); }
     catch(netErr){ return { error: makeStorageError(op, key, netErr, classifyError(netErr) || 'network') }; }
-    if(res && res.error) return { error: makeStorageError(op, key, res.error), data: res.data };
+    if(res && res.error){
+      if(res.status===402 && res.error.status===undefined) res.error.status = 402;
+      var se = makeStorageError(op, key, res.error);
+      if(se.kind==='restricted') showRestrictedBanner();
+      return { error: se, data: res.data };
+    }
+    var rb = (typeof document!=='undefined' && document.getElementById) ? document.getElementById('dbRestrictedBanner') : null;
+    if(rb) rb.parentNode.removeChild(rb); // 読めるようになったら帯を消す
     return { data: res ? res.data : null };
   }
 
@@ -1188,15 +1213,59 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
      4秒更新では最初に「版だけ」をまとめて確かめ(checkVersions、数百バイト)、版が変わったキーだけを読み直す。
      書き込んだ値も覚えておく。版の確認から VER_SNAP_MS 以上たっていたら、今までどおり毎回読む(古い値を使い続けない)。 ---- */
   var kvCache = {};       // key → { value, ver }
+  var BIG_VALUE = 4000;   // これより大きい値は、読む前に版だけ確かめる・端末に残す
+  var LS_PREFIX = 'logilink-kvcache:';
+  var LS_MAX_TOTAL = 3500000; // 端末に残す合計の上限(文字数)
+  // 前回までに端末に残した大きな値を読み込む(版を確かめてから使う)
+  try{
+    for(var li=0; li<localStorage.length; li++){
+      var lk = localStorage.key(li);
+      if(lk && lk.indexOf(LS_PREFIX)===0){
+        var lv = JSON.parse(localStorage.getItem(lk)||'null');
+        if(lv && lv.ver && typeof lv.value==='string' && Date.now()-(lv.at||0) < 7*86400000) kvCache[lk.slice(LS_PREFIX.length)] = { value: lv.value, ver: lv.ver };
+        else { localStorage.removeItem(lk); li--; } // 7日以上使っていないものは消す
+      }
+    }
+  }catch(e){}
+  function lsSave(key, value, ver){
+    try{
+      if(!ver || typeof value!=='string' || value.length<BIG_VALUE){ localStorage.removeItem(LS_PREFIX+key); return; }
+      if(value.length > LS_MAX_TOTAL){ localStorage.removeItem(LS_PREFIX+key); return; }
+      // 合計が上限を超えるときは、古く残したものから消す(端末の保存領域を使い切らないように)
+      var others = [], total = value.length;
+      for(var i=0;i<localStorage.length;i++){
+        var k = localStorage.key(i);
+        if(k && k.indexOf(LS_PREFIX)===0 && k!==LS_PREFIX+key){
+          var raw = localStorage.getItem(k)||''; var at = 0;
+          try{ at = JSON.parse(raw).at||0; }catch(e2){}
+          others.push({ k:k, len: raw.length, at: at }); total += raw.length;
+        }
+      }
+      others.sort(function(x,y){ return x.at-y.at; });
+      while(total > LS_MAX_TOTAL && others.length){ var o = others.shift(); localStorage.removeItem(o.k); total -= o.len; }
+      localStorage.setItem(LS_PREFIX+key, JSON.stringify({ value: value, ver: ver, at: Date.now() }));
+    }catch(e){ try{ localStorage.removeItem(LS_PREFIX+key); }catch(e2){} }
+  }
+  /* 覚えている大きな値があれば、版だけ読んで(数十バイト)同じなら使う。違えば undefined(読み直す) */
+  async function cachedIfSameVersion(key){
+    var c = kvCache[key];
+    if(!c || typeof c.value!=='string' || c.value.length<BIG_VALUE) return undefined;
+    var r = await runQuery('read', key, function(){ return client.from('kv_store').select('updated_at').eq('key', key).maybeSingle(); });
+    if(r.error) return undefined;
+    if(!r.data) return null;
+    if(r.data.updated_at===c.ver){ if(verSnap) verSnap.vers[key] = c.ver; return c; }
+    return undefined;
+  }
   var verSnap = null;     // { at, vers: { key: 版 または null(キーが無い) } }
   var recentKeys = {};    // 最近読んだキー → 時刻(版を確かめる対象)
   var VER_SNAP_MS = 6000;
   function cachePut(key, value, ver){
     if(ver){ kvCache[key] = { value: value, ver: ver }; recentKeys[key] = Date.now(); } else delete kvCache[key];
+    lsSave(key, value, ver);
     if(verSnap) verSnap.vers[key] = ver || null;
   }
   // 競合したときは、覚えている値と版を捨てて、次は必ずデータベースから読む
-  function forgetCache(key){ delete kvCache[key]; if(verSnap) delete verSnap.vers[key]; }
+  function forgetCache(key){ delete kvCache[key]; if(verSnap) delete verSnap.vers[key]; try{ localStorage.removeItem(LS_PREFIX+key); }catch(e){} }
   function cachedIfFresh(key){
     if(!verSnap || Date.now()-verSnap.at > VER_SNAP_MS || !Object.prototype.hasOwnProperty.call(verSnap.vers, key)) return undefined;
     var v = verSnap.vers[key];
@@ -1220,7 +1289,8 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
       if(!client) throw makeStorageError('read', key, new Error('Supabase未設定です(config.jsを確認してください)'), 'other');
       recentKeys[key] = Date.now();
       var c = cachedIfFresh(key);
-      if(c===null) throw makeNotFoundError(key);
+      if(c===undefined) c = await cachedIfSameVersion(key);
+      if(c===null){ cachePut(key, null, null); throw makeNotFoundError(key); }
       if(c) return { key: key, value: c.value };
       var r = await runQuery('read', key, function(){ return client.from('kv_store').select('value,updated_at').eq('key', key).maybeSingle(); });
       if(r.error){ console.error('[LOGI LINK] 読み込みに失敗しました', key, r.error.kind, r.error.cause||r.error); throw r.error; }
@@ -1260,7 +1330,8 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
       if(!client) throw makeStorageError('read', key, new Error('Supabase未設定です(config.jsを確認してください)'), 'other');
       recentKeys[key] = Date.now();
       var c = cachedIfFresh(key);
-      if(c===null) return { key: key, value: null, version: null, missing: true };
+      if(c===undefined) c = await cachedIfSameVersion(key);
+      if(c===null){ cachePut(key, null, null); return { key: key, value: null, version: null, missing: true }; }
       if(c) return { key: key, value: c.value, version: c.ver, missing: false };
       var r = await runQuery('read', key, function(){ return client.from('kv_store').select('value,updated_at').eq('key', key).maybeSingle(); });
       if(r.error){ console.error('[LOGI LINK] 読み込みに失敗しました', key, r.error.kind, r.error.cause||r.error); throw r.error; }
@@ -1628,6 +1699,10 @@ var CHANGELOG = [
     '「🔄 kintoneから商品マスタを取得」ボタンで、取得件数・保存件数・最終取得日時を確認できます。商品コードが空のレコードは対象外とし、kintoneのレコードIDを一意キーとして重複せず保存します(荷主が違えば同じ商品コードでも別レコードとして扱われます)',
     '実際にコードを実行するテストで、未ログイン状態では画面自体・同期処理のどちらも実行できないこと、Edge Functionへ送信するデータにAPIトークンが含まれないこと、エラー時に分かりやすいメッセージが表示されることを確認しました(Edge Function自体の実際の動作は、私の環境では実行・デプロイできないため未検証です)。既存の全回帰テスト(40スイート)にも影響はありません',
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
+  ]},
+  { date:'2026-10-05', items:[
+    '【通信量の目安】Supabase の通信量の目安を、ロジリンクの中で見られるようにしました。トップページの「データの更新状況」に「今月の通信量(目安)」(無料枠5GBに対する割合と月末の見込み)を出し、70%を超えるか月末に超えそうなら黄色、90%を超えたら赤になります。設定→システムでは、端末ごと・日ごとの内訳が見られます。各端末が受け取ったデータ量を数えて10分ごとに記録する目安で、Supabase の請求の数字とは少しずれます',
+    '【止まりにくくする】データの読み込みを、4秒ごとの更新以外(在庫・集計表・VC引当などを開いたとき)も「変わったときだけ」にしました。大きなデータは端末にも残し、再読み込みや翌日の起動のときも、変わっていなければ読み直しません。データベースが使用量の上限で止められたときは、全画面の上に赤い帯でお知らせします(読めるようになると消えます)'
   ]},
   { date:'2026-10-04', items:[
     '【通信量を減らす】データベースの通信量が月の上限を超えて止まったため、通信量を大きく減らしました。読んだデータを端末に覚えておき、4秒ごとの更新では最初に「変わったかどうか」だけを確かめて、変わったデータだけを読み直します。画面が見えていない(別のタブ・スリープ中)ときは更新を止め、見えたらすぐ読み直します。保存したときに、保存した内容をそのまま送り返してもらうのをやめました。画面の動きは今までと同じです',
@@ -2625,7 +2700,8 @@ function storageFailureReason(kind){
     auth: 'ログインの有効期限が切れています。再度ログインしてください',
     network: '通信エラーです。通信状態を確認してください',
     readonly: 'モニター用(閲覧専用)アカウントのため保存できません',
-    unverified: '保存済みのデータを読み込めなかったため、上書きを防ぐために保存を中止しました'
+    unverified: '保存済みのデータを読み込めなかったため、上書きを防ぐために保存を中止しました',
+    restricted: 'データベースが使用量の上限で止められています(システム担当に連絡してください)'
   }[kind] || '保存処理でエラーが発生しました';
 }
 function renderSaveErrorBanner(){
@@ -10893,6 +10969,10 @@ async function loadGateDataStatus(){
   var ws = await loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; });
   var md = function(d){ return d ? Number(d.slice(5,7))+'/'+Number(d.slice(8,10)) : ''; };
   out.kintoneReport = (ws && ws.syncedAt) ? { at: ws.syncedAt, detail: md(ws.from)+'〜'+md(ws.to)+'の日報' } : null;
+  // 今月の通信量(目安)
+  if(window.LogiUsageMeter && window.__supabaseClient){
+    try{ out.usage = await window.LogiUsageMeter.loadSummary(window.__supabaseClient); }catch(e){ out.usage = null; }
+  }
   // kintone 作業単価マスタの同期(管理者のみ読める)
   if(hasManagerSession() && window.__supabaseClient){
     try{
@@ -10901,6 +10981,19 @@ async function loadGateDataStatus(){
     }catch(e){}
   }
   return out;
+}
+/* 通信量の目安: GB の表示。無料枠(5GB)に対して 70% 以上(または月末の見込みが超える)で黄色、90% 以上で赤 */
+function fmtUsageBytes(b){ return b>=1e9 ? (b/1e9).toFixed(2)+'GB' : (b>=1e6 ? Math.round(b/1e6)+'MB' : Math.max(0, Math.round(b/1e3))+'KB'); }
+function usageLevel(u){
+  var free = window.LogiUsageMeter.FREE_BYTES, pct = u.total/free*100;
+  return pct>=90 ? 'is-none' : ((pct>=70 || (u.projected && u.projected>=free)) ? 'is-stale' : 'is-ok');
+}
+function usageTile(u){
+  if(!u || !window.LogiUsageMeter) return '';
+  var free = window.LogiUsageMeter.FREE_BYTES;
+  return '<div class="gs-tile '+usageLevel(u)+'" title="Supabase の通信量の目安です。正確な値は Supabase の Usage 画面で確認してください"><div class="gs-label">今月の通信量(目安)</div>'+
+    '<div class="gs-when">'+fmtUsageBytes(u.total)+' / '+fmtUsageBytes(free)+'</div>'+
+    '<div class="gs-detail">'+Math.round(u.total/free*100)+'%'+(u.projected ? ' ・ 月末見込み '+fmtUsageBytes(u.projected) : '')+'</div></div>';
 }
 function renderGateDataStatus(){
   if(!hasDataAccess() || !state.appDataLoaded) return '';
@@ -10940,6 +11033,7 @@ function renderGateDataStatus(){
       tile('kintone 商品台帳', st.kintoneProduct, false)+
       (hasManagerSession() ? tile('kintone 作業単価', st.kintonePrice, false) : '')+
       tile('kintone 作業日報', st.kintoneReport, false)+
+      usageTile(st.usage)+
     '</div>'+
   '</div>';
 }
@@ -11088,6 +11182,12 @@ var ADMIN_NAV_ITEMS = [
   { role:'adminHub', label:'管理' },
   { role:'settingsHub', label:'設定' }
 ];
+// 通信量の目安で、端末を見分けるための説明(最後に開いた画面)
+window.__usageDeviceLabel = function(){
+  if(state.role) state.usageLastRole = state.role;
+  var it = COMMON_NAV_ITEMS.concat(ADMIN_NAV_ITEMS).filter(function(x){ return x.role===state.usageLastRole; })[0];
+  return it ? it.label : 'トップ';
+};
 function renderTopbar(){
   var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'集計表(高屋・丹南)'}[state.role];
   var lockBtn = (hasManagerSession() && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="ログアウトする">🔓 ログアウト</button>' : '';
@@ -11354,6 +11454,36 @@ function bindAdminHub(){
   else if(state.adminHubTab==='billing') bindBilling();
   else if(state.adminHubTab==='data'){ bindCsvImportPanel(); bindDataHub(); bindKintoneSyncPanel(); }
   else bindManager();
+}
+/* 設定 → システム: 通信量の目安(端末ごと・日ごと) */
+function renderUsagePanel(){
+  if(!window.LogiUsageMeter || !window.__supabaseClient) return '';
+  var p = state.usagePanel || (state.usagePanel = { data:null, loading:false, at:0 });
+  if(!p.loading && (!p.data || Date.now()-p.at > 60000)){
+    p.loading = true;
+    window.LogiUsageMeter.loadSummary(window.__supabaseClient).then(function(d){ p.data = d; p.at = Date.now(); p.loading = false; render(); })
+      .catch(function(){ p.loading = false; p.at = Date.now(); });
+  }
+  var u = p.data, free = window.LogiUsageMeter.FREE_BYTES;
+  var body;
+  if(!u) body = '<div class="pool-hint">'+(p.loading ? '読み込み中…' : '読み込めませんでした')+'</div>';
+  else{
+    var me = '';
+    try{ me = localStorage.getItem('logilink-device-id')||''; }catch(e){}
+    var devRows = u.devices.map(function(d){
+      return '<tr><td>'+esc(d.label||'')+(d.id===me ? ' <span class="sk-minor">(この端末)</span>' : '')+'<div class="sk-minor">'+esc(d.id)+'</div></td><td>'+fmtUsageBytes(d.total)+'</td><td>'+fmtUsageBytes(d.today)+'</td><td class="sk-minor">'+(d.at ? esc(fmtDateTime(d.at)) : '')+'</td></tr>';
+    }).join('') || '<tr><td colspan="4" class="empty-note">まだ記録がありません(各端末が10分ごとに記録します)</td></tr>';
+    var days = Object.keys(u.byDay).sort().reverse().slice(0,14);
+    var dayRows = days.map(function(d){ return '<tr><td>'+esc(d)+'</td><td>'+fmtUsageBytes(u.byDay[d])+'</td></tr>'; }).join('');
+    body = '<div class="gs-grid" style="margin-bottom:10px;">'+usageTile(u)+'</div>'+
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">'+
+        '<div style="overflow-x:auto;flex:2;min-width:300px;"><table class="report-table"><thead><tr><th>端末(最後に開いた画面)</th><th>今月</th><th>今日</th><th>最終記録</th></tr></thead><tbody>'+devRows+'</tbody></table></div>'+
+        (dayRows ? '<div style="overflow-x:auto;flex:1;min-width:180px;"><table class="report-table"><thead><tr><th>日付</th><th>全端末</th></tr></thead><tbody>'+dayRows+'</tbody></table></div>' : '')+
+      '</div>';
+  }
+  return '<div class="panel"><div class="panel-title">通信量の目安(Supabase)</div>'+
+    '<div class="pool-hint" style="margin:0 0 10px;">各端末が Supabase から受け取ったデータ量を数えた目安です(10分ごとに記録)。無料プランの上限は月'+fmtUsageBytes(free)+'で、超えるとロジリンクが止まります。正確な値は Supabase の Usage 画面で確認してください。</div>'+
+    body+'</div>';
 }
 function renderKintoneProductSettingsPanel(){
   ensureManagerSessionChecked();
@@ -13007,7 +13137,7 @@ function renderSettingsHub(){
     }else if(state.settingsHubTab==='shift'){
       content = panels.shiftPanel + panels.breakPanel;
     }else if(state.settingsHubTab==='system'){
-      content = panels.accountInfoHtml + panels.backupPanel + renderKintoneProductSettingsPanel();
+      content = panels.accountInfoHtml + renderUsagePanel() + panels.backupPanel + renderKintoneProductSettingsPanel();
     }else{ // basic
       content = panels.achievementPanel;
     }

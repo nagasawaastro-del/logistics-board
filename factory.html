@@ -12,6 +12,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <!-- ロジリンクと同じ Supabase(同じログイン)を使う -->
 <script src="config.js"></script>
+<!-- 通信量の目安を数える(ロジリンクと共通) -->
+<script src="usage-meter.js"></script>
 
 <style>
   html, body { margin: 0; padding: 0; background: #121417; }
@@ -38,7 +40,10 @@ const SUPABASE_URL = (window.SUPABASE_CONFIG || {}).url || '';
 const SUPABASE_ANON_KEY = (window.SUPABASE_CONFIG || {}).anonKey || '';
 
 const CONFIGURED = SUPABASE_URL.indexOf('http') === 0 && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY';
-const supabaseClient = CONFIGURED ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+// 通信量の目安を数える(usage-meter.js、端末IDのうしろに「-f」を付けてロジリンクの画面と分ける)
+const usageMeter = window.LogiUsageMeter ? window.LogiUsageMeter.create({ lsKey: 'logilink-usage-factory', suffix: '-f', label: () => '生産管理' }) : null;
+const supabaseClient = CONFIGURED ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, usageMeter ? { global: { fetch: usageMeter.fetch } } : undefined) : null;
+if (usageMeter && supabaseClient) usageMeter.setClient(supabaseClient);
 
 async function authSignIn(email, password) {
   const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
@@ -64,6 +69,16 @@ async function cloudLoad() {
   records.forEach((x) => { lastSavedRecords[x.id] = JSON.stringify(x); });
   if (!m.data) return records.length ? { records } : null;
   return { ...m.data.data, records };
+}
+// データの版(通信量を減らす): 最終更新日時と件数だけを読む(数十バイト)。変わっていなければ全体を読み直さない
+let lastCloudSig = null;
+async function cloudSig() {
+  const [m, r] = await Promise.all([
+    supabaseClient.from('factory_master').select('updated_at').eq('id', 'main').maybeSingle(),
+    supabaseClient.from('factory_records').select('updated_at', { count: 'exact' }).order('updated_at', { ascending: false }).limit(1),
+  ]);
+  if (m.error || r.error) return null;
+  return (m.data ? m.data.updated_at : '') + '|' + ((r.data && r.data[0]) ? r.data[0].updated_at : '') + '|' + r.count;
 }
 // ログイン中のアカウントの役割(ロジリンクの user_roles。自分の行だけ読める)
 async function loadMyRole(userId) {
@@ -484,7 +499,9 @@ function App() {
   const lastLoadedJson = React.useRef('');
   const loadFromCloud = useCallback(async () => {
     try {
+      const sig = await cloudSig();
       const remote = await cloudLoad();
+      lastCloudSig = sig;
       const nd = normalizeData(remote);
       lastLoadedJson.current = JSON.stringify(nd); // 読み込んだだけ(変更なし)のときは保存しない
       setData(nd);
@@ -499,10 +516,15 @@ function App() {
 
   useEffect(() => { if (canView) loadFromCloud(); }, [canView, loadFromCloud]);
 
-  // 他の人の更新を定期的に取り込む(10秒ごと)
+  // 他の人の更新を定期的に取り込む(10秒ごと)。画面が見えていないときは止め、版が変わったときだけ全体を読み直す
   useEffect(() => {
     if (!canView) return;
-    const iv = setInterval(() => { if (!loading) loadFromCloud(); }, 10000);
+    const iv = setInterval(async () => {
+      if (loading || document.hidden) return;
+      const sig = await cloudSig();
+      if (sig && sig === lastCloudSig) return;
+      loadFromCloud();
+    }, 10000);
     return () => clearInterval(iv);
   }, [canView, loading, loadFromCloud]);
 

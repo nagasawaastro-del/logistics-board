@@ -98,7 +98,34 @@ async function cloudSave(obj) {
   if (ups.length) { const { error: e1 } = await supabaseClient.from('factory_records').upsert(ups); if (e1) throw e1; }
   if (dels.length) { const { error: e2 } = await supabaseClient.from('factory_records').delete().in('id', dels); if (e2) throw e2; }
   lastSavedRecords = cur;
+  return ups.map((x) => x.id);
 }
+/* ---- kintone 生産実績アプリ(981)への登録(Edge Function push-production-981) ----
+   設定(data.k981)が「使う」で、開始日以降・製造分類のあるラインの実績を保存すると、自動で 981 に登録する。
+   送れなかったときも生産管理の保存はそのまま(kintone の不具合で生産管理が止まらないように)。 */
+async function callK981(body) {
+  try {
+    const res = await supabaseClient.functions.invoke('push-production-981', { body });
+    if (res.error) {
+      let msg = res.error.message || 'エラーが発生しました';
+      try { const j = await res.error.context.json(); if (j && j.error) msg = j.error; } catch (e) {}
+      return { ok: false, error: msg };
+    }
+    let d = res.data;
+    if (typeof d === 'string') { try { d = JSON.parse(d); } catch (e) { d = null; } }
+    return d || { ok: false, error: '応答がありませんでした' };
+  } catch (e) {
+    return { ok: false, error: 'kintone 連携に接続できませんでした' };
+  }
+}
+async function loadK981Status() {
+  const { data, error } = await supabaseClient.from('factory_k981').select('record_id,kintone_id,error,sent_at').range(0, 19999);
+  if (error) return null;
+  const m = {};
+  (data || []).forEach((x) => { m[x.record_id] = x; });
+  return m;
+}
+const k981Target = (cfg, r) => !!(cfg && cfg.enabled && cfg.startDate && r.date >= cfg.startDate && (cfg.lineCategory || {})[r.lineId]);
 
 /* ==================================================================== */
 /* アイコン(lucide-reactの代わりに絵文字ベースの軽量シムを使用)             */
@@ -268,11 +295,13 @@ const normalizeData = (loaded) => {
     records: Array.isArray(loaded.records) ? loaded.records : [],
     materialTransactions: Array.isArray(loaded.materialTransactions) ? loaded.materialTransactions : [],
     tabOrder: Array.isArray(loaded.tabOrder) && loaded.tabOrder.length > 0 ? loaded.tabOrder : DEFAULT_TAB_ORDER,
+    k981: loaded.k981 && typeof loaded.k981 === 'object' ? loaded.k981 : {},
   };
 };
 
-const EMPTY_DATA = { lines: [], products: [], salesOrders: [], lots: [], orders: [], records: [], materialTransactions: [], tabOrder: ['dashboard', 'products', 'salesorders', 'plan', 'inventory', 'production', 'calendar', 'quality'] };
-const DEFECT_CAUSES = ['溶着不良', '寸法不良', '穴あき・破れ', '汚れ・異物', 'シワ・変形', 'その他'];
+const EMPTY_DATA = { k981: {}, lines: [], products: [], salesOrders: [], lots: [], orders: [], records: [], materialTransactions: [], tabOrder: ['dashboard', 'products', 'salesorders', 'plan', 'inventory', 'production', 'calendar', 'quality'] };
+// kintone 生産実績アプリ(981)で使っている不良内容を先に並べる
+const DEFECT_CAUSES = ['生地不良', '裁断不良', 'ちょぼ不良', '肩不良', '溶着不良', 'カット不良', '寸法不良', '穴あき・破れ', '汚れ・異物', 'シワ・変形', 'その他'];
 
 const DEFAULT_DATA = {
   lines: [
@@ -536,8 +565,11 @@ function App() {
     setSaveStatus('saving');
     const t = setTimeout(async () => {
       try {
-        await cloudSave(data);
+        const savedIds = await cloudSave(data);
         setSaveStatus('saved');
+        const cfg = data.k981 || {};
+        const ids = (savedIds || []).filter((id) => { const r = data.records.find((x) => x.id === id); return r && k981Target(cfg, r); });
+        if (ids.length) pushK981(ids);
       } catch (e) {
         console.error(e);
         setSaveStatus('error');
@@ -545,6 +577,22 @@ function App() {
     }, 600);
     return () => clearTimeout(t);
   }, [data, loading]);
+
+  /* --- kintone 981 への登録の状態 --- */
+  const [k981Status, setK981Status] = useState(null);
+  const [k981Busy, setK981Busy] = useState(false);
+  const [k981Last, setK981Last] = useState(null);
+  const refreshK981Status = useCallback(async () => { const st = await loadK981Status(); if (st) setK981Status(st); }, []);
+  useEffect(() => { if (canView && data && data.k981 && data.k981.enabled && !k981Status) refreshK981Status(); }, [canView, data, k981Status, refreshK981Status]);
+  const pushK981 = useCallback(async (ids) => {
+    setK981Busy(true);
+    const r = await callK981(ids ? { action: 'push', ids } : { action: 'push' });
+    setK981Last({ ...r, at: new Date().toISOString() });
+    setK981Busy(false);
+    refreshK981Status();
+    return r;
+  }, [refreshK981Status]);
+  const setK981 = (patch) => setData((d) => ({ ...d, k981: { ...(d.k981 || {}), ...patch } }));
 
   const lineById = useCallback((id) => data?.lines.find((l) => l.id === id), [data]);
   const lotById = useCallback((id) => data?.lots.find((l) => l.id === id), [data]);
@@ -816,7 +864,7 @@ function App() {
             whiteSpace: 'nowrap', marginLeft: 'auto',
           }}
         >
-          <Settings size={14} /> タブ管理
+          <Settings size={14} /> 設定
         </button>
       </div>
 
@@ -836,7 +884,8 @@ function App() {
         <InventoryTab data={data} addLot={addLot} updateLot={updateLot} removeLot={removeLot} addMaterialTransaction={addMaterialTransaction} removeMaterialTransaction={removeMaterialTransaction} isEditor={isEditor} />
       )}
       {tab === 'production' && (
-        <ProductionTab data={data} addRecord={addRecord} updateRecord={updateRecord} removeRecord={removeRecord} lineById={lineById} orderById={orderById} orderStats={orderStats} productById={productById} lotById={lotById} isEditor={isEditor} />
+        <ProductionTab data={data} addRecord={addRecord} updateRecord={updateRecord} removeRecord={removeRecord} lineById={lineById} orderById={orderById} orderStats={orderStats} productById={productById} lotById={lotById} isEditor={isEditor}
+          k981Status={k981Status} k981Busy={k981Busy} k981Last={k981Last} pushK981={pushK981} />
       )}
       {tab === 'calendar' && (
         <CalendarTab data={data} lineById={lineById} orderById={orderById} orderStats={orderStats} productById={productById} />
@@ -845,7 +894,10 @@ function App() {
         <QualityTab data={data} lineById={lineById} orderById={orderById} />
       )}
       {tab === 'settings' && (
+        <>
+        <K981Settings data={data} setK981={setK981} isEditor={isEditor} />
         <SettingsTab TABS={TABS} tabOrder={tabOrder} updateTabOrder={updateTabOrder} resetTabOrder={resetTabOrder} isEditor={isEditor} />
+        </>
       )}
     </div>
   );
@@ -1968,7 +2020,40 @@ function InventoryTab({ data, addLot, updateLot, removeLot, addMaterialTransacti
 /* ------------------------------------------------------------------ */
 /* 生産実績・WIPタブ                                                    */
 /* ------------------------------------------------------------------ */
-function ProductionTab({ data, addRecord, updateRecord, removeRecord, lineById, orderById, orderStats, productById, lotById, isEditor }) {
+function K981StatusPanel({ data, k981Status, k981Busy, k981Last, pushK981, isEditor }) {
+  const cfg = data.k981 || {};
+  if (!cfg.enabled) return null;
+  const targets = data.records.filter((r) => k981Target(cfg, r));
+  const st = k981Status || {};
+  const sent = targets.filter((r) => st[r.id] && st[r.id].kintone_id && !st[r.id].error).length;
+  const errs = targets.filter((r) => st[r.id] && st[r.id].error);
+  const notYet = targets.length - sent - errs.length;
+  return (
+    <Panel style={{ padding: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div className="fm-display" style={{ fontSize: 15, fontWeight: 600 }}>kintone 生産実績アプリ(981)への登録</div>
+        <Badge tone="green">登録済み {sent}</Badge>
+        {notYet > 0 && <Badge tone="amber">未登録 {notYet}</Badge>}
+        {errs.length > 0 && <Badge tone="red">送れなかった {errs.length}</Badge>}
+        {isEditor && <PrimaryButton onClick={() => { if (!k981Busy) pushK981(null); }} style={{ marginLeft: 'auto', padding: '6px 12px' }}>{k981Busy ? '送信中…' : '今すぐ送る'}</PrimaryButton>}
+      </div>
+      <div style={{ fontSize: 12, color: C.textFaint, marginTop: 6 }}>
+        {cfg.startDate} 以降の、製造分類を割り当てたラインの実績を保存すると、自動で登録します(直したときは kintone 側も更新)。生産管理で実績を消しても、kintone のレコードは消えません。
+      </div>
+      {k981Last && !k981Last.ok && <div style={{ fontSize: 12, color: C.red, marginTop: 6 }}>⚠ {k981Last.error}</div>}
+      {k981Last && k981Last.ok && !k981Last.busy && (k981Last.added + k981Last.updated > 0) && <div style={{ fontSize: 12, color: C.green, marginTop: 6 }}>登録 {k981Last.added}件・更新 {k981Last.updated}件{k981Last.remaining ? `(残り ${k981Last.remaining}件は「今すぐ送る」で送れます)` : ''}</div>}
+      {k981Last && k981Last.ok && k981Last.deletedInFactory > 0 && <div style={{ fontSize: 12, color: C.amber, marginTop: 6 }}>生産管理で消した実績のうち {k981Last.deletedInFactory}件が kintone に残っています(必要なら kintone で消してください)。</div>}
+      {errs.length > 0 && (
+        <div style={{ fontSize: 12, color: C.red, marginTop: 6 }}>
+          {errs.slice(0, 5).map((r) => <div key={r.id}>・{r.date} {r.worker}:{st[r.id].error}</div>)}
+          {errs.length > 5 && <div>ほか {errs.length - 5}件</div>}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function ProductionTab({ data, addRecord, updateRecord, removeRecord, lineById, orderById, orderStats, productById, lotById, isEditor, k981Status, k981Busy, k981Last, pushK981 }) {
   const blankForm = {
     date: todayStr(), orderId: data.orders[0]?.id || '', worker: '',
     startTime: '', endTime: '',
@@ -2275,12 +2360,13 @@ function ProductionTab({ data, addRecord, updateRecord, removeRecord, lineById, 
         </div>
       </Panel>
 
+      <K981StatusPanel data={data} k981Status={k981Status} k981Busy={k981Busy} k981Last={k981Last} pushK981={pushK981} isEditor={isEditor} />
       <Panel style={{ padding: 16, overflowX: 'auto' }}>
         <div className="fm-display" style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>実績記録一覧</div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 780 }}>
           <thead>
             <tr style={{ textAlign: 'left', color: C.textDim, borderBottom: `1px solid ${C.border}` }}>
-              {['日付', 'ライン', '計画', '商品コード', '担当者', 'かかった時間', '完成数', '不良', ''].map((h) => <th key={h} style={{ padding: '6px 8px', fontWeight: 500 }}>{h}</th>)}
+              {['日付', 'ライン', '計画', '商品コード', '担当者', 'かかった時間', '完成数', '不良', ...((data.k981 || {}).enabled ? ['kintone'] : []), ''].map((h) => <th key={h} style={{ padding: '6px 8px', fontWeight: 500 }}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -2315,6 +2401,14 @@ function ProductionTab({ data, addRecord, updateRecord, removeRecord, lineById, 
                     </div>
                   ) : <span className="fm-mono" style={{ color: C.textDim }}>0</span>}
                 </td>
+                {(data.k981 || {}).enabled && (
+                  <td style={{ padding: '8px' }}>
+                    {!k981Target(data.k981, r) ? <span style={{ color: C.textFaint }}>—</span>
+                      : (k981Status && k981Status[r.id] && k981Status[r.id].error) ? <span title={k981Status[r.id].error}><Badge tone="red">未送信</Badge></span>
+                      : (k981Status && k981Status[r.id] && k981Status[r.id].kintone_id) ? <Badge tone="green">{'#' + k981Status[r.id].kintone_id}</Badge>
+                      : <Badge tone="amber">未登録</Badge>}
+                  </td>
+                )}
                 <td style={{ padding: '8px', display: 'flex', gap: 2 }}>
                   {isEditor && <IconBtn onClick={() => startEdit(r)} title="編集" icon={Pencil} />}
                   {isEditor && <IconBtn onClick={() => removeRecord(r.id)} title="削除" danger />}
@@ -2677,6 +2771,72 @@ function CalendarTab({ data, lineById, orderById, orderStats, productById }) {
 /* ------------------------------------------------------------------ */
 /* タブ管理タブ                                                         */
 /* ------------------------------------------------------------------ */
+function K981Settings({ data, setK981, isEditor }) {
+  const cfg = data.k981 || {};
+  const [opts, setOpts] = useState(null); // kintone の製造分類の選択肢など
+  const [msg, setMsg] = useState('');
+  const [newName, setNewName] = useState('');
+  if (!isEditor) return null;
+  const readFields = async () => {
+    setMsg('kintone を読んでいます…');
+    const r = await callK981({ action: 'fields' });
+    if (!r.ok) { setMsg('⚠ ' + r.error); return; }
+    setOpts(r);
+    setMsg(r.missing && r.missing.length ? `⚠ 981 に「${r.missing.join('」「')}」が見つかりません` : `製造分類の選択肢: ${r.categoryOptions.join('・') || '(なし。文字で入れてください)'}`);
+  };
+  const workerUser = cfg.workerUser || {};
+  const lineCategory = cfg.lineCategory || {};
+  const names = [...new Set([
+    ...data.records.flatMap((r) => String(r.worker || '').split(/[・、,，\/／\s]+/).map((x) => x.replace(/さん$/, '').trim())),
+    ...Object.keys(workerUser),
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ja'));
+  const setWorker = (n, v) => { const w = { ...workerUser }; if (v) w[n] = v.trim(); else delete w[n]; setK981({ workerUser: w }); };
+  const setLine = (id, v) => { const l = { ...lineCategory }; if (v) l[id] = v; else delete l[id]; setK981({ lineCategory: l }); };
+  return (
+    <Panel style={{ padding: 16, marginBottom: 16 }}>
+      <div className="fm-display" style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>kintone 生産実績アプリ(981)への登録</div>
+      <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 12 }}>
+        生産実績を保存すると、kintone の生産実績アプリにも同じ内容を登録します(kintone への二重入力が要らなくなります)。開始日より前の実績は送りません(kintone に直接入れた分と重ならないように)。
+      </div>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 12 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <input type="checkbox" checked={!!cfg.enabled} onChange={(e) => setK981({ enabled: e.target.checked, startDate: cfg.startDate || todayStr() })} /> 使う
+        </label>
+        <Field label="開始日(この日以降の実績を送る)"><input type="date" className="fm-input" value={cfg.startDate || ''} onChange={(e) => setK981({ startDate: e.target.value })} /></Field>
+        <PrimaryButton onClick={readFields} style={{ background: C.panelAlt2, color: C.text }}>kintone の項目を確かめる</PrimaryButton>
+      </div>
+      {msg && <div style={{ fontSize: 12, color: msg.startsWith('⚠') ? C.red : C.textDim, marginBottom: 10 }}>{msg}</div>}
+      <div style={{ fontSize: 13, fontWeight: 600, margin: '8px 0 4px' }}>ラインと製造分類</div>
+      <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 6 }}>製造分類を選んだラインの実績だけを送ります(たたみ・検品のラインは「送らない」のまま)。</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+        {data.lines.map((l) => (
+          <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 13, minWidth: 180 }}>{l.name}</span>
+            {opts && opts.categoryOptions && opts.categoryOptions.length ? (
+              <select className="fm-input" style={{ width: 220 }} value={lineCategory[l.id] || ''} onChange={(e) => setLine(l.id, e.target.value)}>
+                <option value="">送らない</option>
+                {opts.categoryOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            ) : (
+              <input className="fm-input" style={{ width: 220 }} placeholder="送らない(製造分類を入れると送る)" value={lineCategory[l.id] || ''} onChange={(e) => setLine(l.id, e.target.value)} />
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 600, margin: '8px 0 4px' }}>作業者の対応表</div>
+      <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 6 }}>担当者の名前と、kintone のログイン名。kintone のアカウントが無い人は空のままにすると、981 の「備考」に名前が入ります。</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {names.map((n) => (
+          <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 13, minWidth: 120 }}>{n}</span>
+            <input className="fm-input" style={{ width: 280 }} placeholder="kintone のログイン名(無ければ空)" value={workerUser[n] || ''} onChange={(e) => setWorker(n, e.target.value)} />
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
 function SettingsTab({ TABS, tabOrder, updateTabOrder, resetTabOrder, isEditor }) {
   const ordered = [
     ...tabOrder.map((id) => TABS.find((t) => t.id === id)).filter(Boolean),

@@ -125,6 +125,47 @@ async function loadK981Status() {
   (data || []).forEach((x) => { m[x.record_id] = x; });
   return m;
 }
+/* ---- ロジリンクの現場入力(たたみ数) ----
+   ロジリンクの作業記録で「たたみ」の作業を終えると、kv「factory-fold:日付」にたたみ数が入る。
+   生産管理(編集できる人)が開いている間、1分ごとに版だけ確かめ、新しい分を生産実績(たたみのライン)に取り込む。
+   現場の端末はログインしないので、計画の候補は kv「factory-fold-plans」に出しておく(計画が変わったときだけ書く)。 */
+const FOLD_DAYS = 14;
+const foldLineIdOf = (data) => ((data.fold || {}).lineId) || ((data.lines || []).find((l) => String(l.name || '').includes('たたみ')) || {}).id || '';
+function foldKeys(today) {
+  const keys = [];
+  const d = new Date(today + 'T00:00:00');
+  for (let i = 0; i < FOLD_DAYS; i++) {
+    const x = new Date(d.getTime() - i * 86400000);
+    keys.push('factory-fold:' + x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'));
+  }
+  return keys;
+}
+let lastFoldSig = null;
+async function loadFoldEntries(force) {
+  const keys = foldKeys(todayStr());
+  const v = await supabaseClient.from('kv_store').select('key,updated_at').in('key', keys);
+  if (v.error) return null;
+  const sig = (v.data || []).map((x) => x.key + '@' + x.updated_at).sort().join('|');
+  if (!force && sig === lastFoldSig) return null; // 変わっていない
+  if (!(v.data || []).length) { lastFoldSig = sig; return []; }
+  const r = await supabaseClient.from('kv_store').select('key,value').in('key', (v.data || []).map((x) => x.key));
+  if (r.error) return null;
+  lastFoldSig = sig;
+  const out = [];
+  (r.data || []).forEach((row) => { try { const list = JSON.parse(row.value); if (Array.isArray(list)) list.forEach((e) => { if (e && e.id && e.date) out.push(e); }); } catch (e) {} });
+  return out;
+}
+let lastFoldPlansJson = null;
+async function publishFoldPlans(payload) {
+  const json = JSON.stringify(payload);
+  if (lastFoldPlansJson === null) {
+    const cur = await supabaseClient.from('kv_store').select('value').eq('key', 'factory-fold-plans').maybeSingle();
+    if (!cur.error && cur.data) { try { lastFoldPlansJson = JSON.stringify(JSON.parse(cur.data.value)); } catch (e) {} }
+  }
+  if (json === lastFoldPlansJson) return;
+  const { error } = await supabaseClient.from('kv_store').upsert({ key: 'factory-fold-plans', value: json }, { onConflict: 'key' });
+  if (!error) lastFoldPlansJson = json;
+}
 const k981Target = (cfg, r) => !!(cfg && cfg.enabled && cfg.startDate && r.date >= cfg.startDate && (cfg.lineCategory || {})[r.lineId]);
 
 /* ==================================================================== */
@@ -296,10 +337,12 @@ const normalizeData = (loaded) => {
     materialTransactions: Array.isArray(loaded.materialTransactions) ? loaded.materialTransactions : [],
     tabOrder: Array.isArray(loaded.tabOrder) && loaded.tabOrder.length > 0 ? loaded.tabOrder : DEFAULT_TAB_ORDER,
     k981: loaded.k981 && typeof loaded.k981 === 'object' ? loaded.k981 : {},
+    fold: loaded.fold && typeof loaded.fold === 'object' ? loaded.fold : {},
+    foldImported: Array.isArray(loaded.foldImported) ? loaded.foldImported : [],
   };
 };
 
-const EMPTY_DATA = { k981: {}, lines: [], products: [], salesOrders: [], lots: [], orders: [], records: [], materialTransactions: [], tabOrder: ['dashboard', 'products', 'salesorders', 'plan', 'inventory', 'production', 'calendar', 'quality'] };
+const EMPTY_DATA = { k981: {}, fold: {}, foldImported: [], lines: [], products: [], salesOrders: [], lots: [], orders: [], records: [], materialTransactions: [], tabOrder: ['dashboard', 'products', 'salesorders', 'plan', 'inventory', 'production', 'calendar', 'quality'] };
 // kintone 生産実績アプリ(981)で使っている不良内容を先に並べる
 const DEFECT_CAUSES = ['生地不良', '裁断不良', 'ちょぼ不良', '肩不良', '溶着不良', 'カット不良', '寸法不良', '穴あき・破れ', '汚れ・異物', 'シワ・変形', 'その他'];
 
@@ -593,6 +636,58 @@ function App() {
     return r;
   }, [refreshK981Status]);
   const setK981 = (patch) => setData((d) => ({ ...d, k981: { ...(d.k981 || {}), ...patch } }));
+  const setFold = (patch) => setData((d) => ({ ...d, fold: { ...(d.fold || {}), ...patch } }));
+
+  /* --- ロジリンクの現場入力(たたみ数) --- */
+  const foldPlansPayload = useMemo(() => {
+    if (!data) return null;
+    const lineId = foldLineIdOf(data);
+    const line = data.lines.find((l) => l.id === lineId);
+    const plans = data.orders.filter((o) => o.lineId === lineId).map((o) => {
+      const folded = data.records.filter((r) => r.orderId === o.id).reduce((a, r) => a + num(r.foldedQty), 0);
+      return { id: o.id, planNo: o.planNo || '', productName: o.productName || (data.products.find((p) => p.id === o.productId) || {}).productName || '', remaining: Math.max(0, num(o.targetQty) - folded) };
+    }).filter((p) => p.remaining > 0);
+    return { lineId, lineName: line ? line.name : '', plans };
+  }, [data]);
+  useEffect(() => {
+    if (loading || !isEditor || !foldPlansPayload) return;
+    const t = setTimeout(() => { publishFoldPlans(foldPlansPayload).catch(() => {}); }, 1500);
+    return () => clearTimeout(t);
+  }, [loading, isEditor, JSON.stringify(foldPlansPayload)]);
+  const foldQueued = React.useRef(new Set()); // この画面で取り込み済みにした id(二重に取り込まない)
+  const importFold = useCallback(async (force) => {
+    if (!data) return;
+    const entries = await loadFoldEntries(force);
+    if (!entries) return;
+    const lineId = foldLineIdOf(data);
+    const done = new Set((data.foldImported || []).map((x) => String(x).split('|')[1]));
+    const recIds = new Set(data.records.map((r) => r.id));
+    const fresh = entries.filter((e) => !done.has(e.id) && !recIds.has('F-' + e.id) && !foldQueued.current.has(e.id)).sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    if (!fresh.length || !lineId) return;
+    fresh.forEach((e) => foldQueued.current.add(e.id));
+    fresh.forEach((e) => {
+      const qty = num(e.qty), defect = num(e.defectQty);
+      addRecord({
+        id: 'F-' + e.id, source: 'logilink', date: e.date, orderId: e.orderId || '', lineId,
+        worker: e.staffName || '', startTime: e.startTime || '', endTime: e.endTime || '',
+        machineUpQty: qty + defect, inspectedQty: qty, foldedQty: qty, defectQty: defect,
+        defectCause: '', defectItems: defect > 0 ? [{ cause: '', qty: defect }] : [],
+        materialUsedLength: 0, setProductId: '', setQty: 0,
+      });
+    });
+    // 取り込んだ印(30日より前のものは消す)。生産管理で実績を消しても、もう一度は取り込まない
+    const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    setData((d) => ({ ...d, foldImported: [...(d.foldImported || []).filter((x) => String(x).split('|')[0] >= cutoff), ...fresh.map((e) => e.date + '|' + e.id)] }));
+  }, [data]);
+  const importFoldRef = React.useRef(importFold);
+  importFoldRef.current = importFold;
+  useEffect(() => {
+    if (loading || !isEditor || !data) return;
+    importFoldRef.current(true);
+    const iv = setInterval(() => { if (!document.hidden) importFoldRef.current(false); }, 60000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, isEditor]);
 
   const lineById = useCallback((id) => data?.lines.find((l) => l.id === id), [data]);
   const lotById = useCallback((id) => data?.lots.find((l) => l.id === id), [data]);
@@ -895,6 +990,7 @@ function App() {
       )}
       {tab === 'settings' && (
         <>
+        <FoldSettings data={data} setFold={setFold} isEditor={isEditor} />
         <K981Settings data={data} setK981={setK981} isEditor={isEditor} />
         <SettingsTab TABS={TABS} tabOrder={tabOrder} updateTabOrder={updateTabOrder} resetTabOrder={resetTabOrder} isEditor={isEditor} />
         </>
@@ -2771,6 +2867,27 @@ function CalendarTab({ data, lineById, orderById, orderStats, productById }) {
 /* ------------------------------------------------------------------ */
 /* タブ管理タブ                                                         */
 /* ------------------------------------------------------------------ */
+function FoldSettings({ data, setFold, isEditor }) {
+  if (!isEditor) return null;
+  const lineId = foldLineIdOf(data);
+  const fromLogi = data.records.filter((r) => r.source === 'logilink').length;
+  return (
+    <Panel style={{ padding: 16, marginBottom: 16 }}>
+      <div className="fm-display" style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>ロジリンクの現場入力(たたみ数)</div>
+      <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 10 }}>
+        ロジリンクの作業記録で「生産たたみ、パッキング」を終えるときに入れたたたみ数を、ここで選んだラインの生産実績として取り込みます(生産管理を開いている間、1分ごと)。現場で選べる生産計画は、このラインの終わっていない計画です。これまでに取り込んだ実績: {fromLogi}件
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 13, minWidth: 120 }}>取り込み先のライン</span>
+        <select className="fm-input" style={{ width: 240 }} value={lineId} onChange={(e) => setFold({ lineId: e.target.value })}>
+          {!lineId && <option value="">選んでください</option>}
+          {data.lines.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
+      </div>
+    </Panel>
+  );
+}
+
 function K981Settings({ data, setK981, isEditor }) {
   const cfg = data.k981 || {};
   const [opts, setOpts] = useState(null); // kintone の製造分類の選択肢など

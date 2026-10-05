@@ -1701,6 +1701,7 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-05', items:[
+    '【たたみ数の現場入力】作業記録で「生産たたみ、パッキング」(名前に「たたみ」を含む作業)を終えるときに、たたみ数(できた数・不良数)と生産計画を聞くようにしました。入れた数は、生産管理を開いたときに生産実績(検品・たたみのライン)として自動で取り込まれます。計画の候補は、生産管理で動いている検品・たたみの計画です(1つだけなら自動で選ばれます)',
     '【生産管理 → kintone 981】生産管理の「生産実績」に記録すると、kintone の生産実績アプリ(981)にも自動で登録されるようにしました(二重入力が要らなくなります)。生産管理の「設定」で、ラインごとの製造分類・作業者と kintone ユーザーの対応表・開始日を決めて「使う」にします。kintone のアカウントが無い人は備考に名前が入ります。送れなかったときも生産管理の保存はそのままで、理由と「今すぐ送る」ボタンが出ます',
     '【通信量の目安】Supabase の通信量の目安を、ロジリンクの中で見られるようにしました。トップページの「データの更新状況」に「今月の通信量(目安)」(無料枠5GBに対する割合と月末の見込み)を出し、70%を超えるか月末に超えそうなら黄色、90%を超えたら赤になります。設定→システムでは、端末ごと・日ごとの内訳が見られます。各端末が受け取ったデータ量を数えて10分ごとに記録する目安で、Supabase の請求の数字とは少しずれます',
     '【止まりにくくする】データの読み込みを、4秒ごとの更新以外(在庫・集計表・VC引当などを開いたとき)も「変わったときだけ」にしました。大きなデータは端末にも残し、再読み込みや翌日の起動のときも、変わっていなければ読み直しません。データベースが使用量の上限で止められたときは、全画面の上に赤い帯でお知らせします(読めるようになると消えます)'
@@ -15938,6 +15939,12 @@ async function finishCsvLinkedLog(log, nextTaskId, isEndDay){
     state.taskActionBusy = false;
   }
   state.suppressRender = false;
+  // 生産たたみ: たたみ数を聞いて生産管理へ(答えたあとに、下の「終わりましたか?」や次の作業へ進む)
+  if(log.taskId!=='BREAK' && isFoldTask(log.taskId)){
+    openFoldQtyModal(log, { nextTaskId: nextTaskId||null, isEndDay: !!isEndDay,
+      askDone: askDone ? { kind:'taskDoneConfirm', taskId: log.taskId, staffId: log.staffId, nextTaskId: nextTaskId||null, isEndDay: !!isEndDay, remainingText: askDone.remainingText } : null });
+    return;
+  }
   if(askDone){
     // まだ残っていそうな作業: 作業者に「終わった/まだ途中」を選んでもらう(選ぶまで完了にしない)
     state.modal = { kind:'taskDoneConfirm', taskId: log.taskId, staffId: log.staffId, nextTaskId: nextTaskId||null, isEndDay: !!isEndDay, remainingText: askDone.remainingText };
@@ -15976,6 +15983,100 @@ function bindTaskDoneConfirmModal(m){
   var yes = document.getElementById('taskDoneYesBtn'), no = document.getElementById('taskDoneNoBtn');
   if(yes) yes.addEventListener('click', function(){ answer(true); });
   if(no) no.addEventListener('click', function(){ answer(false); });
+}
+/* ---------- 生産たたみの数量(生産管理へ) ----------
+   作業記録で、名前に「たたみ」を含む作業を終えるときに、たたみ数(できた数・不良数)と生産計画を聞く。
+   入れた数は kv「factory-fold:日付」に貯め、生産管理(factory.html)を開いたときに生産実績として取り込む。
+   計画の候補は、生産管理が kv「factory-fold-plans」に出している(現場の端末はログインしないため、生産管理のデータは読めない)。 */
+var FACTORY_FOLD_PLANS_KEY = 'factory-fold-plans';
+function isFoldTask(taskId){ var t = taskById(taskId); return !!(t && t.name && String(t.name).indexOf('たたみ')!==-1); }
+function foldHM(iso){ if(!iso) return ''; var d = new Date(iso); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+async function openFoldQtyModal(log, cont){
+  var plans = null;
+  try{ plans = await loadKeyJson(FACTORY_FOLD_PLANS_KEY, function(){ return null; }); }catch(e){ plans = null; }
+  var list = (plans && Array.isArray(plans.plans)) ? plans.plans : [];
+  state.modal = { kind:'foldQty', log: { start: log.start, end: log.end, staffId: log.staffId, taskId: log.taskId },
+    date: (state.day && state.day.date) || todayStr(), plans: list, orderId: list.length===1 ? list[0].id : '', cont: cont };
+  state.suppressRender = true;
+  render();
+}
+function renderFoldQtyModal(m){
+  var opts = m.plans.map(function(p){
+    return '<option value="'+esc(p.id)+'"'+(p.id===m.orderId ? ' selected' : '')+'>'+esc((p.planNo ? '計画'+p.planNo+' ' : '')+(p.productName||''))+
+      (p.remaining!==undefined && p.remaining!==null ? '(残り '+formatNum(p.remaining)+')' : '')+'</option>';
+  }).join('');
+  var inputStyle = 'width:100%;font-size:22px;padding:10px 12px;border:1px solid #D0D5DD;border-radius:10px;margin-top:4px;box-sizing:border-box;';
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card" id="foldQtyModal">'+
+      '<div class="modal-task-name">たたみ数を入れてください</div>'+
+      '<div class="pool-hint" style="margin:6px 0 12px;">'+esc(staffById(m.log.staffId).name)+' ・ '+esc(foldHM(m.log.start))+'〜'+esc(foldHM(m.log.end))+'。生産管理の生産実績に入ります。</div>'+
+      (m.plans.length
+        ? '<label style="display:block;font-size:13px;font-weight:700;margin-bottom:10px;">生産計画<select id="foldPlan" style="'+inputStyle+'font-size:16px;">'+(m.plans.length>1 ? '<option value="">選んでください</option>' : '')+opts+'</select></label>'
+        : '<div class="pool-hint" style="margin-bottom:10px;">生産計画の候補がありません(生産管理の担当者があとで計画を決めます)。</div>')+
+      '<label style="display:block;font-size:13px;font-weight:700;margin-bottom:10px;">できた数<input type="number" id="foldQty" inputmode="numeric" min="0" style="'+inputStyle+'"></label>'+
+      '<label style="display:block;font-size:13px;font-weight:700;margin-bottom:10px;">不良数(あれば)<input type="number" id="foldDefect" inputmode="numeric" min="0" style="'+inputStyle+'"></label>'+
+      '<div id="foldErr" style="color:#B42318;font-size:13px;font-weight:700;min-height:18px;margin-bottom:6px;"></div>'+
+      '<div style="display:flex;flex-direction:column;gap:8px;">'+
+        '<button type="button" class="modal-confirm" id="foldSaveBtn" style="width:100%;">記録する</button>'+
+        '<button type="button" class="modal-cancel" id="foldSkipBtn" style="width:100%;">入れない</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+/* kv「factory-fold:日付」に1件足す(ほかの端末と同時でも消し合わないよう、版を確かめて書く) */
+async function saveFoldEntry(entry){
+  var key = 'factory-fold:'+entry.date;
+  for(var i=0; i<5; i++){
+    try{
+      var r = await window.storage.getVersioned(key);
+      var list = r.missing ? [] : JSON.parse(r.value||'[]');
+      if(!Array.isArray(list)) list = [];
+      if(list.some(function(x){ return x && x.id===entry.id; })) return true;
+      list.push(entry);
+      var w = await window.storage.setIfVersion(key, JSON.stringify(list), r.version);
+      if(w.ok) return true;
+      if(!w.conflict) return false;
+    }catch(e){ return false; }
+    await new Promise(function(res){ setTimeout(res, 100*(i+1)); });
+  }
+  return false;
+}
+function bindFoldQtyModal(m){
+  var busy = false;
+  var err = document.getElementById('foldErr');
+  var q = document.getElementById('foldQty'); if(q) setTimeout(function(){ try{ q.focus(); }catch(e){} }, 50);
+  function next(){
+    state.modal = null; state.suppressRender = false;
+    var c = m.cont || {};
+    if(c.askDone){ state.modal = c.askDone; state.suppressRender = true; render(); return; }
+    proceedAfterFinish(c.nextTaskId, c.isEndDay);
+  }
+  var save = document.getElementById('foldSaveBtn'), skip = document.getElementById('foldSkipBtn');
+  if(save) save.addEventListener('click', async function(){
+    if(busy) return;
+    var qty = Math.floor(Number((document.getElementById('foldQty')||{}).value));
+    var defect = Math.floor(Number((document.getElementById('foldDefect')||{}).value)) || 0;
+    var sel = document.getElementById('foldPlan');
+    var orderId = sel ? sel.value : '';
+    if(!(qty>0)){ err.textContent = 'できた数を入れてください'; return; }
+    if(defect<0){ err.textContent = '不良数が正しくありません'; return; }
+    if(m.plans.length>1 && !orderId){ err.textContent = '生産計画を選んでください'; return; }
+    var plan = m.plans.filter(function(p){ return p.id===orderId; })[0] || null;
+    busy = true; save.textContent = '保存中…'; err.textContent = '';
+    var ok = await saveFoldEntry({
+      id: 'F'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
+      date: m.date, staffId: m.log.staffId, staffName: staffById(m.log.staffId).name, taskName: (taskById(m.log.taskId)||{}).name || '',
+      orderId: orderId, planNo: plan ? plan.planNo||'' : '', productName: plan ? plan.productName||'' : '',
+      qty: qty, defectQty: defect, startTime: foldHM(m.log.start), endTime: foldHM(m.log.end), at: new Date().toISOString()
+    });
+    if(!ok){ busy = false; save.textContent = '記録する'; err.textContent = '保存できませんでした。もう一度「記録する」を押すか、「入れない」を押して生産管理の担当者に伝えてください。'; return; }
+    next();
+  });
+  if(skip) skip.addEventListener('click', function(){
+    if(busy) return;
+    if(!confirm('たたみ数を入れずに進みますか?(あとで生産管理の担当者が入れます)')) return;
+    next();
+  });
 }
 /* 作業を終えた後の続き(次の作業の開始・本日の作業のまとめ・次の作業の案内) */
 function proceedAfterFinish(nextTaskId, isEndDay){
@@ -16834,6 +16935,7 @@ function renderModal(){
   if(m.kind==='editTemplate') return renderEditTemplateModal(m);
   if(m.kind==='staffEdit') return renderStaffEditModal(m);
   if(m.kind==='taskDoneConfirm') return renderTaskDoneConfirmModal(m);
+  if(m.kind==='foldQty') return renderFoldQtyModal(m);
   if(m.kind==='qtyBreakdown') return renderQtyBreakdownModal(m);
   if(m.kind==='addLog') return renderAddLogModal(m);
   if(m.kind==='vcPreview') return renderVcPreviewModal(m);
@@ -17678,6 +17780,7 @@ function bindModal(){
   if(m.kind==='editTemplate'){ bindEditTemplateModal(m); return; }
   if(m.kind==='staffEdit'){ bindStaffEditModal(m); return; }
   if(m.kind==='taskDoneConfirm'){ bindTaskDoneConfirmModal(m); return; }
+  if(m.kind==='foldQty'){ bindFoldQtyModal(m); return; }
   if(m.kind==='qtyBreakdown'){ bindQtyBreakdownModal(m); return; }
   if(m.kind==='addLog'){ bindAddLogModal(m); return; }
   if(m.kind==='vcPreview'){ bindVcPreviewModal(m); return; }

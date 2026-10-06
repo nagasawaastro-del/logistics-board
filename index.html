@@ -1753,6 +1753,7 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-05', items:[
+    '【請求: 3桁だけの品番を除く】請求データで、数字3桁だけの品番(例: 996 PE袋)を、保管料・入庫料・生協出庫・生協以外・移動出庫の計算から除くようにしました(明細1の作業コードはそのまま)',
     '【集計表: 在庫差異を集計表へ・貼り付けの列】在庫差異の表に☑を付け、「☑の商品を集計表へ送る」で、品番・数量(差異の数)・備考(弥生とロジの在庫)を集計表に1行ずつ追加できるようにしました(はじめは差異のある商品すべてに☑)。集計表の「まとめて貼り付け」は、Excelの列の並びを「1列目 VC番号/2列目 品番…」の形のボタンで選ぶようにし、貼り付けた中身から自動で選び、1行目をどう読むかを表示するようにしました',
     '【請求のコピーに合計】請求データの各表(保管料・入庫料・生協出庫・生協以外・移動出庫・明細1)の「コピー」とCSVに、最後の行として合計の行を入れるようにしました。「合計の行も含める」のチェックを外すと、今までどおり明細の行だけになります',
     '【配置: A223以降の1段目】A223以降(A棟の B423〜470 の下)は1段目の A ロケを使わず、B ロケを1段目と2段目を合わせた場所(2パレット分)として計算するようにしました。今 A223以降にある物は、動かす物として行き先を出します',
@@ -9697,6 +9698,8 @@ var BILLING_RATES = { storage:12, inbound:15, outCase:20, outPieceCoop:25, outPi
 var BILLING_STORAGE_METHOD = '3期制（末／10／20＋入)';
 // 移動先の名前(Excel「出庫料計算(移動出庫)」と同じ)
 var BILLING_MOVE_DEST = { 21:'RSL', 13:'CX尾道', 8:'CX桶川', 5:'桶川', 9:'CX小野' };
+// 数字3桁だけの品番(資材・袋など。例: 996)は請求の対象にしない(作業明細の作業コードは別)
+function billingIsBareCode(code){ return /^\d{3}$/.test(String(code||'').trim()); }
 function billingIsCoop(name){ return /コープ|生協|パルシステム/.test(String(name||'')); }
 /* 請求の金額は1行ずつ円未満を四捨五入して整数にする(合計は整数の金額の合計)。小数の誤差(例: 2.675×…)で丸めが狂わないよう、先に小数第6位でそろえる */
 function billingYen(v){ var n = Number(v); if(!isFinite(n)) return 0; return Math.round(Math.round(n*1e6)/1e6); }
@@ -9744,7 +9747,7 @@ function computeBilling(files, pm){
     if(!rows) return;
     var qty = {};
     rows.forEach(function(r){
-      if(!inWh(r[5]) || !r[2]) return;
+      if(!inWh(r[5]) || !r[2] || billingIsBareCode(r[2])) return;
       qty[r[2]] = (qty[r[2]]||0) + billingNum(r[11]);
       if(r[3] && !names[r[2]]) names[r[2]] = r[3];
     });
@@ -9758,7 +9761,7 @@ function computeBilling(files, pm){
   // --- 仕入(高屋・丹南、数量がプラスの行): ケース数(切り上げ。入数が無ければ1) ---
   var buy = {};
   (files.purchase||[]).forEach(function(r){
-    if(!inWh(r[22]) || r[14]!=='1' || !r[15]) return;
+    if(!inWh(r[22]) || r[14]!=='1' || !r[15] || billingIsBareCode(r[15])) return;
     var q = billingNum(r[23]);
     if(!(q>0)) return;
     var p = pack(r[15]);
@@ -9770,7 +9773,7 @@ function computeBilling(files, pm){
   var moveIn = {}, moveOut = [];
   (files.move||[]).forEach(function(r){
     var to = r[11], from = r[22], code = r[15];
-    if(!code) return;
+    if(!code || billingIsBareCode(code)) return;
     var q = billingNum(r[23]), p = billingNum(r[20]);
     if(inWh(to) && !inWh(from)){
       moveIn[code] = (moveIn[code]||0) + (p ? Math.ceil(q/p) : 0);
@@ -9797,7 +9800,7 @@ function computeBilling(files, pm){
   // --- 出庫(売上明細): 返品・数量0以下・送料や経費(998-・999-)を除き、得意先で生協と生協以外に分ける ---
   var coop = [], other = [];
   (files.sales||[]).forEach(function(r){
-    if(r[14]!=='1' || !r[15] || /^99/.test(r[15]) || !inWh(r[22])) return;
+    if(r[14]!=='1' || !r[15] || /^99/.test(r[15]) || billingIsBareCode(r[15]) || !inWh(r[22])) return;
     var q = billingNum(r[23]);
     if(!(q>0)) return;
     var code = r[15], p = pack(code), cust = r[39]||'';

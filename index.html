@@ -143,6 +143,49 @@ input,select{font-family:inherit;}
 .topbar-left{display:flex;align-items:baseline;gap:12px;}
 .topbar-title{font-family:var(--font-display);font-weight:600;font-size:15px;letter-spacing:-.01em;}
 .topbar-date{font-family:var(--font-mono);font-size:12px;color:#9AA4B8;}
+/* 在庫: 見やすく(2026-10-06) */
+.st-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.st-csv{position:relative;margin-left:auto;}
+.st-csv>summary{list-style:none;cursor:pointer;font-size:13px;font-weight:600;color:#344054;border:1px solid #D0D5DD;border-radius:8px;padding:4px 10px;background:#fff;}
+.st-csv>summary::-webkit-details-marker{display:none;}
+.st-csv-pop{position:absolute;right:0;top:calc(100% + 4px);z-index:20;background:#fff;border:1px solid #EAECF0;border-radius:10px;box-shadow:0 8px 24px rgba(16,24,40,.12);padding:8px;display:flex;flex-direction:column;gap:6px;min-width:160px;}
+.st-csv-pop button{width:100%;}
+.sd-chips{display:inline-flex;gap:6px;flex-wrap:wrap;margin-left:6px;vertical-align:middle;}
+.sd-chip{font-size:12px;font-weight:700;border-radius:999px;padding:2px 9px;background:#F2F4F7;color:#344054;}
+.sd-chip.danger{background:#FEE4E2;color:#912018;}
+.sd-chip.warn{background:#FEF0C7;color:#93370D;}
+.sd-list{display:flex;flex-direction:column;gap:2px;margin-top:8px;}
+.sd-item>summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:8px;padding:6px 8px;border-radius:8px;font-size:14px;color:#101828;}
+.sd-item>summary::-webkit-details-marker{display:none;}
+.sd-item>summary:hover{background:#F9FAFB;}
+.sd-item[open]>summary{background:#F9FAFB;}
+.sd-tag{flex:none;font-size:11px;font-weight:700;border-radius:6px;padding:1px 7px;min-width:44px;text-align:center;}
+.sd-danger .sd-tag{background:#D92D20;color:#fff;}
+.sd-warn .sd-tag{background:#F79009;color:#fff;}
+.sd-info .sd-tag{background:#EAECF0;color:#344054;}
+.sd-more{margin-left:auto;flex:none;font-size:12px;color:#667085;}
+.sd-item[open] .sd-more{display:none;}
+.sd-detail{font-size:13px;color:#475467;line-height:1.7;padding:2px 10px 8px 62px;}
+.st-meter{height:10px;border-radius:5px;background:#EAECF0;position:relative;overflow:hidden;margin:8px 0 4px;}
+.st-meter>i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:#4C5FD5;}
+.st-meter>i.mid{background:#F79009;}
+.st-meter>i.hi{background:#D92D20;}
+.st-meter-txt{font-size:12px;color:#475467;}
+.st-bars{display:flex;flex-direction:column;gap:6px;margin:4px 0 6px;}
+.st-bar-row{display:grid;grid-template-columns:74px 1fr 190px;align-items:center;gap:10px;font-size:13px;padding:2px 4px;border-radius:6px;}
+.st-bar-row:hover{background:#F9FAFB;}
+.st-bar-name b{font-size:14px;}
+.st-bar-name small,.st-bar-val small{color:#667085;font-size:11px;}
+.st-bar-track{position:relative;height:14px;background:#F2F4F7;border-radius:4px;}
+.st-bar-track>i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:#4C5FD5;}
+.st-bar-track>i.mid{background:#F79009;}
+.st-bar-track>i.hi{background:#D92D20;}
+.st-bar-track>u{position:absolute;top:-3px;bottom:-3px;border-left:1px dashed #98A2B3;}
+.st-bar-val{font-variant-numeric:tabular-nums;color:#101828;}
+.st-bar-val b{display:inline-block;min-width:40px;text-align:right;}
+.st-cell-meter{display:flex;align-items:center;gap:6px;justify-content:flex-end;}
+.st-cell-meter .st-bar-track{width:60px;height:8px;}
+@media (max-width:700px){.sd-more{display:none;}.st-bar-row{grid-template-columns:56px 1fr;}.st-bar-val{grid-column:2;}.sd-detail{padding-left:10px;}}
 .topbar-right{display:flex;align-items:center;gap:8px;}
 .pill-btn{
   background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:#E4E7EC;border-radius:8px;
@@ -1701,6 +1744,8 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-05', items:[
+    '【請求の金額を整数に】請求データの金額(保管料・入庫荷役料・出庫のケース・端数・移動出庫・明細1)を、1行ずつ円未満を四捨五入して整数にしました。合計・請求書鑑は整数の金額の合計です(才数に小数があるため、これまでは金額に小数が出ていました)',
+    '【在庫を見やすく】在庫の画面を見やすくしました。自動診断は1行ずつの見出し(要対応・確認・参考)にして、「くわしく」で品番などの内訳が開くようにしました。ほぼいっぱい・空きが少ないブロックは、それぞれ1行にまとめました。概要に、拠点ごとの使用率のメーターと、ブロックの使用率の横棒グラフ(高い順。90%以上は赤)を足し、才数の推移のグラフを大きく(目盛りと日ごとの点つき)しました。CSV出力は右上の「CSV出力 ▾」にまとめました。画面の上の表示が「在庫」「VC引当」のとき undefined になっていたのを直しました',
     '【たたみ数の現場入力】作業記録で「生産たたみ、パッキング」(名前に「たたみ」を含む作業)を終えるときに、たたみ数(できた数・不良数)と生産計画を聞くようにしました。入れた数は、生産管理を開いたときに生産実績(検品・たたみのライン)として自動で取り込まれます。計画の候補は、生産管理で動いている検品・たたみの計画です(1つだけなら自動で選ばれます)',
     '【生産管理 → kintone 981】生産管理の「生産実績」に記録すると、kintone の生産実績アプリ(981)にも自動で登録されるようにしました(二重入力が要らなくなります)。生産管理の「設定」で、ラインごとの製造分類・作業者と kintone ユーザーの対応表・開始日を決めて「使う」にします。kintone のアカウントが無い人は備考に名前が入ります。送れなかったときも生産管理の保存はそのままで、理由と「今すぐ送る」ボタンが出ます',
     '【通信量の目安】Supabase の通信量の目安を、ロジリンクの中で見られるようにしました。トップページの「データの更新状況」に「今月の通信量(目安)」(無料枠5GBに対する割合と月末の見込み)を出し、70%を超えるか月末に超えそうなら黄色、90%を超えたら赤になります。設定→システムでは、端末ごと・日ごとの内訳が見られます。各端末が受け取ったデータ量を数えて10分ごとに記録する目安で、Supabase の請求の数字とは少しずれます',
@@ -9560,6 +9605,8 @@ var BILLING_STORAGE_METHOD = '3期制（末／10／20＋入)';
 // 移動先の名前(Excel「出庫料計算(移動出庫)」と同じ)
 var BILLING_MOVE_DEST = { 21:'RSL', 13:'CX尾道', 8:'CX桶川', 5:'桶川', 9:'CX小野' };
 function billingIsCoop(name){ return /コープ|生協|パルシステム/.test(String(name||'')); }
+/* 請求の金額は1行ずつ円未満を四捨五入して整数にする(合計は整数の金額の合計)。小数の誤差(例: 2.675×…)で丸めが狂わないよう、先に小数第6位でそろえる */
+function billingYen(v){ var n = Number(v); if(!isFinite(n)) return 0; return Math.round(Math.round(n*1e6)/1e6); }
 function billingNum(v){ var n = Number(String(v===null||v===undefined?'':v).replace(/,/g,'')); return isFinite(n) ? n : 0; }
 /* CSVの種類を見分ける。戻り値 { kind:'stock'|'purchase'|'move'|'sales'|'work', period? } または { error } */
 function billingDetectCsv(rows, fileName){
@@ -9637,7 +9684,7 @@ function computeBilling(files, pm){
     }else if(inWh(from) && !inWh(to)){
       var cs = p ? Math.floor(q/p) : 0, frac = q - cs*p;
       var s = sai(code, r[17]);
-      moveOut.push([billingNum(r[3]), code, r[17]||'', q, BILLING_MOVE_DEST[Number(to)] || ('倉庫'+to), cs, s, cs*s, BILLING_RATES.moveCase, cs*s*BILLING_RATES.moveCase, frac, BILLING_RATES.movePiece, frac*BILLING_RATES.movePiece]);
+      moveOut.push([billingNum(r[3]), code, r[17]||'', q, BILLING_MOVE_DEST[Number(to)] || ('倉庫'+to), cs, s, cs*s, BILLING_RATES.moveCase, billingYen(cs*s*BILLING_RATES.moveCase), frac, BILLING_RATES.movePiece, billingYen(frac*BILLING_RATES.movePiece)]);
     }
     if(r[17] && !names[code]) names[code] = r[17];
   });
@@ -9651,8 +9698,8 @@ function computeBilling(files, pm){
     if(!total) return;
     var s = sai(code, names[code]);
     var calc = total*s;
-    if(calc) storage.push([code, names[code]||'', BILLING_STORAGE_METHOD, st[0], st[1], st[2], b, mi, s, calc, BILLING_RATES.storage, calc*BILLING_RATES.storage]);
-    if(b+mi) inbound.push([code, names[code]||'', b, mi, s, (b+mi)*s, BILLING_RATES.inbound, (b+mi)*s*BILLING_RATES.inbound]);
+    if(calc) storage.push([code, names[code]||'', BILLING_STORAGE_METHOD, st[0], st[1], st[2], b, mi, s, calc, BILLING_RATES.storage, billingYen(calc*BILLING_RATES.storage)]);
+    if(b+mi) inbound.push([code, names[code]||'', b, mi, s, (b+mi)*s, BILLING_RATES.inbound, billingYen((b+mi)*s*BILLING_RATES.inbound)]);
   });
   // --- 出庫(売上明細): 返品・数量0以下・送料や経費(998-・999-)を除き、得意先で生協と生協以外に分ける ---
   var coop = [], other = [];
@@ -9665,7 +9712,7 @@ function computeBilling(files, pm){
     var cs = p ? Math.floor(q/p) : 0, frac = q - cs*(p||0);
     var s = sai(code, r[17]);
     var isCoop = billingIsCoop(cust), rate = isCoop ? BILLING_RATES.outPieceCoop : BILLING_RATES.outPieceOther;
-    (isCoop ? coop : other).push([billingNum(r[3]), code, r[17]||'', q, cust, cs, s, cs*s, BILLING_RATES.outCase, cs*s*BILLING_RATES.outCase, frac, rate, frac*rate]);
+    (isCoop ? coop : other).push([billingNum(r[3]), code, r[17]||'', q, cust, cs, s, cs*s, BILLING_RATES.outCase, billingYen(cs*s*BILLING_RATES.outCase), frac, rate, billingYen(frac*rate)]);
   });
   // --- 明細1(諸作業): 作業明細から消費税の行・衣類カバー(品番の最後が u)・数量も金額も0の行を除く。作業項目・作業日の順 ---
   var work = [];
@@ -9673,7 +9720,7 @@ function computeBilling(files, pm){
     if(r[14]==='99' || /u$/i.test(r[15]||'')) return;
     var q = billingNum(r[23]), amt = billingNum(r[25]);
     if(!q && !amt) return;
-    work.push([billingNum(r[3]), r[17]||'', q, billingNum(r[24]), amt, r[39]||'', (r[30] && r[30]!=='0') ? r[30] : '']); // 備考の「0」は空欄(請求の Excel と同じ)
+    work.push([billingNum(r[3]), r[17]||'', q, billingNum(r[24]), billingYen(amt), r[39]||'', (r[30] && r[30]!=='0') ? r[30] : '']); // 備考の「0」は空欄(請求の Excel と同じ)
   });
   work.sort(function(a,b){ return String(a[1]).localeCompare(String(b[1]), 'ja') || (a[0]-b[0]); });
   function sum(rows, i){ return rows.reduce(function(a,r){ return a + (Number(r[i])||0); }, 0); }
@@ -10189,7 +10236,7 @@ async function billingBuildWorkFromReport(ym){
     workReportLinesForDate(d).forEach(function(x){
       if(x.noPrice) return; // 「単価なし」(請求しない)作業内容は明細1に入れない
       if(x.unitPrice===null) unmapped[x.workName||'(作業内容なし)'] = (unmapped[x.workName||'(作業内容なし)']||0)+1;
-      rows.push([Number(d.replace(/-/g,'')), x.workName, x.qty, x.unitPrice===null ? '' : x.unitPrice, x.amount===null ? '' : x.amount, x.customer, x.note]);
+      rows.push([Number(d.replace(/-/g,'')), x.workName, x.qty, x.unitPrice===null ? '' : x.unitPrice, x.amount===null ? '' : billingYen(x.amount), x.customer, x.note]);
     });
     d = wrDateAdd(d, 1);
   }
@@ -10330,29 +10377,67 @@ async function loadStockAnalysis(){
 }
 function stockFmtCube(v){ return v===null || v===undefined ? '―' : (Math.round(v*10)/10).toLocaleString('ja-JP', { maximumFractionDigits:1 }); }
 /* 推移の小さなグラフ(才数。高屋・丹南) */
+/* 才数の推移(拠点ごとの折れ線)。目盛り3本・各日の点(触ると値)・線の右端に拠点名と値 */
 function stockTrendSvg(snaps){
   if(snaps.length<2) return '<div class="pool-hint">推移は、ロジザードの在庫を取り込んだ日が2日分以上たまると表示します(今 '+snaps.length+'日分)。</div>';
-  var W = 640, H = 170, pad = 34;
-  var series = [['takaya','#1D4ED8'],['tannan','#15803D']];
-  var max = 0;
-  snaps.forEach(function(s){ series.forEach(function(se){ var v = s.sites[se[0]] ? s.sites[se[0]].cube : 0; if(v>max) max = v; }); });
-  max = max || 1;
+  var W = 1000, H = 240, L = 64, R = 130, T = 14, B = 30;
+  var series = [['takaya','#1D4ED8'],['tannan','#15803D']].filter(function(se){ return snaps.some(function(s){ return s.sites[se[0]]; }); });
+  var vals = [];
+  snaps.forEach(function(s){ series.forEach(function(se){ if(s.sites[se[0]]) vals.push(s.sites[se[0]].cube); }); });
+  var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  var span = hi-lo || hi*0.1 || 1;
+  lo = Math.max(0, lo-span*0.15); hi = hi+span*0.15;
   var n = snaps.length;
-  function x(i){ return pad + (W-pad-10)*(n===1 ? 0 : i/(n-1)); }
-  function y(v){ return H-22 - (H-40)*(v/max); }
+  function x(i){ return L + (W-L-R)*(n===1 ? 0 : i/(n-1)); }
+  function y(v){ return T + (H-T-B)*(1-(v-lo)/(hi-lo)); }
+  var grid = [0, 0.5, 1].map(function(f){
+    var v = lo+(hi-lo)*f, yy = y(v).toFixed(1);
+    return '<line x1="'+L+'" y1="'+yy+'" x2="'+(W-R)+'" y2="'+yy+'" stroke="#EAECF0"/>'+
+      '<text x="'+(L-8)+'" y="'+(Number(yy)+4)+'" font-size="12" text-anchor="end" fill="#667085">'+formatNum(Math.round(v))+'</text>';
+  }).join('');
+  var showDots = n<=45;
   var lines = series.map(function(se){
-    var pts = snaps.map(function(s,i){ return x(i).toFixed(1)+','+y(s.sites[se[0]] ? s.sites[se[0]].cube : 0).toFixed(1); }).join(' ');
-    return '<polyline fill="none" stroke="'+se[1]+'" stroke-width="2.5" points="'+pts+'"/>';
+    var pts = [];
+    snaps.forEach(function(s,i){ if(s.sites[se[0]]) pts.push([x(i), y(s.sites[se[0]].cube), s]); });
+    var path = '<polyline fill="none" stroke="'+se[1]+'" stroke-width="2" stroke-linejoin="round" points="'+pts.map(function(p){ return p[0].toFixed(1)+','+p[1].toFixed(1); }).join(' ')+'"/>';
+    var dots = showDots ? pts.map(function(p){
+      var v = p[2].sites[se[0]].cube;
+      return '<g><circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="10" fill="transparent"/><circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="4" fill="'+se[1]+'" stroke="#fff" stroke-width="2"/>'+
+        '<title>'+esc(stockSiteName(se[0]))+' '+esc(p[2].date)+': '+stockFmtCube(v)+'才(40ft 約'+stockFt40(v)+'本分)</title></g>';
+    }).join('') : '';
+    var lastP = pts[pts.length-1];
+    var label = lastP ? '<text x="'+(lastP[0]+10).toFixed(1)+'" y="'+(lastP[1]+4).toFixed(1)+'" font-size="13" font-weight="700" fill="#101828">'+esc(stockSiteName(se[0]))+' '+stockFmtCube(lastP[2].sites[se[0]].cube)+'</text>' : '';
+    return path+dots+label;
   }).join('');
+  var every = Math.max(1, Math.ceil(n/10));
   var labels = snaps.map(function(s,i){
-    if(n>10 && i%Math.ceil(n/8)!==0 && i!==n-1) return '';
-    return '<text x="'+x(i).toFixed(1)+'" y="'+(H-6)+'" font-size="10" text-anchor="middle" fill="#667085">'+Number(s.date.slice(5,7))+'/'+Number(s.date.slice(8,10))+'</text>';
+    if(i%every!==0 && i!==n-1) return '';
+    return '<text x="'+x(i).toFixed(1)+'" y="'+(H-8)+'" font-size="12" text-anchor="middle" fill="#667085">'+Number(s.date.slice(5,7))+'/'+Number(s.date.slice(8,10))+'</text>';
   }).join('');
-  return '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;max-width:'+W+'px;height:auto;">'+
-    '<line x1="'+pad+'" y1="'+(H-22)+'" x2="'+(W-10)+'" y2="'+(H-22)+'" stroke="#D0D5DD"/>'+
-    '<text x="2" y="'+(y(max)+4).toFixed(1)+'" font-size="10" fill="#667085">'+stockFmtCube(max)+'</text>'+
-    lines+labels+'</svg>'+
-    '<div class="pool-hint" style="margin:2px 0 0;"><span style="color:#1D4ED8;font-weight:700;">━ 高屋</span> <span style="color:#15803D;font-weight:700;">━ 丹南</span>(才数)</div>';
+  return '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block;" role="img" aria-label="才数の推移">'+grid+
+    '<line x1="'+L+'" y1="'+(H-B)+'" x2="'+(W-R)+'" y2="'+(H-B)+'" stroke="#D0D5DD"/>'+lines+labels+'</svg>'+
+    '<div class="pool-hint" style="margin:2px 0 0;">'+series.map(function(se){ return '<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;"><i style="display:inline-block;width:14px;height:3px;border-radius:2px;background:'+se[1]+';"></i>'+esc(stockSiteName(se[0]))+'</span>'; }).join('')+'(才数。点に触ると値が出ます。目盛りは0からではありません)</div>';
+}
+/* ブロックの使用率(容量を入れたブロック)。使用率の高い順の横棒。90%に点線 */
+function stockBlockBars(c, cap){
+  var rows = [], none = [];
+  Object.keys(c.blocks).forEach(function(b){
+    var cv = stockCapSai(cap[b]);
+    if(cv>0) rows.push({ b:b, cube:c.blocks[b].cube, cap:cv, use:c.blocks[b].cube/cv*100 });
+    else if(c.blocks[b].cube>0 || c.blocks[b].qty>0) none.push(b);
+  });
+  if(!rows.length) return '';
+  rows.sort(function(a,b){ return b.use-a.use; });
+  return '<div class="stf-section-title">ブロックの使用率</div>'+
+    '<div class="st-bars">'+rows.map(function(r){
+      var lv = r.use>=STOCK_DIAG.useDanger ? 'hi' : (r.use>=STOCK_DIAG.useWarn ? 'mid' : '');
+      return '<div class="st-bar-row" title="ブロック'+esc(r.b)+'('+esc(stockSiteName(stockSiteOfBlock(r.b)))+') '+stockFmtCube(r.cube)+'才 / 容量 '+stockFmtCube(r.cap)+'才(空き '+stockFmtCube(Math.max(0, r.cap-r.cube))+'才)">'+
+        '<span class="st-bar-name"><b>'+esc(r.b)+'</b> <small>'+esc(stockSiteName(stockSiteOfBlock(r.b)))+'</small></span>'+
+        '<span class="st-bar-track"><i class="'+lv+'" style="width:'+Math.min(100, r.use).toFixed(1)+'%;"></i><u style="left:'+STOCK_DIAG.useDanger+'%;"></u></span>'+
+        '<span class="st-bar-val"><b>'+r.use.toFixed(0)+'%</b> <small>'+stockFmtCube(r.cube)+' / '+stockFmtCube(r.cap)+'才</small></span>'+
+      '</div>';
+    }).join('')+'</div>'+
+    '<div class="pool-hint" style="margin:0 0 8px;">赤 = '+STOCK_DIAG.useDanger+'%以上(点線)、オレンジ = '+STOCK_DIAG.useWarn+'%以上。'+(none.length ? '容量が未入力のブロック: '+esc(none.sort().join('・'))+'(「ブロック」のタブで入れられます)' : '')+'</div>';
 }
 /* 出荷の記録: 作業量CSVで取り込んだ商品別の出荷数量(直近 STOCK_SHIP_DAYS 日分の取込のある日)。
    CSVで取り込んでいない出荷は入らない。戻り値 { days, from, to, byCode: { 品番: 数量 } } */
@@ -10380,13 +10465,17 @@ function computeStockDiagnostics(st){
   function top(list, n, f, unit){ return list.slice(0, n).map(f).join('、')+(list.length>n ? ' ほか'+(list.length-n)+(unit||'品番') : ''); }
   function perDayText(v){ return v<1 ? (Math.round(v*10)/10)+'' : formatNum(Math.round(v)); }
   function daysText(v){ return v>3650 ? '10年以上' : '約'+formatNum(Math.round(v))+'日分'; }
-  // 1. 容量に対する使用率
+  // 1. 容量に対する使用率(ほぼいっぱい・空きが少ないブロックを、それぞれ1行にまとめる)
+  var full = [], tight = [];
   Object.keys(c.blocks).forEach(function(b){
     var cv = stockCapSai(cap[b]); if(!cv) return;
     var u = c.blocks[b].cube/cv*100;
-    if(u>=STOCK_DIAG.useDanger) out.push({ level:'danger', text:'ブロック'+b+': 使用率 '+u.toFixed(0)+'%(容量 '+stockFmtCube(cv)+'才 に '+stockFmtCube(c.blocks[b].cube)+'才)。ほぼいっぱいです。ほかのブロックへの移動や、動かない在庫の整理を検討してください' });
-    else if(u>=STOCK_DIAG.useWarn) out.push({ level:'warn', text:'ブロック'+b+': 使用率 '+u.toFixed(0)+'%。空きが少なくなっています' });
+    if(u>=STOCK_DIAG.useDanger) full.push({ b:b, u:u, cv:cv }); else if(u>=STOCK_DIAG.useWarn) tight.push({ b:b, u:u, cv:cv });
   });
+  function useHead(list){ return list.sort(function(x,y){ return y.u-x.u; }).map(function(x){ return x.b+' '+x.u.toFixed(0)+'%'; }).join('・'); }
+  function useDetail(list){ return list.map(function(x){ return 'ブロック'+x.b+': '+stockFmtCube(c.blocks[x.b].cube)+'才 / 容量 '+stockFmtCube(x.cv)+'才(空き '+stockFmtCube(Math.max(0, x.cv-c.blocks[x.b].cube))+'才)'; }).join('、'); }
+  if(full.length) out.push({ level:'danger', head:'ほぼいっぱいのブロック: '+useHead(full), detail: useDetail(full)+'。ほかのブロックへの移動や、動かない在庫の整理を検討してください(使用率 '+STOCK_DIAG.useDanger+'%以上)' });
+  if(tight.length) out.push({ level:'warn', head:'空きが少ないブロック: '+useHead(tight), detail: useDetail(tight)+'(使用率 '+STOCK_DIAG.useWarn+'%以上)' });
   // 2. 7日前(なければいちばん古い記録)からの増減
   if(snaps.length>1){
     var last = snaps[snaps.length-1], target = wrDateAdd(last.date, -7);
@@ -10396,8 +10485,8 @@ function computeStockDiagnostics(st){
         var a = last.sites[k].cube, b0 = prev.sites[k] ? prev.sites[k].cube : 0;
         if(!b0) return;
         var pct = (a-b0)/b0*100, when = Number(prev.date.slice(5,7))+'/'+Number(prev.date.slice(8,10));
-        if(pct>=STOCK_DIAG.growWarn) out.push({ level:'warn', text: stockSiteName(k)+': '+when+'から在庫が '+pct.toFixed(1)+'% 増えています(+'+stockFmtCube(a-b0)+'才、40ftコンテナ 約'+stockFt40(a-b0)+'本分)' });
-        else if(Math.abs(pct)>=5) out.push({ level:'info', text: stockSiteName(k)+': '+when+'から在庫が '+(pct>0?'+':'')+pct.toFixed(1)+'%('+(pct>0?'+':'')+stockFmtCube(a-b0)+'才)' });
+        if(pct>=STOCK_DIAG.growWarn) out.push({ level:'warn', head: stockSiteName(k)+'の在庫が '+pct.toFixed(1)+'% 増加', detail: when+'から +'+stockFmtCube(a-b0)+'才(40ftコンテナ 約'+stockFt40(a-b0)+'本分)増えています' });
+        else if(Math.abs(pct)>=5) out.push({ level:'info', head: stockSiteName(k)+'の在庫 '+(pct>0?'+':'')+pct.toFixed(1)+'%', detail: when+'から '+(pct>0?'+':'')+stockFmtCube(a-b0)+'才' });
       });
     }
   }
@@ -10418,47 +10507,53 @@ function computeStockDiagnostics(st){
     Object.keys(ship.byCode).forEach(function(code){ perDay[code] = ship.byCode[code]/ship.days; });
     var short = Object.keys(stockQty).filter(function(code){ return perDay[code]>0 && stockQty[code]/perDay[code] < STOCK_DIAG.shortDays; })
       .sort(function(a,b){ return stockQty[a]/perDay[a] - stockQty[b]/perDay[b]; });
-    if(short.length) out.push({ level:'danger', text:'欠品の心配: 今の在庫が '+STOCK_DIAG.shortDays+'日分(最近の出荷ペース)に足りない商品が '+short.length+'品番あります。'+top(short, 5, function(code){ return code+'(在庫'+formatNum(stockQty[code])+'・1日約'+perDayText(perDay[code])+')'; }) });
+    if(short.length) out.push({ level:'danger', head:'欠品の心配: '+short.length+'品番', detail:'今の在庫が '+STOCK_DIAG.shortDays+'日分(最近の出荷ペース)に足りない商品です。'+top(short, 10, function(code){ return code+'(在庫'+formatNum(stockQty[code])+'・1日約'+perDayText(perDay[code])+')'; }) });
     if(ship.days>=STOCK_DIAG.minShipDays){
       var still = Object.keys(stockQty).filter(function(code){ return !ship.byCode[code]; });
       var stillCube = 0; still.forEach(function(code){ var v = codeCube(code); if(v) stillCube += v; });
       still.sort(function(a,b){ return (codeCube(b)||0) - (codeCube(a)||0); });
-      if(still.length) out.push({ level:'warn', text:'動かない在庫: '+ship.days+'日分の出荷記録('+ship.from+'〜'+ship.to+')で一度も出荷のない商品が '+still.length+'品番・約'+stockFmtCube(stillCube)+'才(40ftコンテナ 約'+stockFt40(stillCube)+'本分、保管料の目安 月約'+formatNum(Math.round(stillCube*12*3))+'円)あります。才数の多い順: '+top(still, 5, function(code){ return code+'('+stockFmtCube(codeCube(code)||0)+'才)'; }) });
+      if(still.length) out.push({ level:'warn', head:'動かない在庫: '+still.length+'品番・約'+stockFmtCube(stillCube)+'才(40ft 約'+stockFt40(stillCube)+'本分)', detail: ship.days+'日分の出荷記録('+ship.from+'〜'+ship.to+')で一度も出荷のない商品です。保管料の目安 月約'+formatNum(Math.round(stillCube*12*3))+'円。才数の多い順: '+top(still, 10, function(code){ return code+'('+stockFmtCube(codeCube(code)||0)+'才)'; }) });
       var slow = Object.keys(stockQty).filter(function(code){ return perDay[code]>0 && stockQty[code]/perDay[code] > STOCK_DIAG.slowDays; })
         .sort(function(a,b){ return stockQty[b]/perDay[b] - stockQty[a]/perDay[a]; });
-      if(slow.length) out.push({ level:'info', text:'在庫が多めの商品: 最近の出荷ペースで '+STOCK_DIAG.slowDays+'日分より多い在庫がある商品が '+slow.length+'品番あります。'+top(slow, 5, function(code){ return code+'('+daysText(stockQty[code]/perDay[code])+')'; }) });
+      if(slow.length) out.push({ level:'info', head:'在庫が多めの商品: '+slow.length+'品番', detail:'最近の出荷ペースで '+STOCK_DIAG.slowDays+'日分より多い在庫がある商品です。'+top(slow, 10, function(code){ return code+'('+daysText(stockQty[code]/perDay[code])+')'; }) });
     }else{
-      out.push({ level:'info', text:'出荷の記録が '+ship.days+'日分しかないため、動かない在庫・在庫日数の診断はまだ出していません('+STOCK_DIAG.minShipDays+'日分たまると出します)' });
+      out.push({ level:'info', head:'出荷の記録がまだ少ない('+ship.days+'日分)', detail:'動かない在庫・在庫日数の診断は、出荷の記録が '+STOCK_DIAG.minShipDays+'日分たまると出します' });
     }
   }
   // 6. 同じ品番が同じ拠点の多くのロケに分かれている
   var spread = {};
   c.locs.forEach(function(l){ l.skus.forEach(function(code){ var k = code+'|'+l.site; spread[k] = (spread[k]||0) + 1; }); });
   var spreadList = Object.keys(spread).filter(function(k){ return spread[k]>=STOCK_DIAG.spreadLocs; }).sort(function(a,b){ return spread[b]-spread[a]; });
-  if(spreadList.length) out.push({ level:'info', text:'分かれて置かれている商品: 同じ拠点の '+STOCK_DIAG.spreadLocs+'か所以上のロケにある商品が '+spreadList.length+'件あります(まとめるとロケが空きます)。'+top(spreadList, 5, function(k){ var p = k.split('|'); return p[0]+'('+stockSiteName(p[1])+' '+spread[k]+'か所)'; }, '件') });
+  if(spreadList.length) out.push({ level:'info', head:'分かれて置かれている商品: '+spreadList.length+'件', detail:'同じ拠点の '+STOCK_DIAG.spreadLocs+'か所以上のロケにある商品です(まとめるとロケが空きます)。'+top(spreadList, 10, function(k){ var p = k.split('|'); return p[0]+'('+stockSiteName(p[1])+' '+spread[k]+'か所)'; }, '件') });
   // 7. 少量のロケ・混載のロケ
   var small = c.locs.filter(function(l){ return !l.unknown && l.cube<=STOCK_SMALL_LOC_SAI; });
-  if(small.length) out.push({ level:'info', text:'少量のロケ: '+STOCK_SMALL_LOC_SAI+'才以下しか入っていないロケが '+small.length+'か所あります(まとめる候補。在庫 → ロケーションで確認)' });
+  if(small.length) out.push({ level:'info', head:'少量のロケ: '+small.length+'か所', detail: STOCK_SMALL_LOC_SAI+'才以下しか入っていないロケです(まとめる候補)。「ロケーション」のタブで確かめられます' });
   var mixed = c.locs.filter(function(l){ return l.skus.length>=3; });
-  if(mixed.length) out.push({ level:'info', text:'混載のロケ: 3品番以上が入っているロケが '+mixed.length+'か所あります(ピッキングの取り違いに注意)' });
+  if(mixed.length) out.push({ level:'info', head:'混載のロケ: '+mixed.length+'か所', detail:'3品番以上が入っているロケです(ピッキングの取り違いに注意)。「ロケーション」のタブで確かめられます' });
   // 8. 才数の分からない在庫
   var totalQty = 0, unknownQty = 0;
   Object.keys(c.sites).forEach(function(k){ totalQty += c.sites[k].qty; unknownQty += c.sites[k].unknownQty; });
   if(totalQty && unknownQty/totalQty*100 >= STOCK_DIAG.unknownShare){
-    out.push({ level:'warn', text:'才数の分からない在庫が '+formatNum(unknownQty)+'ピース('+(unknownQty/totalQty*100).toFixed(0)+'%)あり、才数・使用率に入っていません。kintone の商品台帳に入数・才数を登録してください(在庫 → 才数不明)' });
+    out.push({ level:'warn', head:'才数の分からない在庫: '+(unknownQty/totalQty*100).toFixed(0)+'%('+formatNum(unknownQty)+'ピース)', detail:'才数・使用率に入っていません。kintone の商品台帳に入数・才数を登録してください(「才数不明」のタブに一覧があります)' });
   }
+  out.forEach(function(d){ d.text = d.head+'。'+d.detail; });
   var order = { danger:0, warn:1, info:2 };
   out.sort(function(a,b){ return order[a.level]-order[b.level]; });
   return out;
 }
 function renderStockDiagnostics(st){
   var list = computeStockDiagnostics(st);
-  var icon = { danger:'🔴', warn:'🟠', info:'🔵' };
-  var nD = list.filter(function(d){ return d.level==='danger'; }).length, nW = list.filter(function(d){ return d.level==='warn'; }).length;
+  var tag = { danger:'要対応', warn:'確認', info:'参考' };
+  var nD = list.filter(function(d){ return d.level==='danger'; }).length, nW = list.filter(function(d){ return d.level==='warn'; }).length, nI = list.length-nD-nW;
   var ship = st.ship || {};
+  state.stockDiagItemOpen = state.stockDiagItemOpen || {};
   return '<details class="stf-diag" id="stockDiag"'+(state.stockDiagOpen===false ? '' : ' open')+'>'+
-    '<summary><b>🩺 在庫の自動診断</b> <span class="stf-row-meta">'+(nD ? '要対応 '+nD+'件・' : '')+(nW ? '確認 '+nW+'件・' : '')+'全'+list.length+'件</span></summary>'+
-    (list.length ? '<ul class="stf-diag-list">'+list.map(function(d){ return '<li class="stf-diag-'+d.level+'">'+icon[d.level]+' '+esc(d.text)+'</li>'; }).join('')+'</ul>'
+    '<summary><b>🩺 在庫の自動診断</b><span class="sd-chips">'+(nD ? '<span class="sd-chip danger">要対応 '+nD+'</span>' : '')+(nW ? '<span class="sd-chip warn">確認 '+nW+'</span>' : '')+(nI ? '<span class="sd-chip">参考 '+nI+'</span>' : '')+'</span></summary>'+
+    (list.length ? '<div class="sd-list">'+list.map(function(d, i){
+        var key = d.head.replace(/[:\s].*$/, '');
+        return '<details class="sd-item sd-'+d.level+'" data-sd-key="'+esc(key)+'"'+(state.stockDiagItemOpen[key] ? ' open' : '')+'><summary><span class="sd-tag">'+tag[d.level]+'</span><b>'+esc(d.head)+'</b><span class="sd-more">くわしく ▾</span></summary>'+
+          '<div class="sd-detail">'+esc(d.detail)+'</div></details>';
+      }).join('')+'</div>'
       : '<div class="pool-hint" style="margin:6px 0 0;">気になる点はありません</div>')+
     '<div class="pool-hint" style="margin:6px 0 0;">ロジザードの在庫・容量・在庫の記録と、作業量CSVの出荷記録('+(ship.days ? esc(ship.from)+'〜'+esc(ship.to)+'の'+ship.days+'日分' : 'なし')+')から自動で出しています(AIは使っていません)。CSVで取り込んでいない出荷は数に入りません。</div>'+
   '</details>';
@@ -10497,14 +10592,17 @@ function renderStockTab(){
       var s = c.sites[k], p = prev && prev.sites[k];
       var capSum = 0, capCube = 0, capAll = true; // 使用率は、容量を入れたブロックの在庫 ÷ その容量
       Object.keys(c.blocks).forEach(function(b){ if(stockSiteOfBlock(b)===k){ var cs = stockCapSai(cap[b]); if(cs>0){ capSum += cs; capCube += c.blocks[b].cube; } else capAll = false; } });
+      var use = capSum ? capCube/capSum*100 : null;
       return '<div class="vca-card"><div class="vca-card-label">'+esc(stockSiteName(k))+'</div>'+
-        '<div class="vca-card-val">'+stockFmtCube(s.cube)+'<span style="font-size:13px;font-weight:600;"> 才</span></div>'+
-        '<div class="vca-card-sub"><b>40ftコンテナ 約'+stockFt40(s.cube)+'本分</b> ・ 約'+stockFmtCube(s.cube*STOCK_SAI_M3)+'m³ ・ '+formatNum(Math.round(s.cases))+'ケース ・ '+formatNum(s.qty)+'ピース</div>'+
-        '<div class="vca-card-sub">'+formatNum(s.skus)+'品番 ・ '+formatNum(s.locs)+'ロケ'+(capSum ? ' ・ 使用率 '+(capCube/capSum*100).toFixed(0)+'%'+(capAll ? '' : '(容量を入れたブロックのみ)') : '')+'</div>'+
-        (p ? '<div class="vca-card-sub">'+esc(Number(prev.date.slice(5,7))+'/'+Number(prev.date.slice(8,10)))+'から '+diff(s.cube, p.cube)+'</div>' : '')+
-        (s.unknownQty ? '<div class="vca-card-sub" style="color:#B54708;">才数不明 '+formatNum(s.unknownQty)+'ピース</div>' : '')+
+        '<div class="vca-card-val">'+stockFmtCube(s.cube)+'<span style="font-size:13px;font-weight:600;"> 才</span> <span style="font-size:13px;font-weight:600;color:#475467;">40ftコンテナ 約'+stockFt40(s.cube)+'本分</span></div>'+
+        (use!==null ? '<div class="st-meter" title="使用率 '+use.toFixed(0)+'%"><i class="'+(use>=STOCK_DIAG.useDanger?'hi':(use>=STOCK_DIAG.useWarn?'mid':''))+'" style="width:'+Math.min(100, use).toFixed(1)+'%;"></i></div>'+
+          '<div class="st-meter-txt"><b>使用率 '+use.toFixed(0)+'%</b>('+stockFmtCube(capCube)+' / '+stockFmtCube(capSum)+'才'+(capAll ? '' : '、容量を入れたブロックのみ')+')</div>' : '')+
+        (p ? '<div class="vca-card-sub" style="margin-top:4px;">'+esc(Number(prev.date.slice(5,7))+'/'+Number(prev.date.slice(8,10)))+'から '+diff(s.cube, p.cube)+'</div>' : '')+
+        '<div class="vca-card-sub">'+formatNum(s.skus)+'品番 ・ '+formatNum(s.locs)+'ロケ ・ '+formatNum(Math.round(s.cases))+'ケース ・ '+formatNum(s.qty)+'ピース ・ 約'+stockFmtCube(s.cube*STOCK_SAI_M3)+'m³</div>'+
+        (s.unknownQty ? '<div class="vca-card-sub" style="color:#B54708;">才数不明 '+formatNum(s.unknownQty)+'ピース(才数に入っていません)</div>' : '')+
       '</div>';
     }).join('')+'</div>'+
+    stockBlockBars(c, cap)+
     '<div class="stf-section-title">才数の推移</div>'+stockTrendSvg(snaps)+
     '<div class="pool-hint" style="margin-top:8px;">ロジザードの在庫('+esc(fmtDateTime(st.lz.uploadedAt))+'取込)の在庫数(引当数を含む)から計算しています。才数 = 在庫数 ÷ 入数 × 1ケースの才数。推移は、在庫を取り込んだ日ごとに残しています。</div>';
   }else if(tab==='blocks'){
@@ -10523,7 +10621,7 @@ function renderStockTab(){
             '<select data-stock-cap="'+esc(b)+'" data-cap-field="unit">'+STOCK_CAP_UNITS.map(function(u){ return '<option value="'+u[0]+'"'+(capE.unit===u[0]?' selected':'')+'>'+u[1]+'</option>'; }).join('')+'</select>'+
             (area ? ' 高さ <input type="number" min="0" step="0.1" class="stock-cap-input" style="width:60px;" data-stock-cap="'+esc(b)+'" data-cap-field="height" value="'+esc(String(capE.height||''))+'" placeholder="m">m' : '')+
             (capV && capE.unit!=='sai' ? '<div class="sk-minor">= '+stockFmtCube(capV)+'才</div>' : (area && !capV && capE.value ? '<div class="sk-minor" style="color:#B54708;">高さを入れてください</div>' : ''))+'</td>')+
-          '<td class="num">'+(use===null ? '' : '<span class="stock-use '+(use>=90?'hi':(use>=70?'mid':''))+'">'+use.toFixed(0)+'%</span>')+'</td>'+
+          '<td class="num">'+(use===null ? '' : '<span class="st-cell-meter"><span class="st-bar-track"><i class="'+(use>=STOCK_DIAG.useDanger?'hi':(use>=STOCK_DIAG.useWarn?'mid':''))+'" style="width:'+Math.min(100, use).toFixed(1)+'%;"></i></span><span class="stock-use '+(use>=90?'hi':(use>=70?'mid':''))+'">'+use.toFixed(0)+'%</span></span>')+'</td>'+
           '<td>'+(p ? diff(x.cube, p.cube) : '')+'</td></tr>';
       }).join('')+
       '</tbody></table></div>'+
@@ -10565,11 +10663,11 @@ function renderStockTab(){
       '<div><div class="stf-section-title">才数が無い('+ns.length+')</div><div class="sk-minor" style="line-height:1.8;">'+ns.sort().map(function(k){ return esc(k)+' '+esc(c.noSai[k]); }).join('<br>')+'</div></div></div>';
   }
   return '<div class="mgr-wrap"><div class="panel">'+
-    '<div class="panel-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">在庫 <span class="pool-hint" style="font-weight:400;margin:0;">ロジザード '+esc(fmtDateTime(st.lz.uploadedAt))+' ・ 記録 '+snaps.length+'日分</span>'+
-      '<button type="button" class="vc-manage-toggle-btn" id="stockReload" style="min-height:0;padding:3px 10px;margin-left:8px;">読み直す</button></div>'+
-    '<div class="stock-csv no-print"><span class="pool-hint" style="margin:0;">CSV出力:</span>'+
-      [['blocks','ブロック別'],['locs','ロケーション別'],['products','品番別'],['trend','推移'],['missing','才数不明']].map(function(x){ return csvButton('stock:'+x[0], x[1]); }).join('')+
-    '</div>'+
+    '<div class="panel-title st-head">在庫 <span class="pool-hint" style="font-weight:400;margin:0;">ロジザード '+esc(fmtDateTime(st.lz.uploadedAt))+' ・ 記録 '+snaps.length+'日分</span>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="stockReload" style="min-height:0;padding:3px 10px;">読み直す</button>'+
+      '<details class="st-csv no-print"><summary>CSV出力 ▾</summary><div class="st-csv-pop">'+
+        [['blocks','ブロック別'],['locs','ロケーション別'],['products','品番別'],['trend','推移'],['missing','才数不明']].map(function(x){ return csvButton('stock:'+x[0], x[1]); }).join('')+
+      '</div></details></div>'+
     renderStockDiagnostics(st)+
     '<div class="vc-tabs sticky-tabs">'+tabs+'</div>'+
     body+
@@ -10633,7 +10731,10 @@ function exportStockCsv(kind){
 }
 function bindStockTab(){
   var dg = document.getElementById('stockDiag');
-  if(dg) dg.addEventListener('toggle', function(){ state.stockDiagOpen = dg.open; });
+  if(dg) dg.addEventListener('toggle', function(e){ if(e.target===dg) state.stockDiagOpen = dg.open; });
+  document.querySelectorAll('[data-sd-key]').forEach(function(el){
+    el.addEventListener('toggle', function(e){ e.stopPropagation(); state.stockDiagItemOpen = state.stockDiagItemOpen || {}; state.stockDiagItemOpen[el.getAttribute('data-sd-key')] = el.open; });
+  });
   document.querySelectorAll('[data-stock-tab]').forEach(function(el){
     el.addEventListener('click', function(){ state.stockTab = el.getAttribute('data-stock-tab'); render(); });
   });
@@ -10985,7 +11086,8 @@ async function loadGateDataStatus(){
   return out;
 }
 /* 通信量の目安: GB の表示。無料枠(5GB)に対して 70% 以上(または月末の見込みが超える)で黄色、90% 以上で赤 */
-function fmtUsageBytes(b){ return b>=1e9 ? (b/1e9).toFixed(2)+'GB' : (b>=1e6 ? Math.round(b/1e6)+'MB' : Math.max(0, Math.round(b/1e3))+'KB'); }
+// いつも GB で出す(1GB 未満は小数3けた。例: 0.012GB)
+function fmtUsageBytes(b){ b = Math.max(0, Number(b)||0); return (b/1e9).toFixed(b<1e9 ? 3 : 2)+'GB'; }
 function usageLevel(u){
   var free = window.LogiUsageMeter.FREE_BYTES, pct = u.total/free*100;
   return pct>=90 ? 'is-none' : ((pct>=70 || (u.projected && u.projected>=free)) ? 'is-stale' : 'is-ok');
@@ -11191,7 +11293,7 @@ window.__usageDeviceLabel = function(){
   return it ? it.label : 'トップ';
 };
 function renderTopbar(){
-  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'集計表(高屋・丹南)'}[state.role];
+  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'集計表(高屋・丹南)', vcAlloc:'VC引当', stock:'在庫'}[state.role] || '';
   var lockBtn = (hasManagerSession() && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="ログアウトする">🔓 ログアウト</button>' : '';
   // 共通ナビゲーション: どのページからでも他の主要ページへ直接移動できるようにする。
   // 管理者専用項目(管理者/設定)は、実際にログイン済みの場合のみ表示する

@@ -1748,6 +1748,7 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-05', items:[
+    '【配置: A223以降の1段目】A223以降(A棟の B423〜470 の下)は1段目の A ロケを使わず、B ロケを1段目と2段目を合わせた場所(2パレット分)として計算するようにしました。今 A223以降にある物は、動かす物として行き先を出します',
     '【配置の指示を作り直し】在庫の「配置」タブを、現場と決めた考え方で作り直しました。テントの通路に全部「通路ラック」を置き(A棟 左の下=入口の通路、B棟 通路1の下=374の前 はあけておく)、よく出る物 → 通路ラック、たまに出る物 → 棚の通路側(中央の横通路に近い2間口)、あまり出ない物・出荷なし → 棚の壁側に分け、D列をなくします。1段目の端数(Aブロック。Bの番号−200)も含めて、①棚の整理 → ②通路ラックの設置 → ③よく出る物を通路ラックへ → ④D列の残りを棚へ の順に、「品番・今のロケ → 行き先のロケ」の指示書を出します。「指示書を印刷」で、チェック欄つきの表を印刷できます',
     '【請求の金額を整数に】請求データの金額(保管料・入庫荷役料・出庫のケース・端数・移動出庫・明細1)を、1行ずつ円未満を四捨五入して整数にしました。合計・請求書鑑は整数の金額の合計です(才数に小数があるため、これまでは金額に小数が出ていました)',
     '【在庫を見やすく】在庫の画面を見やすくしました。自動診断は1行ずつの見出し(要対応・確認・参考)にして、「くわしく」で品番などの内訳が開くようにしました。ほぼいっぱい・空きが少ないブロックは、それぞれ1行にまとめました。概要に、拠点ごとの使用率のメーターと、ブロックの使用率の横棒グラフ(高い順。90%以上は赤)を足し、才数の推移のグラフを大きく(目盛りと日ごとの点つき)しました。CSV出力は右上の「CSV出力 ▾」にまとめました。画面の上の表示が「在庫」「VC引当」のとき undefined になっていたのを直しました',
@@ -10572,6 +10573,8 @@ function renderStockDiagnostics(st){
      あまり出ない・出荷なし → 1段目の通路側 → 1段目の壁側。
    ・D列は全部どこかへ移して廃止する。
    ロケ番号: 2段目(B)・3段目(C)は 201〜374 = B棟、375〜470 = A棟。1段目(A)は B の番号 − 200(A1 = B201 の下)。A0 は対象外。
+   A223以降(B423〜470 の下)は1段目の A ロケを使わない(今後も)。そこの B ロケ = 1段目と2段目を合わせた場所(2パレット分)、C = 3段目。
+   今 A223以降にある物は、動かす物として行き先を出す。
    並び(図面で確認): 1間口に2番号。上半分は A棟が左端の列の中央側(375)から、B棟が左端の列の壁側(201)から、列ごとに交互に右へ。
    下半分は右端の列の壁側(A棟423・B棟289)から、交互に左へ。 */
 var SLOT_DEFAULTS = { segPallets:16, palletSai:40, locSai:40, fastPct:20, midPct:30 };
@@ -10585,6 +10588,7 @@ var SLOT_TENTS = {
 // 通路ラックを置かない(あけておく)区画: 棟|通路|上下
 var SLOT_OPEN = { 'A|左|下':true, 'A|右(広い所)|上':true, 'A|右(広い所)|下':true, 'B|左|上':true, 'B|左|下':true, 'B|通路1|下':true };
 var SLOT_LEVEL = { A:'1段目', B:'2段目', C:'3段目' };
+var SLOT_NO_A_FROM = 423; // この B の番号から先は、1段目の A ロケを使わない(B = 1段目と2段目)
 var slotPosCache = null;
 /* B・C の番号(201〜470) → { tent, col, half, fromWall(0=壁ぎわの間口), faces, side('wall'|'aisle'), open } */
 function slotPositions(){
@@ -10610,9 +10614,14 @@ function slotPositions(){
   return slotPosCache = map;
 }
 function slotLocText(level, n){ return level==='A' ? 'A:'+(n-200) : level+':'+n; }
+function slotLevelText(level, n){
+  if(n>=SLOT_NO_A_FROM && level==='B') return '1・2段目';
+  if(n>=SLOT_NO_A_FROM && level==='A') return '1段目(今後は使わない)';
+  return SLOT_LEVEL[level];
+}
 function slotPlaceText(level, n){
   var p = slotPositions()[n];
-  return SLOT_TENTS[p.tent].name+' '+p.faces.join('・')+'の'+p.half+' '+SLOT_LEVEL[level]+' '+(p.open ? '(あけておく通路の前)' : (p.side==='aisle' ? '通路側' : '壁側'));
+  return SLOT_TENTS[p.tent].name+' '+p.faces.join('・')+'の'+p.half+' '+slotLevelText(level, n)+' '+(p.open ? '(あけておく通路の前)' : (p.side==='aisle' ? '通路側' : '壁側'));
 }
 /* 通路ラックの区画(あけておく区画を除く) */
 function slotRackSegments(segPallets){
@@ -10668,7 +10677,9 @@ function computeSlotting(st, opt){
           if(!POS[n]) return; // 母屋など(配置がえの対象外)
           key = b+':'+n;
         }
-        lots.push({ code:code, name:P[code].name||'', block:b, loc:loc, qty:q, cube:(pack && sai!==null) ? q/pack*sai : null,
+        // A223以降(1段目の A ロケ)は使わない場所なので、そこにある物は必ず動かす
+        var legacy = !!(key && b==='A' && n>=SLOT_NO_A_FROM);
+        lots.push({ legacy:legacy, code:code, name:P[code].name||'', block:b, loc:loc, qty:q, cube:(pack && sai!==null) ? q/pack*sai : null,
           rank:rank[code], perDay:perDay[code], pos:key, n:n, frac: b==='A' });
       });
     });
@@ -10679,33 +10690,37 @@ function computeSlotting(st, opt){
   Object.keys(POS).map(Number).sort(function(a,b){ return a-b; }).forEach(function(n){
     ['A','B','C'].forEach(function(lv){
       var k = lv+':'+n, p = POS[n], z = p.open ? 'open' : p.side;
-      cap[k] = { key:k, level:lv, n:n, used:0, count:0, zone:z };
+      if(lv==='A' && n>=SLOT_NO_A_FROM) return; // A223以降は1段目の A ロケを使わない
+      var two = lv==='B' && n>=SLOT_NO_A_FROM;   // そこの B = 1段目と2段目(2パレット分)
+      cap[k] = { key:k, level:lv, n:n, used:0, count:0, zone:z, size: two ? opt.locSai*2 : opt.locSai, maxN: two ? 3 : 2, floor: lv==='A' || two };
       byZone[z].push(k);
     });
   });
   // 通路側は中央に近い間口から、壁側は壁に近い間口から使う
   byZone.aisle.sort(function(a,b){ return POS[cap[b].n].fromWall-POS[cap[a].n].fromWall || cap[a].n-cap[b].n; });
   byZone.wall.sort(function(a,b){ return POS[cap[a].n].fromWall-POS[cap[b].n].fromWall || cap[a].n-cap[b].n; });
-  function occupy(k, l){ cap[k].used += cu(l); cap[k].count++; }
-  function release(k, l){ cap[k].used -= cu(l); cap[k].count--; }
+  function occupy(k, l){ if(!cap[k]) return; cap[k].used += cu(l); cap[k].count++; }
+  function release(k, l){ if(!cap[k]) return; cap[k].used -= cu(l); cap[k].count--; }
   function prefs(l){
     if(l.rank==='mid' || l.rank==='fast') return ['open','aisle','wall'];
     return l.frac ? ['aisle','wall','open'] : ['wall','aisle','open'];
   }
   function stays(l){
-    if(!l.pos || l.rank==='fast') return false; // D列は必ず動かす。よく出る物は通路ラックへ
+    if(!l.pos || l.rank==='fast' || l.legacy) return false; // D列・A223以降は必ず動かす。よく出る物は通路ラックへ
     var z = cap[l.pos].zone;
     if(l.rank==='mid') return z==='open' || z==='aisle';
     return l.frac ? z!=='open' : z==='wall';
   }
   function place(l){
-    var levels = l.frac ? ['A'] : ['B','C'], z = prefs(l), need = cu(l);
+    var z = prefs(l), need = cu(l);
     for(var zi=0; zi<z.length; zi++){
       var list = byZone[z[zi]];
       for(var i=0;i<list.length;i++){
         var c = cap[list[i]];
-        if(levels.indexOf(c.level)===-1 || c.count>=2) continue;
-        if(c.used+need <= opt.locSai+0.01 || (c.count===0 && need>opt.locSai)){ occupy(c.key, l); return c.key; }
+        // 端数は1段目(A ロケ、A223以降は B ロケ)。パレットは B・C
+        if(l.frac ? !c.floor : c.level==='A') continue;
+        if(c.count>=c.maxN) continue;
+        if(c.used+need <= c.size+0.01 || (c.count===0 && need>c.size)){ occupy(c.key, l); return c.key; }
       }
     }
     return null;
@@ -10831,7 +10846,7 @@ function renderSlotting(st){
   var rules = '<details class="slot-settings" style="margin-top:12px;"><summary>配置のルール ▾</summary><div class="pool-hint" style="line-height:1.8;margin:6px 0 0;">'+
     '出荷のランク: '+ship.days+'日分の出荷記録('+esc(ship.from)+'〜'+esc(ship.to)+')の1日あたりケース数で、出荷のある'+r.movingCount+'品番の上位'+opt.fastPct+'% = よく出る、次の'+opt.midPct+'% = たまに出る、残り = あまり出ない。<br>'+
     '行き先: よく出る → 通路ラック(端数は下段)/ たまに出る → 棚の通路側(あけておく通路の前を先に)/ あまり出ない・出荷なし → 棚の壁側(端数は1段目の通路側 → 壁側)。棚1ロケに'+opt.locSai+'才・2品番まで。<br>'+
-    'ロケ番号: 2段目(B)・3段目(C)の 201〜374 = B棟、375〜470 = A棟。1段目(A)は B の番号 − 200。母屋(B・C の 200以下)・A0・AA・S・E は今の使い方のままです。'+
+    'ロケ番号: 2段目(B)・3段目(C)の 201〜374 = B棟、375〜470 = A棟。1段目(A)は B の番号 − 200。A223以降(B423〜470 の下)は1段目の A ロケを使わず、B ロケ = 1段目と2段目(2パレット分・'+(opt.locSai*2)+'才)、C = 3段目。今 A223以降にある物は動かします。母屋(B・C の 200以下)・A0・AA・S・E は今の使い方のままです。'+
   '</div></details>';
   return settings+cards+head+body+rules;
 }

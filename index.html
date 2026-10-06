@@ -143,6 +143,11 @@ input,select{font-family:inherit;}
 .topbar-left{display:flex;align-items:baseline;gap:12px;}
 .topbar-title{font-family:var(--font-display);font-weight:600;font-size:15px;letter-spacing:-.01em;}
 .topbar-date{font-family:var(--font-mono);font-size:12px;color:#9AA4B8;}
+.sk-pf{display:inline-flex;gap:3px;align-items:center;padding:6px 10px;border-radius:8px;cursor:pointer;border:2px solid #D0D5DD;background:#fff;font-weight:700;}
+.sk-pf span{border:1px solid #98A2B3;border-radius:4px;padding:1px 6px;background:#fff;font-size:12px;}
+.sk-pf .sk-pf-ck{display:none;border:none;padding:0;background:none;color:#175CD3;font-size:14px;}
+.sk-pf.on{border-color:#175CD3;background:#EFF8FF;}
+.sk-pf.on .sk-pf-ck{display:inline;}
 /* 在庫: 見やすく(2026-10-06) */
 .st-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .st-csv{position:relative;margin-left:auto;}
@@ -1748,6 +1753,7 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-05', items:[
+    '【集計表: 在庫差異を集計表へ・貼り付けの列】在庫差異の表に☑を付け、「☑の商品を集計表へ送る」で、品番・数量(差異の数)・備考(弥生とロジの在庫)を集計表に1行ずつ追加できるようにしました(はじめは差異のある商品すべてに☑)。集計表の「まとめて貼り付け」は、Excelの列の並びを「1列目 VC番号/2列目 品番…」の形のボタンで選ぶようにし、貼り付けた中身から自動で選び、1行目をどう読むかを表示するようにしました',
     '【請求のコピーに合計】請求データの各表(保管料・入庫料・生協出庫・生協以外・移動出庫・明細1)の「コピー」とCSVに、最後の行として合計の行を入れるようにしました。「合計の行も含める」のチェックを外すと、今までどおり明細の行だけになります',
     '【配置: A223以降の1段目】A223以降(A棟の B423〜470 の下)は1段目の A ロケを使わず、B ロケを1段目と2段目を合わせた場所(2パレット分)として計算するようにしました。今 A223以降にある物は、動かす物として行き先を出します',
     '【配置の指示を作り直し】在庫の「配置」タブを、現場と決めた考え方で作り直しました。テントの通路に全部「通路ラック」を置き(A棟 左の下=入口の通路、B棟 通路1の下=374の前 はあけておく)、よく出る物 → 通路ラック、たまに出る物 → 棚の通路側(中央の横通路に近い2間口)、あまり出ない物・出荷なし → 棚の壁側に分け、D列をなくします。1段目の端数(Aブロック。Bの番号−200)も含めて、①棚の整理 → ②通路ラックの設置 → ③よく出る物を通路ラックへ → ④D列の残りを棚へ の順に、「品番・今のロケ → 行き先のロケ」の指示書を出します。「指示書を印刷」で、チェック欄つきの表を印刷できます',
@@ -8872,14 +8878,19 @@ function renderShukeiSheet(siteKey, site, data, draft){
       '<button type="button" class="vc-manage-toggle-btn" id="shukeiPrint">印刷</button>'+csvButton('shukeiSheet')+
       '<button type="button" class="vc-manage-toggle-btn" id="shukeiClear" style="color:var(--rust-600);">新規作成(入力を消す)</button>'+
     '</div>'+
-    (state.shukeiPasteOpen ? '<div class="no-print" style="margin-bottom:8px;">'+
-      '<div style="display:flex;gap:14px;flex-wrap:wrap;margin:0 0 4px;font-size:13px;"><b>貼り付ける列:</b>'+
-        [['vc','VC番号から(VC番号・品番・数量・備考)'],['code','品番から(品番・数量・備考)']].map(function(o){
-          return '<label style="cursor:pointer;"><input type="radio" name="shukeiPasteFrom" value="'+o[0]+'"'+((state.shukeiPasteFrom||'vc')===o[0]?' checked':'')+'> '+o[1]+'</label>';
+    (state.shukeiPasteOpen ? '<div class="no-print" style="margin-bottom:8px;padding:10px;border:1px solid #D0D5DD;border-radius:10px;background:#F9FAFB;">'+
+      '<div style="font-size:13px;font-weight:700;margin:0 0 6px;">① Excelの列の並びを選ぶ(貼り付けると自動で選びます)</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 8px;">'+
+        [['vc',['VC番号','品番','数量','備考']],['code',['品番','数量','備考']]].map(function(o){
+          var on = (state.shukeiPasteFrom||'vc')===o[0];
+          return '<button type="button" class="sk-pf'+(on?' on':'')+'" data-shukei-pastefrom="'+o[0]+'"><span class="sk-pf-ck">✔</span>'+
+            o[1].map(function(c, i){ return '<span>'+(i+1)+'列目 '+c+'</span>'; }).join('')+'</button>';
         }).join('')+'</div>'+
+      '<div style="font-size:13px;font-weight:700;margin:0 0 4px;">② 貼り付ける</div>'+
       '<div class="pool-hint" style="margin:0 0 4px;">Excelなどから、上で選んだ並びの列をコピーして貼り付けてください(1行に1品番)。見出しの行は不要です。備考が空の行は、上の行の備考を引き継ぎます。</div>'+
       '<textarea id="shukeiPasteText" rows="5" style="width:100%;font-family:monospace;"></textarea>'+
-      '<button type="button" class="add-btn" id="shukeiPasteAdd" style="margin-top:4px;">貼り付けた行を追加</button></div>' : '')+
+      '<div id="shukeiPastePreview" class="pool-hint" style="margin:4px 0 0;"></div>'+
+      '<button type="button" class="add-btn" id="shukeiPasteAdd" style="margin-top:4px;">③ 貼り付けた行を追加</button></div>' : '')+
     '<div style="overflow-x:auto;" data-keep-scroll="shukeiSheet"><table class="report-table shukei-table sk-pick" id="shukeiTable"><thead>'+head+'</thead><tbody>'+rows+'</tbody>'+foot+'</table></div>'+
     '<div class="pool-hint no-print" style="margin-top:6px;">入数は弥生の在庫データ(無い場合はkintoneの商品台帳)、才数はkintoneの商品台帳の値です。ケースは'+(site.caseMode==='up'?'切り上げ':'切り捨て(残りは端数)')+'で計算します。ロジはロジザードの'+esc(site.name)+'の区画('+esc(site.stockBlocks.join('・'))+')の在庫の合計です。入力中の表はこの端末に保存されます。</div>';
 }
@@ -8894,18 +8905,25 @@ function renderShukeiDiff(siteKey, site, data){
     return Math.abs(b.diff)-Math.abs(a.diff); // 初期: 差異の大きい順
   });
   function dh(label, key){ return '<th class="shukei-sortable'+(['yayoi','logi','diff','cases','cubic'].indexOf(key)!==-1 ? ' num' : '')+'" data-shukei-diffsort="'+key+'" title="押すと「'+esc(label)+'」で並び替え">'+esc(label)+shukeiSortMark(diffSort, key)+'</th>'; }
+  var sel = state.shukeiDiffSel || null; // null = 表示中の差異のある商品すべて
+  function picked(r){ return r.diff!==0 && (!sel || sel[r.code]); }
+  var nPick = list.filter(picked).length;
   var rows = list.map(function(r){
-    return '<tr><td>'+esc(r.code)+'</td><td>'+esc(r.name)+'</td><td class="num">'+formatNum(r.yayoi)+'</td><td class="num">'+formatNum(r.logi)+'</td>'+
+    return '<tr><td class="no-print">'+(r.diff!==0 ? '<input type="checkbox" data-shukei-diffpick="'+esc(r.code)+'"'+(picked(r)?' checked':'')+'>' : '')+'</td><td>'+esc(r.code)+'</td><td>'+esc(r.name)+'</td><td class="num">'+formatNum(r.yayoi)+'</td><td class="num">'+formatNum(r.logi)+'</td>'+
       '<td class="num" style="'+(r.diff!==0?'color:var(--rust-600);font-weight:700;':'')+'">'+(r.diff>0?'+':'')+formatNum(r.diff)+'</td>'+
       '<td class="num">'+(r.cases===null?'':formatNum(r.cases))+'</td><td class="num">'+(r.cubic===null?'要計測':formatCubic(r.cubic))+'</td></tr>';
-  }).join('') || '<tr><td colspan="7" class="empty-note">'+(onlyDiff?'差異のある商品はありません':'商品がありません')+'</td></tr>';
+  }).join('') || '<tr><td colspan="8" class="empty-note">'+(onlyDiff?'差異のある商品はありません':'商品がありません')+'</td></tr>';
   return '<div class="no-print" style="display:flex;gap:12px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">'+
       '<label><input type="checkbox" id="shukeiDiffOnly"'+(onlyDiff?' checked':'')+'> 差異のある商品だけ表示</label>'+
       '<span class="pool-hint" style="margin:0;">'+formatNum(all.filter(function(r){ return r.diff!==0; }).length)+'件に差異 / 全'+formatNum(all.length)+'件</span>'+
       '<button type="button" class="vc-manage-toggle-btn" id="shukeiPrint">印刷</button>'+csvButton('shukeiDiff')+
     '</div>'+
+    '<div class="no-print" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 8px;padding:8px 10px;background:#F0F9FF;border:1px solid #B9E6FE;border-radius:8px;">'+
+      '<button type="button" class="add-btn" id="shukeiDiffSend"'+(nPick ? '' : ' disabled')+'>➡ ☑の商品を集計表へ送る('+formatNum(nPick)+'件)</button>'+
+      '<span class="pool-hint" style="margin:0;">集計表に、品番・数量(差異の数)・備考(弥生とロジの在庫)を1行ずつ追加します。棚番を見て現物を確かめるのに使えます。</span>'+
+    '</div>'+
     '<div class="shukei-print-head"><span class="shukei-site-badge">'+esc(site.name)+'</span><b>在庫差異</b> ・ '+esc(dateLabelFromStr(todayStr()))+'</div>'+
-    '<div style="overflow-x:auto;max-height:560px;overflow-y:auto;" data-keep-scroll="shukeiDiff"><table class="report-table shukei-table"><thead><tr>'+dh('商品コード','code')+dh('商品名','name')+dh('弥生('+site.name+')','yayoi')+dh('ロジザード','logi')+dh('差異(弥生−ロジ)','diff')+dh('ケース数(ロジ)','cases')+dh('才数','cubic')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div style="overflow-x:auto;max-height:560px;overflow-y:auto;" data-keep-scroll="shukeiDiff"><table class="report-table shukei-table"><thead><tr><th class="no-print" title="集計表へ送る商品"><input type="checkbox" id="shukeiDiffPickAll"'+(nPick && nPick===list.filter(function(r){ return r.diff!==0; }).length ? ' checked' : '')+'></th>'+dh('商品コード','code')+dh('商品名','name')+dh('弥生('+site.name+')','yayoi')+dh('ロジザード','logi')+dh('差異(弥生−ロジ)','diff')+dh('ケース数(ロジ)','cases')+dh('才数','cubic')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div class="pool-hint no-print" style="margin-top:6px;">ロジザードは'+esc(site.name)+'の区画('+esc(site.stockBlocks.join('・'))+')の在庫の合計、ケース数はロジザードの在庫 ÷ 入数 の切り上げ、才数はkintoneの商品台帳の値です。</div>';
 }
 function bindShukei(){
@@ -8953,8 +8971,38 @@ function bindShukei(){
     state.shukeiPasteOpen = false; persist(); render();
     showToast(added ? added+'行を追加しました' : '追加できる行がありませんでした('+(fromCode?'1':'2')+'列目に品番が必要です)');
   });
-  document.querySelectorAll('input[name="shukeiPasteFrom"]').forEach(function(el){
-    el.addEventListener('change', function(){ if(el.checked) state.shukeiPasteFrom = el.value; });
+  // 列の並び: ボタンで選ぶ。貼り付けた中身からも自動で見分ける(1列目が品番として登録されていれば「品番から」)
+  function knownCode(v){
+    var dt = state.shukeiData || {}; v = String(v||'').trim(); if(!v) return false;
+    return !!((dt.yayoi && dt.yayoi.products && dt.yayoi.products[v]) || (dt.logizard && dt.logizard.products && dt.logizard.products[v]));
+  }
+  function detectFrom(rows){
+    var a = 0, b = 0;
+    rows.slice(0, 30).forEach(function(r){ if(knownCode(r[0])) a++; if(knownCode(r[1])) b++; });
+    return a>b ? 'code' : (b>a ? 'vc' : null);
+  }
+  function showPreview(){
+    var ta = document.getElementById('shukeiPasteText'), pv = document.getElementById('shukeiPastePreview');
+    if(!ta || !pv) return;
+    var rows = shukeiParseTsv(ta.value).filter(function(r){ return r.some(function(x){ return String(x||'').trim(); }); });
+    if(!rows.length){ pv.textContent = ''; return; }
+    var r = rows[0], fc = (state.shukeiPasteFrom||'vc')==='code';
+    var c = fc ? { vc:'', code:r[0], qty:r[1], note:r[2] } : { vc:r[0], code:r[1], qty:r[2], note:r[3] };
+    pv.innerHTML = '1行目はこう読みます → '+(fc ? '' : 'VC番号 <b>'+esc(c.vc||'(空)')+'</b> ・ ')+'品番 <b>'+esc(c.code||'(空)')+'</b>'+(knownCode(c.code) ? '' : ' <span style="color:#B42318;">(登録の無い品番。列の並びを確かめてください)</span>')+' ・ 数量 <b>'+esc(c.qty||'(空)')+'</b>'+(c.note ? ' ・ 備考 '+esc(c.note) : '')+'(全'+rows.length+'行)';
+  }
+  // 画面を描き直すと貼り付けた中身が消えるので、ボタンの見た目だけを切り替える
+  function setPasteFrom(v){
+    state.shukeiPasteFrom = v;
+    document.querySelectorAll('[data-shukei-pastefrom]').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-shukei-pastefrom')===v); });
+    showPreview();
+  }
+  document.querySelectorAll('[data-shukei-pastefrom]').forEach(function(el){
+    el.addEventListener('click', function(){ setPasteFrom(el.getAttribute('data-shukei-pastefrom')); });
+  });
+  var pta = document.getElementById('shukeiPasteText');
+  if(pta) pta.addEventListener('input', function(){
+    var d0 = detectFrom(shukeiParseTsv(pta.value));
+    if(d0 && d0!==(state.shukeiPasteFrom||'vc')) setPasteFrom(d0); else showPreview();
   });
   // 備考を下の行すべてにコピー(Excelのフィルダウンと同じ)
   document.querySelectorAll('[data-shukei-filldown]').forEach(function(el){
@@ -9004,6 +9052,44 @@ function bindShukei(){
   if(pr) pr.addEventListener('click', function(){ window.print(); });
   var only = document.getElementById('shukeiDiffOnly');
   if(only) only.addEventListener('change', function(){ state.shukeiDiffOnly = only.checked; render(); });
+  // 在庫差異: 集計表へ送る商品の選択(はじめは差異のある商品すべて)
+  function diffList(){
+    var dt = state.shukeiData; if(!dt || !dt.yayoi || !dt.logizard) return [];
+    return shukeiStockDiffRows(siteKey, dt, state.shukeiPm).filter(function(r){ return r.diff!==0; });
+  }
+  function ensureSel(){
+    if(!state.shukeiDiffSel){ state.shukeiDiffSel = {}; diffList().forEach(function(r){ state.shukeiDiffSel[r.code] = true; }); }
+    return state.shukeiDiffSel;
+  }
+  document.querySelectorAll('[data-shukei-diffpick]').forEach(function(el){
+    el.addEventListener('change', function(){ ensureSel()[el.getAttribute('data-shukei-diffpick')] = el.checked; render(); });
+  });
+  var pickAll = document.getElementById('shukeiDiffPickAll');
+  if(pickAll) pickAll.addEventListener('change', function(){
+    var s0 = {}; if(pickAll.checked) diffList().forEach(function(r){ s0[r.code] = true; });
+    state.shukeiDiffSel = s0; render();
+  });
+  var dsend = document.getElementById('shukeiDiffSend');
+  if(dsend) dsend.addEventListener('click', function(){
+    var sel = state.shukeiDiffSel;
+    var list = diffList().filter(function(r){ return !sel || sel[r.code]; });
+    if(state.shukeiDiffOnly===false) list = list.filter(function(r){ return r.diff!==0; });
+    if(!list.length){ showToast('送る商品がありません'); return; }
+    if(!draft){ showToast('集計表を読み込めませんでした'); return; }
+    if(!confirm(list.length+'件を'+SHUKEI_SITES[siteKey].name+'の集計表に追加します。よろしいですか?')) return;
+    var have = {};
+    draft.rows.forEach(function(r){ if(r.code && /^在庫差異/.test(r.note||'')) have[r.code] = true; });
+    var added = 0, skipped = 0;
+    list.forEach(function(r){
+      if(have[r.code]){ skipped++; return; } // 同じ在庫差異の行が既にあるときは足さない
+      draft.rows.push({ vc:'', code:r.code, qty:String(Math.abs(r.diff)), note:'在庫差異 '+(r.diff>0?'+':'')+r.diff+'(弥生'+r.yayoi+'・ロジ'+r.logi+')' });
+      added++;
+    });
+    persist();
+    state.shukeiSheetSort = null; state.shukeiDiffSel = null; state.shukeiTab = 'sheet';
+    render();
+    showToast(added+'件を集計表に追加しました'+(skipped ? '(既にある'+skipped+'件は足していません)' : ''));
+  });
 }
 
 /* ---------- VC引き当て。以前の Excel「VC引き当てリスト」をロジリンクに移したもの ----------

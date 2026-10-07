@@ -3620,8 +3620,10 @@ var STAFFING_LOW_SAMPLE_DAYS = 3; // 作業の生産性の実績がこの日数�
 /* 生産性マスタへの反映(実測のみを使う。複数人が同じ作業に同時に入っていた日は
    個人ぶんの正確な内訳が分からないため、個人サンプルには使わず、
    作業全体の標準生産性の算出にのみ使う。) */
-function updateProductivityMasterFromDay(master, dateStr, day, workVolume, caseLedger){
+function updateProductivityMasterFromDay(master, dateStr, day, workVolume, caseLedger, hoursAdj){
   var agg = aggregateDays([day]);
+  hoursAdj = hoursAdj || {};
+  Object.keys(hoursAdj).forEach(function(tid){ if(!agg.perTask[tid]) agg.perTask[tid] = { ms:0 }; });
   Object.keys(agg.perTask).forEach(function(tid){
     if(tid==='BREAK') return;
     // 生産性の対象は「現在の作業マスタに存在し、かつ有効(archivedでない)な作業」だけに限定する。
@@ -3650,7 +3652,9 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume, caseL
     if(!wvTotals || !wvTotals.primaryCount && !wvTotals.totalQty) return;
     var qty = wvTotals.totalQty; // 出荷個数を基本の作業量単位とする
     if(!qty) return;
-    var taskMs = agg.perTask[tid].ms || 0;
+    // 「今日の作業に変更」で日をまたいで移した取込は、移す前の日の作業時間も一緒に移して数える(adjMs)
+    var adjMs = hoursAdj[tid] || 0;
+    var taskMs = (agg.perTask[tid].ms || 0) + adjMs;
     if(taskMs<=0) return;
     var taskHours = taskMs/3600000;
     var m = master[pkey];
@@ -3677,7 +3681,8 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume, caseL
       return agg.perStaff[sid].byTask[tid] && agg.perStaff[sid].byTask[tid].ms>0;
     });
     // 一人だけで完結した日のみ、個人サンプルとして採用する(複数人だと数量の内訳が不明なため)
-    if(staffIdsOnTask.length===1){
+    // 別の日から作業時間を移した日は、誰の時間か混ざるので個人サンプルにしない
+    if(staffIdsOnTask.length===1 && !adjMs){
       var sid = staffIdsOnTask[0];
       var staffMs = agg.perStaff[sid].byTask[tid].ms;
       var staffHours = staffMs/3600000;
@@ -5497,17 +5502,26 @@ async function rebuildProductivityMasterFromRecentDays(){
   var master = {};
   var todayD = new Date();
   var updatedDays = 0;
+  var rows = [];
   for(var i=0;i<30;i++){ // 直近30日分から蓄積する
     var d = new Date(todayD.getTime() - i*86400000);
     var dStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
     var day = (dStr===todayStr()) ? state.day : await loadDayByDate(dStr);
-    if(!day || !day.logs || !day.logs.length) continue;
+    // 作業記録の無い日は作業量を読まない(通信量を増やさない)。今日だけは、移してきた取込の分を数えるために読む
+    if((!day || !day.logs || !day.logs.length) && dStr!==todayStr()) continue;
     var wv = await getWorkVolumeForDate(dStr);
     if(!wv || isUnverified(wv)) continue;
+    rows.push({ dStr:dStr, day:day, wv:wv });
+  }
+  var adj = await movedImportHoursAdjust(rows);
+  for(var r=0;r<rows.length;r++){
+    var row = rows[r];
+    var hasLogs = row.day && row.day.logs && row.day.logs.length;
+    if(!hasLogs && !adj[row.dStr]) continue;
     // VCのケース数(内訳別生産性の表示用。人員配置の計算には使わない)
-    var caseLedger = (dStr===todayStr()) ? state.vcCaseLedger : await loadVcCaseLedger(dStr);
+    var caseLedger = (row.dStr===todayStr()) ? state.vcCaseLedger : await loadVcCaseLedger(row.dStr);
     if(caseLedger && isUnverified(caseLedger)) caseLedger = null;
-    updateProductivityMasterFromDay(master, dStr, day, wv, caseLedger);
+    updateProductivityMasterFromDay(master, row.dStr, row.day || { logs:[] }, row.wv, caseLedger, adj[row.dStr]);
     updatedDays++;
   }
   var ok = await saveProductivityMaster(master);
@@ -5518,7 +5532,50 @@ async function rebuildProductivityMasterFromRecentDays(){
   }
   return { ok: ok!==false, updatedDays: updatedDays };
 }
-var PRODUCTIVITY_SCHEMA = 2; // 2: 人員配置の基準(件数・明細数)ごとの生産性(byBasis)を含む
+/* 「今日の作業に変更」で別の日へ移した取込の作業時間を、取込と一緒に移す。
+   移す前の日のその作業の時間を、残った数量と移した数量の割合で分け、移した分を移した先の日へ足す
+   (全部移したときは、時間も全部移す)。これで2日分の合計の生産性が、移す前と同じになる。
+   戻り値: { 日付: { 作業ID: 足す(引く)ミリ秒 } } */
+async function movedImportHoursAdjust(rows){
+  var adj = {};
+  var byDate = {};
+  rows.forEach(function(r){ byDate[r.dStr] = r; });
+  var groups = {}; // 移す前の日付|作業ID → 移した取込の一覧
+  rows.forEach(function(r){
+    wvActiveImports(r.wv).forEach(function(imp){
+      if(!imp.movedFromDate || !imp.movedFromTaskId || imp.movedFromDate===r.dStr) return;
+      var k = imp.movedFromDate+'|'+imp.movedFromTaskId;
+      (groups[k] = groups[k] || []).push({ toDate:r.dStr, toTaskId:imp.taskId, qty:imp.totalQty||0 });
+    });
+  });
+  var keys = Object.keys(groups);
+  for(var g=0; g<keys.length; g++){
+    var parts = keys[g].split('|'), fromDate = parts[0], fromTid = parts[1];
+    var src = byDate[fromDate];
+    var srcDay = src ? src.day : (fromDate===todayStr() ? state.day : await loadDayByDate(fromDate));
+    if(!srcDay || !srcDay.logs || !srcDay.logs.length) continue;
+    var srcMs = (aggregateDays([srcDay]).perTask[fromTid] || {}).ms || 0;
+    if(srcMs<=0) continue;
+    var srcWv = src ? src.wv : await getWorkVolumeForDate(fromDate);
+    if(!srcWv || isUnverified(srcWv)) continue;
+    var remain = wvTotalsForTask(srcWv, fromTid).totalQty || 0;
+    var moved = groups[keys[g]];
+    var movedQty = moved.reduce(function(a,m){ return a+m.qty; }, 0);
+    var whole = remain + movedQty;
+    moved.forEach(function(m){
+      var ms = whole>0 ? srcMs*m.qty/whole : srcMs/moved.length;
+      if(ms<=0) return;
+      if(!adj[m.toDate]) adj[m.toDate] = {};
+      adj[m.toDate][m.toTaskId] = (adj[m.toDate][m.toTaskId]||0) + ms;
+      if(byDate[fromDate]){ // 移す前の日も30日の中にあるときは、そちらから同じ時間を引く
+        if(!adj[fromDate]) adj[fromDate] = {};
+        adj[fromDate][fromTid] = (adj[fromDate][fromTid]||0) - ms;
+      }
+    });
+  }
+  return adj;
+}
+var PRODUCTIVITY_SCHEMA = 3; // 2: 人員配置の基準(件数・明細数)ごとの生産性(byBasis)を含む / 3: 日をまたいで移した取込の作業時間も移す
 function productivityRefreshNeeded(meta){
   if(!meta || !meta.updatedAt) return true;
   if(!(meta.schema>=PRODUCTIVITY_SCHEMA)) return true; // 件数・明細数の生産性がまだ無い形式なら、1回作り直す

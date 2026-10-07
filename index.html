@@ -7764,10 +7764,12 @@ function renderFinancial(){
     return renderManagerLoginForm('💰 収支・分析', 'この画面は売上・原価・人件費・粗利などの経営情報を扱います。閲覧には管理者アカウントでのログインが必要です。');
   }
   var todayDate = todayStr();
-  // 上の1日分の収支は、日付を選んで見られる(既定は今日)。今日以外はその日のデータを読み込む
+  // 下の内訳は、ふだんは上で選んだ期間の合計(得意先ごと・作業ごと)。日別の「内訳」や日付を選んだときだけ、その1日を出す
+  var periodMode = !state.finSummaryDate;
   var dateStr = state.finSummaryDate || todayDate;
   var day = null, sumWv = null, sumLoading = false;
-  if(dateStr===todayDate){ day = state.day; sumWv = state.workVolume; }
+  if(periodMode){ /* 期間の内訳は、上の集計で読み込んだデータから作る */ }
+  else if(dateStr===todayDate){ day = state.day; sumWv = state.workVolume; }
   else if(state.finSummaryData && state.finSummaryData.date===dateStr){ day = state.finSummaryData.day || { logs: [] }; sumWv = state.finSummaryData.wv; }
   else{
     sumLoading = true;
@@ -7780,8 +7782,24 @@ function renderFinancial(){
         .then(function(){ state.finSummaryLoading = false; render(); });
     }
   }
-  var summary = sumLoading ? null : computeFinancialSummary(dateStr, day, sumWv);
-  var dayNav = '<div class="fin-day-nav" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
+  var summary = null, sumLabel = '';
+  if(periodMode){
+    var pRange = state.finPeriodRange;
+    if(state.finPeriodCollected && pRange && !state.finAnalyticsLoading){
+      summary = mergeFinancialSummaries(state.finPeriodCollected.byDate.map(function(x){ return computeFinancialSummary(x.date, x.day || { logs: [] }, x.wv || emptyWorkVolume()); }));
+      sumLabel = pRange[0]===pRange[1] ? dateLabelFromStr(pRange[0]) : dateLabelFromStr(pRange[0])+' 〜 '+dateLabelFromStr(pRange[1]);
+    }else sumLoading = true;
+  }else if(!sumLoading){
+    summary = computeFinancialSummary(dateStr, day, sumWv);
+    sumLabel = dateLabelFromStr(dateStr);
+  }
+  var dayNav = periodMode
+    ? '<div class="fin-day-nav" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
+        '<span class="pool-hint" style="margin:0;font-weight:700;">'+(sumLabel ? esc(sumLabel)+'(上の期間)の内訳' : '上の期間の内訳')+'</span>'+
+        '<span class="pool-hint" style="margin:0 0 0 auto;">1日だけ見る</span><input type="date" id="finSummaryDateInput" value="">'+
+      '</div>'+(sumLoading ? '<div class="empty-note">集計中...</div>' : '')
+    : '<div class="fin-day-nav" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
+    '<button type="button" class="add-btn" id="finDayPeriodBtn" style="padding:4px 10px;font-size:12px;">↩ 上の期間の内訳に戻る</button>'+
     '<button type="button" class="vc-manage-toggle-btn" data-fin-day-step="-1">◀ 前日</button>'+
     '<input type="date" id="finSummaryDateInput" value="'+esc(dateStr)+'">'+
     '<button type="button" class="vc-manage-toggle-btn" data-fin-day-step="1"'+(dateStr>=todayDate?' disabled':'')+'>翌日 ▶</button>'+
@@ -7798,12 +7816,12 @@ function renderFinancial(){
   if(summary){
     var finRowsHtml = summary.rows.map(function(r){
       return '<tr><td>'+esc(r.taskName)+'</td><td class="num">'+formatNum(r.pieces)+'ピース</td><td class="num">¥'+formatNum(Math.round(r.sales))+'</td></tr>';
-    }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">この日のCSV取込がありません</td></tr>';
+    }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">'+(periodMode?'この期間':'この日')+'のCSV取込がありません</td></tr>';
     var custRowsHtml = summary.customerRows.map(function(c){
       var detail = c.lines.map(function(l){ return esc(l.workName)+' '+esc(formatPriceQty(l.unit, l.qty))+'×¥'+formatNum(l.unitPrice)+'=¥'+formatNum(Math.round(l.amount)); }).join('<br>') ||
         '<span style="color:var(--slate-500);">当てはまる単価なし</span>';
       return '<tr><td>'+esc(c.customerName||'(得意先なし)')+'</td><td style="font-size:11px;">'+detail+'</td><td class="num">¥'+formatNum(Math.round(c.sales))+'</td></tr>';
-    }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">この日のCSV取込がありません</td></tr>';
+    }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">'+(periodMode?'この期間':'この日')+'のCSV取込がありません</td></tr>';
     summaryHtml = '<div class="fin-summary-grid">'+
       '<div class="fin-summary-card"><div class="fin-summary-label">売上</div><div class="fin-summary-value">¥'+formatNum(Math.round(summary.totalSales))+'</div></div>'+
       '<div class="fin-summary-card"><div class="fin-summary-label">人件費</div><div class="fin-summary-value">¥'+formatNum(Math.round(summary.laborCost))+'</div></div>'+
@@ -7813,15 +7831,15 @@ function renderFinancial(){
     renderFinancialNotices(summary)+
     '<div style="overflow-x:auto;"><table class="report-table" style="margin-top:14px;"><thead><tr><th>得意先</th><th>内訳(作業単価 数量×単価)</th><th>売上</th></tr></thead><tbody>'+custRowsHtml+'</tbody></table></div>'+
     '<table class="report-table" style="margin-top:14px;"><thead><tr><th>作業</th><th>出荷数量</th><th>売上</th></tr></thead><tbody>'+finRowsHtml+'</tbody></table>'+
-    '<div class="pool-hint" style="margin-top:8px;">総稼働'+summary.totalHours.toFixed(1)+'時間 ・ '+esc(dateLabelFromStr(dateStr))+'分 ・ 売上はkintoneの作業単価 × 得意先ごとの数量、人件費はスタッフごとの(作業時間 × 時給)です。作業ごとの売上は、その作業で扱った得意先ごとの数量から計算しています。</div>';
+    '<div class="pool-hint" style="margin-top:8px;">総稼働'+summary.totalHours.toFixed(1)+'時間 ・ '+esc(sumLabel)+'分 ・ 売上はkintoneの作業単価 × 得意先ごとの数量、人件費はスタッフごとの(作業時間 × 時給)です。作業ごとの売上は、その作業で扱った得意先ごとの数量から計算しています。</div>';
   }
 
-  if(!state.finAxis) state.finAxis = 'date';
-  // 開いたときは今月を自動で集計する(「集計する」を押さなくても期間の合計が見えるように)
+  var finDef = finViewDefault();
+  if(!state.finAxis) state.finAxis = finDef.view==='month' ? 'month' : 'date';
+  // 開いたときは既定の表示(日ごと=今月の日別/月ごと=直近Nか月の月別)で自動で集計する
   if(state.financialPriceModel && !state.finPeriodRows && !state.finAnalyticsLoading && !state.finAutoRan){
     state.finAutoRan = true;
-    var pr0 = finPresetRange('thisMonth');
-    state.finStartDate = pr0[0]; state.finEndDate = pr0[1]; state.finPreset = 'thisMonth';
+    setFinView(finDef.view, false);
     setTimeout(runFinancialPeriod, 0);
   }
   if(!state.finStartDate) state.finStartDate = todayDate;
@@ -7927,8 +7945,23 @@ function renderFinancial(){
   var presets = [['today','今日'],['yesterday','昨日'],['thisWeek','今週'],['thisMonth','今月'],['lastMonth','先月']].map(function(p){
     return '<button type="button" class="vc-tab-btn'+(state.finPreset===p[0]?' active':'')+'" data-fin-preset="'+p[0]+'">'+p[1]+'</button>';
   }).join('');
+  var viewSwitch = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">'+
+      '<div class="sub-switch" style="margin:0;">'+
+        '<button type="button" class="sub-switch-btn'+(state.finView==='day'?' active':'')+'" data-fin-view="day">日ごと</button>'+
+        '<button type="button" class="sub-switch-btn'+(state.finView==='month'?' active':'')+'" data-fin-view="month">月ごと</button>'+
+      '</div>'+
+      '<span class="pool-hint" style="margin:0;">日ごと=今月の1日ずつ/月ごと=直近'+finDef.months+'か月の1か月ずつ</span>'+
+      '<details style="margin-left:auto;font-size:12px;"><summary style="cursor:pointer;color:var(--slate-500);">開いたときの表示</summary>'+
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;">'+
+          '<label><input type="radio" name="finDefView" value="day"'+(finDef.view!=='month'?' checked':'')+'> 日ごと</label>'+
+          '<label><input type="radio" name="finDefView" value="month"'+(finDef.view==='month'?' checked':'')+'> 月ごと</label>'+
+          '<label>月ごとの期間 <select id="finDefMonths">'+[3,6,12].map(function(n){ return '<option value="'+n+'"'+(finDef.months===n?' selected':'')+'>直近'+n+'か月</option>'; }).join('')+'</select></label>'+
+          '<span class="pool-hint" style="margin:0;">この端末で覚えます</span>'+
+        '</div></details>'+
+    '</div>';
   var analyticsPanel = '<div class="panel">'+
     '<div class="panel-title">収支 <button class="pill-btn" id="mgrLogoutBtn" style="margin-left:10px;">ログアウト</button></div>'+
+    viewSwitch+
     '<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px;">'+
       '<div class="vc-tabs" style="margin:0;border:none;padding:0;">'+presets+'</div>'+
       '<div><label style="font-size:11px;color:var(--slate-500);display:block;">開始日</label><input type="date" id="finStartDateInput" value="'+state.finStartDate+'"></div>'+
@@ -7943,7 +7976,7 @@ function renderFinancial(){
   return '<div class="mgr-wrap">'+
     analyticsPanel+
     '<div class="panel" style="margin-top:16px;" id="finDayPanel">'+
-      '<div class="panel-title">1日の内訳</div>'+
+      '<div class="panel-title">'+(periodMode ? '内訳(得意先ごと・作業ごと)' : '1日の内訳')+'</div>'+
       dayNav+
       loadingOrError+
       summaryHtml+
@@ -7951,6 +7984,77 @@ function renderFinancial(){
     '</div>'+
     '<div class="pool-hint" style="margin-top:14px;">単価は「設定 → 得意先・単価」、時給は「設定 → スタッフ」で設定します。</div>'+
   '</div>';
+}
+/* 複数日の1日の収支(computeFinancialSummary)を、同じ形の1つにまとめる(下の内訳を上の期間に合わせる) */
+function mergeFinancialSummaries(list){
+  list = (list||[]).filter(Boolean);
+  if(!list.length) return null;
+  var byTask = {}, byCust = {}, notice = { unpriced:{}, wage:{}, wr:{} };
+  var out = { totalSales:0, laborCost:0, totalHours:0, partSales:0, partLabor:0, partUnknownImports:0, cubicMissingCases:0 };
+  list.forEach(function(sm){
+    Object.keys(out).forEach(function(k){ out[k] += sm[k]||0; });
+    sm.rows.forEach(function(r){
+      var t = byTask[r.taskName] || (byTask[r.taskName] = { taskId: r.taskId, taskName: r.taskName, pieces:0, sales:0 });
+      t.pieces += r.pieces||0; t.sales += r.sales||0;
+      if(r.reportSales) t.reportSales = (t.reportSales||0) + r.reportSales;
+    });
+    sm.customerRows.forEach(function(c){
+      var e = byCust[c.customerName] || (byCust[c.customerName] = { customerName: c.customerName, qty: emptyPriceQty(), sales:0, lines:{} });
+      addPriceQty(e.qty, c.qty); e.sales += c.sales;
+      c.lines.forEach(function(l){
+        var lk = l.workName+'|'+l.unit+'|'+l.unitPrice;
+        var x = e.lines[lk] || (e.lines[lk] = { workName: l.workName, unit: l.unit, unitPrice: l.unitPrice, qty:0, amount:0 });
+        x.qty += l.qty; x.amount += l.amount;
+      });
+    });
+    (sm.unpricedCustomers||[]).forEach(function(c){ notice.unpriced[c] = true; });
+    (sm.missingWageStaffIds||[]).forEach(function(c){ notice.wage[c] = true; });
+    (sm.workReportUnmapped||[]).forEach(function(c){ notice.wr[c] = true; });
+  });
+  var last = list[list.length-1];
+  out.rows = Object.keys(byTask).map(function(k){ return byTask[k]; }).sort(function(a,b){ return b.sales-a.sales; });
+  out.customerRows = Object.keys(byCust).map(function(k){
+    var c = byCust[k];
+    return { customerName: c.customerName, qty: c.qty, sales: c.sales, lines: Object.keys(c.lines).map(function(r){ return c.lines[r]; }) };
+  }).sort(function(a,b){ return b.sales-a.sales; });
+  out.grossProfit = out.totalSales - out.laborCost;
+  out.margin = out.totalSales>0 ? out.grossProfit/out.totalSales*100 : 0;
+  out.unpricedCustomers = Object.keys(notice.unpriced);
+  out.missingWageStaffIds = Object.keys(notice.wage);
+  out.workReportUnmapped = Object.keys(notice.wr);
+  out.unsetItems = last.unsetItems;
+  out.workReportError = last.workReportError;
+  return out;
+}
+/* 収支の「日ごと/月ごと」の切り替えと、開いたときの表示(端末ごとに覚える) */
+var FIN_VIEW_LS_KEY = 'logilink-fin-view-default';
+function finViewDefault(){
+  var v = null;
+  try{ v = JSON.parse(localStorage.getItem(FIN_VIEW_LS_KEY) || 'null'); }catch(e){}
+  v = v || {};
+  return { view: v.view==='month' ? 'month' : 'day', months: [3,6,12].indexOf(Number(v.months))>=0 ? Number(v.months) : 3 };
+}
+function saveFinViewDefault(v){
+  try{ localStorage.setItem(FIN_VIEW_LS_KEY, JSON.stringify(v)); }catch(e){}
+}
+/* 日ごと: 今月を日別 / 月ごと: 直近Nか月(Nか月前の1日〜今日)を月別。run=true なら集計する */
+function setFinView(view, run){
+  var t = todayStr();
+  state.finView = view;
+  if(view==='month'){
+    var d = new Date(t.slice(0,8)+'01T00:00:00');
+    d.setMonth(d.getMonth() - (finViewDefault().months - 1));
+    state.finStartDate = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-01';
+    state.finEndDate = t;
+    state.finPreset = null;
+    state.finAxis = 'month';
+  }else{
+    var r = finPresetRange('thisMonth');
+    state.finStartDate = r[0]; state.finEndDate = r[1];
+    state.finPreset = 'thisMonth';
+    state.finAxis = 'date';
+  }
+  if(run) runFinancialPeriod();
 }
 /* 収支の期間のボタン(今日・昨日・今週・今月・先月)→ [開始日, 終了日] */
 function finPresetRange(p){
@@ -7966,6 +8070,7 @@ async function runFinancialPeriod(){
   if(state.finStartDate > state.finEndDate){ showToast('開始日が終了日より後になっています'); return; }
   state.finAnalyticsLoading = true;
   state.finDrillCustomer = null;
+  state.finSummaryDate = null;
   render();
   try{
     var collected = await collectDaysAndVolumeForRange(state.finStartDate, state.finEndDate);
@@ -8010,6 +8115,17 @@ function bindFinancial(){
       render();
     });
   }
+  document.querySelectorAll('[data-fin-view]').forEach(function(el){
+    el.addEventListener('click', function(){ setFinView(el.getAttribute('data-fin-view'), true); });
+  });
+  document.querySelectorAll('input[name="finDefView"]').forEach(function(el){
+    el.addEventListener('change', function(){ var v = finViewDefault(); v.view = el.value; saveFinViewDefault(v); showToast('開いたときは「'+(el.value==='month'?'月ごと':'日ごと')+'」で出します'); });
+  });
+  var finDefMonths = document.getElementById('finDefMonths');
+  if(finDefMonths) finDefMonths.addEventListener('change', function(){
+    var v = finViewDefault(); v.months = Number(finDefMonths.value); saveFinViewDefault(v);
+    if(state.finView==='month') setFinView('month', true); else render();
+  });
   var finStartDateInput = document.getElementById('finStartDateInput');
   if(finStartDateInput) finStartDateInput.addEventListener('change', function(){ state.finStartDate = finStartDateInput.value; });
   var finEndDateInput = document.getElementById('finEndDateInput');
@@ -8017,6 +8133,7 @@ function bindFinancial(){
   document.querySelectorAll('[data-fin-axis]').forEach(function(el){
     el.addEventListener('click', async function(){
       state.finAxis = el.getAttribute('data-fin-axis');
+      if(state.finView && state.finAxis!==(state.finView==='month'?'month':'date')) state.finView = null;
       state.finDrillCustomer = null;
       state.finAnalyticsRows = null;
       var c = state.finPeriodCollected;
@@ -8037,7 +8154,7 @@ function bindFinancial(){
     render();
   }
   var sumDateInput = document.getElementById('finSummaryDateInput');
-  if(sumDateInput) sumDateInput.addEventListener('change', function(){ showSummaryDay(sumDateInput.value); });
+  if(sumDateInput) sumDateInput.addEventListener('change', function(){ if(sumDateInput.value) showSummaryDay(sumDateInput.value); });
   document.querySelectorAll('[data-fin-day-step]').forEach(function(el){
     el.addEventListener('click', function(){
       var d = new Date((state.finSummaryDate || todayStr())+'T00:00:00');
@@ -8045,17 +8162,20 @@ function bindFinancial(){
       showSummaryDay(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
     });
   });
+  var dayPeriodBtn = document.getElementById('finDayPeriodBtn');
+  if(dayPeriodBtn) dayPeriodBtn.addEventListener('click', function(){ state.finSummaryDate = null; render(); });
   var dayTodayBtn = document.getElementById('finDayTodayBtn');
   if(dayTodayBtn) dayTodayBtn.addEventListener('click', function(){ showSummaryDay(todayStr()); });
   document.querySelectorAll('[data-fin-show-day]').forEach(function(el){
     el.addEventListener('click', function(){ showSummaryDay(el.getAttribute('data-fin-show-day')); setTimeout(function(){ var p = document.getElementById('finDayPanel'); if(p) p.scrollIntoView({ behavior:'smooth' }); }, 300); });
   });
   var finRunAnalyticsBtn = document.getElementById('finRunAnalyticsBtn');
-  if(finRunAnalyticsBtn) finRunAnalyticsBtn.addEventListener('click', function(){ state.finPreset = null; runFinancialPeriod(); });
+  if(finRunAnalyticsBtn) finRunAnalyticsBtn.addEventListener('click', function(){ state.finPreset = null; state.finView = null; runFinancialPeriod(); });
   document.querySelectorAll('[data-fin-preset]').forEach(function(el){
     el.addEventListener('click', function(){
       var p = el.getAttribute('data-fin-preset'), r = finPresetRange(p);
       state.finPreset = p; state.finStartDate = r[0]; state.finEndDate = r[1];
+      state.finView = (p==='thisMonth' && state.finAxis==='date') ? 'day' : null;
       runFinancialPeriod();
     });
   });

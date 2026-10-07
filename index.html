@@ -7679,6 +7679,7 @@ function renderManagerLoginForm(title, description){
       renderRememberEmailCheckbox('mgrLoginRemember', lf.remember)+
       '<button type="submit" class="add-btn" id="mgrLoginBtn" style="width:100%;" '+(state.managerLoginBusy?'disabled':'')+'>'+(state.managerLoginBusy?'ログイン中...':'ログイン')+'</button>'+
       '</form>'+
+      '<div style="text-align:center;margin-top:10px;font-size:12px;"><a href="password.html" target="_blank" rel="noopener" style="color:var(--slate-500);">パスワードを変える</a></div>'+
     '</div>'+
   '</div>';
 }
@@ -14382,6 +14383,43 @@ async function callManageAccounts(body){
     return d || { ok:false, error:'想定外の応答がありました。' };
   }catch(e){ return { ok:false, error:'Edge Functionへの接続に失敗しました。' }; }
 }
+/* アカウントのお知らせメール(パソコンのメールソフト: Thunderbird・Outlook など。mailto で開く) */
+function accountMailText(n){
+  var base = location.origin + location.pathname.replace(/[^\/]*$/, '');
+  var app = n.role==='factory' ? base+'factory.html' : base+'index.html';
+  var subject = 'LOGI LINK のアカウント'+(n.reset ? 'のパスワードを再設定しました' : 'をお知らせします');
+  var body = [
+    'ご担当者様',
+    '',
+    n.reset ? 'LOGI LINK(ロジリンク)のアカウントのパスワードを再設定しました。' : 'LOGI LINK(ロジリンク)のアカウントを作りました。',
+    '',
+    '■ 開く画面: '+app,
+    '■ メールアドレス: '+n.email,
+    '■ '+(n.reset ? '新しい' : '初めの')+'パスワード: '+n.password,
+    n.role ? '■ 役割: '+accountRoleLabel(n.role) : '',
+    '',
+    '最初にログインする前か後に、次の画面でパスワードを自分のものに変えてください。',
+    '■ パスワードの変更: '+base+'password.html?email='+encodeURIComponent(n.email),
+    '■ 説明書: '+base+'manual.pdf',
+    '',
+    'パスワードを変えたら、このメールは削除してください。'
+  ].filter(function(l, i, arr){ return l!=='' || arr[i-1]!==''; }).join('\n');
+  return { to: n.email, subject: subject, body: body };
+}
+function accountMailBox(n){
+  if(!n) return '';
+  var m = accountMailText(n);
+  var href = 'mailto:'+encodeURIComponent(m.to)+'?subject='+encodeURIComponent(m.subject)+'&body='+encodeURIComponent(m.body.replace(/\n/g, '\r\n'));
+  return '<div class="ll-form-group" style="margin-bottom:14px;border-color:#86EFAC;"><div class="ll-form-group-title">📧 '+esc(n.email)+' さんに知らせる</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">'+
+      '<a class="add-btn" href="'+esc(href)+'" id="acctMailOpen" style="text-decoration:none;">📧 メールで知らせる</a>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="acctMailCopy">本文をコピー</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="acctMailClose">閉じる</button>'+
+    '</div>'+
+    '<pre style="white-space:pre-wrap;font-size:12px;background:var(--paper-2,#F9FAFB);border:1px solid var(--paper-line);border-radius:8px;padding:10px;margin:0;">件名: '+esc(m.subject)+'\n\n'+esc(m.body)+'</pre>'+
+    '<div class="pool-hint" style="margin:6px 0 0;">「メールで知らせる」で、パソコンのメールソフト(Thunderbird など)が宛先・件名・本文の入った状態で開きます。中身を確かめて送信してください。開かないときは「本文をコピー」してメールに貼り付けてください。パスワードはこの画面を閉じると消えます(どこにも保存しません)。</div>'+
+  '</div>';
+}
 function renderAccountsPanel(){
   if(state.authRole!=='admin') return '<div class="mgr-wrap"><div class="panel"><div class="panel-title">アカウント</div><div class="pool-hint">アカウントの管理は admin のアカウントだけができます。</div></div></div>';
   var a = state.accounts || (state.accounts = { list:null, loading:false, msg:'', form:{ email:'', password:'', role:'factory' } });
@@ -14409,8 +14447,9 @@ function renderAccountsPanel(){
         '<select id="acctRole">'+ACCOUNT_ROLES.map(function(r){ return '<option value="'+r[0]+'"'+(f.role===r[0]?' selected':'')+'>'+esc(r[1])+'</option>'; }).join('')+'</select>'+
         '<button type="button" class="add-btn" id="acctAdd"'+(a.busy?' disabled':'')+'>追加</button>'+
       '</div>'+
-      '<div class="pool-hint" style="margin:6px 0 0;">初めのパスワードは、本人に直接伝えてください(チャットやメールに残さないでください)。</div>'+
+      '<div class="pool-hint" style="margin:6px 0 0;">追加すると、本人に送るお知らせメールを作れます。メールには「パスワードを変える」画面の案内も入るので、受け取った人に自分のパスワードへ変えてもらってください。</div>'+
     '</div>'+
+    accountMailBox(a.notice)+
     '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>メールアドレス</th><th>役割</th><th>作成</th><th>最終ログイン</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
   '</div></div>';
 }
@@ -14418,14 +14457,24 @@ function bindAccountsPanel(){
   var a = state.accounts; if(!a || state.authRole!=='admin') return;
   ['acctEmail','acctPassword'].forEach(function(id){ var el = document.getElementById(id); if(el) el.addEventListener('input', function(){ a.form[id==='acctEmail'?'email':'password'] = el.value; }); });
   var rs = document.getElementById('acctRole'); if(rs) rs.addEventListener('change', function(){ a.form.role = rs.value; });
-  async function run(body, okMsg, audit){
-    a.busy = true; a.msg = ''; render();
+  async function run(body, okMsg, audit, notice){
+    a.busy = true; a.msg = ''; a.notice = null; render();
     var r = await callManageAccounts(body);
     a.busy = false;
-    if(r.ok){ a.msg = '✅ '+okMsg; a.list = null; if(audit) await appendAuditLog(audit); }
+    if(r.ok){ a.msg = '✅ '+okMsg; a.list = null; a.notice = notice || null; if(audit) await appendAuditLog(audit); }
     else a.msg = '⚠️ '+r.error;
     render();
   }
+  var mailCopy = document.getElementById('acctMailCopy');
+  if(mailCopy) mailCopy.addEventListener('click', function(){
+    var m = accountMailText(a.notice);
+    var txt = '件名: '+m.subject+'\n\n'+m.body;
+    try{ navigator.clipboard.writeText(txt).then(function(){ showToast('本文をコピーしました'); }, function(){ alert(txt); }); }catch(e){ alert(txt); }
+  });
+  var mailClose = document.getElementById('acctMailClose');
+  if(mailClose) mailClose.addEventListener('click', function(){ a.notice = null; render(); });
+  var mailOpen = document.getElementById('acctMailOpen');
+  if(mailOpen) mailOpen.addEventListener('click', function(){ appendAuditLog({ action:'アカウントのお知らせメールを作成', target: a.notice ? a.notice.email : '', before:null, after:null }); });
   var add = document.getElementById('acctAdd');
   if(add) add.addEventListener('click', function(){
     var f = a.form;
@@ -14433,7 +14482,7 @@ function bindAccountsPanel(){
     if(!confirm(f.email+' を「'+accountRoleLabel(f.role)+'」で追加します。よろしいですか?')) return;
     var email = f.email, role = f.role;
     a.form = { email:'', password:'', role: f.role };
-    run({ action:'create', email: email, password: f.password, role: role }, email+' を追加しました', { action:'アカウントを追加', target: email, before:null, after: accountRoleLabel(role) });
+    run({ action:'create', email: email, password: f.password, role: role }, email+' を追加しました', { action:'アカウントを追加', target: email, before:null, after: accountRoleLabel(role) }, { email: email, password: f.password, role: role });
   });
   document.querySelectorAll('[data-acct-role]').forEach(function(el){
     el.addEventListener('change', function(){
@@ -14446,9 +14495,10 @@ function bindAccountsPanel(){
   document.querySelectorAll('[data-acct-pw]').forEach(function(el){
     el.addEventListener('click', function(){
       var email = el.getAttribute('data-acct-email');
-      var pw = prompt(email+' の新しいパスワード(8文字以上)を入れてください。本人に直接伝えてください。');
+      var pw = prompt(email+' の新しいパスワード(8文字以上)を入れてください。再設定のあと、本人へのお知らせメールを作れます。');
       if(!pw) return;
-      run({ action:'setPassword', userId: el.getAttribute('data-acct-pw'), password: pw }, email+' のパスワードを再設定しました', { action:'パスワードを再設定', target: email, before:null, after:null });
+      var u = (a.list||[]).filter(function(x){ return x.id===el.getAttribute('data-acct-pw'); })[0];
+      run({ action:'setPassword', userId: el.getAttribute('data-acct-pw'), password: pw }, email+' のパスワードを再設定しました', { action:'パスワードを再設定', target: email, before:null, after:null }, { email: email, password: pw, role: u ? u.role : null, reset: true });
     });
   });
 }
@@ -19720,6 +19770,7 @@ function renderAuthScreen(){
         renderRememberEmailCheckbox('deviceLoginRemember', lf.remember)+
         '<button type="submit" class="add-btn" id="deviceLoginBtn" style="width:100%;" '+(state.deviceLoginBusy?'disabled':'')+'>'+(state.deviceLoginBusy?'ログイン中...':'ログイン')+'</button>'+
         '</form>'+
+        '<div style="text-align:center;margin-top:10px;font-size:12px;"><a href="password.html" target="_blank" rel="noopener" style="color:var(--slate-500);">パスワードを変える</a></div>'+
       '</div>'+
     '</div>';
   }

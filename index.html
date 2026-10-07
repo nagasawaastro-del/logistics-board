@@ -1753,6 +1753,7 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-05', items:[
+    '【VC引当: 倉庫ごとに集計表へ】VC引当の「集計表へ送る」を、「高屋の分を高屋の集計表へ」「丹南の分を丹南の集計表へ」の2つのボタンに分けました(ボタンに行数を表示)。送ったあとの「集計表を開く」は、その倉庫の集計表を開きます',
     '【配置: 区切り】指示書の1回の区切りを、通路の上半分・下半分(例: 201〜208 と 209〜216)にしました',
     '【配置: 通路ごとの順番】配置の指示書を、通路ごとに「その通路に面した列を整理 → D列を 1-1 から1ロケあけ、空いたラックをその通路に置いて、よく出る物を入れる」をくり返す順番にしました(B棟の201の通路から)',
     '【配置: 母屋の C の空き】よく出る物は、通路ラックに入らないとき、母屋の C(3段目)の空いている所(在庫の無い番号)を先に使うようにしました',
@@ -9445,7 +9446,13 @@ function renderVcAllocTable(calc, kind){
   var label = kind==='case' ? 'ケース引当' : 'ピース引当';
   return '<div class="no-print" style="display:flex;gap:12px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">'+
       '<label><input type="checkbox" id="vcaOnlyCheck"'+(state.vcAllocOnlyCheck?' checked':'')+'> 要確認・分ける・変更した品番だけ表示</label>'+
-      (editable ? '<button type="button" class="add-btn" data-vca-send="'+kind+'">🧾 この表を集計表へ送る</button>' : '')+
+      (editable ? (function(){
+        var sr = vcAllocSheetRows(calc, kind);
+        return ['takaya','tannan'].map(function(k){
+          var n = sr.bySite[k].length, st = SHUKEI_SITES[k];
+          return '<button type="button" class="add-btn" data-vca-send="'+kind+'|'+k+'"'+(n ? '' : ' disabled')+' style="background:'+st.color+';">🧾 '+st.name+'の分を'+st.name+'の集計表へ('+n+'行)</button>';
+        }).join('');
+      })() : '')+
       '<button type="button" class="vc-manage-toggle-btn" id="vcaPrint">🖨 印刷</button>'+
       (sort ? '<button type="button" class="vc-manage-toggle-btn" id="vcaSortReset">並びを戻す(番号順)</button>' : '')+
     '</div>'+
@@ -9453,7 +9460,7 @@ function renderVcAllocTable(calc, kind){
     '<div style="overflow-x:auto;max-height:620px;overflow-y:auto;" data-keep-scroll="vcaTable"><table class="report-table shukei-table vca-table"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>'+
     '<div class="pool-hint no-print" style="margin-top:6px;">高屋・丹南はロジザードの在庫数 − 引当数(高屋 '+esc(VC_ALLOC_BLOCKS.takaya.join('・'))+' / 丹南 '+esc(VC_ALLOC_BLOCKS.tannan.join('・'))+')。'+
       '倉庫は、発注数(品番計)が高屋の在庫以下なら高屋、そうでなく丹南の在庫以下なら丹南、どちらも足りなければ要確認です。ケース数は発注数 ÷ 入数 の切り上げ、入数は弥生(無ければ商品台帳)。'+
-      '「集計表へ送る」は、倉庫ごとにこの端末の集計表へ、VC番号=振り分け番号・品番・数量を追加します(要確認の品番は送りません)。</div>';
+      '「高屋の分を高屋の集計表へ」「丹南の分を丹南の集計表へ」は、それぞれの倉庫の行だけを、この端末のその倉庫の集計表へ、VC番号=振り分け番号・品番・数量で追加します(分ける品番は倉庫ごとの数量で。要確認の品番は送りません)。</div>';
 }
 function renderVcAllocDests(calc){
   var list = calc.dests.slice().sort(function(a,b){ return b.qty-a.qty; });
@@ -9528,10 +9535,11 @@ function bindVcAlloc(){
   // 集計表へ送る(この端末の集計表の入力中の表に追加)
   document.querySelectorAll('[data-vca-send]').forEach(function(btn){
     btn.addEventListener('click', function(){
-      var kind = btn.getAttribute('data-vca-send');
+      var spec = btn.getAttribute('data-vca-send').split('|'), kind = spec[0], only = spec[1] || null;
       var calc = computeVcAlloc(d.order, d.dests, d.stock, state.shukeiPm);
       var r = vcAllocSheetRows(calc, kind);
-      var parts = Object.keys(r.bySite).filter(function(k){ return r.bySite[k].length; });
+      // 押した倉庫の分だけ、その倉庫の集計表へ
+      var parts = Object.keys(r.bySite).filter(function(k){ return r.bySite[k].length && (!only || k===only); });
       if(!parts.length){ alert('送れる行がありません(要確認の品番は送りません)'); return; }
       var msg = parts.map(function(k){ var cur = loadShukeiDraft(k).rows.length; return SHUKEI_SITES[k].name+'の集計表に'+r.bySite[k].length+'行'+(cur ? '(今入っている'+cur+'行のあとに追加)' : ''); }).join('\n');
       if(!confirm(msg+'\nを追加します。'+(r.skipped.length ? '\n要確認の'+r.skipped.length+'品番('+r.skipped.slice(0,8).join('・')+(r.skipped.length>8?'…':'')+')は送りません。' : '')+'\nよろしいですか?')) return;
@@ -9541,12 +9549,13 @@ function bindVcAlloc(){
         saveShukeiDraft(k, { requester: dr.requester, rows: dr.rows });
       });
       state.shukeiDraft = null; // 集計表を開いたときに読み直す
-      state.vcAllocMsg = '✅ '+esc(msg.replace(/\n/g,'、'))+'を追加しました。<button type="button" class="vc-manage-toggle-btn" id="vcaGoShukei" style="margin-left:8px;">🧾 集計表を開く</button>';
+      state.vcAllocMsg = '✅ '+esc(msg.replace(/\n/g,'、'))+'を追加しました。'+parts.map(function(k){ return '<button type="button" class="vc-manage-toggle-btn" data-vca-go="'+k+'" style="margin-left:8px;">🧾 '+SHUKEI_SITES[k].name+'の集計表を開く</button>'; }).join('');
       render();
     });
   });
-  var go = document.getElementById('vcaGoShukei');
-  if(go) go.addEventListener('click', function(){ state.role = 'shukei'; state.shukeiTab = 'sheet'; state.vcAllocMsg = ''; render(); });
+  document.querySelectorAll('[data-vca-go]').forEach(function(go){
+    go.addEventListener('click', function(){ state.role = 'shukei'; state.shukeiSite = go.getAttribute('data-vca-go'); state.shukeiTab = 'sheet'; state.shukeiSheetSort = null; state.shukeiDraft = null; state.vcAllocMsg = ''; render(); });
+  });
 }
 /* 納品先一覧の編集の操作(データ更新の画面) */
 function bindVcAllocDestEditor(d){

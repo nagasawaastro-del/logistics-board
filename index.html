@@ -10437,6 +10437,7 @@ async function syncWorkReportFromKintone(from, to){
     var status = { syncedAt: data.syncedAt, from: data.from, to: data.to, reportCount: data.reportCount, rowCount: data.rowCount };
     await persistKey(WORK_REPORT_STATUS_KEY, status);
     state.workReportCache = null; // 読み直す
+    wrForgetLocal();
     state.gateDataStatus = null;
     return { ok:true, result: status };
   }catch(e){
@@ -10457,18 +10458,63 @@ async function fetchWorkReportRows(from, to){
   }
   return { ok:true, rows: out };
 }
+/* 読み込んだ作業日報は、この端末に保存しておく(通信量を減らす)。
+   kintoneから取り込み直すと「最後に取り込んだ日時」(work-report-sync-status の syncedAt)が変わるので、
+   そのときだけ読み直す。日時の確認は小さな設定1つを読むだけ(1分に1回まで)。 */
+var WR_LS_KEY = 'logilink-work-report-cache';
+var WR_LS_MAX = 1500000; // これより大きいときは端末に保存しない(ほかの保存場所を圧迫しないように)
+function wrLoadLocal(){
+  try{ var v = JSON.parse(localStorage.getItem(WR_LS_KEY) || 'null'); return (v && v.syncedAt && v.byDate && Array.isArray(v.ranges)) ? v : null; }catch(e){ return null; }
+}
+function wrSaveLocal(cache){
+  try{
+    if(!cache.syncedAt){ localStorage.removeItem(WR_LS_KEY); return; }
+    var txt = JSON.stringify({ syncedAt: cache.syncedAt, ranges: cache.ranges, byDate: cache.byDate });
+    if(txt.length>WR_LS_MAX){ localStorage.removeItem(WR_LS_KEY); return; }
+    localStorage.setItem(WR_LS_KEY, txt);
+  }catch(e){ try{ localStorage.removeItem(WR_LS_KEY); }catch(e2){} }
+}
+function wrForgetLocal(){ try{ localStorage.removeItem(WR_LS_KEY); }catch(e){} }
+/* 最後に取り込んだ日時を確かめ、端末の日報が同じ取り込みのものなら使う。違えば捨てる */
+async function wrCheckSynced(cache){
+  if(cache.checkedAt && Date.now()-cache.checkedAt < 60000) return;
+  var st = await loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; });
+  if(isUnverified(st)) return; // 確かめられないときは、このまま(端末の保存も使わない)
+  cache.checkedAt = Date.now();
+  var syncedAt = (st && st.syncedAt) || '';
+  if(cache.syncedAt===syncedAt && (cache.ranges.length || !syncedAt)) return;
+  cache.syncedAt = syncedAt; cache.ranges = []; cache.byDate = {};
+  var local = syncedAt ? wrLoadLocal() : null;
+  if(local && local.syncedAt===syncedAt){ cache.ranges = local.ranges; cache.byDate = local.byDate; }
+  else wrForgetLocal();
+}
 /* from〜to の作業日報を読み込んでおく(読み込み済みの期間は読み直さない)。state.workReportCache.byDate[日付] = 行の配列 */
 async function ensureWorkReportRange(from, to){
   if(!hasManagerSession()) return;
-  var cache = state.workReportCache || (state.workReportCache = { ranges:[], byDate:{}, error:'' });
+  var cache = state.workReportCache || (state.workReportCache = { ranges:[], byDate:{}, error:'', syncedAt:null, checkedAt:0 });
+  try{ await wrCheckSynced(cache); }catch(e){}
   if(cache.ranges.some(function(r){ return r[0]<=from && r[1]>=to; })) return;
-  var r = await fetchWorkReportRows(from, to);
-  if(!r.ok){ cache.error = r.missingTable ? '作業日報のテーブルがまだありません(supabase/work_report.sql を実行してください)。' : '作業日報を読み込めませんでした。'; return; }
+  // 読み込み済みの期間と重なる分は読まない(前後の足りない分だけ読む)
+  var need = [[from, to]];
+  cache.ranges.forEach(function(r){
+    need = need.reduce(function(out, n){
+      if(r[1]<n[0] || r[0]>n[1]){ out.push(n); return out; }
+      if(n[0]<r[0]) out.push([n[0], wrDateAdd(r[0], -1)]);
+      if(n[1]>r[1]) out.push([wrDateAdd(r[1], 1), n[1]]);
+      return out;
+    }, []);
+  });
+  for(var i=0;i<need.length;i++){
+    var a = need[i][0], b = need[i][1];
+    var r = await fetchWorkReportRows(a, b);
+    if(!r.ok){ cache.error = r.missingTable ? '作業日報のテーブルがまだありません(supabase/work_report.sql を実行してください)。' : '作業日報を読み込めませんでした。'; return; }
+    var d = a;
+    while(d<=b){ cache.byDate[d] = []; d = wrDateAdd(d, 1); }
+    r.rows.forEach(function(x){ (cache.byDate[x.work_date] || (cache.byDate[x.work_date] = [])).push(x); });
+    cache.ranges.push([a, b]);
+  }
   cache.error = '';
-  var d = from;
-  while(d<=to){ cache.byDate[d] = []; d = wrDateAdd(d, 1); }
-  r.rows.forEach(function(x){ (cache.byDate[x.work_date] || (cache.byDate[x.work_date] = [])).push(x); });
-  cache.ranges.push([from, to]);
+  wrSaveLocal(cache);
 }
 async function loadWorkReportMapping(){
   var seq = state.workReportMappingSeq || 0;

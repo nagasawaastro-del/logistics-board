@@ -1753,6 +1753,7 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-05', items:[
+    '【配置: 仮置きを減らす・AA・B棟から】配置の指示書で、行き先に今入る空きがあれば列の順番を待たずに直接動かし、空きが無ければ行き先から出ていく物を先に動かして空ける(「行き先を空けるために先に動かす物」)ようにして、仮置き場をなるべく使わないようにしました。A(1段目)の端数で、その品番の全在庫が1ケース未満の物は AA へ移す指示を出します。前半は B棟の201の列から始めます(「計算の条件」で A棟からにもできます)',
     '【収支: 担当別(パート・リフト)】収支に「担当別」を足しました。パート(AA・S のピッキングと梱包)の売上は、作業量CSVでブロックが AA・S の出荷の売上(得意先ごとにピース数の割合で分けた目安。梱包には単価が無いので入りません)、人件費はスタッフ設定の区分が「パート」の人の分です。スタッフの「編集」に「区分(パート/リフト・社員)」を足しました。担当別は、この機能より後に取り込んだ作業量CSVから分かれます',
     '【配置: 才数と容量で正確に】配置の計算を、品番ごとの才数(入数・1ケースの才数)と、ロケの容量(1段目・2段目・3段目・通路ラック1段に入る才数。「計算の条件」で入れる)で、きっちり合わせるようにしました。1か所に入らない物は、ケース単位で何か所かに分けて置く指示を出します(「分けて置く」)。指示書に動かすケース数(例: 3c+5 = 3ケースと5ピース)を出し、才数の分からない物は「才数不明」と出します。今の在庫のまま残る物で容量より多い場所があれば、件数を出します',
     '【配置: 少ないパレットの合算】配置の計算で、ケース数の少ないパレット(10ケース以下。「計算の条件」で変えられます)は、同じ品番のある場所へなるべくまとめる(合算)ようにしました。棚で同じ品番が何か所かに分かれているときは、いちばん多い場所へ寄せ、動かす物も同じ品番のある場所を先に使い、通路ラックでも同じ品番の少ないパレットはいっしょに置きます。行き先の場所に「同じ品番と合算」と出ます',
@@ -10721,7 +10722,7 @@ function renderStockDiagnostics(st){
 // segRacks = 通路1区画に置くラックの台数(1台 = 2段 = 2パレット)。dRacks = D列のロケ1つ(1-1 など)をあけると空くラックの台数
 // mergeCases = これ以下のケース数のパレットは、同じ品番のある場所へなるべくまとめる(合算)
 // capA/capB/capC = 棚のロケ1つ(パレット1枚分)に入る才数(1段目・2段目・3段目)。palletSai = 通路ラックの1段(パレット1枚)に入る才数
-var SLOT_DEFAULTS = { segRacks:9, dRacks:9, palletSai:40, capA:40, capB:40, capC:40, fastPct:20, midPct:30, tentFirst:'A', mergeCases:10 };
+var SLOT_DEFAULTS = { segRacks:9, dRacks:9, palletSai:40, capA:40, capB:40, capC:40, fastPct:20, midPct:30, tentFirst:'B', mergeCases:10 };
 var SLOT_RANKS = { fast:{ label:'よく出る' }, mid:{ label:'たまに出る' }, slow:{ label:'あまり出ない' }, none:{ label:'出荷なし' } };
 var SLOT_TENTS = {
   A: { name:'A棟', start:375, cols:6, topFromWall:false, botBays:function(){ return 4; },
@@ -10804,6 +10805,9 @@ function computeSlotting(st, opt){
   Object.keys(P).forEach(function(c){ rank[c] = 'none'; });
   moving.forEach(function(c, i){ var p = (i+1)/moving.length*100; rank[c] = p<=opt.fastPct ? 'fast' : (p<=opt.fastPct+opt.midPct ? 'mid' : 'slow'); });
   var POS = slotPositions();
+  // 品番ごとの全在庫(高屋のすべてのブロック)。A の端数で全在庫が1ケース未満の物は AA へ
+  var totalOf = {};
+  Object.keys(P).forEach(function(code){ var q = 0; Object.keys(P[code].blocks||{}).forEach(function(b){ if(stockSiteOfBlock(b)==='takaya') q += Number(P[code].blocks[b].qty)||0; }); totalOf[code] = q; });
   // 品番×ロケ(テントの1〜3段目とD列)
   var lots = [];
   Object.keys(P).forEach(function(code){
@@ -10823,7 +10827,8 @@ function computeSlotting(st, opt){
         }
         // A223以降(1段目の A ロケ)は使わない場所なので、そこにある物は必ず動かす
         var legacy = !!(key && b==='A' && n>=SLOT_NO_A_FROM);
-        lots.push({ pack:pack, legacy:legacy, code:code, name:P[code].name||'', block:b, loc:loc, qty:q, cube:(pack && sai!==null) ? q/pack*sai : null,
+        var toAA = !!(key && b==='A' && pack && pack>1 && totalOf[code] < pack);
+        lots.push({ toAA:toAA, pack:pack, legacy:legacy, code:code, name:P[code].name||'', block:b, loc:loc, qty:q, cube:(pack && sai!==null) ? q/pack*sai : null,
           rank:rank[code], perDay:perDay[code], pos:key, n:n, frac: b==='A' && pack!==1 }); // 入数1の物は端数として扱わない(Aに置かない)
       });
     });
@@ -10904,16 +10909,17 @@ function computeSlotting(st, opt){
       return { key:p.key, qty:q, cube:cb, merge:p.merge, split: plan.length>1 };
     });
   }
-  var stayLots = [], p1 = [], fastLots = [], dRest = [];
+  var stayLots = [], p1 = [], fastLots = [], dRest = [], aaMoves = [];
   lots.forEach(function(l){
+    if(l.toAA){ aaMoves.push({ lot:l, to:'AA', qty:l.qty, cube:cu(l) }); return; } // 全在庫が1ケース未満の端数は AA へ(テントの1段目から出す)
     if(l.rank==='fast'){ fastLots.push(l); if(l.pos) occupy(l.pos, l.code, cu(l)); return; }
     if(!l.pos){ dRest.push(l); return; }
     if(stays(l)){ stayLots.push(l); occupy(l.pos, l.code, cu(l)); } else p1.push(l);
   });
   var order = { fast:0, mid:1, slow:2, none:3 };
   function byRank(a, b){ return order[a.rank]-order[b.rank] || b.perDay-a.perDay || (cu(b)-cu(a)); }
-  // ① 棚の整理
-  var moves1 = [], left1 = [], merges = 0, splits = 0;
+  // ① 棚の整理(AA へ出す物を先に)
+  var moves1 = aaMoves.slice(), left1 = [], merges = 0, splits = 0;
   // 合算: 今の場所のままでよい物のうち、同じ品番が何か所かに分かれていて、ケース数の少ないパレットは、いちばん多い場所へまとめる(入るときだけ)
   var byCode = {};
   stayLots.forEach(function(l){ var g = l.code+'|'+(l.frac?'f':'p'); (byCode[g] = byCode[g] || []).push(l); });
@@ -11004,7 +11010,9 @@ function computeSlotting(st, opt){
   // 容量を超えている場所(今の在庫のまま残る物で、もともと容量より多い所)
   var over = Object.keys(cap).filter(function(k){ return cap[k].used > cap[k].size+0.5; }).length;
   var dLots = lots.filter(function(l){ return !l.pos; });
-  return { opt:opt, ship:ship, lots:lots, dLots:dLots, stay:stayLots.length, merges:merges, splits:splits, over:over, moves1:moves1, segs:segs, moves3:moves3, moves4:moves4, left:left,
+  var capSize = {}, capMeta = {}; Object.keys(cap).forEach(function(k){ capSize[k] = cap[k].size; capMeta[k] = { zone:cap[k].zone, level:cap[k].level, floor:cap[k].floor, maxN:cap[k].maxN, n:cap[k].n }; });
+  var zoneLists = { open: byZone.open.slice(), aisle: byZone.aisle.slice(), wall: byZone.wall.slice() };
+  return { opt:opt, ship:ship, lots:lots, dLots:dLots, stay:stayLots.length, merges:merges, splits:splits, over:over, toAA:aaMoves.length, capSize:capSize, capMeta:capMeta, zoneLists:zoneLists, prefs:prefs, unitOf:unitOf, cu:cu, moves1:moves1, segs:segs, moves3:moves3, moves4:moves4, left:left,
     rackCap:rackCap, rackUsed:rackUsed, movingCount:moving.length };
 }
 /* 作業の流れ(現場と決めたもの):
@@ -11020,85 +11028,185 @@ function slotColLabel(tent, col){
 }
 function slotSequence(r, tentFirst){
   var POS = slotPositions();
-  var tents = tentFirst==='B' ? ['B','A'] : ['A','B'];
-  function colOfN(n){ return POS[n].tent+'|'+POS[n].col; }
-  function cuOf(x){ return x.m.cube!==undefined ? x.m.cube : (x.lot.cube!==null ? x.lot.cube : (x.lot.frac ? r.opt.capA/4 : r.opt.palletSai)); }
+  var tents = tentFirst==='A' ? ['A','B'] : ['B','A'];
+  function colOfKey(k){ if(!k || k==='AA') return 'AA'; var n = Number(String(k).split(':')[1]); return POS[n] ? POS[n].tent+'|'+POS[n].col : '?'; }
+  function cuOf(x){ return x.m.cube!==undefined ? x.m.cube : r.cu(x.lot); }
+  // 今それぞれの場所に入っている才数(作業を進めるごとに増減させる)
+  var phys = {};
+  r.lots.forEach(function(l){ if(l.pos) phys[l.pos] = (phys[l.pos]||0) + r.cu(l); });
+  function room(k){ if(k==='AA') return Infinity; var sz = r.capSize[k]; return sz===undefined ? 0 : sz - (phys[k]||0); }
+  // 今それぞれの場所に入っている品番(違う品番は1ロケ2品番まで)
+  var codesAt = {};
+  function addCode(k, code){ var o = codesAt[k] || (codesAt[k] = {}); o[code] = (o[code]||0)+1; }
+  function delCode(k, code){ var o = codesAt[k]; if(o && o[code] && !--o[code]) delete o[code]; }
+  r.lots.forEach(function(l){ if(l.pos) addCode(l.pos, l.code); });
+  /* 予定の行き先に空きが無いとき、同じゾーン(通路側・壁側など)で、いま空きのある別の場所を探す */
+  function findAlt(x){
+    var l = x.lot, need = cuOf(x), z = r.prefs(l);
+    for(var pass=0; pass<2; pass++){
+      for(var zi=0; zi<z.length; zi++){
+        var list = r.zoneLists[z[zi]];
+        for(var i=0;i<list.length;i++){
+          var k = list[i], mt = r.capMeta[k], cs = codesAt[k] || {};
+          if(l.frac ? !mt.floor : mt.level==='A') continue;
+          if(pass===0 && !cs[l.code]) continue; // 同じ品番のある所を先に
+          if(!cs[l.code] && Object.keys(cs).length >= mt.maxN) continue;
+          if(room(k) >= need-0.01) return k;
+        }
+      }
+    }
+    return null;
+  }
   var buffer = 0, peak = 0, steps = [];
   function row(x, toText, toPlace){ var l = x.lot; return { code:l.code, name:l.name, rank:SLOT_RANKS[l.rank].label, frac:l.frac, pack:l.pack, from: x.buffered ? '仮置き場' : slotFromText(l), fromPlace: x.buffered ? '' : slotFromPlace(l), qty: x.m.qty!==undefined ? x.m.qty : l.qty, cube: l.cube===null ? null : cuOf(x), to:toText, toPlace:toPlace }; }
-  function toBuffer(x, list){ list.push(row(x, '仮置き場', 'あとで行き先へ('+slotToText(x.m)+')')); x.buffered = true; buffer += cuOf(x); peak = Math.max(peak, buffer); }
-  function arrive(x, list){ list.push(row(x, slotToText(x.m), slotToPlace(x.m))); if(x.buffered) buffer -= cuOf(x); x.handled = true; }
-  // ---- 前半: 棚の適正配置(よく出る物はそのまま) ----
-  var m1 = r.moves1.map(function(m){ return { m:m, lot:m.lot, from: colOfN(m.lot.n), to: colOfN(Number(m.to.split(':')[1])) }; });
-  var done = {};
+  function leave(x){ if(x.lot.pos && !x.buffered){ phys[x.lot.pos] = (phys[x.lot.pos]||0) - cuOf(x); delCode(x.lot.pos, x.lot.code); } }
+  function toBuffer(x, list){ list.push(row(x, '仮置き場', 'あとで行き先へ('+slotToText(x.m)+')')); leave(x); x.buffered = true; buffer += cuOf(x); peak = Math.max(peak, buffer); }
+  function arrive(x, list){
+    list.push(row(x, x.rackText || slotToText(x.m), x.rackText ? (x.lot.frac ? '端数(下段)' : '') : slotToPlace(x.m)));
+    if(x.buffered) buffer -= cuOf(x); else leave(x);
+    if(x.toKey){ phys[x.toKey] = (phys[x.toKey]||0) + cuOf(x); addCode(x.toKey, x.lot.code); }
+    x.handled = true;
+  }
+  /* 予定の行き先に入らなければ、同じゾーンで空きのある別の場所へ(予定を変える) */
+  function moveOrAlt(x, list, chainList){
+    if(tryMove(x, list, chainList, 0)) return true;
+    if(!x.toKey || x.toKey==='AA') return false;
+    var alt = findAlt(x);
+    if(!alt) return false;
+    x.m = Object.assign({}, x.m, { to: alt, merge: !!(codesAt[alt]||{})[x.lot.code], split:false, changed:true });
+    x.toKey = alt; x.to = colOfKey(alt);
+    arrive(x, list);
+    return true;
+  }
+  // 通路ラック: 置いた区画の段に、その場で入れていく(D列のこのロケの物を先に、次に棚の物を出荷の多い順)
+  var rackSlots = [];
+  function installSeg(sg){ sg.slots.forEach(function(sl){ rackSlots.push({ seg:sg, no:sl.no, lower:sl.lower, used:0, count:0, codes:{} }); }); }
+  function rackPlace(x){
+    var l = x.lot, need = cuOf(x), cap = r.opt.palletSai;
+    var pool = l.frac ? rackSlots.filter(function(s0){ return s0.lower; }) : rackSlots.filter(function(s0){ return s0.lower; }).concat(rackSlots.filter(function(s0){ return !s0.lower; }));
+    var got = [];
+    for(var i=0;i<pool.length && !got.length;i++){
+      var y = pool[i];
+      var ok = l.frac ? (y.count<3 && y.used+need<=cap+0.01) : ((y.count===0 || (y.codes[l.code] && y.count===1)) && y.used+need<=cap+0.01);
+      if(ok) got.push(y);
+    }
+    if(!got.length && !l.frac && need>cap){ // 1段に入らない物は、空いている段をいくつか
+      var kk = Math.ceil(need/cap-0.001);
+      for(var j=0;j<pool.length && got.length<kk;j++){ if(pool[j].count===0) got.push(pool[j]); }
+      if(got.length<kk) got = [];
+    }
+    if(!got.length) return false;
+    got.forEach(function(y){ y.used += got.length>1 ? cap : need; if(!y.codes[l.code]){ y.codes[l.code] = true; y.count++; } });
+    x.rackText = '通路ラック '+got[0].seg.name+' '+(got[0].lower ? '下段' : '上段')+' '+got.map(function(y){ return y.no; }).join('・')+'番';
+    return true;
+  }
+  var all = [];
+  var m1 = r.moves1.map(function(m){ var x = { m:m, lot:m.lot, from: colOfKey(m.lot.pos), toKey: m.to, to: colOfKey(m.to), ph:1 }; all.push(x); return x; });
+  var m3 = r.moves3.map(function(m){ var x = { m:m, lot:m.lot, seg: m.slots[0].seg, ph:3 }; all.push(x); return x; });
+  var m4 = r.moves4.map(function(m){ var x = { m:m, lot:m.lot, toKey: m.to, to: colOfKey(m.to), ph:4 }; all.push(x); return x; });
+  var leaving = {}; // 棚の場所 → そこから出ていく物
+  all.forEach(function(x){ if(x.lot.pos) (leaving[x.lot.pos] = leaving[x.lot.pos] || []).push(x); });
+  var installed = {}, phase = 1;
+  function movable(y){ // いま動かしてよい物か
+    if(y.handled || y.buffered) return false;
+    if(y.ph===1) return true;
+    if(y.ph===3) return phase===2 && !!installed[y.seg.name];
+    return phase===2;
+  }
+  /* 行き先に入る空きがあれば直接動かす。無ければ、行き先から出ていく物を先に動かして空ける(3つ先まで)。だめなら false */
+  function tryMove(x, list, chainList, depth, seen){
+    if(x.handled) return true;
+    if(x.ph===3){ if(!installed[x.seg.name]) return false; arrive(x, list); return true; }
+    var need = cuOf(x);
+    if(room(x.toKey) >= need-0.01){ arrive(x, list); return true; }
+    if(depth>=3) return false;
+    seen = seen || {}; seen[x.toKey] = true;
+    (leaving[x.toKey]||[]).forEach(function(y){
+      if(room(x.toKey) >= need-0.01 || !movable(y) || y===x) return;
+      if(y.toKey && seen[y.toKey]) return; // 入れ替え(お互いの場所)は仮置き場を使う
+      tryMove(y, chainList, chainList, depth+1, seen);
+    });
+    if(room(x.toKey) >= need-0.01){ arrive(x, list); return true; }
+    return false;
+  }
+  function flushBuffer(list){ // 仮置き場の物で、行き先に空きができた物を入れる
+    all.forEach(function(x){ if(x.buffered && !x.handled && x.ph!==3 && room(x.toKey) >= cuOf(x)-0.01) arrive(x, list); });
+  }
+  // ---- 前半: 棚の適正配置(B棟の201の列から。よく出る物はそのまま) ----
   tents.forEach(function(t){
     for(var c=0; c<SLOT_TENTS[t].cols; c++){
-      var key = t+'|'+c, out = [], inner = [], inn = [];
+      var key = t+'|'+c, out = [], chain = [], inner = [], inn = [], fromBuf = [];
+      // 出す物(AA へ・ほかの列へ)。行き先に空きが無ければ、先に空けられる物を動かす。それでもだめなら仮置き場
+      m1.forEach(function(x){ if(!x.handled && !x.buffered && x.from===key && x.to!==key){ if(!moveOrAlt(x, out, chain)) toBuffer(x, out); } });
+      // 列の中で動かす物
+      m1.forEach(function(x){ if(!x.handled && !x.buffered && x.from===key && x.to===key){ if(!moveOrAlt(x, inner, chain)) toBuffer(x, inner); } });
+      // 入れる物(仮置き場・ほかの列から)。空きが無ければ、その物の列の番のときに動かす
       m1.forEach(function(x){
-        if(x.handled || x.buffered || x.from!==key) return;
-        if(x.to===key) arrive(x, inner);
-        else if(done[x.to]) arrive(x, out);
-        else toBuffer(x, out);
+        if(x.handled || x.to!==key) return;
+        if(x.buffered){ if(room(x.toKey) >= cuOf(x)-0.01) arrive(x, inn); }
+        else tryMove(x, inn, chain, 0);
       });
-      m1.forEach(function(x){ if(!x.handled && x.to===key) arrive(x, inn); });
-      done[key] = true;
-      if(out.length || inner.length || inn.length) steps.push({ phase:1, title: slotColLabel(t, c), groups:[['出す物', out], ['列の中で動かす物', inner], ['入れる物', inn]], racks:[] });
+      flushBuffer(fromBuf);
+      if(out.length || chain.length || inner.length || inn.length || fromBuf.length) steps.push({ phase:1, title: slotColLabel(t, c), groups:[['出す物', out], ['行き先を空けるために先に動かす物', chain], ['列の中で動かす物', inner], ['入れる物', inn], ['仮置き場から行き先へ', fromBuf]], racks:[] });
     }
   });
-  // ---- 後半: D列を1列ずつあけて、通路ラックを置きながら、よく出る物を入れる ----
-  var m3 = r.moves3.map(function(m){ return { m:m, lot:m.lot, seg: m.slots[0].seg }; });
-  var m4 = r.moves4.map(function(m){ return { m:m, lot:m.lot, toKey: m.to }; });
-  var leaving = {}; // 棚の場所 → そこから出ていく物(よく出る物など)
-  m3.concat(m4).forEach(function(x){ if(x.lot.pos) (leaving[x.lot.pos] = leaving[x.lot.pos] || []).push(x); });
-  function posReady(k){ return (leaving[k]||[]).every(function(y){ return y.handled; }); }
-  function dRow(l){ return String(l.loc); } // D列のロケ(1-1 など)ごとにあける
+  // ---- 後半: D列をロケ1つずつあけて、空いたラックを通路に置き、よく出る物を入れる ----
+  phase = 2;
+  function dRow(l){ return String(l.loc); }
   var dRows = [];
   m3.concat(m4).forEach(function(x){ if(!x.lot.pos){ var k = dRow(x.lot); if(dRows.indexOf(k)===-1) dRows.push(k); } });
   function dKey(v){ if(v==='0') return [9999, 0]; var p = v.split('-').map(Number); return [p[0]||0, p[1]||0]; }
   dRows.sort(function(a,b){ var A = dKey(a), B = dKey(b); return A[0]-B[0] || A[1]-B[1]; });
-  // 通路ラックを置く順: 始める棟から、入口(左)の通路から
   var segOrder = r.segs.slice().sort(function(a,b){
     function idx(sg){ var fs = SLOT_TENTS[sg.tent].faces, i = 0; for(; i<fs.length; i++){ if(fs[i].indexOf(sg.aisle)!==-1) break; } return i; }
     return tents.indexOf(a.tent)-tents.indexOf(b.tent) || idx(a)-idx(b) || (a.half==='上' ? 0 : 1)-(b.half==='上' ? 0 : 1);
   });
-  var si = 0, freeRacks = 0; // あけたD列から出た、まだ置いていないラックの台数
-  function settle(list){ // 空いた棚へ入る物(棚から移る物・仮置き場の物)
-    m4.forEach(function(x){ if(!x.handled && (x.lot.pos || x.buffered) && posReady(x.toKey)) arrive(x, list); });
+  var si = 0, freeRacks = 0;
+  function settle(list, chain){ // 棚から移る物・仮置き場の物を、空きのできた行き先へ(無ければ同じゾーンの別の場所)
+    m4.forEach(function(x){ if(!x.handled && (x.lot.pos || x.buffered)){ if(x.buffered){ if(!moveOrAlt(x, list, chain)) return; } else tryMove(x, list, chain, 0); } });
+    m1.forEach(function(x){ if(!x.handled && x.buffered) moveOrAlt(x, list, chain); });
   }
-  dRows.forEach(function(k, i){
-    var racks = [], rackIn = [], dOut = [], shelfIn = [];
-    // このロケをあけると dRacks 台のラックが空く。区画1つ分(segRacks 台)たまるごとに、入口側の通路から置く
+  dRows.forEach(function(k){
+    var racks = [], rackIn = [], dOut = [], shelfIn = [], chain = [];
     var mySegs = [];
     freeRacks += r.opt.dRacks;
     while(si<segOrder.length && freeRacks>=r.opt.segRacks){ mySegs.push(segOrder[si++]); freeRacks -= r.opt.segRacks; }
     if(k===dRows[dRows.length-1] && si<segOrder.length){ mySegs = mySegs.concat(segOrder.slice(si)); si = segOrder.length; }
-    mySegs.forEach(function(sg){ racks.push(sg.name+'('+(sg.slots.length/2)+'台)'); });
-    // D列のこの列をあける(よく出る物は、置いた通路ラックへ。ほかは行き先へ。行き先がまだなら仮置き場へ)
-    m3.forEach(function(x){ if(!x.handled && !x.lot.pos && dRow(x.lot)===k && mySegs.indexOf(x.seg)===-1) toBuffer(x, dOut); });
-    m4.forEach(function(x){
-      if(x.handled || x.lot.pos || dRow(x.lot)!==k) return;
-      if(posReady(x.toKey)) arrive(x, dOut); else toBuffer(x, dOut);
+    mySegs.forEach(function(sg){ racks.push(sg.name+'('+(sg.slots.length/2)+'台)'); installed[sg.name] = true; installSeg(sg); });
+    var byFast = function(a,b){ return (b.lot.frac?1:0)-(a.lot.frac?1:0) || b.lot.perDay-a.lot.perDay; };
+    // D列のこのロケの、よく出る物 → 置いた通路ラックへ(入らなければ棚の空いている所へ)
+    m3.filter(function(x){ return !x.handled && !x.lot.pos && dRow(x.lot)===k; }).sort(byFast).forEach(function(x){
+      if(rackPlace(x)) arrive(x, dOut);
+      else { x.toKey = '__none'; var alt = findAlt(x); if(alt){ x.m = Object.assign({}, x.m, { to: alt, slots:null, changed:true }); x.toKey = alt; arrive(x, dOut); } else toBuffer(x, dOut); }
     });
-    // 通路ラックを置いて、よく出る物を入れる(棚・D列のこの列・仮置き場から)
-    m3.forEach(function(x){ if(!x.handled && mySegs.indexOf(x.seg)!==-1) arrive(x, rackIn); });
-    settle(shelfIn);
-    steps.push({ phase:2, title:'D:'+k+' をあける'+(mySegs.length ? '(ラック'+(mySegs.length*r.opt.segRacks)+'台が空く → 通路へ)' : ''), groups:[['D列から出す物', dOut], ['よく出る物を通路ラックへ', rackIn], ['空いた棚へ入れる物', shelfIn]], racks:racks });
+    // 仮置き場にある、よく出る物 → 通路ラックへ
+    m3.filter(function(x){ return !x.handled && x.buffered; }).sort(byFast).forEach(function(x){ if(rackPlace(x)) arrive(x, rackIn); });
+    // 棚にある、よく出る物 → 通路ラックへ(棚に空きができる)
+    m3.filter(function(x){ return !x.handled && x.lot.pos; }).sort(byFast).forEach(function(x){ if(rackPlace(x)) arrive(x, rackIn); });
+    // D列のこのロケの、ほかの物 → 棚へ(予定の場所に空きが無ければ同じゾーンの別の場所。それも無ければ仮置き場)
+    m4.forEach(function(x){ if(!x.handled && !x.lot.pos && dRow(x.lot)===k){ if(!moveOrAlt(x, dOut, chain)) toBuffer(x, dOut); } });
+    settle(shelfIn, chain);
+    steps.push({ phase:2, title:'D:'+k+' をあける'+(mySegs.length ? '(ラック'+(mySegs.length*r.opt.segRacks)+'台が空く → 通路へ)' : ''),
+      groups:[['D列から出す物', dOut], ['よく出る物を通路ラックへ(棚・仮置き場から)', rackIn], ['行き先を空けるために先に動かす物', chain], ['空いた棚へ入れる物', shelfIn]], racks:racks });
   });
-  // 残り(仮置き場に残った物など)
+  // 残り(仮置き場の物は、空きのある所へ)
   var restList = [];
-  m3.forEach(function(x){ if(!x.handled) arrive(x, restList); });
-  settle(restList);
-  m4.forEach(function(x){ if(!x.handled) arrive(x, restList); });
+  m3.forEach(function(x){ if(!x.handled && x.buffered){ if(!rackPlace(x)){ var alt = findAlt(x); if(alt){ x.m = Object.assign({}, x.m, { to: alt, slots:null, changed:true }); x.toKey = alt; } } arrive(x, restList); } });
+  all.forEach(function(x){ if(!x.handled && x.buffered){ if(!moveOrAlt(x, restList, restList)) arrive(x, restList); } });
   if(restList.length) steps.push({ phase:2, title:'仕上げ(仮置き場に残った物)', groups:[['行き先へ', restList]], racks:[] });
+  // 棚に残る、よく出る物(通路ラックに入りきらない物)は、そのまま棚に置く
   return { steps: steps, peakBuffer: peak };
 }
 function slotFromText(l){ return l.pos ? slotLocText(l.block, l.n) : 'D:'+l.loc; }
 function slotFromPlace(l){ return l.pos ? slotPlaceText(l.block, l.n) : 'D列'; }
 function slotToText(m){
+  if(m.to==='AA') return 'AA';
   if(m.slots) return '通路ラック '+m.slots[0].seg.name+' '+(m.slots[0].lower ? '下段' : '上段')+' '+m.slots.map(function(x){ return x.no; }).join('・')+'番';
   var c = m.to.split(':'); return slotLocText(c[0], Number(c[1]));
 }
 function slotToPlace(m){
-  var tail = (m.merge ? ' ・同じ品番と合算' : '')+(m.split ? ' ・分けて置く' : '');
+  if(m.to==='AA') return 'AA(パートのバラ。全在庫が1ケース未満)';
+  var tail = (m.merge ? ' ・同じ品番と合算' : '')+(m.split ? ' ・分けて置く' : '')+(m.changed ? ' ・空いている所へ' : '');
   if(m.slots) return (m.lot.frac ? '端数(下段)' : '')+tail;
   var c = m.to.split(':'); return slotPlaceText(c[0], Number(c[1]))+tail;
 }
@@ -11139,13 +11247,13 @@ function renderSlotting(st){
     '<div class="vca-card"><div class="vca-card-label">通路ラック</div><div class="vca-card-val">'+r.rackUsed+'<span style="font-size:13px;font-weight:600;"> / '+r.rackCap+' パレット</span></div>'+
       '<div class="st-meter"><i class="'+(useP>=STOCK_DIAG.useDanger?'hi':(useP>=STOCK_DIAG.useWarn?'mid':''))+'" style="width:'+Math.min(100,useP).toFixed(1)+'%;"></i></div>'+
       '<div class="vca-card-sub">'+r.segs.length+'区画 × '+opt.segRacks+'台 × 2段</div></div>'+
-    '<div class="vca-card"><div class="vca-card-label">作業</div><div class="vca-card-val">'+seq.steps.length+'<span style="font-size:13px;font-weight:600;"> 手順</span></div><div class="vca-card-sub">動かす物 '+(sh.p1.length+sh.p3.length+sh.p4.length)+'行(今の場所のままでよい物 '+r.stay+'行・同じ品番と合算 '+r.merges+'行・何か所かに分けて置く物 '+r.splits+')</div></div>'+
+    '<div class="vca-card"><div class="vca-card-label">作業</div><div class="vca-card-val">'+seq.steps.length+'<span style="font-size:13px;font-weight:600;"> 手順</span></div><div class="vca-card-sub">動かす物 '+(sh.p1.length+sh.p3.length+sh.p4.length)+'行(今の場所のままでよい物 '+r.stay+'行・同じ品番と合算 '+r.merges+'行・何か所かに分けて置く物 '+r.splits+'・AA へ '+r.toAA+'行)</div></div>'+
     (r.over ? '<div class="vca-card" style="border-color:#FEC84B;"><div class="vca-card-label" style="color:#B54708;">容量を超えている場所</div><div class="vca-card-val">'+r.over+'<span style="font-size:13px;font-weight:600;"> ロケ</span></div><div class="vca-card-sub">今の在庫のまま残る物が、ロケの容量より多い所(容量の数字を確かめてください)</div></div>' : '')+
     '<div class="vca-card"><div class="vca-card-label">仮置き場(いちばん多いとき)</div><div class="vca-card-val">'+stockFmtCube(seq.peakBuffer)+'<span style="font-size:13px;font-weight:600;"> 才</span></div><div class="vca-card-sub">約'+Math.ceil(seq.peakBuffer/opt.palletSai)+'パレット分(A棟の右側の広い所)</div></div>'+
     (sh.left.length ? '<div class="vca-card" style="border-color:#FDA29B;"><div class="vca-card-label" style="color:#B42318;">入りきらない</div><div class="vca-card-val">'+sh.left.length+'<span style="font-size:13px;font-weight:600;"> 行</span></div><div class="vca-card-sub">通路ラックの台数か、棚1ロケの才数を見直してください</div></div>' : '')+
   '</div>';
   var settings = '<details class="slot-settings"'+(state.slotSettingsOpen ? ' open' : '')+'><summary>計算の条件 ▾</summary><div class="slot-opts">'+
-      '<label class="slot-opt">始める棟 <select data-slot-tent="1"><option value="A"'+(opt.tentFirst!=='B'?' selected':'')+'>A棟から</option><option value="B"'+(opt.tentFirst==='B'?' selected':'')+'>B棟から</option></select></label>'+
+      '<label class="slot-opt">始める棟 <select data-slot-tent="1"><option value="B"'+(opt.tentFirst!=='A'?' selected':'')+'>B棟から(201の列)</option><option value="A"'+(opt.tentFirst==='A'?' selected':'')+'>A棟から</option></select></label>'+
       num('segRacks','通路1区画に置く','台')+num('dRacks','D列1ロケで空く','台')+num('capA','棚1ロケ 1段目','才')+num('capB','2段目','才')+num('capC','3段目','才')+num('palletSai','通路ラック1段','才')+num('fastPct','よく出る = 上位','%')+num('midPct','たまに出る = 次の','%')+num('mergeCases','合算する = ','ケース以下')+
     '</div><div class="pool-hint" style="margin:6px 0 0;">変えるとすぐ計算し直します(この画面だけ。保存はしません)。棚1ロケ = パレット1枚分の場所。才数 = 幅(cm)×奥行(cm)×高さ(cm)÷27,826(例: 110×110×150cm ≒ 65才)。</div></details>';
   var head = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
@@ -11153,7 +11261,7 @@ function renderSlotting(st){
     '<span class="pool-hint" style="margin:0;">CSVは右上の「CSV出力 ▾ → 配置の指示」。ロジザードの在庫を取り込み直すと、動かした分を反映して計算し直します。</span></div>';
   var segTable = '<table class="report-table" style="font-size:12px;"><thead><tr><th>区画</th><th class="num">パレット</th><th class="num">使う</th></tr></thead><tbody>'+
     r.segs.map(function(sg){ return '<tr><td><b>'+esc(sg.name)+'</b></td><td class="num">'+sg.slots.length+'</td><td class="num">'+sg.slots.filter(function(x){ return x.count>0; }).length+'</td></tr>'; }).join('')+'</tbody></table>';
-  var body = '<div class="pool-hint" style="margin:0 0 8px;"><b>前半</b>: 通路に面した棚(1〜3段目)を、入口(左)の列から1列ずつ適正配置にします(よく出る物はまだ動かさない)。<b>後半</b>: D列を1列ずつあけながら、入口側の通路から通路ラックを置き、よく出る物を入れていきます。行き先がまだ空いていない物は仮置き場(A棟の右側の広い所)へ。</div>'+
+  var body = '<div class="pool-hint" style="margin:0 0 8px;"><b>前半</b>: 通路に面した棚(1〜3段目)を、'+(opt.tentFirst==='A' ? 'A棟' : 'B棟の201の列')+'から1列ずつ適正配置にします(よく出る物はまだ動かさない。行き先に空きがあれば直接動かし、仮置き場はなるべく使わない)。<b>後半</b>: D列を1列ずつあけながら、入口側の通路から通路ラックを置き、よく出る物を入れていきます。行き先がまだ空いていない物は仮置き場(A棟の右側の広い所)へ。</div>'+
     seq.steps.map(function(stp, i){
       var n = stp.groups.reduce(function(a,g){ return a+g[1].length; }, 0);
       var head = (i===0 || seq.steps[i-1].phase!==stp.phase) ? '<div class="stf-section-title" style="margin:12px 0 6px;">'+(stp.phase===1 ? '前半: 棚の適正配置(入口の列から)' : '後半: D列を1ロケずつあけて、空いたラックを通路に置く')+'</div>' : '';
@@ -11165,7 +11273,7 @@ function renderSlotting(st){
     (sh.left.length ? '<div class="stf-section-title" style="margin-top:12px;color:#B42318;">入りきらない('+sh.left.length+'行)</div>'+slotTableHtml(sh.left, 300) : '');
   var rules = '<details class="slot-settings" style="margin-top:12px;"><summary>配置のルール ▾</summary><div class="pool-hint" style="line-height:1.8;margin:6px 0 0;">'+
     '出荷のランク: '+ship.days+'日分の出荷記録('+esc(ship.from)+'〜'+esc(ship.to)+')の1日あたりケース数で、出荷のある'+r.movingCount+'品番の上位'+opt.fastPct+'% = よく出る、次の'+opt.midPct+'% = たまに出る、残り = あまり出ない。<br>'+
-    '作業の流れ: 前半 = 通路に面した棚を入口(左)の列から1列ずつ適正配置(よく出る物はそのまま)。後半 = D列をロケ1つずつ(1-1 から)あけ、空いたラック(1ロケ '+opt.dRacks+'台)を入口側の通路から置き(1区画 '+opt.segRacks+'台)、よく出る物を入れる。入数1の物は1段目(A)に置かない。'+opt.mergeCases+'ケース以下のパレットは、同じ品番のある場所へなるべく合算する(違う品番は1ロケ2品番まで)。'+(opt.tentFirst==='B' ? 'B棟 → A棟' : 'A棟 → B棟')+'。整理中の物は仮置き場(A棟の右側の広い所)へ。<br>'+
+    '作業の流れ: 前半 = 通路に面した棚を、'+(opt.tentFirst==='A' ? 'A棟' : 'B棟(201の列)')+'から1列ずつ適正配置(よく出る物はそのまま)。行き先に今入る空きがあれば直接動かし、無ければ行き先から出ていく物を先に動かして空け、仮置き場はなるべく使わない。A の端数で全在庫が1ケース未満の物は AA へ。後半 = D列をロケ1つずつ(1-1 から)あけ、空いたラック(1ロケ '+opt.dRacks+'台)を入口側の通路から置き(1区画 '+opt.segRacks+'台)、よく出る物を入れる。入数1の物は1段目(A)に置かない。'+opt.mergeCases+'ケース以下のパレットは、同じ品番のある場所へなるべく合算する(違う品番は1ロケ2品番まで)。'+(opt.tentFirst==='B' ? 'B棟 → A棟' : 'A棟 → B棟')+'。整理中の物は仮置き場(A棟の右側の広い所)へ。<br>'+
     '行き先: よく出る → 通路ラック(端数は下段)/ たまに出る → 棚の通路側(あけておく通路の前を先に)/ あまり出ない・出荷なし → 棚の壁側(端数は1段目の通路側 → 壁側)。棚1ロケの容量は 1段目'+opt.capA+'才・2段目'+opt.capB+'才・3段目'+opt.capC+'才で、入らない物はケース単位で分けて置く。違う品番は1ロケ2品番まで。<br>'+
     'ロケ番号: 2段目(B)・3段目(C)の 201〜374 = B棟、375〜470 = A棟。1段目(A)は B の番号 − 200。A223以降(B423〜470 の下)は1段目の A ロケを使わず、B ロケ = 1段目と2段目('+(opt.capA+opt.capB)+'才)、C = 3段目。今 A223以降にある物は動かします。母屋(B・C の 200以下)・A0・AA・S・E は今の使い方のままです。'+
   '</div></details>';

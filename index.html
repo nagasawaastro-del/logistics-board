@@ -335,6 +335,10 @@ input,select{font-family:inherit;}
 .vca-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;}
 .vca-name{font-size:12px;color:var(--slate-500);max-width:260px;white-space:normal !important;word-break:break-all;}
 .vca-table td.vca-name{min-width:150px;}
+/* VC引当の表: 見出しの行をスクロールしても上に固定する(表の枠の中でスクロール) */
+.vca-scroll{overflow:auto;max-height:calc(100vh - 230px);min-height:320px;}
+.vca-table thead th{position:sticky;top:0;z-index:3;background:#F2F4F7;box-shadow:0 1px 0 #D0D5DD;}
+@media print{.vca-scroll{max-height:none;overflow:visible;}.vca-table thead th{position:static;box-shadow:none;}}
 .vca-grp{display:inline-block;min-width:22px;text-align:center;background:var(--ink-900);color:#fff;border-radius:6px;padding:0 6px;font-weight:800;margin-right:4px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
 .vca-site{display:inline-block;border-radius:6px;padding:1px 8px;font-weight:700;font-size:12.5px;margin-right:6px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
 .vca-site.is-takaya{background:#EFF4FF;color:#1D4ED8;}
@@ -1753,6 +1757,7 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-05', items:[
+    '【VC引当: 見出しを固定】ピース引当・ケース引当の表で、見出しの行(品番・商品名・数量など)を、スクロールしても上に固定するようにしました。表の枠も画面の高さに合わせて広げました',
     '【VC引当: 倉庫ごとに集計表へ】VC引当の「集計表へ送る」を、「高屋の分を高屋の集計表へ」「丹南の分を丹南の集計表へ」の2つのボタンに分けました(ボタンに行数を表示)。送ったあとの「集計表を開く」は、その倉庫の集計表を開きます',
     '【配置: 区切り】指示書の1回の区切りを、通路の上半分・下半分(例: 201〜208 と 209〜216)にしました',
     '【配置: 通路ごとの順番】配置の指示書を、通路ごとに「その通路に面した列を整理 → D列を 1-1 から1ロケあけ、空いたラックをその通路に置いて、よく出る物を入れる」をくり返す順番にしました(B棟の201の通路から)',
@@ -9457,7 +9462,7 @@ function renderVcAllocTable(calc, kind){
       (sort ? '<button type="button" class="vc-manage-toggle-btn" id="vcaSortReset">並びを戻す(番号順)</button>' : '')+
     '</div>'+
     '<div class="shukei-print-head"><b>VC '+esc(label)+'</b> ・ '+esc(vcAllocDateLabel())+'</div>'+
-    '<div style="overflow-x:auto;max-height:620px;overflow-y:auto;" data-keep-scroll="vcaTable"><table class="report-table shukei-table vca-table"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>'+
+    '<div class="vca-scroll" data-keep-scroll="vcaTable"><table class="report-table shukei-table vca-table"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>'+
     '<div class="pool-hint no-print" style="margin-top:6px;">高屋・丹南はロジザードの在庫数 − 引当数(高屋 '+esc(VC_ALLOC_BLOCKS.takaya.join('・'))+' / 丹南 '+esc(VC_ALLOC_BLOCKS.tannan.join('・'))+')。'+
       '倉庫は、発注数(品番計)が高屋の在庫以下なら高屋、そうでなく丹南の在庫以下なら丹南、どちらも足りなければ要確認です。ケース数は発注数 ÷ 入数 の切り上げ、入数は弥生(無ければ商品台帳)。'+
       '「高屋の分を高屋の集計表へ」「丹南の分を丹南の集計表へ」は、それぞれの倉庫の行だけを、この端末のその倉庫の集計表へ、VC番号=振り分け番号・品番・数量で追加します(分ける品番は倉庫ごとの数量で。要確認の品番は送りません)。</div>';

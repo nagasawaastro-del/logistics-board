@@ -149,6 +149,7 @@ input,select{font-family:inherit;}
 .todo-btn{text-align:left;padding:12px 14px;border:1px solid #D0D5DD;border-radius:10px;background:#fff;font-size:14px;font-weight:700;color:#101828;cursor:pointer;}
 .todo-btn:hover{background:#F9FAFB;border-color:#98A2B3;}
 .sub-switch{display:flex;gap:6px;margin:-6px 0 12px;}
+.input-sound-hint{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:60;background:#3B2F12;color:#FEDF89;border:1px solid #B54708;border-radius:999px;padding:8px 16px;font-size:13px;font-weight:700;}
 .sub-switch-btn{border:1px solid #D0D5DD;background:#fff;border-radius:999px;padding:5px 14px;font-size:13px;font-weight:700;color:#344054;cursor:pointer;}
 .sub-switch-btn.active{background:#101828;border-color:#101828;color:#fff;}
 .sk-pf{display:inline-flex;gap:3px;align-items:center;padding:6px 10px;border-radius:8px;cursor:pointer;border:2px solid #D0D5DD;background:#fff;font-weight:700;}
@@ -1765,6 +1766,7 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-05', items:[
+    '【作業を手動で完了】作業記録のタブレットで、作業中の作業に「✅ この作業を完了にする」を出しました(押すと、その作業を完了にして作業を終え、次の作業の案内が出ます。ほかの人が作業中でも完了にできます)。管理 → 人員配置 では、完了していない作業に「完了にする」を出しました(未完了に戻すこともできます)',
     '【モニター: 上のボタン】モニターの右上の画面切り替えのボタンに「undefined」と重なって出ていたのを直し、画面の名前(作業記録・集計 など)を出すようにしました',
     '【管理: やること・タブの整理】管理の最初に「やること」画面を作りました。毎朝・日中・夕方・毎月・ときどき に分けたボタンから、その画面のそのタブを1回で開けます(データの更新状況も表示)。タブも減らしました: 管理は「今日・人員配置」「実績・生産性」をまとめ(画面の中で切り替え)、設定は「基本・勤務時間」「システム・操作履歴」をまとめ、在庫は「概要(ブロックごと・才数不明も)・ロケーション・配置」の3つにしました',
     '【配置: 指示書の印刷】「指示書を印刷」を、「どこから → どこへ」だけの見やすい形にしました(品番と、一部だけ動かすときのケース数を小さく添える)。今までの形は「くわしい指示書を印刷」で出せます',
@@ -5381,6 +5383,51 @@ function markTaskCompletedIfLastWorker(day, taskId, staffId){
     qtyByBasis: { pieces: totals.totalQty, count: totals.primaryCount, lines: totals.lineCount } };
   return true;
 }
+/* 手動で完了にする(作業者の「この作業を完了にする」・管理者の「完了にする」)。ほかの人が作業中でも完了の記録を付ける */
+function markTaskCompletedNow(day, taskId, by, at){
+  if(!taskId || taskId==='BREAK') return false;
+  var totals = wvTotalsForTask(state.workVolume||emptyWorkVolume(), taskId);
+  if(!day.taskCompletion) day.taskCompletion = {};
+  day.taskCompletion[taskId] = { at: at || new Date().toISOString(), qty: totals.totalQty, by: by, manual: true,
+    qtyByBasis: { pieces: totals.totalQty, count: totals.primaryCount, lines: totals.lineCount } };
+  return true;
+}
+/* 作業者: 自分が作業中の作業を完了にして、作業を終える */
+async function completeMyTask(taskId){
+  if(state.taskActionBusy) return;
+  var day = state.day, log = currentLog(state.activeStaffId);
+  if(!day || !log || log.taskId!==taskId) return;
+  var others = (day.logs||[]).filter(function(l){ return l.end===null && l.taskId===taskId && l.staffId!==log.staffId; });
+  if(!confirm('「'+taskById(taskId).name+'」を完了にして、作業を終えます。'+(others.length ? '\n(ほかに'+others.length+'人が作業中です。その人の記録はそのまま続きます)' : '')+'\nよろしいですか?')) return;
+  state.taskActionBusy = true;
+  try{
+    finalizeActiveSubTimer(log);
+    log.end = new Date().toISOString();
+    log.quantity = null;
+    delete log.breakdown;
+    markTaskCompletedNow(day, taskId, log.staffId);
+    await saveDay(day);
+  }finally{ state.taskActionBusy = false; }
+  await appendAuditLog({ action:'作業を完了にする(作業者)', target: taskById(taskId).name, before:'未完了', after:'完了('+staffById(log.staffId).name+'さん)' });
+  showToast('「'+taskById(taskId).name+'」を完了にしました');
+  if(isFoldTask(taskId)){ openFoldQtyModal(log, { nextTaskId:null, isEndDay:false, askDone:null }); return; }
+  state.pendingNextSuggestion = true;
+  proceedAfterFinish(null, false);
+}
+/* 管理者: どの作業でも完了にする(誰かが作業中でも。作業記録が無くてもよい) */
+async function completeTaskByManager(taskId){
+  var day = state.day;
+  if(!day || taskCompletionFor(day, taskId)) return false;
+  var tl = (day.logs||[]).filter(function(l){ return l.taskId===taskId && !!l.start; });
+  var working = tl.some(function(l){ return l.end===null; });
+  var last = working ? null : tl.filter(function(l){ return l.end; }).sort(function(a,b){ return new Date(b.end).getTime()-new Date(a.end).getTime(); })[0];
+  var by = (state.managerSession && state.managerSession.user && state.managerSession.user.email) || '管理者';
+  markTaskCompletedNow(day, taskId, last ? last.staffId : null, last ? last.end : null);
+  day.taskCompletion[taskId].byManager = by;
+  var ok = await saveDay(day);
+  if(ok) await appendAuditLog({ action:'作業を完了にする', target: taskById(taskId).name, before:'未完了', after:'完了'+(last ? '('+fmtClock(last.end)+'終了)' : '') });
+  return ok;
+}
 /* 管理者用: 途中で次の作業へ移った場合などに「未完了に戻す」 */
 async function reopenTaskCompletion(taskId){
   var day = state.day;
@@ -7221,7 +7268,8 @@ function renderStaffing(){
     else if(!c.rate) warn = '<div class="stf-warn">生産性が未設定のため、必要人数を計算できません(実績がたまると自動で計算されます)</div>';
     else if(c.status==='breakHold') warn = '<div class="stf-warn" style="color:var(--slate-500);">⏸ 休憩中のため、追加の配置案は休憩終了後に計算します</div>';
     return '<div class="stf-card'+(danger?' is-danger':'')+'" data-staffing-task="'+esc(c.taskId)+'">'+
-      '<div><span class="stf-card-name">'+(danger?'🔴 ':'🟠 ')+esc(c.name)+'</span>'+(c.deadline?'<span class="stf-card-sub">締切 '+esc(c.deadline)+'</span>':'')+'</div>'+
+      '<div><span class="stf-card-name">'+(danger?'🔴 ':'🟠 ')+esc(c.name)+'</span>'+(c.deadline?'<span class="stf-card-sub">締切 '+esc(c.deadline)+'</span>':'')+
+        ' <button type="button" class="vc-manage-toggle-btn" data-complete-any="'+esc(c.taskId)+'" style="padding:2px 8px;font-size:11px;float:right;">完了にする</button></div>'+
       nums+etaHtml+people+resvPeople+warn+
       (c.lowSample ? '<div class="stf-warn" style="color:var(--amber-700,#B54708);">'+esc(staffingLowSampleText(c))+'</div>' : '')+
     '</div>';
@@ -7362,7 +7410,8 @@ function renderStaffing(){
       return '<div class="stf-row" data-staffing-task="'+esc(c.taskId)+'"><span class="stf-row-main">✅ '+esc(c.name)+'</span><span class="stf-row-meta">完了'+(c.completedAt?'('+fmtClock(c.completedAt)+')':'')+'</span>'+reopen+'</div>';
     }
     if(c.status==='estDone'){
-      return '<div class="stf-row" data-staffing-task="'+esc(c.taskId)+'"><span class="stf-row-main">🟢 '+esc(c.name)+'</span><span class="stf-row-meta">推定では処理済み(完了の記録なし)・'+c.currentCount+'人'+planned+'</span></div>';
+      return '<div class="stf-row" data-staffing-task="'+esc(c.taskId)+'"><span class="stf-row-main">🟢 '+esc(c.name)+'</span><span class="stf-row-meta">推定では処理済み(完了の記録なし)・'+c.currentCount+'人'+planned+'</span>'+
+        '<button type="button" class="vc-manage-toggle-btn" data-complete-any="'+esc(c.taskId)+'" style="padding:2px 8px;font-size:11px;">完了にする</button></div>';
     }
     var head = c.rate ? '🟢 ' : '⚪ ';
     var meta = '残り'+formatNum(Math.round(c.remainingQty))+c.unit+staffingPiecesNote(c)+staffingEstMark(c)+'・'+c.currentCount+'人'+planned+(c.lowSample ? '・⚠ 生産性の実績'+c.sampleCount+'日分(精度低め)' : '');
@@ -7373,6 +7422,7 @@ function renderStaffing(){
       '<span class="stf-row-main">'+head+esc(c.name)+'</span>'+
       '<span class="stf-row-meta">'+esc(meta)+(c.rate?'':'(生産性未設定)')+'</span>'+
       (eta ? '<span class="stf-row-meta">'+eta+'</span>' : '')+
+      '<button type="button" class="vc-manage-toggle-btn" data-complete-any="'+esc(c.taskId)+'" style="padding:2px 8px;font-size:11px;">完了にする</button>'+
     '</div>';
   }).join('');
   var othersSection = otherRows ? ('<div class="stf-section-title">🟢 人員が足りている作業</div><div class="stf-card" style="border-left-color:#12B76A;">'+otherRows+'</div>') : '';
@@ -7532,6 +7582,17 @@ function bindStaffing(){
       var tid = el.getAttribute('data-complete-task');
       if(!confirm('「'+taskById(tid).name+'」を完了にします。よろしいですか?')) return;
       var ok = await completeUnattendedTask(tid);
+      showToast(ok ? '完了にしました' : '⚠️ 保存できませんでした');
+      render();
+    });
+  });
+  document.querySelectorAll('[data-complete-any]').forEach(function(el){
+    el.addEventListener('click', async function(e){
+      e.stopPropagation();
+      var tid = el.getAttribute('data-complete-any');
+      var working = ((state.day && state.day.logs)||[]).filter(function(l){ return l.end===null && l.taskId===tid; }).length;
+      if(!confirm('「'+taskById(tid).name+'」を完了にします。'+(working ? '\n(今'+working+'人が作業中です。その人の記録はそのまま続きます)' : '')+'\nよろしいですか?')) return;
+      var ok = await completeTaskByManager(tid);
       showToast(ok ? '完了にしました' : '⚠️ 保存できませんでした');
       render();
     });
@@ -11871,6 +11932,8 @@ function render(){
   else if(state.role==='stock') html += renderStockTab();
   if(state.modal) html += renderModal();
   html += renderInstructionAlert();
+  // 作業記録のタブレット: 音を出せる状態になっていなければ知らせる(画面を一度タップすると、指示が出たときにチャイムが鳴る)
+  if(state.role==='input' && state.activeStaffId && instructionChimeBlocked()) html += '<div class="input-sound-hint">🔇 画面を一度タップすると、作業指示が出たときに音が鳴ります</div>';
   root.innerHTML = html;
   bindCommon();
   if(state.role==='report') bindReport();
@@ -15875,7 +15938,7 @@ function renderInput(){
         liveCountersHtml += renderVcCaseCountWidget(tid);
       }
       // 完了ボタンは使わない(次の作業を開始した時点で完了扱い)。数量入力を伴わない旧ボタンは表示しない
-      var completeBtnHtml = (isActive && !WORKER_QUANTITY_INPUT_DISABLED) ? '<button type="button" class="log-stop-btn" data-complete-and-suggest="'+tid+'" style="margin-top:10px;">✓ 完了して次を確認する</button>' : '';
+      var completeBtnHtml = isActive ? '<button type="button" class="log-stop-btn" data-complete-mytask="'+tid+'" style="margin-top:10px;">✅ この作業を完了にする</button>' : '';
       var completionTimeHtml = '';
       if(isActive){
         var estCompletion3 = planEtaText(workerPlan, tid);
@@ -15994,6 +16057,12 @@ function bindInput(){
       var log = currentLog(state.activeStaffId);
       if(log && log.taskId===tid) return;
       requestTaskSwitch(tid);
+    });
+  });
+  document.querySelectorAll('[data-complete-mytask]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      completeMyTask(el.getAttribute('data-complete-mytask'));
     });
   });
   document.querySelectorAll('[data-complete-and-suggest]').forEach(function(el){

@@ -219,7 +219,7 @@ input,select{font-family:inherit;}
 .mon-nav{display:flex;gap:4px;align-items:center;}
 .mon-nav-item{
   background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:#E4E7EC;border-radius:7px;
-  width:34px;height:34px;font-size:15px;display:flex;align-items:center;justify-content:center;
+  min-width:34px;height:34px;padding:0 10px;font-size:13px;font-weight:700;white-space:nowrap;display:flex;align-items:center;justify-content:center;
 }
 .mon-nav-item:hover{background:rgba(255,255,255,.14);}
 @media (max-width:640px){
@@ -1765,6 +1765,7 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-05', items:[
+    '【モニター: 上のボタン】モニターの右上の画面切り替えのボタンに「undefined」と重なって出ていたのを直し、画面の名前(作業記録・集計 など)を出すようにしました',
     '【管理: やること・タブの整理】管理の最初に「やること」画面を作りました。毎朝・日中・夕方・毎月・ときどき に分けたボタンから、その画面のそのタブを1回で開けます(データの更新状況も表示)。タブも減らしました: 管理は「今日・人員配置」「実績・生産性」をまとめ(画面の中で切り替え)、設定は「基本・勤務時間」「システム・操作履歴」をまとめ、在庫は「概要(ブロックごと・才数不明も)・ロケーション・配置」の3つにしました',
     '【配置: 指示書の印刷】「指示書を印刷」を、「どこから → どこへ」だけの見やすい形にしました(品番と、一部だけ動かすときのケース数を小さく添える)。今までの形は「くわしい指示書を印刷」で出せます',
     '【配置: 引当分はピッキング済み】配置の計算で、ロジザードの在庫数から引当数を差し引くようにしました(引当分はピッキング済み・もう棚に無いとみなす)。全部引当済みの物は動かす指示に出ず、そのロケは空きとして使います',
@@ -18986,7 +18987,7 @@ function renderMonitor(){
   var monNavHtml = '<div class="mon-nav">'+
     '<button type="button" class="mon-nav-item" data-nav-role="" title="ホーム">🏠</button>'+
     monNavItems.map(function(item){
-      return '<button type="button" class="mon-nav-item" data-nav-role="'+item.role+'" title="'+(isRoleBlockedForAccount(item.role) ? item.label+'('+READONLY_BLOCKED_TITLE+')' : item.label)+'"'+readOnlyBlockedAttrs(item.role)+'>'+item.icon+'</button>';
+      return '<button type="button" class="mon-nav-item" data-nav-role="'+item.role+'" title="'+(isRoleBlockedForAccount(item.role) ? item.label+'('+READONLY_BLOCKED_TITLE+')' : item.label)+'"'+readOnlyBlockedAttrs(item.role)+'>'+esc(item.label)+'</button>'; // アイコンは使わず画面の名前(以前は item.icon が無く undefined と出ていた)
     }).join('')+
   '</div>';
   var monThemeClass = state.monitorTheme==='light' ? ' mon-theme-light' : '';

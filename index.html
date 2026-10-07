@@ -1753,6 +1753,7 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-05', items:[
+    '【配置: 区切り】指示書の1回の区切りを、通路の上半分・下半分(例: 201〜208 と 209〜216)にしました',
     '【配置: 通路ごとの順番】配置の指示書を、通路ごとに「その通路に面した列を整理 → D列を 1-1 から1ロケあけ、空いたラックをその通路に置いて、よく出る物を入れる」をくり返す順番にしました(B棟の201の通路から)',
     '【配置: 母屋の C の空き】よく出る物は、通路ラックに入らないとき、母屋の C(3段目)の空いている所(在庫の無い番号)を先に使うようにしました',
     '【配置: 仮置きを減らす・AA・B棟から】配置の指示書で、行き先に今入る空きがあれば列の順番を待たずに直接動かし、空きが無ければ行き先から出ていく物を先に動かして空ける(「行き先を空けるために先に動かす物」)ようにして、仮置き場をなるべく使わないようにしました。A(1段目)の端数で、その品番の全在庫が1ケース未満の物は AA へ移す指示を出します。前半は B棟の201の列から始めます(「計算の条件」で A棟からにもできます)',
@@ -10730,7 +10731,7 @@ var SLOT_TENTS = {
   A: { name:'A棟', start:375, cols:6, topFromWall:false, botBays:function(){ return 4; },
        faces:[['左'],['通路1'],['通路1'],['通路2'],['通路2'],['右(広い所)']] },
   B: { name:'B棟', start:201, cols:11, topFromWall:true, botBays:function(i){ return i===0 ? 3 : 4; },
-       faces:[['左','通路1'],['通路1'],['通路2'],['通路2'],['通路3'],['通路3'],['通路4'],['通路4'],['通路5'],['通路5'],['右']] }
+       faces:[['通路1','左'],['通路1'],['通路2'],['通路2'],['通路3'],['通路3'],['通路4'],['通路4'],['通路5'],['通路5'],['右']] }
 };
 // 通路ラックを置かない(あけておく)区画: 棟|通路|上下
 var SLOT_OPEN = { 'A|左|下':true, 'A|右(広い所)|上':true, 'A|右(広い所)|下':true, 'B|左|上':true, 'B|左|下':true, 'B|通路1|下':true };
@@ -11046,10 +11047,17 @@ function slotColLabel(tent, col){
   function rg(a){ if(!a.length) return ''; a.sort(function(x,y){ return x-y; }); return a[0]+'〜'+a[a.length-1]; }
   return SLOT_TENTS[tent].name+' '+(col+1)+'列目('+[rg(top), rg(bot)].filter(Boolean).join('・')+')';
 }
+// 列の上半分・下半分の番号の範囲(例: 201〜208)
+function slotHalfRange(tent, col, half){
+  var POS = slotPositions(), a = [];
+  Object.keys(POS).forEach(function(n){ var p = POS[n]; if(p.tent===tent && p.col===col && p.half===half) a.push(Number(n)); });
+  a.sort(function(x,y){ return x-y; });
+  return a.length ? a[0]+'〜'+a[a.length-1] : '';
+}
 function slotSequence(r, tentFirst){
   var POS = slotPositions();
   var tents = tentFirst==='A' ? ['A','B'] : ['B','A'];
-  function colOfKey(k){ if(!k || k==='AA') return 'AA'; var n = Number(String(k).split(':')[1]); return POS[n] ? POS[n].tent+'|'+POS[n].col : '?'; }
+  function colOfKey(k){ if(!k || k==='AA') return 'AA'; var n = Number(String(k).split(':')[1]); return POS[n] ? POS[n].tent+'|'+POS[n].col+'|'+POS[n].half : '?'; }
   function cuOf(x){ return x.m.cube!==undefined ? x.m.cube : r.cu(x.lot); }
   // 今それぞれの場所に入っている才数(作業を進めるごとに増減させる)
   var phys = {};
@@ -11155,21 +11163,24 @@ function slotSequence(r, tentFirst){
     m4.forEach(function(x){ if(!x.handled && (x.lot.pos || x.buffered)){ if(x.buffered){ if(!moveOrAlt(x, list, chain)) return; } else tryMove(x, list, chain, 0); } });
     m1.forEach(function(x){ if(!x.handled && x.buffered) moveOrAlt(x, list, chain); });
   }
-  // 列1つの適正配置(よく出る物はまだ動かさない)
+  // 区画(通路の上半分・下半分)に面した列の半分を、まとめて適正配置(よく出る物はまだ動かさない)
   var done = {};
-  function doColumn(t, c){
-    var key = t+'|'+c; if(done[key]) return; done[key] = true;
+  function doUnit(t, cols, half, aisleName){
+    var keys = cols.map(function(c){ return t+'|'+c+'|'+half; }).filter(function(k){ return !done[k]; });
+    if(!keys.length) return;
+    keys.forEach(function(k){ done[k] = true; });
     var out = [], chain = [], inner = [], inn = [], fromBuf = [];
-    m1.forEach(function(x){ if(!x.handled && !x.buffered && x.from===key && x.to!==key){ if(!moveOrAlt(x, out, chain)) toBuffer(x, out); } });
-    m1.forEach(function(x){ if(!x.handled && !x.buffered && x.from===key && x.to===key){ if(!moveOrAlt(x, inner, chain)) toBuffer(x, inner); } });
+    m1.forEach(function(x){ if(!x.handled && !x.buffered && keys.indexOf(x.from)!==-1 && keys.indexOf(x.to)===-1){ if(!moveOrAlt(x, out, chain)) toBuffer(x, out); } });
+    m1.forEach(function(x){ if(!x.handled && !x.buffered && keys.indexOf(x.from)!==-1 && keys.indexOf(x.to)!==-1){ if(!moveOrAlt(x, inner, chain)) toBuffer(x, inner); } });
     m1.forEach(function(x){
-      if(x.handled || x.to!==key) return;
+      if(x.handled || keys.indexOf(x.to)===-1) return;
       if(x.buffered){ if(room(x.toKey) >= cuOf(x)-0.01) arrive(x, inn); }
       else tryMove(x, inn, chain, 0);
     });
     flushBuffer(fromBuf);
+    var label = SLOT_TENTS[t].name+' '+aisleName+'の'+half+'('+keys.map(function(k){ var p = k.split('|'); return slotHalfRange(t, Number(p[1]), half); }).join('・')+')';
     if(out.length || chain.length || inner.length || inn.length || fromBuf.length)
-      steps.push({ phase:1, title: '列の整理: '+slotColLabel(t, c), groups:[['出す物', out], ['行き先を空けるために先に動かす物', chain], ['列の中で動かす物', inner], ['入れる物', inn], ['仮置き場から行き先へ', fromBuf]], racks:[] });
+      steps.push({ phase:1, title: '整理: '+label, groups:[['出す物', out], ['行き先を空けるために先に動かす物', chain], ['区画の中で動かす物', inner], ['入れる物', inn], ['仮置き場から行き先へ', fromBuf]], racks:[] });
   }
   // D列のロケ1つをあけ、segs(この通路の区画)に通路ラックを置いて、よく出る物を入れる
   function dRow(l){ return String(l.loc); }
@@ -11206,11 +11217,11 @@ function slotSequence(r, tentFirst){
       seen[a].cols.push(c);
     }); });
   });
-  // 1つの列が2つの通路に面するとき(B棟1列目)は、先の通路で整理する
+  // 1つの列が2つの通路に面するとき(B棟1列目)は、先の通路で整理する。区切りは通路の上半分・下半分
   var freeRacks = 0, dIdx = 0;
-  aisles.forEach(function(ai){
-    ai.cols.forEach(function(c){ doColumn(ai.tent, c); });
-    var segs = r.segs.filter(function(sg){ return sg.tent===ai.tent && sg.aisle===ai.aisle; }).sort(function(a,b){ return (a.half==='上'?0:1)-(b.half==='上'?0:1); });
+  aisles.forEach(function(ai){ ['上','下'].forEach(function(half){
+    doUnit(ai.tent, ai.cols, half, ai.aisle);
+    var segs = r.segs.filter(function(sg){ return sg.tent===ai.tent && sg.aisle===ai.aisle && sg.half===half; });
     segs.forEach(function(sg){
       // この区画に置くラックがたまるまで、D列を 1-1 から順にあける(ラックがたまったロケの手順で置く)
       if(freeRacks >= r.opt.segRacks){ freeRacks -= r.opt.segRacks; doDStep(null, [sg], ai.tent==='A' ? 'A棟 '+ai.aisle : 'B棟 '+ai.aisle); return; }
@@ -11222,7 +11233,7 @@ function slotSequence(r, tentFirst){
       }
       doDStep(null, [sg], sg.name); // D列が先に空いた(ラックの台数の設定による)
     });
-  });
+  }); });
   while(dIdx < dRows.length) doDStep(dRows[dIdx++], [], '');
   // 残り(仮置き場の物は、空きのある所へ)
   var restList = [];
@@ -11295,7 +11306,7 @@ function renderSlotting(st){
     '<span class="pool-hint" style="margin:0;">CSVは右上の「CSV出力 ▾ → 配置の指示」。ロジザードの在庫を取り込み直すと、動かした分を反映して計算し直します。</span></div>';
   var segTable = '<table class="report-table" style="font-size:12px;"><thead><tr><th>区画</th><th class="num">パレット</th><th class="num">使う</th></tr></thead><tbody>'+
     r.segs.map(function(sg){ return '<tr><td><b>'+esc(sg.name)+'</b></td><td class="num">'+sg.slots.length+'</td><td class="num">'+sg.slots.filter(function(x){ return x.count>0; }).length+'</td></tr>'; }).join('')+'</tbody></table>';
-  var body = '<div class="pool-hint" style="margin:0 0 8px;"><b>通路ごとに</b>: '+(opt.tentFirst==='A' ? 'A棟' : 'B棟の201の通路')+'から、①その通路に面した列を適正配置(よく出る物はまだ動かさない)→ ②D列を 1-1 から1ロケあけて、空いたラックをその通路に置き、よく出る物を入れる、をくり返します。行き先に空きがあれば直接動かし、仮置き場はなるべく使いません。<b>後半</b>: D列を1列ずつあけながら、入口側の通路から通路ラックを置き、よく出る物を入れていきます。行き先がまだ空いていない物は仮置き場(A棟の右側の広い所)へ。</div>'+
+  var body = '<div class="pool-hint" style="margin:0 0 8px;"><b>通路ごとに</b>: '+(opt.tentFirst==='A' ? 'A棟' : 'B棟の201の通路')+'から、通路の上半分・下半分ごとに(例: 201〜208 と 209〜216)、①面した棚を適正配置(よく出る物はまだ動かさない)→ ②D列を 1-1 から1ロケあけて、空いたラックをその区画に置き、よく出る物を入れる、をくり返します。行き先に空きがあれば直接動かし、仮置き場はなるべく使いません。<b>後半</b>: D列を1列ずつあけながら、入口側の通路から通路ラックを置き、よく出る物を入れていきます。行き先がまだ空いていない物は仮置き場(A棟の右側の広い所)へ。</div>'+
     seq.steps.map(function(stp, i){
       var n = stp.groups.reduce(function(a,g){ return a+g[1].length; }, 0);
       var head = '';

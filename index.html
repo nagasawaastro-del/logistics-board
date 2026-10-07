@@ -1757,6 +1757,8 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-05', items:[
+    '【配置: 引当分はピッキング済み】配置の計算で、ロジザードの在庫数から引当数を差し引くようにしました(引当分はピッキング済み・もう棚に無いとみなす)。全部引当済みの物は動かす指示に出ず、そのロケは空きとして使います',
+    '【配置: 1ロケ1品番】配置の計算で、何か入っているロケには別の品番を入れないようにしました(1ロケ = パレット1枚。1段目の端数の A も同じ。同じ品番を合わせるときだけ、容量の範囲で足す。A223以降の B は2品番まで)。「行き先が埋まっていた」を減らすためです',
     '【VC引当: 見出しを固定】ピース引当・ケース引当の表で、見出しの行(品番・商品名・数量など)を、スクロールしても上に固定するようにしました。表の枠も画面の高さに合わせて広げました',
     '【VC引当: 倉庫ごとに集計表へ】VC引当の「集計表へ送る」を、「高屋の分を高屋の集計表へ」「丹南の分を丹南の集計表へ」の2つのボタンに分けました(ボタンに行数を表示)。送ったあとの「集計表を開く」は、その倉庫の集計表を開きます',
     '【配置: 区切り】指示書の1回の区切りを、通路の上半分・下半分(例: 201〜208 と 209〜216)にしました',
@@ -10825,7 +10827,17 @@ function computeSlotting(st, opt){
   var POS = slotPositions();
   // 品番ごとの全在庫(高屋のすべてのブロック)。A の端数で全在庫が1ケース未満の物は AA へ
   var totalOf = {};
-  Object.keys(P).forEach(function(code){ var q = 0; Object.keys(P[code].blocks||{}).forEach(function(b){ if(stockSiteOfBlock(b)==='takaya') q += Number(P[code].blocks[b].qty)||0; }); totalOf[code] = q; });
+  // 配置の計算では、引当分はピッキング済み(もう棚に無い)とみなして、在庫数から引当数を差し引く
+  function allocOf(x, loc){ return (x && x.locAlloc) ? (Number(x.locAlloc[loc])||0) : 0; }
+  Object.keys(P).forEach(function(code){
+    var q = 0;
+    Object.keys(P[code].blocks||{}).forEach(function(b){
+      if(stockSiteOfBlock(b)!=='takaya') return;
+      var x = P[code].blocks[b]; q += Number(x.qty)||0;
+      if(x.locAlloc) Object.keys(x.locAlloc).forEach(function(l){ q -= Number(x.locAlloc[l])||0; });
+    });
+    totalOf[code] = Math.max(0, q);
+  });
   // 品番×ロケ(テントの1〜3段目とD列)
   var lots = [];
   Object.keys(P).forEach(function(code){
@@ -10834,7 +10846,7 @@ function computeSlotting(st, opt){
       if(['A','B','C','D'].indexOf(b)===-1 || stockSiteOfBlock(b)!=='takaya') return;
       var x = P[code].blocks[b], per = (x.locQty && Object.keys(x.locQty).length) ? x.locQty : { '': x.qty };
       Object.keys(per).forEach(function(loc){
-        var q = Number(per[loc])||0; if(q<=0) return;
+        var q = (Number(per[loc])||0) - allocOf(x, loc); if(q<=0) return; // 引当分はピッキング済み
         var key = null, n = null;
         if(b!=='D'){
           var num = Number(String(loc).split('-')[0]);
@@ -10862,7 +10874,7 @@ function computeSlotting(st, opt){
       if(lv==='A' && n>=SLOT_NO_A_FROM) return; // A223以降は1段目の A ロケを使わない
       var two = lv==='B' && n>=SLOT_NO_A_FROM;   // そこの B = 1段目と2段目
       var size = lv==='A' ? opt.capA : (two ? opt.capA+opt.capB : (lv==='B' ? opt.capB : opt.capC));
-      cap[k] = { key:k, level:lv, n:n, used:0, count:0, codes:{}, zone:z, size:size, maxN: two ? 3 : 2, floor: lv==='A' || two };
+      cap[k] = { key:k, level:lv, n:n, used:0, count:0, codes:{}, zone:z, size:size, maxN: two ? 2 : 1, floor: lv==='A' || two }; // 1ロケ = パレット1枚(端数の A も1品番)。何か入っているロケには、同じ品番だけ足す
       byZone[z].push(k);
     });
   });
@@ -10872,7 +10884,7 @@ function computeSlotting(st, opt){
     var used = {}, lo = Infinity, hi = -Infinity;
     Object.keys(P).forEach(function(code){
       var x = P[code].blocks && P[code].blocks.C; if(!x) return;
-      Object.keys(x.locQty || {}).forEach(function(loc){ var n = Number(String(loc).split('-')[0]); if(isFinite(n) && n<SLOT_TENTS.B.start && (Number(x.locQty[loc])||0)>0){ used[n] = true; lo = Math.min(lo, n); hi = Math.max(hi, n); } });
+      Object.keys(x.locQty || {}).forEach(function(loc){ var n = Number(String(loc).split('-')[0]); if(!isFinite(n) || n>=SLOT_TENTS.B.start) return; lo = Math.min(lo, n); hi = Math.max(hi, n); if((Number(x.locQty[loc])||0) - (x.locAlloc ? (Number(x.locAlloc[loc])||0) : 0) > 0) used[n] = true; });
     });
     for(var n=lo; n<=hi; n++){
       if(used[n]) continue;
@@ -10903,7 +10915,7 @@ function computeSlotting(st, opt){
   }
   /* 1つの物(品番×ロケ)を、空き(容量 − 入っている才数)のある場所に置く。
      1か所に全部入らなければ、ケース単位で何か所かに分ける(端数のピースは最後の場所へ)。置けなければ null。
-     同じ品番の入っている場所を先に使う(合算)。違う品番は1ロケ2品番まで(1・2段目を合わせた場所は3品番まで) */
+     同じ品番の入っている場所を先に使う(合算)。違う品番は入れない(1ロケ1品番。1・2段目を合わせた場所は2品番まで) */
   function placeParts(l){
     var need = cu(l), z = prefs(l), unit = unitOf(l);
     function room(c){ return c.size - c.used; }
@@ -11077,7 +11089,7 @@ function slotSequence(r, tentFirst){
   var phys = {};
   r.lots.forEach(function(l){ if(l.pos) phys[l.pos] = (phys[l.pos]||0) + r.cu(l); });
   function room(k){ if(k==='AA') return Infinity; var sz = r.capSize[k]; return sz===undefined ? 0 : sz - (phys[k]||0); }
-  // 今それぞれの場所に入っている品番(違う品番は1ロケ2品番まで)
+  // 今それぞれの場所に入っている品番(違う品番は入れない。1ロケ1品番)
   var codesAt = {};
   function addCode(k, code){ var o = codesAt[k] || (codesAt[k] = {}); o[code] = (o[code]||0)+1; }
   function delCode(k, code){ var o = codesAt[k]; if(o && o[code] && !--o[code]) delete o[code]; }
@@ -11332,8 +11344,9 @@ function renderSlotting(st){
     (sh.left.length ? '<div class="stf-section-title" style="margin-top:12px;color:#B42318;">入りきらない('+sh.left.length+'行)</div>'+slotTableHtml(sh.left, 300) : '');
   var rules = '<details class="slot-settings" style="margin-top:12px;"><summary>配置のルール ▾</summary><div class="pool-hint" style="line-height:1.8;margin:6px 0 0;">'+
     '出荷のランク: '+ship.days+'日分の出荷記録('+esc(ship.from)+'〜'+esc(ship.to)+')の1日あたりケース数で、出荷のある'+r.movingCount+'品番の上位'+opt.fastPct+'% = よく出る、次の'+opt.midPct+'% = たまに出る、残り = あまり出ない。<br>'+
-    '作業の流れ: '+(opt.tentFirst==='A' ? 'A棟' : 'B棟の201の通路')+'から通路ごとに、面した列を適正配置(よく出る物はそのまま)→ D列を1ロケあけて、空いたラックをその通路に置く、をくり返す。行き先に今入る空きがあれば直接動かし、無ければ行き先から出ていく物を先に動かして空け、仮置き場はなるべく使わない。A の端数で全在庫が1ケース未満の物は AA へ。後半 = D列をロケ1つずつ(1-1 から)あけ、空いたラック(1ロケ '+opt.dRacks+'台)を入口側の通路から置き(1区画 '+opt.segRacks+'台)、よく出る物を入れる。入数1の物は1段目(A)に置かない。'+opt.mergeCases+'ケース以下のパレットは、同じ品番のある場所へなるべく合算する(違う品番は1ロケ2品番まで)。'+(opt.tentFirst==='B' ? 'B棟 → A棟' : 'A棟 → B棟')+'。整理中の物は仮置き場(A棟の右側の広い所)へ。<br>'+
-    '行き先: よく出る → 通路ラック(端数は下段)→ 入らなければ母屋の C の空いている所/ たまに出る → 棚の通路側(あけておく通路の前を先に)/ あまり出ない・出荷なし → 棚の壁側(端数は1段目の通路側 → 壁側)。棚1ロケの容量は 1段目'+opt.capA+'才・2段目'+opt.capB+'才・3段目'+opt.capC+'才で、入らない物はケース単位で分けて置く。違う品番は1ロケ2品番まで。<br>'+
+    '作業の流れ: '+(opt.tentFirst==='A' ? 'A棟' : 'B棟の201の通路')+'から通路ごとに、面した列を適正配置(よく出る物はそのまま)→ D列を1ロケあけて、空いたラックをその通路に置く、をくり返す。行き先に今入る空きがあれば直接動かし、無ければ行き先から出ていく物を先に動かして空け、仮置き場はなるべく使わない。A の端数で全在庫が1ケース未満の物は AA へ。後半 = D列をロケ1つずつ(1-1 から)あけ、空いたラック(1ロケ '+opt.dRacks+'台)を入口側の通路から置き(1区画 '+opt.segRacks+'台)、よく出る物を入れる。入数1の物は1段目(A)に置かない。'+opt.mergeCases+'ケース以下のパレットは、同じ品番のある場所へなるべく合算する。'+(opt.tentFirst==='B' ? 'B棟 → A棟' : 'A棟 → B棟')+'。整理中の物は仮置き場(A棟の右側の広い所)へ。<br>'+
+    '行き先: よく出る → 通路ラック(端数は下段)→ 入らなければ母屋の C の空いている所/ たまに出る → 棚の通路側(あけておく通路の前を先に)/ あまり出ない・出荷なし → 棚の壁側(端数は1段目の通路側 → 壁側)。棚1ロケの容量は 1段目'+opt.capA+'才・2段目'+opt.capB+'才・3段目'+opt.capC+'才で、入らない物はケース単位で分けて置く。違う品番は入れない(1ロケ1品番。何か入っているロケには同じ品番だけ足す)。<br>'+
+    '在庫数: ロジザードの在庫数から引当数を差し引いた数(引当分はピッキング済みとみなす)。<br>'+
     'ロケ番号: 2段目(B)・3段目(C)の 201〜374 = B棟、375〜470 = A棟。1段目(A)は B の番号 − 200。A223以降(B423〜470 の下)は1段目の A ロケを使わず、B ロケ = 1段目と2段目('+(opt.capA+opt.capB)+'才)、C = 3段目。今 A223以降にある物は動かします。母屋(B・C の 200以下)・A0・AA・S・E は今の使い方のままです。'+
   '</div></details>';
   return settings+cards+head+body+rules;

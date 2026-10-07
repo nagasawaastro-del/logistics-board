@@ -1753,6 +1753,7 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-05', items:[
+    '【収支: 担当別(パート・リフト)】収支に「担当別」を足しました。パート(AA・S のピッキングと梱包)の売上は、作業量CSVでブロックが AA・S の出荷の売上(得意先ごとにピース数の割合で分けた目安。梱包には単価が無いので入りません)、人件費はスタッフ設定の区分が「パート」の人の分です。スタッフの「編集」に「区分(パート/リフト・社員)」を足しました。担当別は、この機能より後に取り込んだ作業量CSVから分かれます',
     '【配置: 才数と容量で正確に】配置の計算を、品番ごとの才数(入数・1ケースの才数)と、ロケの容量(1段目・2段目・3段目・通路ラック1段に入る才数。「計算の条件」で入れる)で、きっちり合わせるようにしました。1か所に入らない物は、ケース単位で何か所かに分けて置く指示を出します(「分けて置く」)。指示書に動かすケース数(例: 3c+5 = 3ケースと5ピース)を出し、才数の分からない物は「才数不明」と出します。今の在庫のまま残る物で容量より多い場所があれば、件数を出します',
     '【配置: 少ないパレットの合算】配置の計算で、ケース数の少ないパレット(10ケース以下。「計算の条件」で変えられます)は、同じ品番のある場所へなるべくまとめる(合算)ようにしました。棚で同じ品番が何か所かに分かれているときは、いちばん多い場所へ寄せ、動かす物も同じ品番のある場所を先に使い、通路ラックでも同じ品番の少ないパレットはいっしょに置きます。行き先の場所に「同じ品番と合算」と出ます',
     '【配置: D列はロケ1つずつ】後半の手順を、D列のロケ1つ(1-1 から)ずつにしました。1ロケをあけると約9台のラックが空き、それを入口側の通路に置いて(1区画9台・2段)、よく出る物を入れます。台数は「計算の条件」で変えられます',
@@ -4037,6 +4038,8 @@ async function registerShipperNos(shipperNos, dateStr, taskId){
   });
   await saveShipperNoRegistry(registry);
 }
+// パートさんがピッキングするブロック(収支の担当別に使う)
+var PART_PICK_BLOCKS = ['AA','S'];
 function summarizeShipperGroups(groupsSubset){
   var primaryCount = groupsSubset.length;
   var lineCount = groupsSubset.reduce(function(a,g){ return a+g.lineCount; }, 0);
@@ -4046,10 +4049,12 @@ function summarizeShipperGroups(groupsSubset){
   var byCustomer = {};
   groupsSubset.forEach(function(g){
     var key = g.customerName || '(不明)';
-    if(!byCustomer[key]) byCustomer[key] = { primaryCount:0, lineCount:0, totalQty:0 };
+    if(!byCustomer[key]) byCustomer[key] = { primaryCount:0, lineCount:0, totalQty:0, partQty:0, partLines:0 };
     byCustomer[key].primaryCount += 1;
     byCustomer[key].lineCount += g.lineCount;
     byCustomer[key].totalQty += g.totalQty;
+    byCustomer[key].partQty += g.partQty||0;
+    byCustomer[key].partLines += g.partLines||0;
   });
   return { primaryCount:primaryCount, lineCount:lineCount, totalQty:totalQty, setQty:setQty, setLines:setLines, byCustomer:byCustomer };
 }
@@ -4073,6 +4078,7 @@ function buildAutoMappedImportPlan(parseResult, mapping, targetDate){
       primaryCount: summary.primaryCount, lineCount: summary.lineCount, totalQty: summary.totalQty,
       // 当日出荷に使うセット(ブロック略称 SET)。ブロックの列が無いCSVでは null(分からない)
       setQty: parseResult.hasBlock ? summary.setQty : null, setLines: parseResult.hasBlock ? summary.setLines : null,
+      partKnown: !!parseResult.hasBlock, // AA・S の数量が分かる(ブロックの列があるCSV)
       byCustomer: summary.byCustomer, byProduct: byProductForTask,
       shipperNos: groupsSubset.map(function(g){ return g.shipperNo; })
     };
@@ -6090,7 +6096,7 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
             customerName: rowCustomerName,
             pickLocation: locCol ? (r[locCol]||'').trim() : '',
             invoiceType: invCol ? (r[invCol]||'').trim() : '',
-            lineCount:0, totalQty:0, setQty:0, setLines:0
+            lineCount:0, totalQty:0, setQty:0, setLines:0, partQty:0, partLines:0
           };
           order.push(shipperNo);
         }
@@ -6103,6 +6109,8 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
         }
         groups[shipperNo].totalQty += qty;
         if(blkCol && String(r[blkCol]||'').trim().toUpperCase()==='SET'){ groups[shipperNo].setQty += qty; groups[shipperNo].setLines++; }
+        // パートさんのピッキング担当のブロック(AA・S)
+        if(blkCol && PART_PICK_BLOCKS.indexOf(String(r[blkCol]||'').trim().toUpperCase())!==-1){ groups[shipperNo].partQty += qty; groups[shipperNo].partLines++; }
 
         // 荷主(取引先名)別・商品(商品ID)別の内訳(実CSVの列名で取得。無ければ「(不明)」扱い)
         var customerName = rowCustomerName;
@@ -7693,7 +7701,8 @@ function renderFinancial(){
         '<div class="fin-summary-card"><div class="fin-summary-label">粗利</div><div class="fin-summary-value">¥'+formatNum(Math.round(pt.grossProfit))+'</div></div>'+
         '<div class="fin-summary-card"><div class="fin-summary-label">利益率</div><div class="fin-summary-value">'+pt.margin.toFixed(1)+'%</div></div>'+
       '</div>'+
-      '<div class="pool-hint" style="margin:0 0 10px;">総稼働 '+pt.personHours.toFixed(1)+'時間 ・ 出荷数量 '+formatNum(pt.totalQty)+'ピース</div>';
+      '<div class="pool-hint" style="margin:0 0 10px;">総稼働 '+pt.personHours.toFixed(1)+'時間 ・ 出荷数量 '+formatNum(pt.totalQty)+'ピース</div>'+
+      renderFinPartTable(pt);
   }
   if(state.finAnalyticsLoading){
     analyticsBody = '<div class="empty-note">集計中...</div>';
@@ -7797,6 +7806,7 @@ function renderFinancial(){
       dayNav+
       loadingOrError+
       summaryHtml+
+      (summary ? renderFinPartTable({ sales: summary.totalSales, laborCost: summary.laborCost, partSales: summary.partSales, partLabor: summary.partLabor, partUnknownImports: summary.partUnknownImports }) : '')+
     '</div>'+
     '<div class="pool-hint" style="margin-top:14px;">単価は「設定 → 得意先・単価」、時給は「設定 → スタッフ」で設定します。</div>'+
   '</div>';
@@ -8315,14 +8325,30 @@ function computeFinancialByDate(byDate){
     unsetItems = sm.unsetItems;
     if(!(sm.totalSales || sm.laborCost || qty || sm.totalHours)) return; // 記録の無い日(休日など)は出さない
     rows.push({ key: x.date, label: dateLabelFromStr(x.date), date: x.date, shipmentCount: ship, poCount: po, lineCount: lines, totalQty: qty,
-      personHours: sm.totalHours||0, sales: sm.totalSales, laborCost: sm.laborCost, grossProfit: sm.grossProfit, margin: sm.margin });
+      personHours: sm.totalHours||0, sales: sm.totalSales, laborCost: sm.laborCost, grossProfit: sm.grossProfit, margin: sm.margin,
+      partSales: sm.partSales||0, partLabor: sm.partLabor||0, partUnknownImports: sm.partUnknownImports||0 });
   });
   rows.meta = { unpricedCustomers: Object.keys(unpriced), cubicMissingCases: cubicMissing, missingWageStaffIds: Object.keys(missingWage), unsetItems: unsetItems || [], workReportUnmapped: Object.keys(wrUnmapped) };
   return rows;
 }
 /* 表の合計行用 */
+/* 担当別(パート = AA・S のピッキングと梱包 / リフト・社員 = それ以外)の売上・人件費・粗利 */
+function renderFinPartTable(t){
+  function line(label, sales, labor){
+    var gp = sales-labor;
+    return '<tr><td><b>'+esc(label)+'</b></td><td class="num">¥'+formatNum(Math.round(sales))+'</td><td class="num">¥'+formatNum(Math.round(labor))+'</td>'+
+      '<td class="num" style="'+(gp<0?'color:var(--rust-600);':'')+'">¥'+formatNum(Math.round(gp))+'</td><td class="num">'+(sales>0 ? (gp/sales*100).toFixed(1)+'%' : '―')+'</td></tr>';
+  }
+  return '<div class="stf-section-title" style="margin:6px 0 4px;">担当別</div>'+
+    '<div style="overflow-x:auto;"><table class="report-table" style="font-size:13px;max-width:640px;"><thead><tr><th>担当</th><th class="num">売上</th><th class="num">人件費</th><th class="num">粗利</th><th class="num">利益率</th></tr></thead><tbody>'+
+      line('パート(AA・S)', t.partSales||0, t.partLabor||0)+
+      line('リフト・社員(それ以外)', (t.sales||0)-(t.partSales||0), (t.laborCost||0)-(t.partLabor||0))+
+    '</tbody></table></div>'+
+    '<div class="pool-hint" style="margin:4px 0 10px;">パートの売上 = 作業量CSVでブロックが AA・S の出荷の売上(得意先ごとに、ピース数の割合で分けた目安)。梱包には作業単価が無いため、梱包の売上は入っていません。人件費は、スタッフ設定の区分が「パート」の人の分(区分はスタッフの「編集」で変えられます)。'+
+      ((t.partUnknownImports||0) ? ' ⚠ ブロックの分からない取込が'+t.partUnknownImports+'件あり、その分はリフト・社員に入っています(CSVを取り込み直すと分かれます)。' : '')+'</div>';
+}
 function sumFinancialRows(rows){
-  var t = { shipmentCount:0, poCount:0, lineCount:0, totalQty:0, personHours:0, sales:0, laborCost:0, grossProfit:0 };
+  var t = { shipmentCount:0, poCount:0, lineCount:0, totalQty:0, personHours:0, sales:0, laborCost:0, grossProfit:0, partSales:0, partLabor:0, partUnknownImports:0 };
   (rows||[]).forEach(function(r){ Object.keys(t).forEach(function(k){ t[k] += r[k]||0; }); });
   t.margin = t.sales>0 ? t.grossProfit/t.sales*100 : 0;
   return t;
@@ -8484,12 +8510,17 @@ function computeFinancialSummary(dateStr, day, workVolume){
   var labor = laborCostFromAgg(agg, wages);
   var wv = workVolume || emptyWorkVolume();
   var byTask = {}, byCustomer = {}, unpriced = {}, cubicMissingCases = 0;
+  var partSales = 0, partUnknownImports = 0;
   wvActiveImports(wv).forEach(function(imp){
     var cq = importCustomerPriceQty(imp);
     var t = byTask[imp.taskId] || (byTask[imp.taskId] = { taskId: imp.taskId, taskName: taskById(imp.taskId).name, pieces:0, sales:0 });
+    if(!imp.partKnown) partUnknownImports++;
     Object.keys(cq).forEach(function(cust){
       var q = cq[cust];
       var s = salesForCustomerQty(model, cust, q);
+      // パート担当分: その得意先の出荷のうち AA・S から出した数量の割合で売上を分ける(梱包には単価が無いので、出荷の売上で数える)
+      var bc = imp.byCustomer && imp.byCustomer[cust];
+      if(imp.partKnown && bc && bc.totalQty>0) partSales += s.sales * Math.min(1, (bc.partQty||0)/bc.totalQty);
       t.pieces += q['ピース']; t.sales += s.sales;
       var c = byCustomer[cust] || (byCustomer[cust] = { customerName: cust, qty: emptyPriceQty(), sales:0, lines:{} });
       addPriceQty(c.qty, q);
@@ -8527,7 +8558,9 @@ function computeFinancialSummary(dateStr, day, workVolume){
   var totalSales = rows.reduce(function(a,r){ return a+r.sales; }, 0);
   var grossProfit = totalSales - labor.total;
   var margin = totalSales>0 ? (grossProfit/totalSales*100) : 0;
+  var partLabor = Object.keys(labor.byStaff).reduce(function(a, sid){ return a + (isPartStaff(sid) ? labor.byStaff[sid] : 0); }, 0);
   return { rows: rows, customerRows: customerRows, totalSales: totalSales, laborCost: labor.total, totalHours: labor.hours,
+    partSales: partSales, partLabor: partLabor, partUnknownImports: partUnknownImports,
     grossProfit: grossProfit, margin: margin, unpricedCustomers: Object.keys(unpriced), cubicMissingCases: cubicMissingCases,
     missingWageStaffIds: labor.missingStaffIds, unsetItems: model.unsetItems, workReportUnmapped: Object.keys(wrUnmapped),
     workReportError: (state.workReportCache && state.workReportCache.error) || '' };
@@ -12863,7 +12896,7 @@ function renderStaffSettingsPanel(){
     var nowText = !on ? '' : (open ? (open.taskId==='BREAK' ? '🍽 休憩中' : '▶ '+taskById(open.taskId).name) : '作業なし');
     var pattern = s.pattern || defaultPattern();
     var days = pattern.map(function(v,i){ return v ? WD[i] : ''; }).join('') || 'なし';
-    var tags = (s.autoAssignExcluded===true ? '<span class="ll-tag ll-tag-warn">自動配置の対象外</span>' : '')+
+    var tags = (s.workerType==='lift' ? '<span class="ll-tag">リフト・社員</span>' : '')+(s.autoAssignExcluded===true ? '<span class="ll-tag ll-tag-warn">自動配置の対象外</span>' : '')+
       (s.offOnHolidays ? '<span class="ll-tag">祝日休み</span>' : '');
     return '<div class="ll-card" data-staff-card="'+s.id+'">'+
       '<div class="ll-card-head">'+
@@ -12896,7 +12929,7 @@ function openStaffEditModal(s){
   state.modal = { kind:'staffEdit', staffId: s.id, name: s.name, avatarColor: avatarColorForStaff(s), pattern: (s.pattern || defaultPattern()).slice(),
     attendance: !!day.attendance[s.id], shiftEnd: (day.shiftEndOverrides && day.shiftEndOverrides[s.id]) || '',
     ownShiftEnd: isClockStr(s.shiftEnd) ? s.shiftEnd : '',
-    offOnHolidays: !!s.offOnHolidays, autoAssignExcluded: s.autoAssignExcluded===true };
+    offOnHolidays: !!s.offOnHolidays, autoAssignExcluded: s.autoAssignExcluded===true, workerType: s.workerType==='lift' ? 'lift' : 'part' };
   state.suppressRender = true;
   render();
 }
@@ -12940,6 +12973,10 @@ function renderStaffEditModal(m){
       '<div class="ll-form-group"><div class="ll-form-group-title">人員配置</div>'+
         '<label style="display:block;font-size:13px;"><input type="checkbox" id="staffEditAutoExcluded" '+(m.autoAssignExcluded?'checked':'')+'> 🚫 自動配置の対象外にする(手動での配置・作業開始はできます)</label>'+
       '</div>'+
+      '<div class="ll-form-group"><div class="ll-form-group-title">区分(収支の担当別)</div>'+
+        '<label style="margin-right:14px;font-size:13px;"><input type="radio" name="staffEditType" value="part"'+(m.workerType!=='lift'?' checked':'')+'> パート(AA・Sのピッキング・梱包)</label>'+
+        '<label style="font-size:13px;"><input type="radio" name="staffEditType" value="lift"'+(m.workerType==='lift'?' checked':'')+'> リフト・社員</label>'+
+      '</div>'+
       '<div class="modal-actions" style="margin-top:14px;">'+
         '<button class="modal-cancel" id="staffEditCancelBtn">キャンセル</button>'+
         '<button class="modal-confirm" id="staffEditSaveBtn">保存</button>'+
@@ -12957,6 +12994,7 @@ function bindStaffEditModal(m){
     var ose = document.getElementById('staffEditOwnShiftEnd'); if(ose) state.modal.ownShiftEnd = ose.value;
     var h =document.getElementById('staffEditHoliday'); if(h) state.modal.offOnHolidays = h.checked;
     var ax = document.getElementById('staffEditAutoExcluded'); if(ax) state.modal.autoAssignExcluded = ax.checked;
+    var wt = document.querySelector('input[name="staffEditType"]:checked'); if(wt) state.modal.workerType = wt.value;
   }
   document.querySelectorAll('[data-staff-edit-color]').forEach(function(el){
     el.addEventListener('click', function(){ keepInputs(); state.modal.avatarColor = el.getAttribute('data-staff-edit-color'); render(); });
@@ -12992,6 +13030,8 @@ function bindStaffEditModal(m){
     if(JSON.stringify(s.pattern || defaultPattern())!==JSON.stringify(d.pattern)){ s.pattern = d.pattern.slice(); rosterChanged = true; }
     if(!!s.offOnHolidays!==d.offOnHolidays){ s.offOnHolidays = d.offOnHolidays; rosterChanged = true; }
     if(beforeExcluded!==d.autoAssignExcluded){ if(d.autoAssignExcluded) s.autoAssignExcluded = true; else delete s.autoAssignExcluded; rosterChanged = true; }
+    var beforeType = s.workerType==='lift' ? 'lift' : 'part';
+    if(d.workerType && beforeType!==d.workerType){ if(d.workerType==='lift') s.workerType = 'lift'; else delete s.workerType; rosterChanged = true; }
     if(beforeAtt!==d.attendance){ day.attendance[s.id] = d.attendance; dayChanged = true; }
     var beforeTodayEnd = (day.shiftEndOverrides && day.shiftEndOverrides[s.id]) || '', todayEndChanged = false;
     if(state.shiftSettings && state.shiftSettings.enabled){
@@ -13016,6 +13056,7 @@ function bindStaffEditModal(m){
     if(beforeAtt!==d.attendance) await appendAuditLog({ action:'出勤状態変更', target: s.name, before: (beforeAtt?'出勤中':'欠勤'), after: (d.attendance?'出勤中':'欠勤') });
     if(beforeOwnEnd!==afterOwnEnd) await appendAuditLog({ action:'退勤時間の設定', target: s.name, before: beforeOwnEnd||'未設定', after: afterOwnEnd||'未設定' });
     if(beforeExcluded!==d.autoAssignExcluded) await appendAuditLog({ action:'自動配置の対象設定', target: s.name, before: beforeExcluded?'対象外':'対象', after: d.autoAssignExcluded?'対象外':'対象' });
+    if(d.workerType && beforeType!==d.workerType) await appendAuditLog({ action:'スタッフの区分', target: s.name, before: beforeType==='lift'?'リフト・社員':'パート', after: d.workerType==='lift'?'リフト・社員':'パート' });
     render();
     if(ok && (rosterChanged || dayChanged)) showToast('「'+s.name+'」の設定を保存しました');
   });
@@ -16076,6 +16117,8 @@ function customerHasWorkPrice(model, customerName){
   return !!(model && model.items.some(function(it){ return it.allCustomers || it.customers[customerName]; }));
 }
 /* スタッフの時給。個別の時給 → 標準時給 → 従来の全員共通の時給(labor_costs)の順。どれも無ければ null */
+/* 区分: スタッフ設定の「リフト・社員」以外はパート */
+function isPartStaff(staffId){ var s = (state.roster||[]).find(function(x){ return x.id===staffId; }); return !(s && s.workerType==='lift'); }
 function wageForStaff(wages, staffId){
   if(!wages) return null;
   if(typeof wages.byStaff[staffId]==='number') return wages.byStaff[staffId];
@@ -16128,7 +16171,7 @@ async function saveStaffWage(staffId, hourlyWage){
 /* 期間の作業時間から人件費を出す。戻り値: { total, byTask:{ taskId: 円 }, hours, missingStaffIds[] }
    人件費 = スタッフごとの(作業時間 × 時給)。休憩は含めない。時給が分からない人の時間は人件費に入れず missingStaffIds に入れる */
 function laborCostFromAgg(agg, wages){
-  var out = { total:0, byTask:{}, hours:0, missingStaffIds:[] };
+  var out = { total:0, byTask:{}, byStaff:{}, hours:0, missingStaffIds:[] };
   Object.keys(agg.perStaff).forEach(function(sid){
     var ps = agg.perStaff[sid];
     var w = wageForStaff(wages, sid);
@@ -16140,6 +16183,7 @@ function laborCostFromAgg(agg, wages){
       var cost = h*w;
       out.total += cost;
       out.byTask[tid] = (out.byTask[tid]||0) + cost;
+      out.byStaff[sid] = (out.byStaff[sid]||0) + cost;
     });
   });
   return out;
@@ -18033,6 +18077,7 @@ function bindAutoMapPreviewModal(m){
           taskKind: (taskById(p.taskId).taskKind) || 'normal',
           primaryCount: p.primaryCount, lineCount: p.lineCount, totalQty: p.totalQty,
           setQty: (typeof p.setQty==='number') ? p.setQty : null, setLines: (typeof p.setLines==='number') ? p.setLines : null,
+          partKnown: !!p.partKnown,
           fileFingerprint: d.fingerprint, fileSize: d.fileSize, shipperNos: p.shipperNos,
           byCustomer: p.byCustomer||{}, byProduct: p.byProduct||{},
           autoMappedGroupId: groupImportId,

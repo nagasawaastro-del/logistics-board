@@ -14279,9 +14279,10 @@ function renderCsvImportPanel(){
       '<td class="num">明細'+formatNum(imp.lineCount)+'</td>'+
       '<td class="num">'+formatNum(imp.totalQty)+'ピース</td>'+
       '<td class="num" data-wv-split="'+imp.id+'">'+(outboundSplitOfImport(imp) ? formatNum(outboundSplitOfImport(imp).caseCount)+'ケース / バラ'+formatNum(outboundSplitOfImport(imp).pieceCount)+'ピース' : '<span style="color:var(--slate-500);">データなし</span>')+'</td>'+
+      '<td class="num">'+(importSetText(imp) || '<span style="color:var(--slate-500);" title="ブロック略称の列が無いCSVか、機能追加前の取込です(取り込み直すと数えます)">データなし</span>')+'</td>'+
       '<td class="num">'+todayBtn+'<button type="button" class="vc-manage-toggle-btn" data-wv-import-edit="'+imp.id+'">編集</button> <button type="button" class="vc-manage-toggle-btn" data-wv-import-move="'+imp.id+'">日付変更</button> <button type="button" class="log-stop-btn" data-wv-import-delete="'+imp.id+'">削除</button></td>'+
     '</tr>';
-  }).join('') || '<tr><td colspan="8" style="color:var(--slate-500);">この日付の取込履歴はまだありません</td></tr>';
+  }).join('') || '<tr><td colspan="9" style="color:var(--slate-500);">この日付の取込履歴はまだありません</td></tr>';
   var wvDeletedImports = (wvViewData.imports||[]).filter(function(i){ return i.deletedAt; });
   var wvDeletedHtml = wvDeletedImports.map(function(imp){
     var t = taskById(imp.taskId);
@@ -14290,7 +14291,7 @@ function renderCsvImportPanel(){
 
   var wvHistoryHtml = pastDatesHtml+
     '<div class="panel-title" style="font-size:15px;margin-top:18px;">取込履歴('+esc(dateLabelFromStr(wvTargetDate))+')</div>'+
-    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>作業</th><th>合計</th><th>明細</th><th>出荷数量</th><th>ケース / バラ</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
+    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>作業</th><th>合計</th><th>明細</th><th>出荷数量</th><th>ケース / バラ</th><th>セット</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
     '<details class="vc-manage-details" id="wvDeletedDetails" '+(state.wvDeletedOpen?'open':'')+' style="margin-top:12px;">'+
       '<summary>削除済み'+(wvDeletedImports.length?'('+wvDeletedImports.length+'件)':'')+'</summary>'+
       '<div class="vc-slip-list" style="margin-top:8px;">'+wvDeletedHtml+'</div>'+
@@ -14419,6 +14420,11 @@ function accountMailBox(n){
     '<pre style="white-space:pre-wrap;font-size:12px;background:var(--paper-2,#F9FAFB);border:1px solid var(--paper-line);border-radius:8px;padding:10px;margin:0;">件名: '+esc(m.subject)+'\n\n'+esc(m.body)+'</pre>'+
     '<div class="pool-hint" style="margin:6px 0 0;">「メールで知らせる」で、パソコンのメールソフト(Thunderbird など)が宛先・件名・本文の入った状態で開きます。中身を確かめて送信してください。開かないときは「本文をコピー」してメールに貼り付けてください。パスワードはこの画面を閉じると消えます(どこにも保存しません)。</div>'+
   '</div>';
+}
+/* 取込のセットの数量(CSVのブロック略称 SET の行)。ブロックの列が無いCSV・機能追加前の取込は null */
+function importSetText(imp){
+  if(typeof imp.setQty!=='number') return null;
+  return formatNum(imp.setQty)+'ピース('+formatNum(imp.setLines||0)+'行)';
 }
 function renderAccountsPanel(){
   if(state.authRole!=='admin') return '<div class="mgr-wrap"><div class="panel"><div class="panel-title">アカウント</div><div class="pool-hint">アカウントの管理は admin のアカウントだけができます。</div></div></div>';
@@ -15527,10 +15533,11 @@ async function downloadBackupForDate(dateStr){
   downloadCSV(dateStr+'_作業時間実績.csv', logRows);
 
   // 既存の列はそのまま(「ピース数」列は従来どおり出荷数量=出荷引当数の合計)。ケース数・バラ数は末尾に追加(記録が無い取込は空欄)
-  var wvRows = [['取込日時','ファイル名','作業','件数またはPO数','明細数','ピース数','状態','ケース数','バラ数']];
+  var wvRows = [['取込日時','ファイル名','作業','件数またはPO数','明細数','ピース数','状態','ケース数','バラ数','セット数量','セット行数']];
   (wv.imports||[]).forEach(function(imp){
     var sp = outboundSplitOfImport(imp);
-    wvRows.push([imp.importedAt, imp.fileName, taskById(imp.taskId).name, imp.primaryCount, imp.lineCount, imp.totalQty, imp.deletedAt?'削除済み':'有効', sp ? sp.caseCount : '', sp ? sp.pieceCount : '']);
+    var hasSet = typeof imp.setQty==='number';
+    wvRows.push([imp.importedAt, imp.fileName, taskById(imp.taskId).name, imp.primaryCount, imp.lineCount, imp.totalQty, imp.deletedAt?'削除済み':'有効', sp ? sp.caseCount : '', sp ? sp.pieceCount : '', hasSet ? imp.setQty : '', hasSet ? (imp.setLines||0) : '']);
   });
   downloadCSV(dateStr+'_CSV取込履歴と作業量.csv', wvRows);
 
@@ -18581,7 +18588,8 @@ function renderAutoMapPreviewModal(m){
     var t = taskById(p.taskId);
     return '<div class="checklist-item">'+
       '<div class="checklist-item-title">✓ '+esc(t.name)+'</div>'+
-      '<div class="checklist-item-action">件数/PO数 '+formatNum(p.primaryCount)+' ・ 明細 '+formatNum(p.lineCount)+' ・ 出荷数量 '+formatNum(p.totalQty)+'ピース'+(outboundSplitOfImport(p) ? '(ケース '+formatNum(outboundSplitOfImport(p).caseCount)+'ケース・バラ '+formatNum(outboundSplitOfImport(p).pieceCount)+'ピース)' : '')+'('+Object.keys(p.byCustomer).length+'得意先)</div>'+
+      '<div class="checklist-item-action">件数/PO数 '+formatNum(p.primaryCount)+' ・ 明細 '+formatNum(p.lineCount)+' ・ 出荷数量 '+formatNum(p.totalQty)+'ピース'+(outboundSplitOfImport(p) ? '(ケース '+formatNum(outboundSplitOfImport(p).caseCount)+'ケース・バラ '+formatNum(outboundSplitOfImport(p).pieceCount)+'ピース)' : '')+'('+Object.keys(p.byCustomer).length+'得意先)'+
+        ' ・ セット '+(importSetText(p) || '<span style="color:var(--slate-500);">分からない(ブロック略称の列なし)</span>')+'</div>'+
     '</div>';
   }).join('') || '<div class="empty-note">自動紐付けできた作業枠はありません</div>';
 

@@ -143,6 +143,14 @@ input,select{font-family:inherit;}
 .topbar-left{display:flex;align-items:baseline;gap:12px;}
 .topbar-title{font-family:var(--font-display);font-weight:600;font-size:15px;letter-spacing:-.01em;}
 .topbar-date{font-family:var(--font-mono);font-size:12px;color:#9AA4B8;}
+.todo-sec{margin:14px 0 0;}
+.todo-sec-title{font-size:13px;font-weight:800;color:#475467;margin:0 0 6px;letter-spacing:.04em;}
+.todo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;}
+.todo-btn{text-align:left;padding:12px 14px;border:1px solid #D0D5DD;border-radius:10px;background:#fff;font-size:14px;font-weight:700;color:#101828;cursor:pointer;}
+.todo-btn:hover{background:#F9FAFB;border-color:#98A2B3;}
+.sub-switch{display:flex;gap:6px;margin:-6px 0 12px;}
+.sub-switch-btn{border:1px solid #D0D5DD;background:#fff;border-radius:999px;padding:5px 14px;font-size:13px;font-weight:700;color:#344054;cursor:pointer;}
+.sub-switch-btn.active{background:#101828;border-color:#101828;color:#fff;}
 .sk-pf{display:inline-flex;gap:3px;align-items:center;padding:6px 10px;border-radius:8px;cursor:pointer;border:2px solid #D0D5DD;background:#fff;font-weight:700;}
 .sk-pf span{border:1px solid #98A2B3;border-radius:4px;padding:1px 6px;background:#fff;font-size:12px;}
 .sk-pf .sk-pf-ck{display:none;border:none;padding:0;background:none;color:#175CD3;font-size:14px;}
@@ -1757,6 +1765,7 @@ var CHANGELOG = [
     '今回はあくまで「取得して保存する」ところまでです。ケース数・才数計算、CSVとの照合、収支計算への反映は、指示書の通り今回のスコープ外です'
   ]},
   { date:'2026-10-05', items:[
+    '【管理: やること・タブの整理】管理の最初に「やること」画面を作りました。毎朝・日中・夕方・毎月・ときどき に分けたボタンから、その画面のそのタブを1回で開けます(データの更新状況も表示)。タブも減らしました: 管理は「今日・人員配置」「実績・生産性」をまとめ(画面の中で切り替え)、設定は「基本・勤務時間」「システム・操作履歴」をまとめ、在庫は「概要(ブロックごと・才数不明も)・ロケーション・配置」の3つにしました',
     '【配置: 指示書の印刷】「指示書を印刷」を、「どこから → どこへ」だけの見やすい形にしました(品番と、一部だけ動かすときのケース数を小さく添える)。今までの形は「くわしい指示書を印刷」で出せます',
     '【配置: 引当分はピッキング済み】配置の計算で、ロジザードの在庫数から引当数を差し引くようにしました(引当分はピッキング済み・もう棚に無いとみなす)。全部引当済みの物は動かす指示に出ず、そのロケは空きとして使います',
     '【配置: 1ロケ1品番】配置の計算で、何か入っているロケには別の品番を入れないようにしました(1ロケ = パレット1枚。1段目の端数の A も同じ。同じ品番を合わせるときだけ、容量の範囲で足す。A223以降の B は2品番まで)。「行き先が埋まっていた」を減らすためです',
@@ -11404,7 +11413,8 @@ function renderStockTab(){
   if(st.error || !st.calc) return '<div class="mgr-wrap"><div class="panel"><div class="panel-title">在庫</div><div class="empty-note">ロジザードの在庫がまだ取り込まれていません。「データ取込」で取り込んでください。</div></div></div>';
   var c = st.calc, snaps = st.snaps || [], cap = st.capacity || {};
   var tab = state.stockTab || 'summary';
-  var tabs = [['summary','概要'],['blocks','ブロック'],['locs','ロケーション'],['slot','配置'],['missing','才数不明']].map(function(t){
+  if(tab==='blocks' || tab==='missing') tab = 'summary'; // 概要にまとめた
+  var tabs = [['summary','概要'],['locs','ロケーション'],['slot','配置']].map(function(t){
     return '<button type="button" class="vc-tab-btn'+(tab===t[0]?' active':'')+'" data-stock-tab="'+t[0]+'">'+t[1]+'</button>';
   }).join('');
   var prev = null; // 7日前(なければいちばん古い)の記録と比べる
@@ -11438,10 +11448,12 @@ function renderStockTab(){
     stockBlockBars(c, cap)+
     '<div class="stf-section-title">才数の推移</div>'+stockTrendSvg(snaps)+
     '<div class="pool-hint" style="margin-top:8px;">ロジザードの在庫('+esc(fmtDateTime(st.lz.uploadedAt))+'取込)の在庫数(引当数を含む)から計算しています。才数 = 在庫数 ÷ 入数 × 1ケースの才数。推移は、在庫を取り込んだ日ごとに残しています。</div>';
-  }else if(tab==='blocks'){
+  }
+  if(tab==='summary'){ // ブロックの表(概要の下に続けて出す)
+    body += '<div class="stf-section-title" style="margin-top:16px;">ブロックごと</div>';
     var bl = Object.keys(c.blocks).sort(function(a,b){ return (c.blocks[b].cube)-(c.blocks[a].cube); });
     var total = bl.reduce(function(a,b){ return a+c.blocks[b].cube; }, 0);
-    body = '<div style="overflow-x:auto;"><table class="report-table shukei-table"><thead><tr><th>ブロック</th><th>拠点</th><th class="num">才数</th><th class="num">40ft換算</th><th class="num">割合</th><th class="num">ケース</th><th class="num">品番</th><th class="num">ロケ</th><th class="num">1ロケあたり</th><th>容量</th><th class="num">使用率</th><th>'+(prev ? esc(Number(prev.date.slice(5,7))+'/'+Number(prev.date.slice(8,10)))+'から' : '前回から')+'</th></tr></thead><tbody>'+
+    body += '<div style="overflow-x:auto;"><table class="report-table shukei-table"><thead><tr><th>ブロック</th><th>拠点</th><th class="num">才数</th><th class="num">40ft換算</th><th class="num">割合</th><th class="num">ケース</th><th class="num">品番</th><th class="num">ロケ</th><th class="num">1ロケあたり</th><th>容量</th><th class="num">使用率</th><th>'+(prev ? esc(Number(prev.date.slice(5,7))+'/'+Number(prev.date.slice(8,10)))+'から' : '前回から')+'</th></tr></thead><tbody>'+
       bl.map(function(b){
         var x = c.blocks[b], capE = stockCapEntry(cap[b]), capV = stockCapSai(cap[b]), p = prev && prev.blocks[b];
         var use = capV ? x.cube/capV*100 : null;
@@ -11491,11 +11503,13 @@ function renderStockTab(){
       '<div class="stf-section-title" style="margin-top:12px;">才数の多いロケ</div>'+locTable(big, 15);
   }else if(tab==='slot'){
     body = renderSlotting(st);
-  }else{
+  }
+  if(tab==='summary'){ // 才数不明(概要のいちばん下。開いて見る)
     var np = Object.keys(c.noPack), ns = Object.keys(c.noSai);
-    body = '<div class="pool-hint">ここに出る商品は、才数を計算できないため、才数・使用率に入っていません。kintone の商品台帳に入数・才数を登録し、データ取込で商品台帳を同期してください。</div>'+
+    body += '<details class="slot-settings" style="margin-top:16px;"><summary>才数不明の商品('+(np.length+ns.length)+') ▾</summary>'+
+      '<div class="pool-hint">ここに出る商品は、才数を計算できないため、才数・使用率に入っていません。kintone の商品台帳に入数・才数を登録し、データ取込で商品台帳を同期してください。</div>'+
       '<div class="vca-two"><div><div class="stf-section-title">入数が無い('+np.length+')</div><div class="sk-minor" style="line-height:1.8;">'+np.sort().map(function(k){ return esc(k)+' '+esc(c.noPack[k]); }).join('<br>')+'</div></div>'+
-      '<div><div class="stf-section-title">才数が無い('+ns.length+')</div><div class="sk-minor" style="line-height:1.8;">'+ns.sort().map(function(k){ return esc(k)+' '+esc(c.noSai[k]); }).join('<br>')+'</div></div></div>';
+      '<div><div class="stf-section-title">才数が無い('+ns.length+')</div><div class="sk-minor" style="line-height:1.8;">'+ns.sort().map(function(k){ return esc(k)+' '+esc(c.noSai[k]); }).join('<br>')+'</div></div></div></details>';
   }
   return '<div class="mgr-wrap"><div class="panel">'+
     '<div class="panel-title st-head">在庫 <span class="pool-hint" style="font-weight:400;margin:0;">ロジザード '+esc(fmtDateTime(st.lz.uploadedAt))+' ・ 記録 '+snaps.length+'日分</span>'+
@@ -11966,7 +11980,7 @@ function renderGateDataStatus(){
     state.gateStatusLoading = true;
     loadGateDataStatus().then(function(st){
       state.gateDataStatus = st; state.gateDataStatusAt = Date.now(); state.gateStatusLoading = false;
-      if(!state.role) render();
+      if(!state.role || (state.role==='adminHub' && state.adminHubTab==='todo')) render();
     }).catch(function(){ state.gateStatusLoading = false; state.gateDataStatusAt = Date.now(); });
   }
   var st = state.gateDataStatus;
@@ -12036,7 +12050,7 @@ function renderGate(){
     '<div class="gate-section-title">管理 <span>ログインが必要です</span></div>'+
     '<div class="gate-grid">'+
       gateCard('adminHub', '#F0F9FF', '#026AA2', '&#128229;', '作業量CSV取込', '出荷のCSVを取り込む', true, 'data')+
-      gateCard('adminHub', '#EFEBE2', '#1B2333', '&#128100;', '管理', '今日・人員配置・実績・生産性・収支・請求・データ取込', true)+
+      gateCard('adminHub', '#EFEBE2', '#1B2333', '&#128100;', '管理', 'やること(毎朝・日中・夕方・毎月)から、各画面へ', true)+
       gateCard('settingsHub', '#F4EEE4', '#8A6A3B', '&#9881;', '設定', 'スタッフ・作業・得意先と単価・勤務時間など', true)+
       '<a class="gate-card" href="factory.html" style="text-decoration:none;color:inherit;">'+
         '<div class="gate-lock-badge" title="ログインが必要です">&#128274;</div>'+
@@ -12295,28 +12309,97 @@ function renderDailyChecklist(){
     rows+
   '</div>';
 }
+// 管理のタブ。subs があるタブは、画面の中で切り替える(今日の状況・人員配置 / 作業記録・生産性)
 var ADMIN_HUB_TABS = [
-  { key:'today', label:'今日' },
-  { key:'staffing', label:'人員配置' },
-  { key:'logMgmt', label:'実績' },
-  { key:'productivity', label:'生産性' },
+  { key:'todo', label:'やること' },
+  { key:'today', label:'今日・人員配置', subs:[['today','今日の状況'],['staffing','人員配置']] },
+  { key:'logMgmt', label:'実績・生産性', subs:[['logMgmt','作業記録'],['productivity','生産性']] },
   { key:'financial', label:'収支' },
   { key:'billing', label:'請求' },
   { key:'data', label:'データ取込' }
 ];
+/* 管理の「やること」: やることから、その画面のそのタブを1回で開く */
+var ADMIN_TODO = [
+  ['毎朝', [
+    ['📥 作業量CSVを取り込む', 'adminHub', 'data'],
+    ['📦 ロジザード・弥生の在庫を取り込む', 'adminHub', 'data'],
+    ['👥 今日の人員配置', 'adminHub', 'staffing'],
+    ['📋 今日の状況', 'adminHub', 'today']
+  ]],
+  ['日中', [
+    ['🚚 VC引当', 'vcAlloc', ''],
+    ['🧾 集計表を作る', 'shukei', 'sheet'],
+    ['🏗 在庫の整理(配置の指示書)', 'stock', 'slot'],
+    ['✏️ 作業記録の確認・修正', 'adminHub', 'logMgmt']
+  ]],
+  ['夕方', [
+    ['📈 今日の生産性', 'adminHub', 'productivity'],
+    ['💴 今日の収支', 'adminHub', 'financial', 'today']
+  ]],
+  ['毎月', [
+    ['🧮 請求データを作る', 'adminHub', 'billing'],
+    ['💴 先月の収支', 'adminHub', 'financial', 'lastMonth'],
+    ['🔄 kintone の作業日報・作業単価を取得', 'adminHub', 'data']
+  ]],
+  ['ときどき', [
+    ['🧑 スタッフ・時給・区分', 'settingsHub', 'staff'],
+    ['🗂 作業・内訳', 'settingsHub', 'task'],
+    ['🏢 得意先・単価', 'settingsHub', 'master'],
+    ['⏰ 基本・勤務時間', 'settingsHub', 'basic'],
+    ['🔑 アカウント', 'settingsHub', 'accounts'],
+    ['⚙️ システム・通信量・操作履歴', 'settingsHub', 'system'],
+    ['✂️ 生産管理', 'factory', '']
+  ]]
+];
+function renderAdminTodo(){
+  return '<div class="mgr-wrap">'+
+    '<div class="panel">'+
+      '<div class="panel-title">やること</div>'+
+      '<div class="pool-hint" style="margin:0 0 10px;">やることのボタンを押すと、その画面が開きます。迷ったら、上の「やること」に戻ってください。</div>'+
+      renderGateDataStatus()+
+      ADMIN_TODO.map(function(sec){
+        return '<div class="todo-sec"><div class="todo-sec-title">'+esc(sec[0])+'</div><div class="todo-grid">'+
+          sec[1].filter(function(b){ return b[2]!=='accounts' || state.authRole==='admin'; }).map(function(b){
+            return '<button type="button" class="todo-btn" data-todo-go="'+esc(b[1]+'|'+b[2]+'|'+(b[3]||''))+'">'+esc(b[0])+'</button>';
+          }).join('')+'</div></div>';
+      }).join('')+
+    '</div>'+
+  '</div>';
+}
+function goAdminTodo(spec){
+  var p = spec.split('|'), role = p[0], tab = p[1], extra = p[2];
+  if(role==='factory'){ location.href = 'factory.html'; return; }
+  state.role = role;
+  if(role==='adminHub') state.adminHubTab = tab;
+  else if(role==='settingsHub') state.settingsHubTab = tab;
+  else if(role==='stock') state.stockTab = tab;
+  else if(role==='shukei' && tab) state.shukeiTab = tab;
+  if(role==='adminHub' && tab==='financial' && extra){
+    var r = finPresetRange(extra);
+    state.finPreset = extra; state.finStartDate = r[0]; state.finEndDate = r[1];
+    render(); window.scrollTo(0, 0);
+    runFinancialPeriod();
+    return;
+  }
+  render(); window.scrollTo(0, 0);
+  if(role==='adminHub' && (tab==='today' || tab==='staffing')) requestFreshTodayData();
+}
 function renderAdminHub(){
   ensureManagerSessionChecked();
   if(!hasManagerSession()){
     return renderManagerLoginForm('管理', '管理者アカウントでログインしてください。');
   }
-  if(!state.adminHubTab || state.adminHubTab==='csvImport') state.adminHubTab = state.adminHubTab==='csvImport' ? 'data' : 'today';
+  if(!state.adminHubTab || state.adminHubTab==='csvImport') state.adminHubTab = state.adminHubTab==='csvImport' ? 'data' : 'todo';
+  var cur = ADMIN_HUB_TABS.filter(function(t){ return t.key===state.adminHubTab || (t.subs && t.subs.some(function(x){ return x[0]===state.adminHubTab; })); })[0];
   var tabsHtml = '<div class="vc-tabs hub-tabs" style="margin:0 0 14px;">'+
     ADMIN_HUB_TABS.map(function(t){
-      return '<button type="button" class="vc-tab-btn'+(state.adminHubTab===t.key?' active':'')+'" data-admin-hub-tab="'+t.key+'">'+t.label+'</button>';
+      return '<button type="button" class="vc-tab-btn'+(cur===t?' active':'')+'" data-admin-hub-tab="'+t.key+'">'+t.label+'</button>';
     }).join('')+
-  '</div>';
+  '</div>'+
+  (cur && cur.subs ? '<div class="sub-switch">'+cur.subs.map(function(x){ return '<button type="button" class="sub-switch-btn'+(state.adminHubTab===x[0]?' active':'')+'" data-admin-hub-tab="'+x[0]+'">'+esc(x[1])+'</button>'; }).join('')+'</div>' : '');
   var body;
-  if(state.adminHubTab==='staffing') body = renderStaffing();
+  if(state.adminHubTab==='todo') body = renderAdminTodo();
+  else if(state.adminHubTab==='staffing') body = renderStaffing();
   else if(state.adminHubTab==='productivity') body = renderProductivityTab();
   else if(state.adminHubTab==='financial') body = renderFinancial();
   else if(state.adminHubTab==='logMgmt') body = renderLogManagementTab();
@@ -12411,6 +12494,11 @@ function bindAdminHub(){
       // 「今日の状況」「人員配置」を開いたら、最新データを読み直して再計算する
       if(state.adminHubTab==='today' || state.adminHubTab==='staffing') requestFreshTodayData();
     });
+  });
+  var gdh = document.getElementById('gateGoDataHub');
+  if(gdh && state.adminHubTab==='todo') gdh.addEventListener('click', function(){ state.adminHubTab = 'data'; render(); window.scrollTo(0, 0); });
+  document.querySelectorAll('[data-todo-go]').forEach(function(el){
+    el.addEventListener('click', function(){ goAdminTodo(el.getAttribute('data-todo-go')); });
   });
   if(state.adminHubTab==='staffing') bindStaffing();
   else if(state.adminHubTab==='productivity') bindProductivityTab();
@@ -13986,14 +14074,12 @@ function renderSettingsPanels(){
   return { shiftPanel:shiftPanel, breakPanel:breakPanel, achievementPanel:achievementPanel, accountInfoHtml:accountInfoHtml, backupPanel:backupPanel };
 }
 var SETTINGS_HUB_TABS = [
-  { key:'basic', label:'基本' },
+  { key:'basic', label:'基本・勤務時間' },
   { key:'staff', label:'スタッフ' },
   { key:'task', label:'作業' },
-  { key:'shift', label:'勤務時間' },
   { key:'master', label:'得意先・単価' },
-  { key:'history', label:'操作履歴' },
   { key:'accounts', label:'アカウント' },
-  { key:'system', label:'システム' }
+  { key:'system', label:'システム・操作履歴' }
 ];
 /* ---------- 設定 → アカウント(admin だけ) ----------
    ログイン用のアカウントの一覧・追加・役割の変更・パスワードの再設定。処理は Edge Function「manage-accounts」(service_role)で行う。 */
@@ -14086,6 +14172,8 @@ function renderSettingsHub(){
   }
   if(!state.settingsHubTab) state.settingsHubTab = 'basic';
   if(state.settingsHubTab==='customerMapping' || state.settingsHubTab==='kintoneProduct') state.settingsHubTab = 'master'; // 以前のタブ
+  if(state.settingsHubTab==='shift') state.settingsHubTab = 'basic';    // 基本・勤務時間 にまとめた
+  if(state.settingsHubTab==='history') state.settingsHubTab = 'system'; // システム・操作履歴 にまとめた
   var tabsHtml = '<div class="panel-title" style="font-size:20px;margin-bottom:4px;">設定</div>'+
     '<div class="vc-tabs hub-tabs" style="margin:0 0 14px;flex-wrap:wrap;">'+
     SETTINGS_HUB_TABS.filter(function(t){ return t.key!=='accounts' || state.authRole==='admin'; }).map(function(t){
@@ -14096,8 +14184,6 @@ function renderSettingsHub(){
   var body;
   if(state.settingsHubTab==='task'){
     body = renderRegister();
-  }else if(state.settingsHubTab==='history'){
-    body = renderHistory();
   }else if(state.settingsHubTab==='accounts'){
     body = renderAccountsPanel();
   }else if(state.settingsHubTab==='master'){
@@ -14107,14 +14193,14 @@ function renderSettingsHub(){
     var content;
     if(state.settingsHubTab==='staff'){
       content = renderStaffSettingsPanel() + renderStaffWagesPanel();
-    }else if(state.settingsHubTab==='shift'){
-      content = panels.shiftPanel + panels.breakPanel;
     }else if(state.settingsHubTab==='system'){
       content = panels.accountInfoHtml + renderUsagePanel() + panels.backupPanel + renderKintoneProductSettingsPanel();
-    }else{ // basic
-      content = panels.achievementPanel;
+    }else{ // basic(基本・勤務時間)
+      content = panels.achievementPanel + panels.shiftPanel + panels.breakPanel;
     }
     body = '<div class="mgr-wrap">'+content+'</div>';
+    // 操作履歴は、システムの下に続けて出す
+    if(state.settingsHubTab==='system') body += '<div class="stf-section-title" style="margin:18px 0 6px;">操作履歴</div>'+renderHistory();
   }
   return body.replace(/^(<div[^>]*>)/, '$1'+tabsHtml);
 }
@@ -14130,11 +14216,10 @@ function bindSettingsHub(){
     });
   });
   if(state.settingsHubTab==='task') bindRegister();
-  else if(state.settingsHubTab==='history') bindHistory();
   else if(state.settingsHubTab==='staff'){ bindStaffSettingsPanel(); bindStaffWagesPanel(); }
   else if(state.settingsHubTab==='accounts') bindAccountsPanel();
   else if(state.settingsHubTab==='master'){ bindCustomerMappingPanel(); bindWorkPriceMasterPanel(); bindDestListPanel(); }
-  else if(state.settingsHubTab==='system'){ bindSettings(); bindKintoneProductSettingsPanel(); }
+  else if(state.settingsHubTab==='system'){ bindSettings(); bindKintoneProductSettingsPanel(); bindHistory(); }
   else bindSettings();
 }
 

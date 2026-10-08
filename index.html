@@ -11102,8 +11102,9 @@ function renderStockDiagnostics(st){
 // segRacks = 通路1区画に置くラックの台数(1台 = 2段 = 2パレット)。dRacks = D列のロケ1つ(1-1 など)をあけると空くラックの台数
 // mergeCases = これ以下のケース数のパレットは、同じ品番のある場所へなるべくまとめる(合算)
 // capA/capB/capC = 棚のロケ1つ(パレット1枚分)に入る才数(1段目・2段目・3段目)。palletSai = 通路ラックの1段(パレット1枚)に入る才数
-var SLOT_DEFAULTS = { segRacks:9, dRacks:9, palletSai:40, capA:40, capB:40, capC:40, fastPct:20, midPct:30, tentFirst:'B', mergeCases:10, order:'dFirst' };
-// order: 'dFirst' = D列を先にあける(通路ラックを置いてよく出る物を入れる。棚の整理はD列が空いてから)/ 'aisle' = 通路ごとに棚を整理してからD列をあける
+var SLOT_DEFAULTS = { segRacks:9, dRacks:9, palletSai:40, capA:40, capB:40, capC:40, fastPct:20, midPct:30, tentFirst:'B', mergeCases:10, order:'swap' };
+// order: 'swap' = 通路ごとに入れ替え(D のラックを在庫を載せたまま通路へ置き、面した棚と入れ替える。棚の整理は全部のあと。現場のやり方)
+//        'dFirst' = D列を先にあける(通路ラックを置いてよく出る物を入れる。棚の整理はD列が空いてから)/ 'aisle' = 通路ごとに棚を整理してからD列をあける
 var SLOT_RANKS = { fast:{ label:'よく出る' }, mid:{ label:'たまに出る' }, slow:{ label:'あまり出ない' }, none:{ label:'出荷なし' } };
 var SLOT_TENTS = {
   A: { name:'A棟', start:375, cols:6, topFromWall:false, botBays:function(){ return 4; },
@@ -11675,6 +11676,54 @@ function slotSequence(r, tentFirst){
     steps.push({ phase:2, title: title, groups:[['D列から出す物', dOut], ['よく出る物を通路ラックへ(棚・仮置き場から)', rackIn], ['行き先を空けるために先に動かす物', chain], ['空いた棚へ入れる物', shelfIn]], racks:racks,
       dRow: (k!==null && segs.length && r.rackPlan.rowToSeg[k]===segs[0].name) ? k : null, segName: segs.length ? segs[0].name : null });
   }
+  /* 通路ごとに入れ替え: D:k のラックを在庫を載せたまま区画 sg に置き、その区画に面した棚(同じ棟・通路・上下)と入れ替える。
+     ①D列のよく出る物はラックに残す ②面した棚のよく出る物をラックへ ③D列の残りの物を面した棚の空いた所へ(ゾーンが合う所から)
+     ④面した棚に入らない D列の物はほかの棚へ ⑤ラックの段が余れば、ほかの棚のよく出る物を入れる */
+  function doSwapStep(k, sg, ai){
+    var keep = [], rackIn = [], toFace = [], toOther = [], rackOther = [], chain = [], shelfIn = [];
+    installed[sg.name] = true; installSeg(sg);
+    var faceKeys = Object.keys(r.capSize).filter(function(key){
+      var mt = r.capMeta[key], p = mt && POS[mt.n];
+      return p && p.tent===ai.tent && ai.cols.indexOf(p.col)!==-1 && p.half===sg.half;
+    });
+    var faceSet = {}; faceKeys.forEach(function(key){ faceSet[key] = true; });
+    function localFind(x){
+      var l = x.lot, need = cuOf(x), z = r.prefs(l);
+      var ks = faceKeys.slice().sort(function(a,b){ var A = z.indexOf(r.capMeta[a].zone), B = z.indexOf(r.capMeta[b].zone); return (A<0?99:A)-(B<0?99:B); });
+      for(var pass=0; pass<2; pass++){
+        for(var i=0;i<ks.length;i++){
+          var key = ks[i], mt = r.capMeta[key], cs = codesAt[key] || {};
+          if(l.frac ? !mt.floor : mt.level==='A') continue;
+          if(pass===0 && !cs[l.code]) continue;
+          if(!cs[l.code] && Object.keys(cs).length >= mt.maxN) continue;
+          if(room(key) >= need-0.01) return key;
+        }
+      }
+      return null;
+    }
+    function setTo(x, key){ x.m = Object.assign({}, x.m, { to:key, slots:null, merge: !!(codesAt[key]||{})[x.lot.code], split:false, changed: key!==x.m.to }); x.toKey = key; x.to = colOfKey(key); }
+    var byFast = function(a,b){ return (b.lot.frac?1:0)-(a.lot.frac?1:0) || b.lot.perDay-a.lot.perDay; };
+    function isRow(x){ return !x.handled && !x.lot.pos && !x.lot.inRack && k!==null && dRow(x.lot)===k; }
+    function placeD(x){ // D列の物を面した棚へ(無ければほかの棚・仮置き場)
+      var key = localFind(x);
+      if(key){ setTo(x, key); arrive(x, toFace); return; }
+      if(!x.toKey || x.toKey==='__none' || x.ph===3){ var alt = findAlt(x); if(alt){ setTo(x, alt); arrive(x, toOther); } else toBuffer(x, toOther); return; }
+      if(!moveOrAlt(x, toOther, chain)) toBuffer(x, toOther);
+    }
+    // ① D列のよく出る物は、このラックに載せたまま
+    m3.filter(isRow).sort(byFast).forEach(function(x){ if(rackPlace(x)) arrive(x, keep); else { x.toKey = '__none'; placeD(x); } });
+    // ② 面した棚のよく出る物 → このラック
+    m3.filter(function(x){ return !x.handled && !x.buffered && x.lot.pos && faceSet[x.lot.pos]; }).sort(byFast).forEach(function(x){ if(rackPlace(x)) arrive(x, rackIn); });
+    // ③④ D列の残りの物 → 面した棚の空いた所(入らなければほかの棚)
+    m4.filter(isRow).forEach(placeD);
+    // ⑤ ラックの段が余れば、ほかの棚・仮置き場のよく出る物
+    m3.filter(function(x){ return !x.handled && (x.buffered || x.lot.pos); }).sort(byFast).forEach(function(x){ if(rackPlace(x)) arrive(x, rackOther); });
+    settle(shelfIn, chain);
+    steps.push({ phase:2, title: (k!==null ? 'D:'+k+' のラックを' : 'ラックを')+' '+sg.name+' へ(在庫を載せたまま)→ 面した棚と入れ替え', swap:true,
+      groups:[['このラックに残す物(D列のよく出る物)', keep], ['面した棚のよく出る物 → このラック', rackIn], ['D列の物 → 面した棚', toFace], ['D列の物 → ほかの棚(面した棚に入らない)', toOther],
+              ['ほかの棚のよく出る物 → このラック(余った段)', rackOther], ['行き先を空けるために先に動かす物', chain], ['空いた棚へ入れる物', shelfIn]],
+      racks:[sg.name+'('+(sg.slots.length/2)+'台)'], dRow: (k!==null && r.rackPlan.rowToSeg[k]===sg.name) ? k : null, segName: sg.name });
+  }
   /* 設置済みの通路ラックの見直し: 出なくなった物を棚へ出し、棚にあるよく出る物を通路ラックへ */
   function doRackReview(){
     var out = [], rackIn = [], chain = [], shelfIn = [];
@@ -11740,7 +11789,7 @@ function slotSequence(r, tentFirst){
       // この区画には、対応する D の番号(1-1 から順)のラックを置く。その番号をあける
       var k = r.rackPlan.segToRow[sg.name] || null;
       if(k){ var di = dRows.indexOf(k); if(di!==-1) dRows.splice(di, 1); }
-      doDStep(k, [sg], sg.name);
+      if(r.opt.order==='swap') doSwapStep(k, sg, ai); else doDStep(k, [sg], sg.name);
       clearForBuffered();
     });
   }); });
@@ -11854,7 +11903,7 @@ function renderSlotting(st){
     (sh.left.length ? '<div class="vca-card" style="border-color:#FDA29B;"><div class="vca-card-label" style="color:#B42318;">入りきらない</div><div class="vca-card-val">'+sh.left.length+'<span style="font-size:13px;font-weight:600;"> 行</span></div><div class="vca-card-sub">通路ラックの台数か、棚1ロケの才数を見直してください</div></div>' : '')+
   '</div>';
   var settings = '<details class="slot-settings"'+(state.slotSettingsOpen ? ' open' : '')+'><summary>計算の条件 ▾</summary><div class="slot-opts">'+
-      '<label class="slot-opt">順番 <select data-slot-order="1"><option value="dFirst"'+(opt.order!=='aisle'?' selected':'')+'>D列を先にあける(整理はあと)</option><option value="aisle"'+(opt.order==='aisle'?' selected':'')+'>通路ごとに整理してからD列</option></select></label>'+
+      '<label class="slot-opt">順番 <select data-slot-order="1"><option value="swap"'+(opt.order==='swap'?' selected':'')+'>通路ごとに入れ替え(ラックを載せたまま通路へ)</option><option value="dFirst"'+(opt.order==='dFirst'?' selected':'')+'>D列を先にあける(整理はあと)</option><option value="aisle"'+(opt.order==='aisle'?' selected':'')+'>通路ごとに整理してからD列</option></select></label>'+
       '<label class="slot-opt">始める棟 <select data-slot-tent="1"><option value="B"'+(opt.tentFirst!=='A'?' selected':'')+'>B棟から(201の列)</option><option value="A"'+(opt.tentFirst==='A'?' selected':'')+'>A棟から</option></select></label>'+
       num('segRacks','通路1区画に置く','台')+num('capA','棚1ロケ 1段目','才')+num('capB','2段目','才')+num('capC','3段目','才')+num('palletSai','通路ラック1段','才')+num('fastPct','よく出る = 上位','%')+num('midPct','たまに出る = 次の','%')+num('mergeCases','合算する = ','ケース以下')+
     '</div>'+(st.slotBaseline ? '<div class="pool-hint" style="margin:6px 0 0;">D列の元の中身の記録: '+esc(fmtDateTime(st.slotBaseline.at))+(st.slotBaseline.stockAt ? '(ロジザード '+esc(fmtDateTime(st.slotBaseline.stockAt))+' の在庫)' : '')+' <button type="button" class="vc-manage-toggle-btn" id="slotRebase" style="padding:1px 8px;font-size:11px;">今の在庫で記録し直す</button>(通路ラックになったと判断した番号はそのまま)</div>' : '')+
@@ -11866,7 +11915,8 @@ function renderSlotting(st){
   var segTable = '<table class="report-table" style="font-size:12px;"><thead><tr><th>区画</th><th class="num">パレット</th><th class="num">使う</th></tr></thead><tbody>'+
     r.segs.map(function(sg){ return '<tr><td><b>'+esc(sg.name)+'</b></td><td class="num">'+sg.slots.length+'</td><td class="num">'+sg.slots.filter(function(x){ return x.count>0; }).length+'</td></tr>'; }).join('')+'</tbody></table>';
   var instList = instRows.length ? '<div class="pool-hint" style="margin:0 0 8px;">通路ラックになったと判断した番号: '+instRows.map(function(row){ var x = r.rackPlan.installed[row]; return 'D:'+esc(row)+'→'+esc(r.rackPlan.rowToSeg[row]||'')+'('+esc(x.why||'')+')'; }).join('・')+'</div>' : '';
-  var body = instList + (r.normal ? '<div class="pool-hint" style="margin:0 0 8px;"><b>ふだんの見直し</b>: 直近の出荷の記録でランクを計算し直し、置き場所が合わなくなった物だけを出します。①通路ラックの見直し(出なくなった物を棚へ・棚にあるよく出る物を通路ラックへ)→ ②棚の見直し(通路ごとに、たまに出る物を通路側へ・あまり出ない物を壁側へ)。ロジザードの在庫を取り込み直すと、動かした分を反映して計算し直します。月に1回など、決まった時に見直すのがおすすめです。</div>' : '') + (r.normal ? '' : opt.order!=='aisle' ? '<div class="pool-hint" style="margin:0 0 8px;"><b>D列を先にあける</b>: '+(opt.tentFirst==='A' ? 'A棟' : 'B棟の201の通路')+'から、D列を 1-1 から1ロケずつあけ、空いたラックを通路の区画(上半分・下半分)に置いて、D列の物とよく出る物を入れます。D列の物で通路ラックに入らない物は、棚の空いている所(合う場所)へ。棚の整理(たまに出る物を通路側へ・あまり出ない物を壁側へ)は、D列が全部空いてから、同じ通路の順番で行います。行き先に空きがあれば直接動かし、仮置き場はなるべく使いません。</div>' : '<div class="pool-hint" style="margin:0 0 8px;"><b>通路ごとに</b>: '+(opt.tentFirst==='A' ? 'A棟' : 'B棟の201の通路')+'から、通路の上半分・下半分ごとに(例: 201〜208 と 209〜216)、①面した棚を適正配置(よく出る物はまだ動かさない)→ ②D列を 1-1 から1ロケあけて、空いたラックをその区画に置き、よく出る物を入れる、をくり返します。行き先に空きがあれば直接動かし、仮置き場はなるべく使いません。<b>後半</b>: D列を1列ずつあけながら、入口側の通路から通路ラックを置き、よく出る物を入れていきます。行き先がまだ空いていない物は仮置き場(A棟の右側の広い所)へ。</div>')+
+  var swapHint = (!r.normal && opt.order==='swap') ? '<div class="pool-hint" style="margin:0 0 8px;"><b>通路ごとに入れ替え</b>: '+(opt.tentFirst==='A' ? 'A棟' : 'B棟の201の通路')+'から、D のラック(D:1-1 から順)を<b>在庫を載せたまま</b>通路の区画(上半分・下半分)に置き、その区画に面した棚と入れ替えます。D列のよく出る物はラックに残し、面した棚のよく出る物をラックへ、D列の残りの物を面した棚の空いた所へ(1台ずつ: ラックの物を降ろす → 棚の物をラックへ → 降ろした物をその棚へ)。面した棚に入らない物はほかの棚へ。棚の並べ替え(たまに出る物を通路側・あまり出ない物を壁側)は、全部の入れ替えが終わってから「整理(D列のあと)」で行います。</div>' : '';
+  var body = instList + swapHint + (r.normal ? '<div class="pool-hint" style="margin:0 0 8px;"><b>ふだんの見直し</b>: 直近の出荷の記録でランクを計算し直し、置き場所が合わなくなった物だけを出します。①通路ラックの見直し(出なくなった物を棚へ・棚にあるよく出る物を通路ラックへ)→ ②棚の見直し(通路ごとに、たまに出る物を通路側へ・あまり出ない物を壁側へ)。ロジザードの在庫を取り込み直すと、動かした分を反映して計算し直します。月に1回など、決まった時に見直すのがおすすめです。</div>' : '') + (r.normal || opt.order==='swap' ? '' : opt.order!=='aisle' ? '<div class="pool-hint" style="margin:0 0 8px;"><b>D列を先にあける</b>: '+(opt.tentFirst==='A' ? 'A棟' : 'B棟の201の通路')+'から、D列を 1-1 から1ロケずつあけ、空いたラックを通路の区画(上半分・下半分)に置いて、D列の物とよく出る物を入れます。D列の物で通路ラックに入らない物は、棚の空いている所(合う場所)へ。棚の整理(たまに出る物を通路側へ・あまり出ない物を壁側へ)は、D列が全部空いてから、同じ通路の順番で行います。行き先に空きがあれば直接動かし、仮置き場はなるべく使いません。</div>' : '<div class="pool-hint" style="margin:0 0 8px;"><b>通路ごとに</b>: '+(opt.tentFirst==='A' ? 'A棟' : 'B棟の201の通路')+'から、通路の上半分・下半分ごとに(例: 201〜208 と 209〜216)、①面した棚を適正配置(よく出る物はまだ動かさない)→ ②D列を 1-1 から1ロケあけて、空いたラックをその区画に置き、よく出る物を入れる、をくり返します。行き先に空きがあれば直接動かし、仮置き場はなるべく使いません。<b>後半</b>: D列を1列ずつあけながら、入口側の通路から通路ラックを置き、よく出る物を入れていきます。行き先がまだ空いていない物は仮置き場(A棟の右側の広い所)へ。</div>')+
     seq.steps.map(function(stp, i){
       var n = stp.groups.reduce(function(a,g){ return a+g[1].length; }, 0);
       var head = '';

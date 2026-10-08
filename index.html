@@ -11427,6 +11427,7 @@ function computeSlotting(st, opt){
   moves1 = ordered;
   // ③ よく出る物を通路ラックへ(1段目の端数は下段、パレットは下段 → 上段)。ラックの1段 = パレット1枚 = palletSai 才
   var segs = slotRackSegments(opt.segRacks*2), moves3 = [], rackLeft = [];
+  segs.forEach(function(sg){ sg.dRow = rackPlan.segToRow[sg.name] || null; }); // 通路ラックのロジザードのロケ(D の番号のまま)
   var allSlots = [];
   segs.forEach(function(sg){ sg.slots.forEach(function(sl){ sl.seg = sg; sl.codes = {}; allSlots.push(sl); }); });
   // 設置済みの通路ラックに今ある、よく出る物(そのまま)の分を先に埋めておく
@@ -11558,7 +11559,7 @@ function slotSequence(r, tentFirst){
   function leave(x){ if(x.lot.pos && !x.buffered){ phys[x.lot.pos] = (phys[x.lot.pos]||0) - cuOf(x); delCode(x.lot.pos, x.lot.code); } }
   function toBuffer(x, list){ list.push(row(x, '仮置き場', 'あとで行き先へ('+slotToText(x.m)+')')); leave(x); x.buffered = true; buffer += cuOf(x); peak = Math.max(peak, buffer); }
   function arrive(x, list){
-    list.push(row(x, x.rackText || slotToText(x.m), x.rackText ? (x.lot.frac ? '端数(下段)' : '') : slotToPlace(x.m)));
+    list.push(row(x, x.rackText || slotToText(x.m), x.rackText ? x.rackPlace : slotToPlace(x.m)));
     if(x.buffered) buffer -= cuOf(x); else leave(x);
     if(x.toKey){
       phys[x.toKey] = (phys[x.toKey]||0) + cuOf(x); addCode(x.toKey, x.lot.code);
@@ -11596,7 +11597,8 @@ function slotSequence(r, tentFirst){
     }
     if(!got.length) return false;
     got.forEach(function(y){ y.used += got.length>1 ? cap : need; if(!y.codes[l.code]){ y.codes[l.code] = true; y.count++; } });
-    x.rackText = '通路ラック '+got[0].seg.name+' '+(got[0].lower ? '下段' : '上段')+' '+got.map(function(y){ return y.no; }).join('・')+'番';
+    x.rackText = got[0].seg.dRow ? 'D:'+got[0].seg.dRow : '通路ラック';
+    x.rackPlace = '通路ラック '+(got[0].lower ? '下段' : '上段')+' '+got.map(function(y){ return y.no; }).join('・')+'番('+got[0].seg.name+')'+(l.frac ? ' 端数' : '');
     return true;
   }
   var all = [];
@@ -11706,12 +11708,15 @@ function slotSequence(r, tentFirst){
     function isRow(x){ return !x.handled && !x.lot.pos && !x.lot.inRack && k!==null && dRow(x.lot)===k; }
     function placeD(x){ // D列の物を面した棚へ(無ければほかの棚・仮置き場)
       var key = localFind(x);
-      if(key){ setTo(x, key); arrive(x, toFace); return; }
+      if(key){ setTo(x, key); x.m.changed = false; arrive(x, toFace); return; } // 面した棚へ入れるのが決まりなので「空いている所へ」は付けない
       if(!x.toKey || x.toKey==='__none' || x.ph===3){ var alt = findAlt(x); if(alt){ setTo(x, alt); arrive(x, toOther); } else toBuffer(x, toOther); return; }
       if(!moveOrAlt(x, toOther, chain)) toBuffer(x, toOther);
     }
     // ① D列のよく出る物は、このラックに載せたまま
-    m3.filter(isRow).sort(byFast).forEach(function(x){ if(rackPlace(x)) arrive(x, keep); else { x.toKey = '__none'; placeD(x); } });
+    m3.filter(isRow).sort(byFast).forEach(function(x){
+      if(rackPlace(x)){ arrive(x, keep); var kr = keep[keep.length-1]; kr.to = 'D:'+k+' のまま'; kr.toPlace = '動かさない('+x.rackPlace+')'; }
+      else { x.toKey = '__none'; placeD(x); }
+    });
     // ② 面した棚のよく出る物 → このラック
     m3.filter(function(x){ return !x.handled && !x.buffered && x.lot.pos && faceSet[x.lot.pos]; }).sort(byFast).forEach(function(x){ if(rackPlace(x)) arrive(x, rackIn); });
     // ③④ D列の残りの物 → 面した棚の空いた所(入らなければほかの棚)
@@ -11819,13 +11824,13 @@ function slotFromText(l){ return l.pos ? slotLocText(l.block, l.n) : 'D:'+l.loc;
 function slotFromPlace(l){ return l.pos ? slotPlaceText(l.block, l.n) : (l.inRack ? '通路ラック '+(l.rackSeg||'') : 'D列'); }
 function slotToText(m){
   if(m.to==='AA') return 'AA';
-  if(m.slots) return '通路ラック '+m.slots[0].seg.name+' '+(m.slots[0].lower ? '下段' : '上段')+' '+m.slots.map(function(x){ return x.no; }).join('・')+'番';
+  if(m.slots) return m.slots[0].seg.dRow ? 'D:'+m.slots[0].seg.dRow : '通路ラック';
   var c = m.to.split(':'); return slotLocText(c[0], Number(c[1]));
 }
 function slotToPlace(m){
   if(m.to==='AA') return 'AA(パートのバラ。全在庫が1ケース未満)';
   var tail = (m.merge ? ' ・同じ品番と合算' : '')+(m.split ? ' ・分けて置く' : '')+(m.changed ? ' ・空いている所へ' : '');
-  if(m.slots) return (m.lot.frac ? '端数(下段)' : '')+tail;
+  if(m.slots) return '通路ラック '+(m.slots[0].lower ? '下段' : '上段')+' '+m.slots.map(function(x){ return x.no; }).join('・')+'番('+m.slots[0].seg.name+')'+(m.lot.frac ? ' 端数' : '')+tail;
   var c = m.to.split(':'); return slotPlaceText(c[0], Number(c[1]))+tail;
 }
 /* 指示書の行(画面・印刷・CSV で共通) */
@@ -11944,11 +11949,18 @@ function printSlotting(simple){
   var r = computeSlotting(st, opt), sh = slotSheetRows(r), seq = slotSequence(r, opt.tentFirst);
   function tbl(title, rows){
     if(!rows.length) return '';
+    if(simple === true && /^このラックに残す物/.test(title)){ // 動かさない物は1行にまとめる(品番ごとに段の番号)
+      var byCode = {}, order = [];
+      rows.forEach(function(x){ var m = /(下段|上段) ([\d・]+)番/.exec(x.toPlace||''); if(!byCode[x.code]){ byCode[x.code] = []; order.push(x.code); } if(m) byCode[x.code].push(m[1]+m[2]); });
+      return '<h3>'+esc(title)+'('+rows.length+'件)</h3><div style="border:1px solid #999;padding:6px 8px;font-size:12px;">□ <b>'+esc(rows[0].to.replace(/ のまま$/, ''))+'</b> に載せたまま: '+
+        order.map(function(c){ return esc(c)+(byCode[c].length ? '('+esc(byCode[c].filter(function(v, i, a){ return a.indexOf(v)===i; }).join('・'))+')' : ''); }).join('、')+'</div>';
+    }
     if(simple === true){
       return '<h3>'+esc(title)+'('+rows.length+'件)</h3><table class="sp"><thead><tr><th>済</th><th>順</th><th>どこから</th><th></th><th>どこへ</th><th>品番</th></tr></thead><tbody>'+
         rows.map(function(x, i){
           var part = (x.pack && !x.frac && x.toPlace && /分けて置く/.test(x.toPlace)) ? ' '+slotCasesText(x)+'だけ' : '';
-          return '<tr><td class="ck">□</td><td class="no">'+(i+1)+'</td><td class="loc">'+esc(x.from)+'</td><td class="ar">→</td><td class="loc">'+esc(x.to)+'</td><td class="cd">'+esc(x.code)+(x.frac?'(端数)':'')+esc(part)+'</td></tr>';
+          return '<tr><td class="ck">□</td><td class="no">'+(i+1)+'</td><td class="loc">'+esc(x.from)+(x.fromPlace ? '<div class="pl">'+esc(x.fromPlace)+'</div>' : '')+'</td><td class="ar">→</td>'+
+            '<td class="loc">'+esc(x.to)+(x.toPlace ? '<div class="pl">'+esc(x.toPlace)+'</div>' : '')+'</td><td class="cd">'+esc(x.code)+(x.frac?'(端数)':'')+esc(part)+'</td></tr>';
         }).join('')+'</tbody></table>';
     }
     return '<h3>'+esc(title)+'('+rows.length+'件)</h3><table><thead><tr><th>済</th><th>順</th><th>品番</th><th>商品名</th><th>出荷</th><th>どこから</th><th>数量</th><th>ケース</th><th>どこへ</th><th>行き先の場所</th></tr></thead><tbody>'+
@@ -11958,10 +11970,13 @@ function printSlotting(simple){
     'body{font-family:"Yu Gothic UI","Meiryo",sans-serif;font-size:11px;margin:12mm;color:#111;}h1{font-size:16px;margin:0 0 4px;}h2{font-size:14px;margin:0 0 4px;}h3{font-size:12px;margin:10px 0 4px;}'+
     'table{border-collapse:collapse;width:100%;}th,td{border:1px solid #999;padding:3px 4px;text-align:left;}th{background:#eee;}.ck{width:16px;text-align:center;font-size:14px;}tr{page-break-inside:avoid;}'+
     '.step{page-break-before:always;}'+
-    'table.sp td{padding:6px 8px;}table.sp td.loc{font-size:17px;font-weight:800;white-space:nowrap;}table.sp td.ar{font-size:17px;text-align:center;width:24px;border-left:none;border-right:none;}table.sp td.no{width:28px;color:#555;}table.sp td.cd{font-size:10px;color:#555;}'+
+    'table.sp td{padding:6px 8px;}table.sp td.loc{font-size:17px;font-weight:800;white-space:nowrap;}table.sp td.ar{font-size:17px;text-align:center;width:24px;border-left:none;border-right:none;}table.sp td.no{width:28px;color:#555;}table.sp td.cd{font-size:10px;color:#555;}table.sp .pl{font-size:10px;font-weight:400;color:#444;white-space:normal;margin-top:2px;}'+
     '</style></head><body><h1>配置の指示書(テント倉庫の配置がえ・D列の廃止)</h1><div>ロジザード在庫 '+esc(fmtDateTime(st.lz.uploadedAt))+' ・ 出荷記録 '+r.ship.days+'日分 ・ 作成 '+esc(fmtDateTime(new Date().toISOString()))+
     ' ・ '+(opt.tentFirst==='B' ? 'B棟 → A棟' : 'A棟 → B棟')+' ・ 仮置き場(A棟の右側の広い所)はいちばん多いとき約'+Math.ceil(seq.peakBuffer/opt.palletSai)+'パレット</div>'+
-    '<div style="margin-top:6px;">通路ごとに、その通路に面した列を適正配置(出す物 → 列の中 → 入れる物)→ D列を1ロケあけて、空いたラックをその通路に置き、よく出る物を入れる、をくり返します。□にチェックしてください。</div>'+
+    '<div style="margin-top:6px;">'+(opt.order==='swap'
+      ? 'D のラックを在庫を載せたまま通路に置き、面した棚と入れ替えます(1台ずつ: ラックの物を降ろす → 棚の物をラックへ → 降ろした物をその棚へ)。'
+      : (opt.order==='aisle' ? '通路ごとに、その通路に面した列を適正配置(出す物 → 列の中 → 入れる物)→ D列を1ロケあけて、空いたラックをその通路に置き、よく出る物を入れる、をくり返します。' : 'D列を1ロケずつあけ、空いたラックを通路に置いて、D列の物とよく出る物を入れます。棚の整理はD列のあと。'))+
+      '<b>どこへ</b> の大きい字がロジザードのロケです(通路ラックは D の番号のまま)。下の小さい字が場所です。□にチェックしてください。</div>'+
     seq.steps.map(function(stp, i){
       return '<div class="step"><h2>'+(i+1)+'. '+esc(stp.title)+'</h2>'+
         (stp.racks.length ? '<h3>通路ラックを置く: '+esc(stp.racks.join('、'))+'</h3>' : '')+

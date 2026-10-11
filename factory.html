@@ -56,6 +56,46 @@ async function authSignOut() {
 
 // 最後に読み込んだ(保存した)生産実績。保存のときに、変わった行・消えた行だけを書く
 let lastSavedRecords = {};
+/* ---- 同時編集(2026-10-12): 計画・商品・資材などの factory_master は1行(丸ごと)なので、
+   以前は「あとから保存した人の内容で丸ごと置き換え」になり、ほかの人が同時に入れた実績の完成品在庫・資材の残りの増減が消えることがあった。
+   読み込んだときの内容(元)と版(updated_at)を覚えておき、保存のときに版が変わっていたら、最新の内容に「この画面で変えた所」だけを入れる。
+   完成品在庫(finishedStock)・資材の残り(remainingLength)は、上書きせず「増えた分・減った分」を足す。 */
+let lastMasterBase = null; // 元(JSON)
+let lastMasterVer = null;  // 版
+const MERGE_DELTA_KEYS = { finishedStock: true, remainingLength: true };
+const mIsObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const mEq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+function mergeMaster(b, l, r, key) {
+  if (mEq(l, b)) return r;                 // この画面では変えていない
+  if (mEq(r, b) || mEq(r, l)) return l;    // ほかの人は変えていない
+  if (MERGE_DELTA_KEYS[key] && typeof l === 'number' && typeof r === 'number') {
+    return Math.max(0, r + (l - (typeof b === 'number' ? b : 0))); // 増えた分・減った分を足す
+  }
+  if (Array.isArray(l) && Array.isArray(r)) {
+    const bb = Array.isArray(b) ? b : [];
+    const all = bb.concat(l, r);
+    if (all.length && all.every((x) => mIsObj(x) && x.id)) { // id のある行の並び(商品・計画・ロットなど): 行ごとに
+      const B = {}, L = {}, R = {}; bb.forEach((x) => { B[x.id] = x; }); l.forEach((x) => { L[x.id] = x; }); r.forEach((x) => { R[x.id] = x; });
+      const out = [], seen = {};
+      r.concat(l).forEach((x) => { if (seen[x.id]) return; seen[x.id] = true; const v = mergeMaster(B[x.id], L[x.id], R[x.id], ''); if (v !== undefined) out.push(v); });
+      return out;
+    }
+    if (all.every((x) => typeof x !== 'object')) { // 文字・数の並び(取り込み済みの印など): 足した物は残し、消した物は消す
+      const sb = new Set(bb.map(String)), sl = new Set(l.map(String)), sr = new Set(r.map(String));
+      const out = [];
+      r.concat(l).forEach((x) => { const k = String(x); if (out.some((y) => String(y) === k)) return; if (sb.has(k) && (!sl.has(k) || !sr.has(k))) return; out.push(x); });
+      return out;
+    }
+    return l;
+  }
+  if (mIsObj(l) && mIsObj(r)) {
+    const bo = mIsObj(b) ? b : {}, out = {}, keys = {};
+    [r, l, bo].forEach((o) => Object.keys(o).forEach((k) => { keys[k] = true; }));
+    Object.keys(keys).forEach((k) => { const v = mergeMaster(bo[k], l[k], r[k], k); if (v !== undefined) out[k] = v; });
+    return out;
+  }
+  return l; // 同じ所を両方で違う値に変えた: この画面の値
+}
 async function cloudLoad() {
   const [m, r] = await Promise.all([
     supabaseClient.from('factory_master').select('data').eq('id', 'main').maybeSingle(),
@@ -67,6 +107,8 @@ async function cloudLoad() {
     .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')) || String(a.id).localeCompare(String(b.id)));
   lastSavedRecords = {};
   records.forEach((x) => { lastSavedRecords[x.id] = JSON.stringify(x); });
+  lastMasterBase = m.data ? JSON.stringify(m.data.data) : null;
+  lastMasterVer = m.data ? m.data.updated_at : null;
   if (!m.data) return records.length ? { records } : null;
   return { ...m.data.data, records };
 }
@@ -86,11 +128,37 @@ async function loadMyRole(userId) {
   if (error) return null;
   return data ? data.role : null;
 }
+/* 計画・商品・資材など(factory_master)を保存する。版が変わっていれば最新とまとめる。まとめた内容を返す(まとめなかったときは null) */
+async function saveMasterMerged(master) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const cur = await supabaseClient.from('factory_master').select('data, updated_at').eq('id', 'main').maybeSingle();
+    if (cur.error) throw cur.error;
+    const now = new Date().toISOString();
+    if (!cur.data) { // まだ1度も保存していない
+      const ins = await supabaseClient.from('factory_master').insert({ id: 'main', data: master, updated_at: now }).select('updated_at');
+      if (ins.error) { if (String(ins.error.code) === '23505') continue; throw ins.error; }
+      lastMasterBase = JSON.stringify(master); lastMasterVer = ins.data[0].updated_at;
+      return null;
+    }
+    let toSave = master, merged = null;
+    if (cur.data.updated_at !== lastMasterVer && lastMasterBase) { // ほかの人が先に保存していた
+      toSave = mergeMaster(JSON.parse(lastMasterBase), JSON.parse(JSON.stringify(master)), cur.data.data, '');
+      merged = toSave;
+    } else if (cur.data.updated_at !== lastMasterVer && !lastMasterBase) {
+      toSave = master; // 元が分からないときは従来どおり
+    }
+    const up = await supabaseClient.from('factory_master').update({ data: toSave, updated_at: now }).eq('id', 'main').eq('updated_at', cur.data.updated_at).select('updated_at');
+    if (up.error) throw up.error;
+    if (!up.data || !up.data.length) { await new Promise((res) => setTimeout(res, 120 * (attempt + 1))); continue; } // その間にまた保存された: 読み直す
+    lastMasterBase = JSON.stringify(toSave); lastMasterVer = up.data[0].updated_at;
+    return merged;
+  }
+  throw new Error('ほかの人の保存と重なって、保存できませんでした');
+}
 async function cloudSave(obj) {
   const { records, ...master } = obj;
   const now = new Date().toISOString();
-  const { error } = await supabaseClient.from('factory_master').upsert({ id: 'main', data: master, updated_at: now });
-  if (error) throw error;
+  const mergedMaster = await saveMasterMerged(master);
   const cur = {};
   (records || []).forEach((x) => { cur[x.id] = JSON.stringify(x); });
   const ups = (records || []).filter((x) => lastSavedRecords[x.id] !== cur[x.id]).map((x) => ({ id: x.id, record: x, updated_at: now }));
@@ -98,7 +166,7 @@ async function cloudSave(obj) {
   if (ups.length) { const { error: e1 } = await supabaseClient.from('factory_records').upsert(ups); if (e1) throw e1; }
   if (dels.length) { const { error: e2 } = await supabaseClient.from('factory_records').delete().in('id', dels); if (e2) throw e2; }
   lastSavedRecords = cur;
-  return ups.map((x) => x.id);
+  return { ids: ups.map((x) => x.id), mergedMaster };
 }
 /* ---- kintone 生産実績アプリ(981)への登録(Edge Function push-production-981) ----
    設定(data.k981)が「使う」で、開始日以降・製造分類のあるラインの実績を保存すると、自動で 981 に登録する。
@@ -154,6 +222,14 @@ async function loadFoldEntries(force) {
   const out = [];
   (r.data || []).forEach((row) => { try { const list = JSON.parse(row.value); if (Array.isArray(list)) list.forEach((e) => { if (e && e.id && e.date) out.push(e); }); } catch (e) {} });
   return out;
+}
+async function callFoldImport() {
+  try {
+    const res = await supabaseClient.functions.invoke('factory-fold-import', { body: {} });
+    if (res.error) return { ok: false };
+    let d = res.data; if (typeof d === 'string') { try { d = JSON.parse(d); } catch (e) { d = null; } }
+    return d || { ok: false };
+  } catch (e) { return { ok: false }; }
 }
 let lastFoldPlansJson = null;
 async function publishFoldPlans(payload) {
@@ -269,7 +345,8 @@ const FONT_STYLE = `
 /* ユーティリティ                                                       */
 /* ------------------------------------------------------------------ */
 const uid = (p) => `${p}-${Math.random().toString(36).slice(2, 9)}`;
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// この端末の日付(日本)。以前は toISOString(世界標準時)で、毎朝0時〜9時は前の日になっていた(2026-10-12 修正)
+const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 // 今日から指定日までの日数(過去ならマイナス)
 const daysUntil = (dateStr) => {
   if (!dateStr) return null;
@@ -321,6 +398,33 @@ const planSpanDays = (o) => {
 };
 const planActiveOn = (o, dateStr) => dateStr >= planStart(o) && dateStr <= planEnd(o);
 const planDailyTarget = (o) => num(o.targetQty) / planSpanDays(o);
+/* 計画の進み具合(物差しは完成数 = たたみ済み)。
+   予定 = 目標 × (開始日から今日までの日数 ÷ 生産期間の日数)。実績が予定の9割に届かなければ「遅れ」、予定より1割以上多ければ「前倒し」。
+   見込み = 開始日(または最初の実績の日)から今日までの1日あたりの実績で、残りを作り終える日。納期より後なら「納期に間に合わない見込み」。
+   日数はカレンダーの日数(休みの日も数える) */
+const addDaysStr = (dateStr, n) => { const d = parseDate(dateStr); d.setDate(d.getDate() + n); return toDateStr(d.getFullYear(), d.getMonth(), d.getDate()); };
+const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 86400000);
+const planPace = (o, folded, records, today) => {
+  today = today || todayStr();
+  const target = num(o.targetQty), start = planStart(o), end = planEnd(o);
+  const r = { target, actual: folded, expected: 0, shortfall: 0, status: '', tone: 'dim', forecast: null, late: false };
+  if (!target || !start) return r;
+  if (folded >= target) { r.status = '完了'; r.tone = 'green'; return r; }
+  if (today < start) { r.status = '開始前'; return r; }
+  const span = planSpanDays(o), elapsed = Math.min(span, daysBetween(start, today) + 1);
+  r.expected = Math.round(target * elapsed / span);
+  r.shortfall = Math.max(0, r.expected - folded);
+  const recDates = (records || []).filter((x) => x.orderId === o.id && num(x.foldedQty) > 0).map((x) => x.date).sort();
+  const from = recDates.length && recDates[0] < start ? recDates[0] : start;
+  const days = Math.max(1, daysBetween(from, today) + 1), pace = folded / days;
+  if (pace > 0) { r.forecast = addDaysStr(today, Math.ceil((target - folded) / pace)); r.late = r.forecast > end; }
+  else r.late = today >= end;
+  if (today > end) { r.status = '納期超過'; r.tone = 'red'; }
+  else if (folded < r.expected * 0.9) { r.status = '遅れ'; r.tone = 'red'; }
+  else if (folded > r.expected * 1.1) { r.status = '前倒し'; r.tone = 'teal'; }
+  else { r.status = '順調'; r.tone = 'green'; }
+  return r;
+};
 
 // 過去バージョンで保存されたデータ(新しい項目が無い場合)でも安全に読み込めるよう補完する
 const DEFAULT_TAB_ORDER = ['dashboard', 'products', 'salesorders', 'plan', 'inventory', 'production', 'calendar', 'quality'];
@@ -547,6 +651,8 @@ function AuthBar({ session }) {
 
 function App() {
   const [data, setData] = useState(null);
+  const dataRef = React.useRef(null);
+  dataRef.current = data;
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState('idle'); // idle | saving | saved | error
   const [tab, setTab] = useState('dashboard');
@@ -595,6 +701,8 @@ function App() {
     if (!canView) return;
     const iv = setInterval(async () => {
       if (loading || document.hidden) return;
+      // まだ保存していない変更がある間は読み直さない(読み直すと入力が消える。保存のときに最新とまとめる)
+      if (dataRef.current && JSON.stringify(dataRef.current) !== lastLoadedJson.current) return;
       const sig = await cloudSig();
       if (sig && sig === lastCloudSig) return;
       loadFromCloud();
@@ -610,7 +718,22 @@ function App() {
     setSaveStatus('saving');
     const t = setTimeout(async () => {
       try {
-        const savedIds = await cloudSave(data);
+        const sent = data;
+        const res = await cloudSave(sent);
+        const savedIds = res.ids;
+        if (res.mergedMaster) {
+          // ほかの人の変更とまとめた: 画面にも反映する(保存している間にこの画面で変えた所は残す)
+          const { records: _r, ...sentMaster } = sent;
+          setData((d) => {
+            const { records, ...curMaster } = d;
+            const rebased = mergeMaster(sentMaster, curMaster, res.mergedMaster, '');
+            const nd = normalizeData({ ...rebased, records });
+            if (d === sent) lastLoadedJson.current = JSON.stringify(nd);
+            return nd;
+          });
+        } else if (dataRef.current === sent) {
+          lastLoadedJson.current = JSON.stringify(sent);
+        }
         setSaveStatus('saved');
         const cfg = data.k981 || {};
         const ids = (savedIds || []).filter((id) => { const r = data.records.find((x) => x.id === id); return r && k981Target(cfg, r); });
@@ -629,6 +752,7 @@ function App() {
   const [k981Last, setK981Last] = useState(null);
   const refreshK981Status = useCallback(async () => { const st = await loadK981Status(); if (st) setK981Status(st); }, []);
   useEffect(() => { if (canView && data && data.k981 && data.k981.enabled && !k981Status) refreshK981Status(); }, [canView, data, k981Status, refreshK981Status]);
+  const k981AutoSent = React.useRef(false);
   const pushK981 = useCallback(async (ids) => {
     setK981Busy(true);
     const r = await callK981(ids ? { action: 'push', ids } : { action: 'push' });
@@ -637,6 +761,13 @@ function App() {
     refreshK981Status();
     return r;
   }, [refreshK981Status]);
+  useEffect(() => {
+    // まだ kintone に送っていない対象の実績(タブレットからサーバーで取り込んだ分など)があれば、開いたときに1回送る
+    if (!isEditor || !data || !k981Status || k981AutoSent.current || k981Busy) return;
+    const cfg = data.k981 || {};
+    if (!cfg.enabled) return;
+    if (data.records.some((r) => k981Target(cfg, r) && !k981Status[r.id])) { k981AutoSent.current = true; pushK981(); }
+  }, [isEditor, data, k981Status, k981Busy, pushK981]);
   const setK981 = (patch) => setData((d) => ({ ...d, k981: { ...(d.k981 || {}), ...patch } }));
   const setFold = (patch) => setData((d) => ({ ...d, fold: { ...(d.fold || {}), ...patch } }));
 
@@ -656,40 +787,24 @@ function App() {
     const t = setTimeout(() => { publishFoldPlans(foldPlansPayload).catch(() => {}); }, 1500);
     return () => clearTimeout(t);
   }, [loading, isEditor, JSON.stringify(foldPlansPayload)]);
-  const foldQueued = React.useRef(new Set()); // この画面で取り込み済みにした id(二重に取り込まない)
-  const importFold = useCallback(async (force) => {
-    if (!data) return;
-    const entries = await loadFoldEntries(force);
-    if (!entries) return;
-    const lineId = foldLineIdOf(data);
-    const done = new Set((data.foldImported || []).map((x) => String(x).split('|')[1]));
-    const recIds = new Set(data.records.map((r) => r.id));
-    const fresh = entries.filter((e) => !done.has(e.id) && !recIds.has('F-' + e.id) && !foldQueued.current.has(e.id)).sort((a, b) => String(a.at).localeCompare(String(b.at)));
-    if (!fresh.length || !lineId) return;
-    fresh.forEach((e) => foldQueued.current.add(e.id));
-    fresh.forEach((e) => {
-      const qty = num(e.qty), defect = num(e.defectQty);
-      addRecord({
-        id: 'F-' + e.id, source: 'logilink', date: e.date, orderId: e.orderId || '', lineId,
-        worker: e.staffName || '', startTime: e.startTime || '', endTime: e.endTime || '',
-        machineUpQty: qty + defect, inspectedQty: qty, foldedQty: qty, defectQty: defect,
-        defectCause: '', defectItems: defect > 0 ? [{ cause: '', qty: defect }] : [],
-        materialUsedLength: 0, setProductId: '', setQty: 0,
-      });
-    });
-    // 取り込んだ印(30日より前のものは消す)。生産管理で実績を消しても、もう一度は取り込まない
-    const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-    setData((d) => ({ ...d, foldImported: [...(d.foldImported || []).filter((x) => String(x).split('|')[0] >= cutoff), ...fresh.map((e) => e.date + '|' + e.id)] }));
-  }, [data]);
-  const importFoldRef = React.useRef(importFold);
-  importFoldRef.current = importFold;
+  /* たたみ数の取り込みは、サーバー(Edge Function factory-fold-import)で行う(2026-10-12)。
+     現場のタブレットが入力のたびに頼むので、生産管理を開いていなくても入る。この画面では、開いている間に念のため1分ごとに頼み、
+     新しく入ったら読み直す(画面の中で足すと、サーバーの分と二重になるため、ここでは足さない) */
+  const requestFoldImport = useCallback(async (force) => {
+    const entries = await loadFoldEntries(force); // 版だけ確かめ、変わっていなければ null
+    if (!entries || !entries.length) return;
+    const r = await callFoldImport();
+    if (r && r.ok && r.imported > 0 && dataRef.current && JSON.stringify(dataRef.current) === lastLoadedJson.current) loadFromCloud();
+  }, [loadFromCloud]);
+  const requestFoldImportRef = React.useRef(requestFoldImport);
+  requestFoldImportRef.current = requestFoldImport;
   useEffect(() => {
-    if (loading || !isEditor || !data) return;
-    importFoldRef.current(true);
-    const iv = setInterval(() => { if (!document.hidden) importFoldRef.current(false); }, 60000);
+    if (loading || !canView) return;
+    requestFoldImportRef.current(true);
+    const iv = setInterval(() => { if (!document.hidden) requestFoldImportRef.current(false); }, 60000);
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, isEditor]);
+  }, [loading, canView]);
 
   const lineById = useCallback((id) => data?.lines.find((l) => l.id === id), [data]);
   const lotById = useCallback((id) => data?.lots.find((l) => l.id === id), [data]);
@@ -975,7 +1090,7 @@ function App() {
         <SalesOrderTab data={data} addSalesOrder={addSalesOrder} updateSalesOrder={updateSalesOrder} removeSalesOrder={removeSalesOrder} salesOrderStats={salesOrderStats} productById={productById} isEditor={isEditor} />
       )}
       {tab === 'plan' && (
-        <PlanTab data={data} orderStats={orderStats} addOrder={addOrder} updateOrder={updateOrder} removeOrder={removeOrder} lineById={lineById} lotById={lotById} addLine={addLine} removeLine={removeLine} salesOrderById={salesOrderById} productById={productById} isEditor={isEditor} />
+        <PlanTab data={data} orderStats={orderStats} salesOrderStats={salesOrderStats} addOrder={addOrder} updateOrder={updateOrder} removeOrder={removeOrder} lineById={lineById} lotById={lotById} addLine={addLine} removeLine={removeLine} salesOrderById={salesOrderById} productById={productById} isEditor={isEditor} />
       )}
       {tab === 'inventory' && (
         <InventoryTab data={data} addLot={addLot} updateLot={updateLot} removeLot={removeLot} addMaterialTransaction={addMaterialTransaction} removeMaterialTransaction={removeMaterialTransaction} isEditor={isEditor} />
@@ -1023,6 +1138,11 @@ function DashboardTab({ data, lineById, orderById, lotById, orderStats, salesOrd
   const completedPlans = planRows.filter(({ o, st }) => o.targetQty > 0 && st.folded >= o.targetQty);
   const completedToday = completedPlans.filter(({ o }) => data.records.some((r) => r.orderId === o.id && r.date === date));
 
+  // 予定より遅れている・納期に間に合わない見込みの計画(納期が7日以内の物は下の「納期が近い」にも出る)
+  const behindPlans = planRows
+    .map(({ o, st }) => ({ o, st, pc: planPace(o, st.folded, data.records) }))
+    .filter(({ pc }) => pc.status === '遅れ' || pc.status === '納期超過' || (pc.late && pc.status !== '完了' && pc.status !== '開始前'))
+    .sort((a, b) => b.pc.shortfall - a.pc.shortfall);
   // 生産計画が未作成の受注(受注はあるがまだ計画に紐づいていないもの)
   const unplannedOrders = data.salesOrders.filter((so) => !data.orders.some((o) => o.salesOrderId === so.id));
 
@@ -1075,7 +1195,7 @@ function DashboardTab({ data, lineById, orderById, lotById, orderStats, salesOrd
       </div>
 
       {/* 要対応(未計画の受注・納期が近い計画) */}
-      {(unplannedOrders.length > 0 || urgentPlans.length > 0) && (
+      {(unplannedOrders.length > 0 || urgentPlans.length > 0 || behindPlans.length > 0) && (
         <Panel style={{ padding: 16, border: `1px solid ${C.amberDim || C.border}` }}>
           <div className="fm-display" style={{ fontSize: 16, fontWeight: 600, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
             <AlertTriangle size={16} color={C.amber} /> 要対応
@@ -1090,6 +1210,22 @@ function DashboardTab({ data, lineById, orderById, lotById, orderStats, salesOrd
                       <span style={{ fontWeight: 600 }}>{so.orderNo}</span>
                       <span style={{ color: C.textDim }}>{so.customerName} / {so.productName}</span>
                       <span className="fm-mono" style={{ marginLeft: 'auto', fontSize: 11, color: C.textFaint }}>納期 {so.dueDate}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {behindPlans.length > 0 && (
+              <div>
+                <div style={{ fontSize: 12, color: C.textDim, marginBottom: 6 }}>予定より遅れている・納期に間に合わない見込みの計画({behindPlans.length}件)</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {behindPlans.map(({ o, st, pc }) => (
+                    <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, background: 'rgba(224,90,90,0.08)', borderRadius: 6, padding: '6px 10px', flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 600 }}>{o.planNo}</span>
+                      <span style={{ color: C.textDim }}>{o.productName}</span>
+                      <Badge tone={pc.tone}>{pc.status}</Badge>
+                      <span className="fm-mono" style={{ fontSize: 11, color: C.textDim }}>実績 {fmt(st.folded)} / 今日までの予定 {fmt(pc.expected)}{pc.shortfall > 0 ? `(${fmt(pc.shortfall)}不足)` : ''}</span>
+                      <span className="fm-mono" style={{ marginLeft: 'auto', fontSize: 11, color: pc.late ? C.red : C.textFaint }}>納期 {planEnd(o)}{pc.forecast ? ` ・見込み ${pc.forecast}` : ''}</span>
                     </div>
                   ))}
                 </div>
@@ -1637,7 +1773,67 @@ function SalesOrderTab({ data, addSalesOrder, updateSalesOrder, removeSalesOrder
 /* ------------------------------------------------------------------ */
 /* 生産計画タブ                                                         */
 /* ------------------------------------------------------------------ */
-function PlanTab({ data, orderStats, addOrder, updateOrder, removeOrder, lineById, lotById, addLine, removeLine, salesOrderById, productById, isEditor }) {
+/* ---- 進み具合の印刷・CSV出力(アカウントの無い人にも渡せるように) ----
+   計画ごと: 目標・完成(たたみ済)・進捗・生産期間・状態・今日までの予定・不足・完了の見込み
+   受注ごと: 受注数・完成・進捗・納期 */
+function progressTables(data, orderStats, salesOrderStats, lineById, salesOrderById, productById) {
+  const today = todayStr();
+  const plans = data.orders.map((o) => {
+    const st = orderStats(o.id), pc = planPace(o, st.folded, data.records, today), so = salesOrderById(o.salesOrderId);
+    const p = o.productId ? productById(o.productId) : null;
+    return {
+      planNo: o.planNo || '', order: so ? so.orderNo || '' : '', customer: so ? so.customerName || '' : '', product: o.productName || '', line: (lineById(o.lineId) || {}).name || '',
+      target: num(o.targetQty), done: st.folded, unit: p && p.isSet ? 'セット' : '枚', ratio: num(o.targetQty) > 0 ? Math.round(st.folded / num(o.targetQty) * 100) : 0,
+      start: planStart(o) || '', end: planEnd(o) || '', status: pc.status || (st.folded > 0 ? '仕掛中' : '未着手'),
+      expected: pc.status && pc.status !== '完了' && pc.status !== '開始前' ? pc.expected : '', shortfall: pc.shortfall || '', forecast: pc.forecast || '', late: pc.late,
+    };
+  }).sort((a, b) => (a.status === '完了') - (b.status === '完了') || String(a.end).localeCompare(String(b.end)));
+  const orders = data.salesOrders.map((so) => {
+    const st = salesOrderStats(so.id), p = so.productId ? productById(so.productId) : null;
+    const done = p && p.isSet ? st.setsCompleted : st.folded;
+    return { order: so.orderNo || '', customer: so.customerName || '', product: so.productName || '', qty: num(so.orderedQty), done, unit: p && p.isSet ? 'セット' : '枚',
+      ratio: num(so.orderedQty) > 0 ? Math.round(done / num(so.orderedQty) * 100) : 0, due: so.dueDate || '', planned: data.orders.some((o) => o.salesOrderId === so.id) };
+  }).sort((a, b) => String(a.due).localeCompare(String(b.due)));
+  return { today, plans, orders };
+}
+function downloadProgressCsv(t) {
+  const q = (v) => { const s0 = String(v === null || v === undefined ? '' : v); return /[",\n]/.test(s0) ? '"' + s0.replace(/"/g, '""') + '"' : s0; };
+  const rows = [['生産計画の進み具合', t.today + ' 時点'], ['計画番号', '受注番号', '得意先', '製品名', 'ライン', '目標', '完成(たたみ済)', '単位', '進捗(%)', '開始日', '終了日(納期)', '状態', '今日までの予定', '不足', '完了の見込み', '納期に間に合わない見込み']];
+  t.plans.forEach((p) => rows.push([p.planNo, p.order, p.customer, p.product, p.line, p.target, p.done, p.unit, p.ratio, p.start, p.end, p.status, p.expected, p.shortfall, p.forecast, p.late ? 'はい' : '']));
+  rows.push([]); rows.push(['受注の進み具合']); rows.push(['受注番号', '得意先', '製品名', '受注数', '完成', '単位', '進捗(%)', '納期', '生産計画']);
+  t.orders.forEach((o) => rows.push([o.order, o.customer, o.product, o.qty, o.done, o.unit, o.ratio, o.due, o.planned ? 'あり' : '未作成']));
+  const csv = '\ufeff' + rows.map((r) => r.map(q).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = '生産の進み具合_' + t.today + '.csv';
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+function printProgress(t) {
+  const e = (v) => String(v === null || v === undefined ? '' : v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const f = (n) => (n === '' || n === null || n === undefined) ? '' : Number(n).toLocaleString('ja-JP');
+  const bar = (r) => '<div class="bar"><i style="width:' + Math.min(100, r) + '%"></i></div><span>' + r + '%</span>';
+  const tone = (st) => ({ '完了': 'g', '順調': 'g', '前倒し': 'b', '遅れ': 'r', '納期超過': 'r' }[st] || '');
+  const html = '<!doctype html><html><head><meta charset="utf-8"><title>生産の進み具合 ' + e(t.today) + '</title><style>' +
+    'body{font-family:"Yu Gothic UI","Meiryo",sans-serif;font-size:11px;margin:10mm;color:#111;}h1{font-size:16px;margin:0 0 2px;}h2{font-size:13px;margin:14px 0 4px;}' +
+    'table{border-collapse:collapse;width:100%;}th,td{border:1px solid #999;padding:3px 5px;text-align:left;vertical-align:middle;}th{background:#eee;}td.n{text-align:right;white-space:nowrap;}tr{page-break-inside:avoid;}' +
+    '.bar{display:inline-block;width:70px;height:7px;background:#eee;border-radius:4px;vertical-align:middle;margin-right:4px;overflow:hidden;}.bar i{display:block;height:100%;background:#1f8a70;}' +
+    '.st{font-weight:700;padding:1px 6px;border-radius:8px;white-space:nowrap;}.st.g{background:#dcfae6;color:#067647;}.st.r{background:#fee4e2;color:#b42318;}.st.b{background:#d1e9ff;color:#175cd3;}.late{color:#b42318;font-weight:700;}' +
+    '@page{size:A4 landscape;}</style></head><body>' +
+    '<h1>生産の進み具合</h1><div>' + e(t.today) + ' 時点(完成数 = たたみ済みの数。今日までの予定 = 目標 × 開始日からの日数 ÷ 生産期間。見込み = これまでの1日あたりの実績で作り終える日)</div>' +
+    '<h2>生産計画(' + t.plans.length + '件)</h2><table><thead><tr><th>計画番号</th><th>受注 / 得意先</th><th>製品名</th><th>ライン</th><th>完成 / 目標</th><th>進捗</th><th>生産期間</th><th>状態</th><th>今日までの予定</th><th>完了の見込み</th></tr></thead><tbody>' +
+    (t.plans.map((p) => '<tr><td>' + e(p.planNo) + '</td><td>' + e([p.order, p.customer].filter(Boolean).join(' / ')) + '</td><td>' + e(p.product) + '</td><td>' + e(p.line) + '</td>' +
+      '<td class="n">' + f(p.done) + ' / ' + f(p.target) + e(p.unit) + '</td><td>' + bar(p.ratio) + '</td><td>' + e(p.start) + '〜' + e(p.end) + '</td>' +
+      '<td><span class="st ' + tone(p.status) + '">' + e(p.status) + '</span></td><td class="n">' + (p.expected !== '' ? f(p.expected) + (p.shortfall ? '(' + f(p.shortfall) + '不足)' : '') : '') + '</td>' +
+      '<td class="' + (p.late ? 'late' : '') + '">' + e(p.forecast) + (p.late ? '(納期に間に合わない)' : '') + '</td></tr>').join('') || '<tr><td colspan="10">計画がありません</td></tr>') +
+    '</tbody></table>' +
+    '<h2>受注(' + t.orders.length + '件)</h2><table><thead><tr><th>受注番号</th><th>得意先</th><th>製品名</th><th>完成 / 受注数</th><th>進捗</th><th>納期</th><th>生産計画</th></tr></thead><tbody>' +
+    (t.orders.map((o) => '<tr><td>' + e(o.order) + '</td><td>' + e(o.customer) + '</td><td>' + e(o.product) + '</td><td class="n">' + f(o.done) + ' / ' + f(o.qty) + e(o.unit) + '</td><td>' + bar(o.ratio) + '</td><td>' + e(o.due) + '</td><td>' + (o.planned ? 'あり' : '<span class="late">未作成</span>') + '</td></tr>').join('') || '<tr><td colspan="7">受注がありません</td></tr>') +
+    '</tbody></table><script>window.onload=function(){window.print();};<\/script></body></html>';
+  const w = window.open('', '_blank');
+  if (!w) { alert('印刷の画面を開けませんでした(ポップアップを許可してください)'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+}
+function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, removeOrder, lineById, lotById, addLine, removeLine, salesOrderById, productById, isEditor }) {
   const blankForm = { planNo: '', salesOrderId: '', productId: '', productName: '', lineId: data.lines[0]?.id || '', lotId: '', targetQty: '', startDate: todayStr(), dueDate: '' };
   const [form, setForm] = useState(blankForm);
   const [editingId, setEditingId] = useState(null);
@@ -1835,19 +2031,23 @@ function PlanTab({ data, orderStats, addOrder, updateOrder, removeOrder, lineByI
       <Panel style={{ padding: 16, overflowX: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div className="fm-display" style={{ fontSize: 16, fontWeight: 600 }}>生産計画一覧</div>
-          {completedCount > 0 && <Badge tone="green">完了 {completedCount}件</Badge>}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {completedCount > 0 && <Badge tone="green">完了 {completedCount}件</Badge>}
+            <button className="fm-btn" onClick={() => printProgress(progressTables(data, orderStats, salesOrderStats, lineById, salesOrderById, productById))} style={{ background: C.panelAlt2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>🖨 進み具合を印刷</button>
+            <button className="fm-btn" onClick={() => downloadProgressCsv(progressTables(data, orderStats, salesOrderStats, lineById, salesOrderById, productById))} style={{ background: C.panelAlt2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>CSV出力</button>
+          </div>
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 780 }}>
           <thead>
             <tr style={{ textAlign: 'left', color: C.textDim, borderBottom: `1px solid ${C.border}` }}>
-              {['計画番号', '受注/得意先', '製品名', 'ライン', '資材', '進捗(たたみ済/目標)', '生産期間', '状態', ''].map((h) => (
+              {['計画番号', '受注/得意先', '製品名', 'ライン', '資材', '進捗(たたみ済/目標)', '生産期間', '状態', '予定との比較', ''].map((h) => (
                 <th key={h} style={{ padding: '6px 8px', fontWeight: 500 }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {sortedRows.length === 0 && (
-              <tr><td colSpan={9} style={{ padding: 14, color: C.textFaint }}>計画がありません。上のフォームから追加してください。</td></tr>
+              <tr><td colSpan={10} style={{ padding: 14, color: C.textFaint }}>計画がありません。上のフォームから追加してください。</td></tr>
             )}
             {sortedRows.map(({ o, st, status }) => {
               const ratio = pct(st.folded, o.targetQty);
@@ -1873,6 +2073,15 @@ function PlanTab({ data, orderStats, addOrder, updateOrder, removeOrder, lineByI
                   <td className="fm-mono" style={{ padding: '8px', fontSize: 12, whiteSpace: 'nowrap' }}>{planStart(o)} 〜 {planEnd(o)}</td>
                   <td style={{ padding: '8px' }}>
                     <Badge tone={tone}>{done ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><CheckCircle2 size={11} />完了</span> : status}</Badge>
+                  </td>
+                  <td style={{ padding: '8px', fontSize: 11, whiteSpace: 'nowrap' }}>
+                    {(() => { const pc = planPace(o, st.folded, data.records); if (!pc.status || pc.status === '完了') return <span style={{ color: C.textFaint }}>—</span>; return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <span><Badge tone={pc.tone}>{pc.status}</Badge>{pc.status !== '開始前' && <span className="fm-mono" style={{ marginLeft: 6, color: C.textDim }}>今日までの予定 {fmt(pc.expected)}{pc.shortfall > 0 ? `(${fmt(pc.shortfall)}不足)` : ''}</span>}</span>
+                        {pc.forecast && <span className="fm-mono" style={{ color: pc.late ? C.red : C.textDim }}>完了の見込み {pc.forecast}{pc.late ? '(納期に間に合わない)' : ''}</span>}
+                        {!pc.forecast && pc.status !== '開始前' && <span style={{ color: C.textFaint }}>実績がまだ無いので見込みは出せません</span>}
+                      </div>
+                    ); })()}
                   </td>
                   <td style={{ padding: '8px', display: 'flex', gap: 2 }}>
                     {isEditor && <IconBtn onClick={() => startEdit(o)} title="編集" icon={Pencil} />}
@@ -2808,8 +3017,8 @@ function CalendarTab({ data, lineById, orderById, orderStats, productById }) {
                     const dayRecs = data.records.filter((r) => r.orderId === o.id && r.date === selected);
                     const dayActual = dayRecs.reduce((s, r) => s + num(r.machineUpQty), 0);
                     const dayFolded = dayRecs.reduce((s, r) => s + num(r.foldedQty), 0);
-                    const ratio = pct(dayActual, dailyTarget);
-                    const behind = dailyTarget > 0 && dayActual < dailyTarget * 0.8;
+                    const ratio = pct(dayFolded, dailyTarget);
+                    const behind = dailyTarget > 0 && dayFolded < dailyTarget * 0.8; // 計画の進み具合と同じく完成数(たたみ済み)で比べる
                     const tone = dailyTarget === 0 ? 'dim' : behind ? 'red' : 'green';
                     return (
                       <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: C.panelAlt, borderRadius: 6, padding: '8px 10px' }}>
@@ -2817,9 +3026,9 @@ function CalendarTab({ data, lineById, orderById, orderStats, productById }) {
                         <span style={{ fontSize: 10, color: C.textFaint, whiteSpace: 'nowrap' }}>{planStart(o)}〜{planEnd(o)}</span>
                         <div style={{ flex: 1, minWidth: 100, maxWidth: 200 }}><ProgressBar ratio={ratio} color={behind ? C.red : C.teal} /></div>
                         <span className="fm-mono" style={{ fontSize: 11, color: C.textDim, whiteSpace: 'nowrap' }}>
-                          実績(機械上がり) {fmt(dayActual)} / 1日計画 {fmt(Math.round(dailyTarget))}枚
+                          実績(たたみ済) {fmt(dayFolded)} / 1日計画 {fmt(Math.round(dailyTarget))}枚
                         </span>
-                        <span className="fm-mono" style={{ fontSize: 10, color: C.textFaint }}>たたみ済 {fmt(dayFolded)}枚</span>
+                        <span className="fm-mono" style={{ fontSize: 10, color: C.textFaint }}>機械上がり {fmt(dayActual)}枚</span>
                         <Badge tone={tone}>{dailyTarget === 0 ? '—' : behind ? 'ペース遅れ' : '順調'}</Badge>
                       </div>
                     );

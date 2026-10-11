@@ -17784,6 +17784,13 @@ function renderFoldQtyModal(m){
   '</div>';
 }
 /* kv「factory-fold:日付」に1件足す(ほかの端末と同時でも消し合わないよう、版を確かめて書く) */
+/* 生産管理への取り込み(Edge Function factory-fold-import)を頼む。待たない(失敗しても、生産管理を開いたときや次の入力でまた取り込む) */
+function requestFoldImport(){
+  try{
+    var c = window.__supabaseClient;
+    if(c && c.functions && typeof c.functions.invoke==='function') c.functions.invoke('factory-fold-import', { body: {} }).catch(function(){});
+  }catch(e){}
+}
 async function saveFoldEntry(entry){
   var key = 'factory-fold:'+entry.date;
   for(var i=0; i<5; i++){
@@ -17830,6 +17837,7 @@ function bindFoldQtyModal(m){
       qty: qty, defectQty: defect, startTime: foldHM(m.log.start), endTime: foldHM(m.log.end), at: new Date().toISOString()
     });
     if(!ok){ busy = false; save.textContent = '記録する'; err.textContent = '保存できませんでした。もう一度「記録する」を押すか、「入れない」を押して生産管理の担当者に伝えてください。'; return; }
+    requestFoldImport();
     next();
   });
   if(skip) skip.addEventListener('click', function(){

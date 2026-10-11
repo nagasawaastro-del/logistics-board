@@ -1340,6 +1340,8 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
   }
 
   window.storage = {
+    /* この端末が覚えている読み込み結果を捨てる(サーバーの関数がキーを書き換えた直後に、確実に読み直すため) */
+    forget: function(key){ forgetCache(key); },
     /* 書き込み操作の通し番号。4秒更新(pollTick)が「自分の取得中に書き込みが
        あったか」を判定し、保存前に取得した古いデータで画面の状態を上書きしない
        ために使う。 */
@@ -10881,6 +10883,12 @@ async function loadStockSnapshots(){
 async function loadStockAnalysis(){
   var r = await Promise.all([loadShukeiData('takaya'), loadKeyJson(STOCK_CAPACITY_KEY, function(){ return {}; }), loadStockSnapshots(), loadKeyJson(SLOT_BASELINE_KEY, function(){ return null; }), loadKeyJson(STOCK_OUTLOOK_KEY, function(){ return null; })]);
   var stock = r[0], lz = stock && stock.logizard;
+  // ダミー品番(DUMMY_PRODUCT_CODES。ロジザードの仮の品番)は、在庫タブのどこにも入れない(概要・ロケーション・配置・将来在庫)
+  if(lz && lz.products && Object.keys(lz.products).some(isDummyProductCode)){
+    var realProducts = {};
+    Object.keys(lz.products).forEach(function(code){ if(!isDummyProductCode(code)) realProducts[code] = lz.products[code]; });
+    lz = Object.assign({}, lz, { products: realProducts });
+  }
   var pm = {};
   if(lz && lz.products){
     var info = await getProductMasterInfoBatch(Object.keys(lz.products));
@@ -12245,7 +12253,7 @@ function computeStockOutlook(st, site){
     if(q>0) stock[code] = q;
   });
   var lines = (ol.estimates||[]).map(function(x){ return Object.assign({ sign:-1 }, x); }).concat((ol.arrivals||[]).map(function(x){ return Object.assign({ sign:1 }, x); }))
-    .filter(function(x){ return !site || outlookSiteOfWarehouse(x.warehouse)===site; })
+    .filter(function(x){ return !isDummyProductCode(x.code) && (!site || outlookSiteOfWarehouse(x.warehouse)===site); })
     .sort(function(a,b){ return String(a.date).localeCompare(String(b.date)) || b.sign-a.sign; }); // 同じ日は入荷を先に
   var by = {};
   lines.forEach(function(x){
@@ -12309,7 +12317,7 @@ function renderStockOutlook(st){
     (codeRow ? '<div class="pool-hint" style="margin:0 0 6px;"><b>'+esc(code)+'</b> '+esc(codeRow.name)+': 今の在庫 '+formatNum(codeRow.stock)+' → 将来在庫 '+formatNum(codeRow.future)+(codeRow.shortDate ? '(<b style="color:#B42318;">'+esc(codeRow.shortDate)+' に足りなくなる</b>)' : '')+'</div>' : '')+
     '<div style="overflow-x:auto;max-height:520px;" data-keep-scroll="outlookB"><table class="report-table shukei-table"><thead><tr><th>日付</th><th>内容</th><th>番号</th><th>得意先・仕入先</th><th>品番</th><th class="num">数量</th><th class="num">その品番の残り</th></tr></thead><tbody>'+
     (ev.slice(0, LIMIT).map(function(x){
-      return '<tr'+(x.after<0 ? ' style="background:#FEF3F2;"' : '')+'><td>'+esc(x.date)+'</td><td>'+(x.sign<0 ? '見積もり' : '<span style="color:#067647;font-weight:700;">入荷予定</span>')+'</td><td class="sk-minor">'+esc(x.no)+'</td><td class="sk-minor">'+esc(x.party)+'</td>'+
+      return '<tr'+(x.after<0 ? ' style="background:#FEF3F2;"' : '')+'><td>'+esc(x.date)+'</td><td>'+(x.sign<0 ? '見積もり' : '<span style="color:#067647;font-weight:700;">入荷予定</span>'+(x.late ? '<div class="sk-minor" style="color:#B54708;">遅れ(納入期日 '+esc(x.late)+')</div>' : ''))+'</td><td class="sk-minor">'+esc(x.no)+'</td><td class="sk-minor">'+esc(x.party)+'</td>'+
         '<td><b>'+esc(x.code)+'</b><div class="sk-minor">'+esc(x.name)+'</div></td><td class="num">'+(x.sign<0 ? '−' : '+')+formatNum(x.qty)+'</td><td class="num"><b'+(x.after<0 ? ' style="color:#B42318;"' : '')+'>'+formatNum(x.after)+'</b></td></tr>';
     }).join('') || '<tr><td colspan="7" class="empty-note">'+(code ? 'この品番の見積もり・入荷予定はありません' : '見積もり・入荷予定がありません')+'</td></tr>')+
     '</tbody></table></div>'+(ev.length>LIMIT ? '<div class="pool-hint">ほか '+formatNum(ev.length-LIMIT)+'行(品番で絞るか、CSV出力で全部)</div>' : '');
@@ -12322,7 +12330,7 @@ function renderStockOutlook(st){
     }).join('') || '<tr><td colspan="6" class="empty-note">見積もりの入っていない在庫はありません</td></tr>')+
     '</tbody></table></div>'+(o.noEst.length>LIMIT ? '<div class="pool-hint">ほか '+formatNum(o.noEst.length-LIMIT)+'品番(CSV出力で全部)</div>' : '');
   return sync+cards+tblA+tblB+tblC+
-    '<div class="pool-hint" style="margin-top:10px;">今の在庫 = ロジザードの在庫('+esc(fmtDateTime(st.lz.uploadedAt))+'取込)から引当数を除いた数(ピース)。見積もり = kintone の見積もりアプリ(956)の、見積日が今日以降の明細の数量(スタンプは見ない。見積日に在庫から出ていくとみなす)。'+
+    '<div class="pool-hint" style="margin-top:10px;">今の在庫 = ロジザードの在庫('+esc(fmtDateTime(st.lz.uploadedAt))+'取込)から引当数を除いた数(ピース)。見積もり = kintone の見積もりアプリ(956)の、見積日が今日以降の明細の数量(スタンプは見ない。見積日に在庫から出ていくとみなす)。入荷予定 = 発注履歴アプリ(949)の、仕入番号の入っていない(まだ入荷していない)発注の数量。納入期日に入荷するとみなし、納入期日を過ぎた物は「遅れ」として今日に数えます(60日より前は除く)。'+
     '拠点は明細の倉庫コード(高屋 0018・丹南 0000)で分けます(倉庫コードの無い明細は「全部」のときだけ数えます)。1日の出荷・在庫日数は、作業量CSVの出荷記録('+((st.ship||{}).days||0)+'日分)からの目安です。</div>';
 }
 function bindStockTab(){
@@ -12349,6 +12357,7 @@ function bindStockTab(){
         state.outlookMsg = '⚠️ '+(msg || '取り込めませんでした');
       }else{
         state.outlookMsg = '✅ 見積もり '+formatNum(d.estimateRecords)+'件(明細 '+formatNum(d.estimateLines)+'行)を取り込みました'+(d.arrivalLines ? '・入荷予定 '+formatNum(d.arrivalLines)+'行' : '')+(d.arrivalNote ? '('+d.arrivalNote+')' : '');
+        if(window.storage.forget) window.storage.forget(STOCK_OUTLOOK_KEY); // 取り込む前に読んだ「まだ無い」を使わない
         var ol = await loadKeyJson(STOCK_OUTLOOK_KEY, function(){ return null; });
         if(state.stockData && !isUnverified(ol)) state.stockData.outlook = ol;
         await appendAuditLog({ action:'kintoneから見積もり・入荷予定を取り込む', target:'将来在庫', before:null, after: d.estimateLines+'行' });
@@ -12370,7 +12379,7 @@ function bindStockTab(){
       var st0 = state.stockData; if(!st0) return;
       var o = computeStockOutlook(st0, state.outlookSite || ''), kind = el.getAttribute('data-outlook-csv'), rows;
       if(kind==='future'){ rows = [['品番','商品名','今の在庫','見積もり','見積もりの件数','入荷予定','将来在庫','入数','足りなくなる日']]; o.rows.forEach(function(g){ rows.push([g.code, g.name, g.stock, g.est, g.estCount, g.arr, g.future, g.pack||'', g.shortDate||'']); }); }
-      else if(kind==='events'){ rows = [['日付','内容','番号','得意先・仕入先','品番','商品名','数量','その品番の残り','倉庫コード']]; o.events.forEach(function(x){ rows.push([x.date, x.sign<0?'見積もり':'入荷予定', x.no, x.party, x.code, x.name, x.sign*x.qty, x.after, x.warehouse]); }); }
+      else if(kind==='events'){ rows = [['日付','内容','番号','得意先・仕入先','品番','商品名','数量','その品番の残り','倉庫コード','遅れ(もとの納入期日)']]; o.events.forEach(function(x){ rows.push([x.date, x.sign<0?'見積もり':'入荷予定', x.no, x.party, x.code, x.name, x.sign*x.qty, x.after, x.warehouse, x.late||'']); }); }
       else { rows = [['品番','商品名','在庫','入数','ケース','才数','1日の出荷(ピース)','在庫日数']]; o.noEst.forEach(function(x){ rows.push([x.code, x.name, x.qty, x.pack||'', x.cases===null?'':Math.round(x.cases*10)/10, x.cube===null?'':Math.round(x.cube*10)/10, Math.round(x.perDay*10)/10, x.days===null?'':Math.round(x.days)]); }); }
       var names = { future:'将来在庫', events:'日付ごと', noest:'見積もりの入っていない在庫' };
       downloadCSV('在庫_'+names[kind]+'_'+todayStr()+'.csv', rows);

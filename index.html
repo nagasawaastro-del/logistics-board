@@ -9822,7 +9822,7 @@ function bindVcAlloc(){
     el.addEventListener('click', function(){ state.vcAllocTab = el.getAttribute('data-vca-tab'); state.vcAllocMsg = ''; state.vcAllocSort = null; render(); });
   });
   var rl = document.getElementById('vcaReload');
-  if(rl) rl.addEventListener('click', function(){ state.vcAllocData = null; state.vcAllocMsg = ''; render(); });
+  if(rl) rl.addEventListener('click', function(){ state.vcAllocData = null; state.vcDestData = null; state.vcAllocMsg = ''; render(); });
   var pr = document.getElementById('vcaPrint');
   if(pr) pr.addEventListener('click', function(){ window.print(); });
   var oc = document.getElementById('vcaOnlyCheck');
@@ -9971,7 +9971,7 @@ async function importSharedDataFiles(files){
   }
   // 集計表・VC引き当て・この画面は、開いたときに読み直す
   state.shukeiData = null;
-  state.vcAllocData = null;
+  state.vcAllocData = null; state.vcDestData = null;
   state.stockData = null;
   if(msgs.some(function(m){ return m.indexOf('✅ ロジザードの在庫')===0; })){
     try{ state.stockData = await loadStockAnalysis(); msgs.push('✅ 在庫の記録を残しました(トップの「在庫」で推移が見られます)'); }catch(e){}
@@ -10033,7 +10033,7 @@ function renderDataHub(){
 function bindDataHub(){
   if(!hasManagerSession()){ bindManagerLoginForm(); return; }
   var rl = document.getElementById('hubReload');
-  if(rl) rl.addEventListener('click', function(){ state.vcAllocData = null; state.shukeiData = null; state.dataHubMsg = ''; render(); });
+  if(rl) rl.addEventListener('click', function(){ state.vcAllocData = null; state.vcDestData = null; state.shukeiData = null; state.dataHubMsg = ''; render(); });
   var busy = false;
   async function run(files){
     if(busy || !files || !files.length) return;
@@ -12685,7 +12685,7 @@ function render(){
   if(state.role==='stock') bindStockTab();
   bindCsvButtons();
   document.querySelectorAll('[data-go-datahub]').forEach(function(el){
-    el.addEventListener('click', function(){ state.role = 'adminHub'; state.adminHubTab = 'data'; state.dataHubMsg = ''; state.vcAllocData = null; render(); });
+    el.addEventListener('click', function(){ state.role = 'adminHub'; state.adminHubTab = 'data'; state.dataHubMsg = ''; state.vcAllocData = null; state.vcDestData = null; render(); });
   });
   if(state.modal) bindModal();
   var instrClose = document.getElementById('instrAlertClose');
@@ -12911,7 +12911,7 @@ function bindGate(){
     });
   });
   var hubBtn = document.getElementById('gateGoDataHub');
-  if(hubBtn) hubBtn.addEventListener('click', function(){ state.role = 'adminHub'; state.adminHubTab = 'data'; state.dataHubMsg = ''; state.vcAllocData = null; render(); startPolling(); });
+  if(hubBtn) hubBtn.addEventListener('click', function(){ state.role = 'adminHub'; state.adminHubTab = 'data'; state.dataHubMsg = ''; state.vcAllocData = null; state.vcDestData = null; render(); startPolling(); });
   var openBtn = document.getElementById('changelogOpenBtn');
   if(openBtn) openBtn.addEventListener('click', function(){
     state.showChangelog = true;
@@ -13616,22 +13616,44 @@ function bindKintoneProductSettingsPanel(){
   }
 }
 /* 設定 → 得意先・単価 の中の「納品先一覧」(VC引当の振り分け番号) */
+/* 納品先の一覧に要るのは「納品先の名前」と「一覧に無い納品先」だけ(computeVcAlloc と同じ判定)。在庫は使わない */
+function vcAllocDestInfo(order, dests){
+  var groups = vcAllocDestGroups(dests), destMap = {}, unknownDests = {};
+  ((order && order.lines) || []).forEach(function(l){
+    var destId = l[2], g = l[5] ? 1 : (groups[destId] || null);
+    if(!g) unknownDests[destId] = l[3] || destId;
+    if(!destMap[destId]) destMap[destId] = { id: destId, name: l[3]||'', group: g };
+  });
+  return { dests: Object.keys(destMap).map(function(k){ return destMap[k]; }), unknownDests: unknownDests };
+}
+/* 設定 → 得意先・単価 の「VC引当の納品先一覧」。
+   以前は VC引当の全データ(ロジザード・弥生の在庫を含む)を読み、描き直すたびに VC引当の計算を丸ごとやり直していたので重かった(2026-10-12)。
+   ここでは出荷指示と納品先一覧だけを読み(VC引当の画面を開いていればそのデータを使う)、軽い計算の結果をデータが変わるまで使い回す */
 function renderDestListPanel(){
-  if(!state.vcAllocData){
-    if(!state.vcAllocLoading){
-      state.vcAllocLoading = true;
-      loadVcAllocData().then(function(d){ state.vcAllocData = d; state.vcAllocLoading = false; render(); }).catch(function(){ state.vcAllocLoading = false; });
+  var d = state.vcAllocData || state.vcDestData;
+  if(!d){
+    if(!state.vcDestLoading){
+      state.vcDestLoading = true;
+      Promise.all([loadKeyJson(VC_ALLOC_KEYS.order, function(){ return null; }), loadKeyJson(VC_ALLOC_KEYS.dests, function(){ return null; })])
+        .then(function(r){ state.vcDestData = { order: r[0], dests: r[1] }; })
+        .catch(function(){})
+        .then(function(){ state.vcDestLoading = false; render(); });
     }
     return '<div class="panel" style="margin-top:16px;"><div class="panel-title">VC引当の納品先一覧</div><div class="pool-hint">読み込み中…</div></div>';
   }
-  var d = state.vcAllocData;
-  var calc = d.order && d.order.lines ? computeVcAlloc(d.order, d.dests, d.stock, state.shukeiPm) : null;
+  var memo = state.vcDestInfoMemo, destsJson = JSON.stringify(d.dests||null);
+  var calc = null;
+  if(d.order && d.order.lines){
+    if(!memo || memo.order!==d.order || memo.destsJson!==destsJson) memo = state.vcDestInfoMemo = { order: d.order, destsJson: destsJson, calc: vcAllocDestInfo(d.order, d.dests) };
+    calc = memo.calc;
+  }
   return '<div class="panel" style="margin-top:16px;"><div class="panel-title">VC引当の納品先一覧</div>'+
     (state.dataHubMsg ? '<div class="vc-import-status">'+esc(state.dataHubMsg)+'</div>' : '')+
     renderVcAllocDestEditor(d, calc)+'</div>';
 }
 function bindDestListPanel(){
-  if(state.vcAllocData) bindVcAllocDestEditor(state.vcAllocData);
+  var d = state.vcAllocData || state.vcDestData;
+  if(d) bindVcAllocDestEditor(d);
 }
 function renderCustomerMappingPanel(){
   if(state.customerTaskMapping===null){
@@ -20054,6 +20076,13 @@ var pollHandle = null;
 var pollTickRunning = false;
 function safeSnapshotForChangeDetection(){
   try{
+    // 設定ページは、現場の作業の記録・作業量などを使わない(スタッフの出勤と本日の勤務終了だけ)。
+    // それらが変わるたびに丸ごと描き直すと重いので、設定ページを開いている間は見ない(2026-10-12)
+    if(state.role==='settingsHub') return JSON.stringify({
+      settings: true, roster: state.roster, backlog: state.backlog, templates: state.templates,
+      attendance: state.day && state.day.attendance, shiftEndOverrides: state.day && state.day.shiftEndOverrides,
+      breakSettings: state.breakSettings, shiftSettings: state.shiftSettings, achievementSettings: state.achievementSettings
+    });
     return JSON.stringify({
       roster: state.roster, backlog: state.backlog, templates: state.templates,
       day: state.day, workVolume: state.workVolume, vcCaseLedger: state.vcCaseLedger,

@@ -9639,8 +9639,9 @@ function vcAllocNote(p){
 }
 /* LINE に貼る文: 高屋・丹南(そのまま出す品番)以外の品番(要確認・対応を選んだ品番・分ける)を、まとめて読める文にする */
 /* 高屋・丹南以外の品番(要確認・対応を選んだ品番・分ける)の行。LINE に画像・データで共有する用 */
-function vcAllocOtherRows(calc){
-  var ps = calc.products.filter(function(p){ return p.site!=='takaya' && p.site!=='tannan'; });
+var VC_ALLOC_KIND_LABEL = { all:'全品番', piece:'ピース引当', 'case':'ケース引当' };
+function vcAllocOtherRows(calc, kind){
+  var ps = calc.products.filter(function(p){ return p.site!=='takaya' && p.site!=='tannan' && (!kind || kind==='all' || p.kind===kind); });
   var order = function(p){ return !p.site ? 0 : (p.site==='handled' ? 1 : 2); };
   ps.sort(function(a,b){ return order(a)-order(b) || String(a.handling||'').localeCompare(String(b.handling||'')) || b.qty-a.qty; });
   return ps.map(function(p){
@@ -9652,8 +9653,8 @@ function vcAllocOtherRows(calc){
   });
 }
 /* 高屋・丹南以外の品番の表を、キャンバスに描く(PDF にする用)。戻り値: { canvas, headH, rowH, rows, scale } */
-function vcAllocOtherCanvas(calc){
-  var rows = vcAllocOtherRows(calc);
+function vcAllocOtherCanvas(calc, kind){
+  var rows = vcAllocOtherRows(calc, kind);
   var cols = [['区分',96],['品番',110],['商品名',300],['数量',80],['ケース',70],['高屋',80],['丹南',80],['不足',70],['備考',300]];
   var FONT = '"Yu Gothic UI","Meiryo","Hiragino Sans",sans-serif';
   var mc = document.createElement('canvas').getContext('2d'); mc.font = '700 12px '+FONT; // 区分(対応の名前)の幅に合わせて広げる
@@ -9664,7 +9665,7 @@ function vcAllocOtherCanvas(calc){
   var g = cv.getContext('2d'); g.scale(SC, SC);
   g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
   g.fillStyle = '#101828'; g.font = '700 18px '+FONT; g.textBaseline = 'middle';
-  g.fillText('VC引当 '+vcAllocDateLabel()+' 高屋・丹南以外 '+rows.length+'品番', 16, 24);
+  g.fillText('VC引当 '+(kind && kind!=='all' ? VC_ALLOC_KIND_LABEL[kind]+' ' : '')+vcAllocDateLabel()+' 高屋・丹南以外 '+rows.length+'品番', 16, 24);
   g.font = '12px '+FONT; g.fillStyle = '#475467';
   var cnt = {}; rows.forEach(function(r){ cnt[r.kind] = (cnt[r.kind]||0)+1; });
   g.fillText(Object.keys(cnt).map(function(k){ return k+' '+cnt[k]; }).join(' ・ '), 16, 46);
@@ -9704,7 +9705,7 @@ function vcCanvasToPdf(d){
     var c = document.createElement('canvas'), S = d.scale, hh = withHead ? d.headH : 0;
     c.width = d.width*S; c.height = (hh + sh)*S;
     var g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
-    if(withHead) g.drawImage(d.canvas, 0, 0, d.width*S, hh*S, 0, 0, d.width*S, hh*S);
+    if(withHead && hh>0) g.drawImage(d.canvas, 0, 0, d.width*S, hh*S, 0, 0, d.width*S, hh*S);
     g.drawImage(d.canvas, 0, sy*S, d.width*S, sh*S, 0, hh*S, d.width*S, sh*S);
     var bin = atob(c.toDataURL('image/jpeg', 0.92).split(',')[1]), u = new Uint8Array(bin.length);
     for(var i=0;i<bin.length;i++) u[i] = bin.charCodeAt(i);
@@ -9729,10 +9730,75 @@ function vcCanvasToPdf(d){
   return new Blob(parts, { type:'application/pdf' });
 }
 /* 高屋・丹南以外の品番を PDF にして保存する。パソコンの Chrome・Edge は保存の画面(デスクトップから)、ほかはダウンロード */
-async function vcAllocOtherPdf(calc){
+async function vcAllocOtherPdf(calc, kind){
+  kind = VC_ALLOC_KIND_LABEL[kind] ? kind : 'all';
   var blob;
-  try{ blob = vcCanvasToPdf(vcAllocOtherCanvas(calc)); }catch(e){ showToast('PDFを作れませんでした'); return; }
-  var name = 'VC引当_高屋丹南以外_'+todayStr()+'.pdf';
+  try{ blob = vcCanvasToPdf(vcAllocOtherCanvas(calc, kind)); }catch(e){ showToast('PDFを作れませんでした'); return; }
+  await vcSavePdf(blob, 'VC引当_'+VC_ALLOC_KIND_LABEL[kind]+'_高屋丹南以外_'+todayStr()+'.pdf'); // ピース・ケースで名前を分ける
+}
+/* ダッシュボードを1枚の絵にする(PDF で共有する用)。画面のダッシュボードと同じ中身 */
+function vcAllocDashCanvas(calc){
+  var t = calc.totals, FONT = '"Yu Gothic UI","Meiryo","Hiragino Sans",sans-serif';
+  var nSite = { takaya:0, tannan:0, split:0, none:0, handled:0 }, byHandling = {};
+  calc.products.forEach(function(p){ nSite[p.site || 'none']++; if(p.site==='handled') byHandling[p.handling] = (byHandling[p.handling]||0)+1; });
+  var byGroup = {}; calc.rows.forEach(function(r){ byGroup[r.group] = (byGroup[r.group]||0) + r.qty; });
+  var top = calc.products.slice().sort(function(a,b){ return b.qty-a.qty; }).slice(0,10);
+  var topDest = calc.dests.slice().sort(function(a,b){ return b.qty-a.qty; }).slice(0,5);
+  var nCase = calc.products.filter(function(p){ return p.kind==='case'; }).length;
+  var W = 1100, H = 740, SC = 2;
+  var cv = document.createElement('canvas'); cv.width = W*SC; cv.height = H*SC;
+  var g = cv.getContext('2d'); g.scale(SC, SC); g.textBaseline = 'middle';
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  function text(s, x, y, size, color, bold, align){ g.font = (bold ? '700 ' : '')+size+'px '+FONT; g.fillStyle = color; g.textAlign = align || 'left'; g.fillText(s, x, y); g.textAlign = 'left'; }
+  function fit(s, w, size, bold){ g.font = (bold ? '700 ' : '')+size+'px '+FONT; s = String(s||''); if(g.measureText(s).width<=w) return s; while(s.length && g.measureText(s+'…').width>w) s = s.slice(0,-1); return s+'…'; }
+  text('VC引当 ダッシュボード '+vcAllocDateLabel(), 16, 22, 20, '#101828', true);
+  text(fit('引当の決まり: '+vcAllocRulesText(calc.rules || vcAllocRules(null)), W-32, 11), 16, 46, 11, '#475467');
+  function cards(y, list){
+    var gap = 10, w = (W-32-gap*(list.length-1))/list.length;
+    list.forEach(function(c, i){
+      var x = 16+i*(w+gap), danger = c[3];
+      g.fillStyle = danger ? '#FEF3F2' : '#F9FAFB'; g.strokeStyle = danger ? '#FDA29B' : '#EAECF0';
+      g.beginPath(); if(g.roundRect) g.roundRect(x, y, w, 74, 8); else g.rect(x, y, w, 74); g.fill(); g.stroke();
+      text(c[0], x+12, y+16, 12, danger ? '#B42318' : '#475467', true);
+      text(fit(c[1], w-24, 22, true), x+12, y+42, 22, '#101828', true);
+      if(c[2]) text(fit(c[2], w-24, 11), x+12, y+63, 11, '#667085');
+    });
+  }
+  cards(64, [['PO数', formatNum(calc.poCount), formatNum(t.lines)+'行'], ['数量', formatNum(t.qty), 'ピース'], ['ケース数', formatNum(t.cases), '行ごとの入数で切り捨て'], ['端数', formatNum(t.hasu), 'ピース'],
+    ['品番', formatNum(calc.products.length), 'ピース '+formatNum(calc.products.length-nCase)+' ・ ケース '+formatNum(nCase)]]);
+  var c2 = [['高屋から', formatNum(nSite.takaya)+'品番', ''], ['丹南から', formatNum(nSite.tannan)+'品番', ''], ['分ける', formatNum(nSite.split)+'品番', '高屋と丹南から'],
+    ['要確認', formatNum(nSite.none)+'品番', '在庫が足りない', nSite.none>0]];
+  if(nSite.handled) c2.push(['確認して対応を決めた', formatNum(nSite.handled)+'品番', '内訳は下の段']);
+  cards(150, c2);
+  // 3段目: 振り分け番号ごとの数量と、対応ごとの品番数(長くなるので1つずつカードに)
+  var c3 = Object.keys(byGroup).sort().map(function(k){ return ['振り分け番号 '+k, formatNum(byGroup[k]), '数量(ピース)']; })
+    .concat(Object.keys(byHandling).map(function(h){ return [h, formatNum(byHandling[h])+'品番', '確認して決めた対応']; }));
+  if(c3.length) cards(236, c3);
+  function table(x, y, w, title, heads, widths, rows){
+    text(title, x, y, 14, '#101828', true);
+    var yy = y+16, RH = 26;
+    g.fillStyle = '#F2F4F7'; g.fillRect(x, yy, w, RH);
+    var cx = x; heads.forEach(function(h, i){ var num = h[1]; text(h[0], num ? cx+widths[i]-8 : cx+8, yy+RH/2, 12, '#344054', true, num ? 'right' : 'left'); cx += widths[i]; });
+    rows.forEach(function(r, ri){
+      var ry = yy+RH*(ri+1); cx = x;
+      r.forEach(function(v, i){ var num = heads[i][1]; text(fit(v, widths[i]-16, 12, i===0), num ? cx+widths[i]-8 : cx+8, ry+RH/2, 12, i===0 ? '#101828' : '#344054', i===0, num ? 'right' : 'left'); cx += widths[i]; });
+      g.strokeStyle = '#EAECF0'; g.beginPath(); g.moveTo(x, ry+RH); g.lineTo(x+w, ry+RH); g.stroke();
+    });
+  }
+  var ty = c3.length ? 338 : 252;
+  table(16, ty, 640, '商品別トップ10', [['品番'],['商品名'],['数量',1],['倉庫']], [100, 340, 90, 110],
+    top.map(function(p){ return [p.code, p.name, formatNum(p.qty), vcAllocSiteLabel(p)]; }));
+  table(676, ty, 408, '出荷先別トップ5', [['出荷先'],['番号',1],['PO',1],['数量',1]], [208, 60, 60, 80],
+    topDest.map(function(x){ return [x.name || x.id, x.group ? String(x.group) : '?', formatNum(Object.keys(x.pos).length), formatNum(x.qty)]; }));
+  return { canvas: cv, headH: 0, rowH: H, rows: 1, scale: SC, width: W, height: H };
+}
+async function vcAllocDashPdf(calc){
+  var blob;
+  try{ blob = vcCanvasToPdf(vcAllocDashCanvas(calc)); }catch(e){ showToast('PDFを作れませんでした'); return; }
+  await vcSavePdf(blob, 'VC引当_ダッシュボード_'+todayStr()+'.pdf');
+}
+/* PDF を保存する。パソコンの Chrome・Edge は保存の画面(デスクトップから)、ほかはダウンロード */
+async function vcSavePdf(blob, name){
   if(window.showSaveFilePicker){
     try{
       var h = await window.showSaveFilePicker({ suggestedName: name, startIn: 'desktop', types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }] });
@@ -9847,7 +9913,7 @@ function renderVcAllocDash(calc){
   var topDest = calc.dests.slice().sort(function(a,b){ return b.qty-a.qty; }).slice(0,5);
   var nCase = calc.products.filter(function(p){ return p.kind==='case'; }).length;
   return '<div class="pool-hint" style="margin:0 0 8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><span>引当の決まり: '+esc(vcAllocRulesText(calc.rules || vcAllocRules(null)))+'(設定 → 得意先・単価 で変えられます)</span>'+
-      '<button type="button" class="vc-manage-toggle-btn no-print" data-vca-pdf="1" style="margin-left:auto;">📄 PDFで出力(高屋・丹南以外)</button></div>'+
+      '<button type="button" class="vc-manage-toggle-btn no-print" data-vca-dash-pdf="1" style="margin-left:auto;">📄 ダッシュボードをPDFで出力</button></div>'+
     '<div class="vca-cards">'+
       card('PO数', formatNum(calc.poCount), formatNum(t.lines)+'行')+
       card('数量', formatNum(t.qty), 'ピース')+
@@ -9927,7 +9993,7 @@ function renderVcAllocTable(calc, kind){
           return '<button type="button" class="add-btn" data-vca-send="'+kind+'|'+k+'"'+(n ? '' : ' disabled')+' style="background:'+st.color+';">🧾 '+st.name+'の分を'+st.name+'の集計表へ('+n+'行)</button>';
         }).join('');
       })() : '')+
-      '<button type="button" class="vc-manage-toggle-btn" data-vca-pdf="1">📄 PDFで出力(高屋・丹南以外)</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" data-vca-pdf="'+kind+'">📄 PDFで出力('+(kind==='case' ? 'ケース' : 'ピース')+'引当の高屋・丹南以外)</button>'+
       (sort ? '<button type="button" class="vc-manage-toggle-btn" id="vcaSortReset">並びを戻す(番号順)</button>' : '')+
     '</div>'+
     '<div class="shukei-print-head"><b>VC '+esc(label)+'</b> ・ '+esc(vcAllocDateLabel())+'</div>'+
@@ -10015,9 +10081,13 @@ function bindVcAlloc(){
       if(await saveOrder(order, 'VC引き当ての備考を変更', code+': '+(v || '(消した)'))){ d.order = order; render(); }
     });
   });
-  // 高屋・丹南以外の品番を PDF(印刷の画面)で出力
+  // ダッシュボードを PDF で出力
+  document.querySelectorAll('[data-vca-dash-pdf]').forEach(function(btn){
+    btn.addEventListener('click', function(){ vcAllocDashPdf(computeVcAlloc(d.order, d.dests, d.stock, state.shukeiPm)); });
+  });
+  // 高屋・丹南以外の品番を PDF で出力
   document.querySelectorAll('[data-vca-pdf]').forEach(function(btn){
-    btn.addEventListener('click', function(){ vcAllocOtherPdf(computeVcAlloc(d.order, d.dests, d.stock, state.shukeiPm)); });
+    btn.addEventListener('click', function(){ vcAllocOtherPdf(computeVcAlloc(d.order, d.dests, d.stock, state.shukeiPm), btn.getAttribute('data-vca-pdf')); });
   });
   // 集計表へ送る(この端末の集計表の入力中の表に追加)
   document.querySelectorAll('[data-vca-send]').forEach(function(btn){

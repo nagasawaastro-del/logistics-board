@@ -12490,7 +12490,35 @@ function outlookSiteOfWarehouse(code){
   var k = Object.keys(SHUKEI_SITES).filter(function(x){ return SHUKEI_SITES[x].yayoiWarehouse===String(code||'').trim(); })[0];
   return k || '';
 }
-function computeStockOutlook(st, site){
+/* 将来在庫に数える明細か: 高屋・丹南(倉庫コード 0018・0000)の物だけ(ほかの倉庫に入る発注・出す見積もりは、この在庫と関係ない。倉庫コードの無い明細は数える)。
+   品物ではない品番(98・99で始まる作業費・送料など、数字3桁だけの品番)とダミー品番は外す */
+function outlookCountable(x){
+  var code = String(x.code||'').trim();
+  if(!code || isDummyProductCode(code) || /^9[89]/.test(code) || billingIsBareCode(code)) return false;
+  return !String(x.warehouse||'').trim() || !!outlookSiteOfWarehouse(x.warehouse);
+}
+/* 見積もりを、将来在庫に数える物に絞る。
+   ・作り直した見積もり: 件名の「○月○回」が同じ見積もりが、同じ得意先に何件もあれば、いちばん新しい1件(レコード番号が大きい)だけ(生協の計画数→校正数→アバウト数など)
+   ・アマゾン・楽天: 見積日が月曜 = PO数(確定)、それ以外の日 = 需要予測(forecast: true)。予測は includeForecast のときだけ数える
+   戻り値: { lines, forecast(予測で外した行数), old(古い版で外した行数) } */
+function outlookRoundKey(subject){
+  var m = String(subject||'').normalize('NFKC').match(/(\d{1,2})\s*月\s*(\d{1,2})\s*回/);
+  return m ? Number(m[1])+'月'+Number(m[2])+'回' : '';
+}
+function outlookEstimateLines(ol, includeForecast){
+  var est = ((ol && ol.estimates) || []).filter(outlookCountable), latest = {};
+  est.forEach(function(x){ var rk = outlookRoundKey(x.subject); if(!rk) return; var k = x.party+'|'+rk; if(!latest[k] || Number(x.recordId) > Number(latest[k])) latest[k] = x.recordId; });
+  var old = 0, forecast = 0, out = [];
+  est.forEach(function(x){
+    var rk = outlookRoundKey(x.subject);
+    if(rk && String(latest[x.party+'|'+rk])!==String(x.recordId)){ old++; return; }
+    var isFc = /アマゾン|ｱﾏｿﾞﾝ|amazon|楽天/i.test(x.party||'') && new Date(x.date+'T00:00:00').getDay()!==1;
+    if(isFc && !includeForecast){ forecast++; return; }
+    out.push(isFc ? Object.assign({}, x, { forecast:true }) : x);
+  });
+  return { lines: out, forecast: forecast, old: old };
+}
+function computeStockOutlook(st, site, includeForecast){
   var ol = st.outlook || {}, P = (st.lz && st.lz.products) || {}, pm = st.pm || {}, ship = st.ship || { days:0, byCode:{} };
   function packOf(code, lnPack){ var m = pm[code]; return (m && m.packQty) ? Number(m.packQty) : (lnPack || null); }
   function saiOf(code){ var m = pm[code]; return (m && m.cubicVolume!==null && m.cubicVolume!==undefined && m.cubicVolume!=='') ? Number(m.cubicVolume) : null; }
@@ -12505,8 +12533,9 @@ function computeStockOutlook(st, site){
     });
     if(q>0) stock[code] = q;
   });
-  var lines = (ol.estimates||[]).map(function(x){ return Object.assign({ sign:-1 }, x); }).concat((ol.arrivals||[]).map(function(x){ return Object.assign({ sign:1 }, x); }))
-    .filter(function(x){ return !isDummyProductCode(x.code) && (!site || outlookSiteOfWarehouse(x.warehouse)===site); })
+  var ef = outlookEstimateLines(ol, includeForecast);
+  var lines = ef.lines.map(function(x){ return Object.assign({ sign:-1 }, x); }).concat((ol.arrivals||[]).filter(outlookCountable).map(function(x){ return Object.assign({ sign:1 }, x); }))
+    .filter(function(x){ return !site || outlookSiteOfWarehouse(x.warehouse)===site; })
     .sort(function(a,b){ return String(a.date).localeCompare(String(b.date)) || b.sign-a.sign; }); // 同じ日は入荷を先に
   var by = {};
   lines.forEach(function(x){
@@ -12530,7 +12559,7 @@ function computeStockOutlook(st, site){
   var events = [];
   rows.forEach(function(g){ g.events.forEach(function(x){ events.push(Object.assign({ name:g.name, pack:g.pack }, x)); }); });
   events.sort(function(a,b){ return String(a.date).localeCompare(String(b.date)) || String(a.code).localeCompare(String(b.code)); });
-  return { rows:rows, noEst:noEst, events:events, lines:lines.length };
+  return { rows:rows, noEst:noEst, events:events, lines:lines.length, forecastSkipped: ef.forecast, oldSkipped: ef.old };
 }
 function outlookCasesText(q, pack){ return pack ? (Math.round(q/pack*10)/10).toLocaleString('ja-JP')+'ケース' : ''; }
 /* ---------- 保管料の試算(在庫を圧縮できたら、保管料がどうなるか) ----------
@@ -12542,8 +12571,8 @@ function computeStorageSim(st, opt){
   var P = (st.lz && st.lz.products) || {}, pm = st.pm || {}, ship = st.ship || { days:0, byCode:{} };
   var rate = BILLING_RATES.storage, days = Math.max(0, Number(opt.days)||0), over = opt.overrides || {};
   var est = {};
-  if(opt.keepEstimates && st.outlook) (st.outlook.estimates||[]).forEach(function(x){
-    if(isDummyProductCode(x.code) || (opt.site && outlookSiteOfWarehouse(x.warehouse)!==opt.site)) return;
+  if(opt.keepEstimates && st.outlook) outlookEstimateLines(st.outlook, !!state.outlookForecast).lines.forEach(function(x){
+    if(opt.site && outlookSiteOfWarehouse(x.warehouse)!==opt.site) return;
     est[x.code] = (est[x.code]||0) + x.qty;
   });
   var rows = [];
@@ -12614,14 +12643,15 @@ function renderStockOutlook(st){
   var sync = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
     (hasManagerSession() ? '<button type="button" class="add-btn" id="outlookSync"'+(state.outlookSyncing?' disabled':'')+'>'+(state.outlookSyncing?'取り込み中…':'kintone から見積もり・入荷予定を取り込む')+'</button>' : '<span class="pool-hint" style="margin:0;">取り込みは管理者でログインしたときだけできます。</span>')+
     '<span class="pool-hint" style="margin:0;">'+(ol && ol.syncedAt ? '最後に取り込んだ日時 '+esc(fmtDateTime(ol.syncedAt))+'(見積日が '+esc(ol.from||'')+' 以降の見積もり '+formatNum(ol.estimateRecords||0)+'件)' : 'まだ取り込んでいません')+(ol && ol.arrivalNote ? ' ・ '+esc(ol.arrivalNote) : '')+'</span>'+
-    '<label class="pool-hint" style="margin:0 0 0 auto;">拠点 <select id="outlookSite"><option value="">全部</option>'+Object.keys(SHUKEI_SITES).map(function(k){ return '<option value="'+k+'"'+(site===k?' selected':'')+'>'+esc(SHUKEI_SITES[k].name)+'</option>'; }).join('')+'</select></label>'+
+    '<label class="pool-hint" style="margin:0 0 0 auto;"><input type="checkbox" id="outlookForecast"'+(state.outlookForecast?' checked':'')+'> 需要予測(アマゾン・楽天の月曜以外)も差し引く</label>'+
+    '<label class="pool-hint" style="margin:0;">拠点 <select id="outlookSite"><option value="">全部</option>'+Object.keys(SHUKEI_SITES).map(function(k){ return '<option value="'+k+'"'+(site===k?' selected':'')+'>'+esc(SHUKEI_SITES[k].name)+'</option>'; }).join('')+'</select></label>'+
   '</div>'+(state.outlookMsg ? '<div class="vc-import-status" style="white-space:pre-line;">'+esc(state.outlookMsg)+'</div>' : '');
   if(!ol) return sync+'<div class="empty-note">kintone の見積もりアプリ(956)から取り込むと、将来在庫と、見積もりの入っていない在庫が出ます。</div>';
-  var o = computeStockOutlook(st, site);
+  var o = computeStockOutlook(st, site, !!state.outlookForecast);
   var shortN = o.rows.filter(function(g){ return g.shortDate; }).length;
   var noEstCube = o.noEst.reduce(function(a,x){ return a+(x.cube||0); }, 0);
   var cards = '<div class="vca-cards">'+
-    '<div class="vca-card"><div class="vca-card-label">見積もり・入荷予定のある品番</div><div class="vca-card-val">'+formatNum(o.rows.length)+'<span style="font-size:13px;font-weight:600;"> 品番</span></div><div class="vca-card-sub">明細 '+formatNum(o.lines)+'行</div></div>'+
+    '<div class="vca-card"><div class="vca-card-label">見積もり・入荷予定のある品番</div><div class="vca-card-val">'+formatNum(o.rows.length)+'<span style="font-size:13px;font-weight:600;"> 品番</span></div><div class="vca-card-sub">明細 '+formatNum(o.lines)+'行'+(o.forecastSkipped ? ' ・ 需要予測 '+formatNum(o.forecastSkipped)+'行は差し引いていない' : '')+(o.oldSkipped ? ' ・ 作り直す前の見積もり '+formatNum(o.oldSkipped)+'行は除いた' : '')+'</div></div>'+
     '<div class="vca-card"'+(shortN ? ' style="border-color:#FDA29B;"' : '')+'><div class="vca-card-label"'+(shortN ? ' style="color:#B42318;"' : '')+'>足りなくなる品番</div><div class="vca-card-val">'+formatNum(shortN)+'<span style="font-size:13px;font-weight:600;"> 品番</span></div><div class="vca-card-sub">見積もりを全部出すと在庫がマイナスになる品番</div></div>'+
     '<div class="vca-card"><div class="vca-card-label">見積もりの入っていない在庫</div><div class="vca-card-val">'+formatNum(o.noEst.length)+'<span style="font-size:13px;font-weight:600;"> 品番</span></div><div class="vca-card-sub">約'+stockFmtCube(noEstCube)+'才(40ftコンテナ 約'+stockFt40(noEstCube)+'本分)</div></div>'+
   '</div>';
@@ -12646,7 +12676,7 @@ function renderStockOutlook(st){
     (codeRow ? '<div class="pool-hint" style="margin:0 0 6px;"><b>'+esc(code)+'</b> '+esc(codeRow.name)+': 今の在庫 '+formatNum(codeRow.stock)+' → 将来在庫 '+formatNum(codeRow.future)+(codeRow.shortDate ? '(<b style="color:#B42318;">'+esc(codeRow.shortDate)+' に足りなくなる</b>)' : '')+'</div>' : '')+
     '<div style="overflow-x:auto;max-height:520px;" data-keep-scroll="outlookB"><table class="report-table shukei-table"><thead><tr><th>日付</th><th>内容</th><th>番号</th><th>得意先・仕入先</th><th>品番</th><th class="num">数量</th><th class="num">その品番の残り</th></tr></thead><tbody>'+
     (ev.slice(0, LIMIT).map(function(x){
-      return '<tr'+(x.after<0 ? ' style="background:#FEF3F2;"' : '')+'><td>'+esc(x.date)+'</td><td>'+(x.sign<0 ? '見積もり' : '<span style="color:#067647;font-weight:700;">入荷予定</span>'+(x.late ? '<div class="sk-minor" style="color:#B54708;">遅れ(納入期日 '+esc(x.late)+')</div>' : ''))+'</td><td class="sk-minor">'+esc(x.no)+'</td><td class="sk-minor">'+esc(x.party)+'</td>'+
+      return '<tr'+(x.after<0 ? ' style="background:#FEF3F2;"' : '')+'><td>'+esc(x.date)+'</td><td>'+(x.sign<0 ? (x.forecast ? '見積もり<div class="sk-minor" style="color:#B54708;">需要予測</div>' : '見積もり') : '<span style="color:#067647;font-weight:700;">入荷予定</span>'+(x.late ? '<div class="sk-minor" style="color:#B54708;">遅れ(納入期日 '+esc(x.late)+')</div>' : ''))+'</td><td class="sk-minor">'+esc(x.no)+'</td><td class="sk-minor">'+esc(x.party)+'</td>'+
         '<td><b>'+esc(x.code)+'</b><div class="sk-minor">'+esc(x.name)+'</div></td><td class="num">'+(x.sign<0 ? '−' : '+')+formatNum(x.qty)+'</td><td class="num"><b'+(x.after<0 ? ' style="color:#B42318;"' : '')+'>'+formatNum(x.after)+'</b></td></tr>';
     }).join('') || '<tr><td colspan="7" class="empty-note">'+(code ? 'この品番の見積もり・入荷予定はありません' : '見積もり・入荷予定がありません')+'</td></tr>')+
     '</tbody></table></div>'+(ev.length>LIMIT ? '<div class="pool-hint">ほか '+formatNum(ev.length-LIMIT)+'行(品番で絞るか、CSV出力で全部)</div>' : '');
@@ -12659,7 +12689,7 @@ function renderStockOutlook(st){
     }).join('') || '<tr><td colspan="6" class="empty-note">見積もりの入っていない在庫はありません</td></tr>')+
     '</tbody></table></div>'+(o.noEst.length>LIMIT ? '<div class="pool-hint">ほか '+formatNum(o.noEst.length-LIMIT)+'品番(CSV出力で全部)</div>' : '');
   return sync+cards+tblA+tblB+tblC+
-    '<div class="pool-hint" style="margin-top:10px;">今の在庫 = ロジザードの在庫('+esc(fmtDateTime(st.lz.uploadedAt))+'取込)から引当数を除いた数(ピース)。見積もり = kintone の見積もりアプリ(956)の、見積日が今日以降の明細の数量(スタンプは見ない。見積日に在庫から出ていくとみなす)。入荷予定 = 発注履歴アプリ(949)の、仕入番号の入っていない(まだ入荷していない)発注の数量。納入期日に入荷するとみなし、納入期日を過ぎた物は「遅れ」として今日に数えます(60日より前は除く)。'+
+    '<div class="pool-hint" style="margin-top:10px;">今の在庫 = ロジザードの在庫('+esc(fmtDateTime(st.lz.uploadedAt))+'取込)から引当数を除いた数(ピース)。見積もり = kintone の見積もりアプリ(956)の、見積日が今日以降の明細の数量(スタンプは見ない。見積日に在庫から出ていくとみなす)。入荷予定 = 発注履歴アプリ(949)の、仕入番号の入っていない(まだ入荷していない)発注の数量。高屋・丹南(発送先・倉庫コード 0018・0000)以外の明細と、98・99で始まる品番(作業費・送料など)は数えません。納入期日に入荷するとみなし、納入期日を過ぎた物は「遅れ」として今日に数えます(60日より前は除く)。'+
     '拠点は明細の倉庫コード(高屋 0018・丹南 0000)で分けます(倉庫コードの無い明細は「全部」のときだけ数えます)。1日の出荷・在庫日数は、作業量CSVの出荷記録('+((st.ship||{}).days||0)+'日分)からの目安です。</div>';
 }
 function bindStockTab(){
@@ -12715,6 +12745,8 @@ function bindStockTab(){
     rows.push(['合計','','','','','','','','','','','','', rr.totals.now, rr.totals.after, rr.totals.now-rr.totals.after]);
     downloadCSV('在庫_保管料の試算_'+sso.days+'日分_'+todayStr()+'.csv', rows);
   });
+  var ofc = document.getElementById('outlookForecast');
+  if(ofc) ofc.addEventListener('change', function(){ state.outlookForecast = ofc.checked; render(); });
   var osi = document.getElementById('outlookSite');
   if(osi) osi.addEventListener('change', function(){ state.outlookSite = osi.value; render(); });
   document.querySelectorAll('[data-outlook-code]').forEach(function(el){
@@ -12727,7 +12759,7 @@ function bindStockTab(){
   document.querySelectorAll('[data-outlook-csv]').forEach(function(el){
     el.addEventListener('click', function(){
       var st0 = state.stockData; if(!st0) return;
-      var o = computeStockOutlook(st0, state.outlookSite || ''), kind = el.getAttribute('data-outlook-csv'), rows;
+      var o = computeStockOutlook(st0, state.outlookSite || '', !!state.outlookForecast), kind = el.getAttribute('data-outlook-csv'), rows;
       if(kind==='future'){ rows = [['品番','商品名','今の在庫','見積もり','見積もりの件数','入荷予定','将来在庫','入数','足りなくなる日']]; o.rows.forEach(function(g){ rows.push([g.code, g.name, g.stock, g.est, g.estCount, g.arr, g.future, g.pack||'', g.shortDate||'']); }); }
       else if(kind==='events'){ rows = [['日付','内容','番号','得意先・仕入先','品番','商品名','数量','その品番の残り','倉庫コード','遅れ(もとの納入期日)']]; o.events.forEach(function(x){ rows.push([x.date, x.sign<0?'見積もり':'入荷予定', x.no, x.party, x.code, x.name, x.sign*x.qty, x.after, x.warehouse, x.late||'']); }); }
       else { rows = [['品番','商品名','在庫','入数','ケース','才数','1日の出荷(ピース)','在庫日数']]; o.noEst.forEach(function(x){ rows.push([x.code, x.name, x.qty, x.pack||'', x.cases===null?'':Math.round(x.cases*10)/10, x.cube===null?'':Math.round(x.cube*10)/10, Math.round(x.perDay*10)/10, x.days===null?'':Math.round(x.days)]); }); }

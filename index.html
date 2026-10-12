@@ -12578,13 +12578,13 @@ function outlookCasesText(q, pack){ return pack ? (Math.round(q/pack*10)/10).toL
 /* ---------- 保管料の試算(在庫を圧縮できたら、保管料がどうなるか) ----------
    請求と同じ考え方: 保管料 = (1期・2期・3期の在庫のケース数 + 入庫のケース数)× 1ケースの才数 × 単価(BILLING_RATES.storage 円)。
    在庫がずっと同じなら、1か月の保管料 ≒ 在庫のケース数(切り上げ)× 才数 × 単価 × 3(期)。入庫の分は数えない(圧縮しても変わらないため)。
-   圧縮後 = 品番ごとに「○日分の出荷」(作業量CSVの出荷記録の1日あたり × 日数)まで減らした在庫。見積もりの分を残すなら、今日以降の見積もりより少なくしない。
+   圧縮後 = 品番ごとに、今日以降の見積もり(将来在庫で取り込んだ物。需要予測を含む)の分だけ残した在庫。見積もりの無い品番は全部減らせるとみなす。
    品番ごとに「残すケース数」を手で変えられる(この画面だけ。保存しない)。才数の分からない品番は、請求と同じく 1才 で計算する。 */
 function computeStorageSim(st, opt){
   var P = (st.lz && st.lz.products) || {}, pm = st.pm || {}, ship = st.ship || { days:0, byCode:{} };
-  var rate = BILLING_RATES.storage, days = Math.max(0, Number(opt.days)||0), over = opt.overrides || {};
+  var rate = BILLING_RATES.storage, over = opt.overrides || {};
   var est = {};
-  if(opt.keepEstimates && st.outlook) outlookEstimateLines(st.outlook).lines.forEach(function(x){
+  if(st.outlook) outlookEstimateLines(st.outlook).lines.forEach(function(x){
     if(opt.site && outlookSiteOfWarehouse(x.warehouse)!==opt.site) return;
     est[x.code] = (est[x.code]||0) + x.qty;
   });
@@ -12604,52 +12604,49 @@ function computeStorageSim(st, opt){
     var perDay = ship.days ? (ship.byCode[code]||0)/ship.days : 0;
     var cases = pack ? Math.ceil(q/pack) : 0;
     if(!cases) return; // 入数が分からない品番は請求でもケース数 0(保管料なし)
-    var keepQty = Math.min(q, Math.max(perDay*days, est[code]||0));
+    var keepQty = Math.min(q, est[code]||0);
     var keepCases = Math.min(cases, Math.ceil(keepQty/pack));
     var manual = Object.prototype.hasOwnProperty.call(over, code);
     if(manual) keepCases = Math.max(0, Math.min(cases, Math.floor(Number(over[code])||0)));
     var now = billingYen(cases*sai*rate*3), after = billingYen(keepCases*sai*rate*3);
     rows.push({ code:code, name:P[code].name||'', qty:q, pack:pack, cases:cases, sai:sai, saiKnown:saiKnown, perDay:perDay, est:est[code]||0,
       keepCases:keepCases, manual:manual, cutCases:cases-keepCases, cutCube:(cases-keepCases)*sai, now:now, after:after, save:now-after,
-      daysNow: perDay>0 ? q/perDay : null });
+      });
   });
   rows.sort(function(a,b){ return b.save-a.save || b.now-a.now; });
   var tot = rows.reduce(function(a,r){ a.now += r.now; a.after += r.after; a.cube += r.cases*r.sai; a.cutCube += r.cutCube; return a; }, { now:0, after:0, cube:0, cutCube:0 });
   return { rows: rows, totals: tot, rate: rate, shipDays: ship.days||0 };
 }
 function renderStorageSim(st){
-  var o = state.storageSimOpt || (state.storageSimOpt = { days: 60, keepEstimates: true, site: '', overrides: {} });
+  var o = state.storageSimOpt || (state.storageSimOpt = { site: '', overrides: {} });
   var r = computeStorageSim(st, o), t = r.totals, LIMIT = 300;
   function yen(v){ return '¥'+formatNum(Math.round(v)); }
   var head = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px;font-size:13px;">'+
-    '<label>残す在庫: <select id="ssDays">'+[30,60,90,120,180].map(function(d){ return '<option value="'+d+'"'+(Number(o.days)===d?' selected':'')+'>'+d+'日分の出荷</option>'; }).join('')+'</select></label>'+
-    '<label><input type="checkbox" id="ssKeepEst"'+(o.keepEstimates?' checked':'')+(st.outlook ? '' : ' disabled')+'> 見積もりの分は残す'+(st.outlook ? '' : '(将来在庫で取り込むと使えます)')+'</label>'+
+    (st.outlook ? '' : '<span class="pool-hint" style="margin:0;">見積もりがまだありません(将来在庫タブで取り込むと、見積もりの分を残して計算します)</span>')+
     '<label>拠点 <select id="ssSite"><option value="">全部</option>'+Object.keys(SHUKEI_SITES).map(function(k){ return '<option value="'+k+'"'+(o.site===k?' selected':'')+'>'+esc(SHUKEI_SITES[k].name)+'</option>'; }).join('')+'</select></label>'+
     (Object.keys(o.overrides).length ? '<button type="button" class="vc-manage-toggle-btn" id="ssResetOv">手で変えた '+Object.keys(o.overrides).length+'品番を戻す</button>' : '')+
     '<button type="button" class="vc-manage-toggle-btn" id="ssCsv" style="margin-left:auto;">CSV出力</button></div>';
   var cards = '<div class="vca-cards">'+
     '<div class="vca-card"><div class="vca-card-label">今の保管料(1か月)</div><div class="vca-card-val">'+yen(t.now)+'</div><div class="vca-card-sub">約'+stockFmtCube(t.cube)+'才 × '+r.rate+'円 × 3期</div></div>'+
-    '<div class="vca-card"><div class="vca-card-label">圧縮後の保管料(1か月)</div><div class="vca-card-val">'+yen(t.after)+'</div><div class="vca-card-sub">'+esc(o.days+'日分の出荷'+(o.keepEstimates && st.outlook ? '・見積もりの分' : '')+'を残す')+'</div></div>'+
+    '<div class="vca-card"><div class="vca-card-label">圧縮後の保管料(1か月)</div><div class="vca-card-val">'+yen(t.after)+'</div><div class="vca-card-sub">'+'見積もりの分だけ残す'+'</div></div>'+
     '<div class="vca-card" style="border-color:#ABEFC6;"><div class="vca-card-label" style="color:#067647;">下がる額(1か月)</div><div class="vca-card-val" style="color:#067647;">'+yen(t.now-t.after)+'</div><div class="vca-card-sub">'+(t.now ? '今の '+((t.now-t.after)/t.now*100).toFixed(1)+'% ・ 1年で '+yen((t.now-t.after)*12) : '')+'</div></div>'+
     '<div class="vca-card"><div class="vca-card-label">減らせる在庫</div><div class="vca-card-val">'+stockFmtCube(t.cutCube)+'<span style="font-size:13px;font-weight:600;"> 才</span></div><div class="vca-card-sub">40ftコンテナ 約'+stockFt40(t.cutCube)+'本分</div></div>'+
   '</div>';
-  var table = '<div style="overflow-x:auto;max-height:620px;" data-keep-scroll="storageSim"><table class="report-table shukei-table"><thead><tr><th>品番</th><th>商品名</th><th class="num">今の在庫</th><th class="num">1日の出荷</th><th class="num">在庫日数</th><th class="num">見積もり</th><th class="num">残すケース</th><th class="num">減らすケース</th><th class="num">才/ケース</th><th class="num">今の保管料</th><th class="num">圧縮後</th><th class="num">下がる額</th></tr></thead><tbody>'+
+  var table = '<div style="overflow-x:auto;max-height:620px;" data-keep-scroll="storageSim"><table class="report-table shukei-table"><thead><tr><th>品番</th><th>商品名</th><th class="num">今の在庫</th><th class="num">見積もり</th><th class="num">残すケース</th><th class="num">減らすケース</th><th class="num">才/ケース</th><th class="num">今の保管料</th><th class="num">圧縮後</th><th class="num">下がる額</th></tr></thead><tbody>'+
     (r.rows.slice(0, LIMIT).map(function(x){
       return '<tr><td><b>'+esc(x.code)+'</b></td><td class="sk-minor">'+esc(x.name)+'</td>'+
         '<td class="num">'+formatNum(x.cases)+'ケース<div class="sk-minor">'+formatNum(x.qty)+'</div></td>'+
-        '<td class="num">'+(x.perDay>0 ? (function(v){ return v<0.1 ? '0.1未満' : (Math.round(v*10)/10)+''; })(x.perDay/x.pack)+'ケース' : '<span class="sk-minor">出荷なし</span>')+'</td>'+
-        '<td class="num">'+(x.daysNow===null ? '' : (x.daysNow>3650 ? '10年以上' : formatNum(Math.round(x.daysNow))+'日'))+'</td>'+
         '<td class="num">'+(x.est ? formatNum(x.est) : '')+'</td>'+
         '<td class="num"><input type="number" min="0" max="'+x.cases+'" step="1" data-ss-keep="'+esc(x.code)+'" value="'+x.keepCases+'" style="width:70px;text-align:right;'+(x.manual?'background:#FFFAEB;':'')+'"></td>'+
         '<td class="num">'+(x.cutCases ? formatNum(x.cutCases) : '')+'</td>'+
         '<td class="num">'+(x.saiKnown ? stockFmtCube(x.sai) : '<span class="sk-minor" title="才数が商品台帳に無いので、請求と同じく1才で計算">1(不明)</span>')+'</td>'+
         '<td class="num">'+yen(x.now)+'</td><td class="num">'+yen(x.after)+'</td><td class="num"><b'+(x.save>0?' style="color:#067647;"':'')+'>'+(x.save ? yen(x.save) : '')+'</b></td></tr>';
-    }).join('') || '<tr><td colspan="12" class="empty-note">在庫がありません</td></tr>')+
+    }).join('') || '<tr><td colspan="10" class="empty-note">在庫がありません</td></tr>')+
     '</tbody></table></div>'+(r.rows.length>LIMIT ? '<div class="pool-hint">ほか '+formatNum(r.rows.length-LIMIT)+'品番(CSV出力で全部)</div>' : '');
   return head+cards+table+
     '<div class="pool-hint" style="margin-top:10px;">保管料は請求と同じ考え方(在庫のケース数(切り上げ)× 1ケースの才数 × '+r.rate+'円。1期・2期・3期の月3回)で、在庫がずっと同じとした1か月分です。入庫の分は入れていません。'+
-    '今の在庫 = ロジザードの在庫('+esc(fmtDateTime(st.lz.uploadedAt))+'取込)から引当数を除いた数。1日の出荷は作業量CSVの出荷記録('+r.shipDays+'日分)から。'+
-    '圧縮後 = 「○日分の出荷」'+(o.keepEstimates ? 'と「見積もり(今日以降)」の多い方' : '')+'まで減らした在庫(今の在庫より多くはしない)。「残すケース」を書き換えると、その品番だけ手で決めた数で計算します(この画面だけ。保存しません)。入数の分からない品番は、請求でも保管料が出ないので入れていません。</div>';
+    '今の在庫 = ロジザードの在庫('+esc(fmtDateTime(st.lz.uploadedAt))+'取込)から引当数を除いた数。'+
+    '圧縮後 = 見積もり(将来在庫タブで取り込んだ、今日以降の見積もり。需要予測を含む)の分だけ残した在庫(今の在庫より多くはしない)。見積もりの無い品番は全部減らせるとみなします。「残すケース」を書き換えると、その品番だけ手で決めた数で計算します(この画面だけ。保存しません)。入数の分からない品番は、請求でも保管料が出ないので入れていません。</div>';
 }
 function renderStockOutlook(st){
   var ol = st.outlook, site = state.outlookSite || '';
@@ -12693,16 +12690,15 @@ function renderStockOutlook(st){
     }).join('') || '<tr><td colspan="7" class="empty-note">'+(code ? 'この品番の見積もり・入荷予定はありません' : '見積もり・入荷予定がありません')+'</td></tr>')+
     '</tbody></table></div>'+(ev.length>LIMIT ? '<div class="pool-hint">ほか '+formatNum(ev.length-LIMIT)+'行(品番で絞るか、CSV出力で全部)</div>' : '');
   var tblC = '<div class="stf-section-title" style="display:flex;align-items:center;gap:8px;margin-top:16px;">見積もりの入っていない在庫(才数の多い順)<button type="button" class="vc-manage-toggle-btn" data-outlook-csv="noest" style="margin-left:auto;">CSV出力</button></div>'+
-    '<div style="overflow-x:auto;max-height:520px;" data-keep-scroll="outlookC"><table class="report-table shukei-table"><thead><tr><th>品番</th><th>商品名</th><th class="num">在庫</th><th class="num">才数</th><th class="num">1日の出荷</th><th class="num">在庫日数</th></tr></thead><tbody>'+
+    '<div style="overflow-x:auto;max-height:520px;" data-keep-scroll="outlookC"><table class="report-table shukei-table"><thead><tr><th>品番</th><th>商品名</th><th class="num">在庫</th><th class="num">才数</th><th class="num">1日の出荷</th></tr></thead><tbody>'+
     (o.noEst.slice(0, LIMIT).map(function(x){
       return '<tr><td><b>'+esc(x.code)+'</b></td><td class="sk-minor">'+esc(x.name)+'</td><td class="num">'+formatNum(x.qty)+'<div class="sk-minor">'+outlookCasesText(x.qty, x.pack)+'</div></td>'+
-        '<td class="num">'+(x.cube===null ? '<span class="sk-minor">才数不明</span>' : stockFmtCube(x.cube))+'</td><td class="num">'+(x.perDay>0 ? (function(v, u){ return v<0.1 ? '0.1'+u+'未満' : (Math.round(v*10)/10)+u; })(x.pack ? x.perDay/x.pack : x.perDay, x.pack ? 'ケース' : 'ピース') : '<span class="sk-minor">出荷なし</span>')+'</td>'+
-        '<td class="num">'+(x.days===null ? '' : (x.days>3650 ? '10年以上' : formatNum(Math.round(x.days))+'日'))+'</td></tr>';
-    }).join('') || '<tr><td colspan="6" class="empty-note">見積もりの入っていない在庫はありません</td></tr>')+
+        '<td class="num">'+(x.cube===null ? '<span class="sk-minor">才数不明</span>' : stockFmtCube(x.cube))+'</td><td class="num">'+(x.perDay>0 ? (function(v, u){ return v<0.1 ? '0.1'+u+'未満' : (Math.round(v*10)/10)+u; })(x.pack ? x.perDay/x.pack : x.perDay, x.pack ? 'ケース' : 'ピース') : '<span class="sk-minor">出荷なし</span>')+'</td></tr>';
+    }).join('') || '<tr><td colspan="5" class="empty-note">見積もりの入っていない在庫はありません</td></tr>')+
     '</tbody></table></div>'+(o.noEst.length>LIMIT ? '<div class="pool-hint">ほか '+formatNum(o.noEst.length-LIMIT)+'品番(CSV出力で全部)</div>' : '');
   return sync+cards+tblA+tblB+tblC+
-    '<div class="pool-hint" style="margin-top:10px;">今の在庫 = ロジザードの在庫('+esc(fmtDateTime(st.lz.uploadedAt))+'取込)から引当数を除いた数(ピース)。見積もり = kintone の見積もりアプリ(956)の、見積日が今日以降の明細の数量(スタンプは見ない。見積日に在庫から出ていくとみなす)。入荷予定 = 発注履歴アプリ(949)の、仕入番号の入っていない(まだ入荷していない)発注の数量。高屋・丹南(発送先・倉庫コード 0018・0000)以外の明細と、98・99で始まる品番(作業費・送料など)は数えません。納入期日に入荷するとみなし、納入期日を過ぎた物は「遅れ」として今日に数えます(60日より前は除く)。'+
-    '拠点は明細の倉庫コード(高屋 0018・丹南 0000)で分けます(倉庫コードの無い明細は「全部」のときだけ数えます)。1日の出荷・在庫日数は、作業量CSVの出荷記録('+((st.ship||{}).days||0)+'日分)からの目安です。</div>';
+    '<div class="pool-hint" style="margin-top:10px;">今の在庫 = ロジザードの在庫('+esc(fmtDateTime(st.lz.uploadedAt))+'取込)から引当数を除いた数(ピース)。見積もり = kintone の見積もりアプリ(956)の明細の数量(スタンプは見ない。明細の日付が今日以降の行を、その日に在庫から出ていくとみなす。明細に日付が無ければ見積日)。アマゾン・楽天の需要予測も数えます(同じ品番は最新の予測だけ)。入荷予定 = 発注履歴アプリ(949)の、仕入番号の入っていない(まだ入荷していない)発注の数量。高屋・丹南(発送先・倉庫コード 0018・0000)以外の明細と、98・99で始まる品番(作業費・送料など)は数えません。納入期日に入荷するとみなし、納入期日を過ぎた物は「遅れ」として今日に数えます(60日より前は除く)。'+
+    '拠点は明細の倉庫コード(高屋 0018・丹南 0000)で分けます(倉庫コードの無い明細は「全部」のときだけ数えます)。1日の出荷は、作業量CSVの出荷記録('+((st.ship||{}).days||0)+'日分)からの目安です。</div>';
 }
 function bindStockTab(){
   var dg = document.getElementById('stockDiag');
@@ -12738,10 +12734,6 @@ function bindStockTab(){
   });
   // 保管料の試算
   var sso = state.storageSimOpt;
-  var ssDays = document.getElementById('ssDays');
-  if(ssDays) ssDays.addEventListener('change', function(){ sso.days = Number(ssDays.value); sso.overrides = {}; render(); });
-  var ssKeep = document.getElementById('ssKeepEst');
-  if(ssKeep) ssKeep.addEventListener('change', function(){ sso.keepEstimates = ssKeep.checked; render(); });
   var ssSite = document.getElementById('ssSite');
   if(ssSite) ssSite.addEventListener('change', function(){ sso.site = ssSite.value; render(); });
   var ssReset = document.getElementById('ssResetOv');
@@ -12752,10 +12744,10 @@ function bindStockTab(){
   var ssCsv = document.getElementById('ssCsv');
   if(ssCsv) ssCsv.addEventListener('click', function(){
     var rr = computeStorageSim(state.stockData, sso);
-    var rows = [['品番','商品名','今の在庫(ピース)','入数','今の在庫(ケース)','1日の出荷(ピース)','在庫日数','見積もり(今日以降)','残すケース','手で決めた','減らすケース','才/ケース','才数不明','今の保管料(月)','圧縮後(月)','下がる額(月)']];
-    rr.rows.forEach(function(x){ rows.push([x.code, x.name, x.qty, x.pack, x.cases, Math.round(x.perDay*10)/10, x.daysNow===null ? '' : Math.round(x.daysNow), x.est||'', x.keepCases, x.manual ? 'はい' : '', x.cutCases, x.sai, x.saiKnown ? '' : 'はい', x.now, x.after, x.save]); });
-    rows.push(['合計','','','','','','','','','','','','', rr.totals.now, rr.totals.after, rr.totals.now-rr.totals.after]);
-    downloadCSV('在庫_保管料の試算_'+sso.days+'日分_'+todayStr()+'.csv', rows);
+    var rows = [['品番','商品名','今の在庫(ピース)','入数','今の在庫(ケース)','見積もり(今日以降)','残すケース','手で決めた','減らすケース','才/ケース','才数不明','今の保管料(月)','圧縮後(月)','下がる額(月)']];
+    rr.rows.forEach(function(x){ rows.push([x.code, x.name, x.qty, x.pack, x.cases, x.est||'', x.keepCases, x.manual ? 'はい' : '', x.cutCases, x.sai, x.saiKnown ? '' : 'はい', x.now, x.after, x.save]); });
+    rows.push(['合計','','','','','','','','','','', rr.totals.now, rr.totals.after, rr.totals.now-rr.totals.after]);
+    downloadCSV('在庫_保管料の試算_'+todayStr()+'.csv', rows);
   });
   var osi = document.getElementById('outlookSite');
   if(osi) osi.addEventListener('change', function(){ state.outlookSite = osi.value; render(); });
@@ -12772,7 +12764,7 @@ function bindStockTab(){
       var o = computeStockOutlook(st0, state.outlookSite || ''), kind = el.getAttribute('data-outlook-csv'), rows;
       if(kind==='future'){ rows = [['品番','商品名','今の在庫','見積もり','見積もりの件数','入荷予定','将来在庫','入数','足りなくなる日']]; o.rows.forEach(function(g){ rows.push([g.code, g.name, g.stock, g.est, g.estCount, g.arr, g.future, g.pack||'', g.shortDate||'']); }); }
       else if(kind==='events'){ rows = [['日付','内容','番号','得意先・仕入先','品番','商品名','数量','その品番の残り','倉庫コード','遅れ(もとの納入期日)']]; o.events.forEach(function(x){ rows.push([x.date, x.sign<0?'見積もり':'入荷予定', x.no, x.party, x.code, x.name, x.sign*x.qty, x.after, x.warehouse, x.late||'']); }); }
-      else { rows = [['品番','商品名','在庫','入数','ケース','才数','1日の出荷(ピース)','在庫日数']]; o.noEst.forEach(function(x){ rows.push([x.code, x.name, x.qty, x.pack||'', x.cases===null?'':Math.round(x.cases*10)/10, x.cube===null?'':Math.round(x.cube*10)/10, Math.round(x.perDay*10)/10, x.days===null?'':Math.round(x.days)]); }); }
+      else { rows = [['品番','商品名','在庫','入数','ケース','才数','1日の出荷(ピース)']]; o.noEst.forEach(function(x){ rows.push([x.code, x.name, x.qty, x.pack||'', x.cases===null?'':Math.round(x.cases*10)/10, x.cube===null?'':Math.round(x.cube*10)/10, Math.round(x.perDay*10)/10]); }); }
       var names = { future:'将来在庫', events:'日付ごと', noest:'見積もりの入っていない在庫' };
       downloadCSV('在庫_'+names[kind]+'_'+todayStr()+'.csv', rows);
     });

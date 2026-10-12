@@ -9651,29 +9651,100 @@ function vcAllocOtherRows(calc){
       note: p.memo || (p.site==='handled' ? '' : vcAllocNote(p)) };
   });
 }
-/* 高屋・丹南以外の品番を、印刷の画面(A4横)で開く。「PDFに保存」で PDF にして LINE などで共有する */
-function vcAllocOtherPdf(calc){
+/* 高屋・丹南以外の品番の表を、キャンバスに描く(PDF にする用)。戻り値: { canvas, headH, rowH, rows, scale } */
+function vcAllocOtherCanvas(calc){
   var rows = vcAllocOtherRows(calc);
+  var cols = [['区分',96],['品番',110],['商品名',300],['数量',80],['ケース',70],['高屋',80],['丹南',80],['不足',70],['備考',300]];
+  var FONT = '"Yu Gothic UI","Meiryo","Hiragino Sans",sans-serif';
+  var mc = document.createElement('canvas').getContext('2d'); mc.font = '700 12px '+FONT; // 区分(対応の名前)の幅に合わせて広げる
+  cols[0][1] = Math.min(260, Math.max(cols[0][1], Math.ceil(rows.reduce(function(a,r){ return Math.max(a, mc.measureText(r.kind).width); }, 0)) + 22));
+  var W = cols.reduce(function(a,c){ return a+c[1]; }, 0) + 32, RH = 30, TOP = 64;
+  var H = TOP + RH*(rows.length+1) + 24, SC = 2;
+  var cv = document.createElement('canvas'); cv.width = W*SC; cv.height = H*SC;
+  var g = cv.getContext('2d'); g.scale(SC, SC);
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#101828'; g.font = '700 18px '+FONT; g.textBaseline = 'middle';
+  g.fillText('VC引当 '+vcAllocDateLabel()+' 高屋・丹南以外 '+rows.length+'品番', 16, 24);
+  g.font = '12px '+FONT; g.fillStyle = '#475467';
   var cnt = {}; rows.forEach(function(r){ cnt[r.kind] = (cnt[r.kind]||0)+1; });
-  var tone = function(k){ return k==='要確認' ? 'n' : (k==='分ける' ? 's' : 'h'); };
-  var html = '<!doctype html><html><head><meta charset="utf-8"><meta name="format-detection" content="telephone=no"><title>VC引当_高屋丹南以外_'+esc(todayStr())+'</title><style>'+
-    '@page{size:A4 landscape;margin:8mm;}body{font-family:"Yu Gothic UI","Meiryo","Hiragino Sans",sans-serif;font-size:11px;color:#101828;margin:0;}'+
-    'h1{font-size:16px;margin:0 0 2px;}.sub{color:#475467;margin:0 0 8px;}table{border-collapse:collapse;width:100%;}'+
-    'th,td{border-bottom:1px solid #EAECF0;padding:5px 6px;text-align:left;vertical-align:middle;color:#101828;}td a{color:inherit;text-decoration:none;}th{background:#F2F4F7;color:#344054;}td.n{text-align:right;white-space:nowrap;}tr{page-break-inside:avoid;}'+
-    '.k{font-weight:700;padding:2px 6px;border-radius:4px;white-space:nowrap;-webkit-print-color-adjust:exact;print-color-adjust:exact;}.k.n{background:#FEF3F2;color:#B42318;}.k.s{background:#FFFAEB;color:#B54708;}.k.h{background:#F4EBFF;color:#6941C6;}'+
-    'td.c{font-weight:700;white-space:nowrap;}</style></head><body>'+
-    '<h1>VC引当 '+esc(vcAllocDateLabel())+' 高屋・丹南以外 '+rows.length+'品番</h1>'+
-    '<div class="sub">'+esc(Object.keys(cnt).map(function(k){ return k+' '+cnt[k]; }).join(' ・ '))+'</div>'+
-    '<table><thead><tr><th>区分</th><th>品番</th><th>商品名</th><th>数量</th><th>ケース</th><th>高屋</th><th>丹南</th><th>不足</th><th>備考</th></tr></thead><tbody>'+
-    (rows.map(function(r){
-      return '<tr><td><span class="k '+tone(r.kind)+'">'+esc(r.kind)+'</span></td><td class="c">'+esc(r.code)+'</td><td>'+esc(r.name)+'</td>'+
-        '<td class="n">'+formatNum(r.qty)+'</td><td class="n">'+(r.cases===null ? '' : formatNum(r.cases))+'</td><td class="n">'+formatNum(r.takaya)+'</td><td class="n">'+formatNum(r.tannan)+'</td>'+
-        '<td class="n">'+(r.shortage ? formatNum(r.shortage) : '')+'</td><td>'+esc(r.split || r.note)+'</td></tr>';
-    }).join('') || '<tr><td colspan="9">ありません(すべて高屋か丹南から出せます)</td></tr>')+
-    '</tbody></table><script>window.onload=function(){window.print();};<\/script></body></html>';
-  var w = window.open('', '_blank');
-  if(!w){ showToast('印刷の画面を開けませんでした(ポップアップを許可してください)'); return; }
-  w.document.open(); w.document.write(html); w.document.close();
+  g.fillText(Object.keys(cnt).map(function(k){ return k+' '+cnt[k]; }).join(' ・ '), 16, 46);
+  function fit(t, w){ t = String(t===null||t===undefined ? '' : t); if(g.measureText(t).width<=w) return t; while(t.length && g.measureText(t+'…').width>w) t = t.slice(0,-1); return t+'…'; }
+  var colors = { '要確認':['#FEF3F2','#B42318'], '分ける':['#FFFAEB','#B54708'] };
+  function row(y, cells, head, kind){
+    var x = 16, c = head ? ['#F2F4F7','#344054'] : (colors[kind] || ['#F4EBFF','#6941C6']);
+    g.fillStyle = head ? c[0] : '#fff'; g.fillRect(16, y, W-32, RH);
+    cols.forEach(function(col, i){
+      var num = !head && i>=3 && i<=7;
+      if(!head && i===0){ g.fillStyle = c[0]; g.fillRect(x+3, y+5, col[1]-8, RH-10); g.fillStyle = c[1]; g.font = '700 12px '+FONT; }
+      else { g.fillStyle = head ? c[1] : (i===1 ? '#101828' : '#344054'); g.font = (head || i===1 ? '700 ' : '')+'13px '+FONT; }
+      var t = fit(cells[i], col[1]-12);
+      if(num){ g.textAlign = 'right'; g.fillText(t, x+col[1]-6, y+RH/2); g.textAlign = 'left'; }
+      else g.fillText(t, x+6, y+RH/2);
+      x += col[1];
+    });
+    g.strokeStyle = '#EAECF0'; g.beginPath(); g.moveTo(16, y+RH); g.lineTo(W-16, y+RH); g.stroke();
+  }
+  row(TOP, cols.map(function(c){ return c[0]; }), true);
+  rows.forEach(function(r, i){
+    row(TOP+RH*(i+1), [r.kind, r.code, r.name, formatNum(r.qty), r.cases===null ? '' : formatNum(r.cases), formatNum(r.takaya), formatNum(r.tannan), r.shortage ? formatNum(r.shortage) : '', r.split || r.note], false, r.kind);
+  });
+  if(!rows.length){ g.fillStyle = '#475467'; g.font = '14px '+FONT; g.fillText('ありません(すべて高屋か丹南から出せます)', 24, TOP+RH*1.5); }
+  return { canvas: cv, headH: TOP+RH, rowH: RH, rows: rows.length, scale: SC, width: W, height: H };
+}
+/* キャンバスの絵を A4横の PDF にする(ページに入らなければ、行の切れ目でページを分ける。2ページ目からも見出しを付ける) */
+function vcCanvasToPdf(d){
+  var PW = 842, PH = 595, M = 24, k = (PW-2*M)/d.width;            // ポイント / キャンバスの1単位
+  var bodyH = Math.floor(((PH-2*M)/k - d.headH) / d.rowH) * d.rowH;  // 1ページに入る行の高さ(見出しを除く)
+  var pages = [], y = d.headH;
+  do { var h = Math.min(bodyH, d.height - y); pages.push([y, h]); y += h; } while(y < d.height - 1);
+  var enc = new TextEncoder(), parts = [], offs = [], len = 0;
+  function add(x){ var b = typeof x==='string' ? enc.encode(x) : x; parts.push(b); len += b.length; }
+  function obj(n, body){ offs[n] = len; add(n+' 0 obj\n'); body(); add('\nendobj\n'); }
+  function jpeg(sy, sh, withHead){
+    var c = document.createElement('canvas'), S = d.scale, hh = withHead ? d.headH : 0;
+    c.width = d.width*S; c.height = (hh + sh)*S;
+    var g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    if(withHead) g.drawImage(d.canvas, 0, 0, d.width*S, hh*S, 0, 0, d.width*S, hh*S);
+    g.drawImage(d.canvas, 0, sy*S, d.width*S, sh*S, 0, hh*S, d.width*S, sh*S);
+    var bin = atob(c.toDataURL('image/jpeg', 0.92).split(',')[1]), u = new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++) u[i] = bin.charCodeAt(i);
+    return { bytes: u, w: c.width, h: c.height, ptH: (hh + sh)*k };
+  }
+  add('%PDF-1.4\n%âãÏÓ\n');
+  var n = pages.length, kids = [];
+  for(var i=0;i<n;i++) kids.push((3+i*3)+' 0 R');
+  obj(1, function(){ add('<< /Type /Catalog /Pages 2 0 R >>'); });
+  obj(2, function(){ add('<< /Type /Pages /Count '+n+' /Kids ['+kids.join(' ')+'] >>'); });
+  pages.forEach(function(p, i){
+    var im = jpeg(p[0], p[1], true), pn = 3+i*3;
+    var cs = 'q '+(PW-2*M).toFixed(2)+' 0 0 '+im.ptH.toFixed(2)+' '+M+' '+(PH-M-im.ptH).toFixed(2)+' cm /Im'+i+' Do Q';
+    obj(pn, function(){ add('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+PW+' '+PH+'] /Resources << /XObject << /Im'+i+' '+(pn+2)+' 0 R >> >> /Contents '+(pn+1)+' 0 R >>'); });
+    obj(pn+1, function(){ add('<< /Length '+cs.length+' >>\nstream\n'+cs+'\nendstream'); });
+    obj(pn+2, function(){ add('<< /Type /XObject /Subtype /Image /Width '+im.w+' /Height '+im.h+' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '+im.bytes.length+' >>\nstream\n'); add(im.bytes); add('\nendstream'); });
+  });
+  var total = 3+n*3, xref = len;
+  add('xref\n0 '+total+'\n0000000000 65535 f \n');
+  for(var j=1;j<total;j++) add(String(offs[j]).padStart(10,'0')+' 00000 n \n');
+  add('trailer\n<< /Size '+total+' /Root 1 0 R >>\nstartxref\n'+xref+'\n%%EOF');
+  return new Blob(parts, { type:'application/pdf' });
+}
+/* 高屋・丹南以外の品番を PDF にして保存する。パソコンの Chrome・Edge は保存の画面(デスクトップから)、ほかはダウンロード */
+async function vcAllocOtherPdf(calc){
+  var blob;
+  try{ blob = vcCanvasToPdf(vcAllocOtherCanvas(calc)); }catch(e){ showToast('PDFを作れませんでした'); return; }
+  var name = 'VC引当_高屋丹南以外_'+todayStr()+'.pdf';
+  if(window.showSaveFilePicker){
+    try{
+      var h = await window.showSaveFilePicker({ suggestedName: name, startIn: 'desktop', types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }] });
+      var w = await h.createWritable(); await w.write(blob); await w.close();
+      showToast('PDFを保存しました: '+h.name);
+      return;
+    }catch(e){ if(e && e.name==='AbortError') return; } // やめた: 何もしない。ほかのエラー: ダウンロードにする
+  }
+  var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  showToast('PDFをダウンロードしました(ダウンロードのフォルダ)');
 }
 /* 集計表へ送る行: 倉庫ごと [{ vc, code, qty }]。分ける品番は、行の順に先に使う拠点(引当の決まり)の分まで、残りをもう一方 */
 function vcAllocSheetRows(calc, kind){

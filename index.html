@@ -9637,6 +9637,94 @@ function vcAllocNote(p){
   if(p.overridden && p.site!=='handled') out.push('倉庫を手で変更');
   return out.join('・');
 }
+/* LINE に貼る文: 高屋・丹南(そのまま出す品番)以外の品番(要確認・対応を選んだ品番・分ける)を、まとめて読める文にする */
+/* 高屋・丹南以外の品番(要確認・対応を選んだ品番・分ける)の行。LINE に画像・データで共有する用 */
+function vcAllocOtherRows(calc){
+  var ps = calc.products.filter(function(p){ return p.site!=='takaya' && p.site!=='tannan'; });
+  var order = function(p){ return !p.site ? 0 : (p.site==='handled' ? 1 : 2); };
+  ps.sort(function(a,b){ return order(a)-order(b) || String(a.handling||'').localeCompare(String(b.handling||'')) || b.qty-a.qty; });
+  return ps.map(function(p){
+    var kind = !p.site ? '要確認' : (p.site==='handled' ? (p.handling||'対応') : '分ける');
+    return { kind: kind, code: p.code, name: p.name||'', qty: p.qty, cases: p.pack ? p.casesUp : null,
+      takaya: Math.max(0, p.takaya), tannan: Math.max(0, p.tannan), shortage: p.shortage || 0,
+      split: p.site==='split' && p.split ? '高屋 '+formatNum(p.split.takaya)+' + 丹南 '+formatNum(p.split.tannan) : '',
+      note: p.memo || (p.site==='handled' ? '' : vcAllocNote(p)) };
+  });
+}
+function vcAllocOtherCsv(calc){
+  var rows = [['区分','品番','商品名','数量','ケース数','高屋の在庫','丹南の在庫','不足','分け方','備考']];
+  vcAllocOtherRows(calc).forEach(function(r){ rows.push([r.kind, r.code, r.name, r.qty, r.cases===null ? '' : r.cases, r.takaya, r.tannan, r.shortage || '', r.split, r.note]); });
+  downloadCSV('VC引当_高屋丹南以外_'+todayStr()+'.csv', rows);
+}
+/* 表を画像(PNG)にする。スマホ・タブレットは共有の画面(LINE を選べる)、パソコンはファイルを保存 */
+function vcAllocOtherImage(calc){
+  var rows = vcAllocOtherRows(calc);
+  var cols = [['区分',96],['品番',110],['商品名',300],['数量',80],['ケース',70],['高屋',80],['丹南',80],['不足',70],['備考',300]];
+  var FONT = '"Yu Gothic UI","Meiryo","Hiragino Sans",sans-serif';
+  var mc = document.createElement('canvas').getContext('2d'); mc.font = '700 12px '+FONT; // 区分(対応の名前)の幅に合わせて広げる
+  cols[0][1] = Math.min(260, Math.max(cols[0][1], Math.ceil(rows.reduce(function(a,r){ return Math.max(a, mc.measureText(r.kind).width); }, 0)) + 22));
+  var W = cols.reduce(function(a,c){ return a+c[1]; }, 0) + 32, RH = 30, TOP = 64;
+  var H = TOP + RH*(rows.length+1) + 24, SC = 2;
+  var cv = document.createElement('canvas'); cv.width = W*SC; cv.height = H*SC;
+  var g = cv.getContext('2d'); g.scale(SC, SC);
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#101828'; g.font = '700 18px '+FONT; g.textBaseline = 'middle';
+  g.fillText('VC引当 '+vcAllocDateLabel()+' 高屋・丹南以外 '+rows.length+'品番', 16, 24);
+  g.font = '12px '+FONT; g.fillStyle = '#475467';
+  var cnt = {}; rows.forEach(function(r){ cnt[r.kind] = (cnt[r.kind]||0)+1; });
+  g.fillText(Object.keys(cnt).map(function(k){ return k+' '+cnt[k]; }).join(' ・ '), 16, 46);
+  function fit(t, w){ t = String(t===null||t===undefined ? '' : t); if(g.measureText(t).width<=w) return t; while(t.length && g.measureText(t+'…').width>w) t = t.slice(0,-1); return t+'…'; }
+  var colors = { '要確認':['#FEF3F2','#B42318'], '分ける':['#FFFAEB','#B54708'] };
+  function row(y, cells, head, kind){
+    var x = 16, c = head ? ['#F2F4F7','#344054'] : (colors[kind] || ['#F4EBFF','#6941C6']);
+    g.fillStyle = head ? c[0] : '#fff'; g.fillRect(16, y, W-32, RH);
+    cols.forEach(function(col, i){
+      var num = !head && i>=3 && i<=7;
+      if(!head && i===0){ g.fillStyle = c[0]; g.fillRect(x+3, y+5, col[1]-8, RH-10); g.fillStyle = c[1]; g.font = '700 12px '+FONT; }
+      else { g.fillStyle = head ? c[1] : (i===1 ? '#101828' : '#344054'); g.font = (head || i===1 ? '700 ' : '')+'13px '+FONT; }
+      var t = fit(cells[i], col[1]-12);
+      if(num){ g.textAlign = 'right'; g.fillText(t, x+col[1]-6, y+RH/2); g.textAlign = 'left'; }
+      else g.fillText(t, x+6, y+RH/2);
+      x += col[1];
+    });
+    g.strokeStyle = '#EAECF0'; g.beginPath(); g.moveTo(16, y+RH); g.lineTo(W-16, y+RH); g.stroke();
+  }
+  row(TOP, cols.map(function(c){ return c[0]; }), true);
+  rows.forEach(function(r, i){
+    row(TOP+RH*(i+1), [r.kind, r.code, r.name, formatNum(r.qty), r.cases===null ? '' : formatNum(r.cases), formatNum(r.takaya), formatNum(r.tannan), r.shortage ? formatNum(r.shortage) : '', r.split || r.note], false, r.kind);
+  });
+  if(!rows.length){ g.fillStyle = '#475467'; g.font = '14px '+FONT; g.fillText('ありません(すべて高屋か丹南から出せます)', 24, TOP+RH*1.5); }
+  var name = 'VC引当_高屋丹南以外_'+todayStr()+'.png';
+  cv.toBlob(async function(blob){
+    if(!blob){ showToast('画像を作れませんでした'); return; }
+    var file = null; try{ file = new File([blob], name, { type:'image/png' }); }catch(e){}
+    if(file && navigator.canShare && navigator.canShare({ files:[file] })){
+      try{ await navigator.share({ files:[file], title: name }); return; }catch(e){ if(e && e.name==='AbortError') return; }
+    }
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    showToast('画像を保存しました。LINE に貼り付けてください');
+  }, 'image/png');
+}
+function vcAllocLineText(calc){
+  var NL = '\n';
+  var ps = calc.products.filter(function(p){ return p.site!=='takaya' && p.site!=='tannan'; });
+  var head = '【VC引当 '+vcAllocDateLabel()+'】高屋・丹南以外 '+ps.length+'品番';
+  if(!ps.length) return head+NL+'(ありません。すべて高屋か丹南から出せます)';
+  function line(p, extra){
+    return '・'+p.code+' '+(p.name||'')+' '+formatNum(p.qty)+'個'+(p.pack ? '('+formatNum(p.casesUp)+'ケース)' : '')+(extra ? ' '+extra : '')+(p.memo ? ' ※'+p.memo : '');
+  }
+  function stockText(p){ return '(在庫 高屋 '+formatNum(Math.max(0,p.takaya))+'/丹南 '+formatNum(Math.max(0,p.tannan))+(p.shortage ? '・'+formatNum(p.shortage)+'不足' : '')+')'; }
+  var groups = [], none = ps.filter(function(p){ return !p.site; });
+  if(none.length) groups.push('■要確認(在庫が足りない)'+none.length+'品番'+NL+none.map(function(p){ return line(p, stockText(p)); }).join(NL));
+  var hs = {};
+  ps.filter(function(p){ return p.site==='handled'; }).forEach(function(p){ (hs[p.handling] = hs[p.handling] || []).push(p); });
+  Object.keys(hs).forEach(function(h){ groups.push('■'+h+' '+hs[h].length+'品番'+NL+hs[h].map(function(p){ return line(p, ''); }).join(NL)); });
+  var sp = ps.filter(function(p){ return p.site==='split'; });
+  if(sp.length) groups.push('■分ける '+sp.length+'品番'+NL+sp.map(function(p){ return line(p, p.split ? '(高屋 '+formatNum(p.split.takaya)+'+丹南 '+formatNum(p.split.tannan)+')' : ''); }).join(NL));
+  return head+NL+groups.join(NL);
+}
 /* 集計表へ送る行: 倉庫ごと [{ vc, code, qty }]。分ける品番は、行の順に先に使う拠点(引当の決まり)の分まで、残りをもう一方 */
 function vcAllocSheetRows(calc, kind){
   var out = { takaya:[], tannan:[] }, skipped = [];
@@ -9737,7 +9825,11 @@ function renderVcAllocDash(calc){
   var top = calc.products.slice().sort(function(a,b){ return b.qty-a.qty; }).slice(0,10);
   var topDest = calc.dests.slice().sort(function(a,b){ return b.qty-a.qty; }).slice(0,5);
   var nCase = calc.products.filter(function(p){ return p.kind==='case'; }).length;
-  return '<div class="pool-hint" style="margin:0 0 8px;">引当の決まり: '+esc(vcAllocRulesText(calc.rules || vcAllocRules(null)))+'(設定 → 得意先・単価 で変えられます)</div>'+
+  return '<div class="pool-hint" style="margin:0 0 8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><span>引当の決まり: '+esc(vcAllocRulesText(calc.rules || vcAllocRules(null)))+'(設定 → 得意先・単価 で変えられます)</span>'+
+      '<span class="no-print" style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;"><b style="font-size:12px;align-self:center;">LINEで共有(高屋・丹南以外):</b>'+
+        '<button type="button" class="vc-manage-toggle-btn" data-vca-share="image">🖼 画像で保存</button>'+
+        '<button type="button" class="vc-manage-toggle-btn" data-vca-share="csv">📄 データで保存</button>'+
+        '<button type="button" class="vc-manage-toggle-btn" data-vca-line="1">💬 文でコピー</button></span></div>'+
     '<div class="vca-cards">'+
       card('PO数', formatNum(calc.poCount), formatNum(t.lines)+'行')+
       card('数量', formatNum(t.qty), 'ピース')+
@@ -9817,13 +9909,16 @@ function renderVcAllocTable(calc, kind){
           return '<button type="button" class="add-btn" data-vca-send="'+kind+'|'+k+'"'+(n ? '' : ' disabled')+' style="background:'+st.color+';">🧾 '+st.name+'の分を'+st.name+'の集計表へ('+n+'行)</button>';
         }).join('');
       })() : '')+
+      '<button type="button" class="vc-manage-toggle-btn" data-vca-share="image">🖼 画像で保存(高屋・丹南以外)</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" data-vca-share="csv">📄 データで保存</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" data-vca-line="1">💬 文でコピー</button>'+
       '<button type="button" class="vc-manage-toggle-btn" id="vcaPrint">🖨 印刷</button>'+
       (sort ? '<button type="button" class="vc-manage-toggle-btn" id="vcaSortReset">並びを戻す(番号順)</button>' : '')+
     '</div>'+
     '<div class="shukei-print-head"><b>VC '+esc(label)+'</b> ・ '+esc(vcAllocDateLabel())+'</div>'+
     '<div class="vca-scroll" data-keep-scroll="vcaTable"><table class="report-table shukei-table vca-table"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>'+
-    '<div class="pool-hint no-print" style="margin-top:6px;">高屋・丹南はロジザードの在庫数 − 引当数(高屋 '+esc(VC_ALLOC_BLOCKS.takaya.join('・'))+' / 丹南 '+esc(VC_ALLOC_BLOCKS.tannan.join('・'))+')。'+
-      '倉庫は、発注数(品番計)が高屋の在庫以下なら高屋、そうでなく丹南の在庫以下なら丹南、どちらも足りなければ要確認です。ケース数は発注数 ÷ 入数 の切り上げ、入数は弥生(無ければ商品台帳)。'+
+    '<div class="pool-hint no-print" style="margin-top:6px;">高屋・丹南はロジザードの在庫数 − 引当数。引当の決まり: '+esc(vcAllocRulesText(calc.rules || vcAllocRules(null)))+'。'+
+      'ケース数は発注数 ÷ 入数 の切り上げ、入数は弥生(無ければ商品台帳)。'+
       '「高屋の分を高屋の集計表へ」「丹南の分を丹南の集計表へ」は、それぞれの倉庫の行だけを、この端末のその倉庫の集計表へ、VC番号=振り分け番号・品番・数量で追加します(分ける品番は倉庫ごとの数量で。要確認の品番は送りません)。</div>';
 }
 function renderVcAllocDests(calc){
@@ -9904,6 +9999,21 @@ function bindVcAlloc(){
       order.notes = order.notes || {};
       if(v) order.notes[code] = v; else delete order.notes[code];
       if(await saveOrder(order, 'VC引き当ての備考を変更', code+': '+(v || '(消した)'))){ d.order = order; render(); }
+    });
+  });
+  // LINE に画像・データで共有(高屋・丹南以外の品番)
+  document.querySelectorAll('[data-vca-share]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var calc = computeVcAlloc(d.order, d.dests, d.stock, state.shukeiPm);
+      if(btn.getAttribute('data-vca-share')==='image') vcAllocOtherImage(calc); else vcAllocOtherCsv(calc);
+    });
+  });
+  // LINE に貼る文をコピー(高屋・丹南以外の品番)
+  document.querySelectorAll('[data-vca-line]').forEach(function(btn){
+    btn.addEventListener('click', async function(){
+      var text = vcAllocLineText(computeVcAlloc(d.order, d.dests, d.stock, state.shukeiPm));
+      try{ await navigator.clipboard.writeText(text); showToast('コピーしました。LINE に貼り付けてください'); }
+      catch(e){ window.prompt('コピーできなかったので、下の文を選んでコピーしてください', text); }
     });
   });
   // 集計表へ送る(この端末の集計表の入力中の表に追加)

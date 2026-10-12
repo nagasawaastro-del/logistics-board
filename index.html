@@ -12299,7 +12299,7 @@ function renderStockTab(){
   var c = st.calc, snaps = st.snaps || [], cap = st.capacity || {};
   var tab = state.stockTab || 'summary';
   if(tab==='blocks' || tab==='missing') tab = 'summary'; // 概要にまとめた
-  var tabs = [['summary','概要'],['outlook','将来在庫'],['locs','ロケーション'],['slot','配置']].map(function(t){
+  var tabs = [['summary','概要'],['outlook','将来在庫'],['storage','保管料の試算'],['locs','ロケーション'],['slot','配置']].map(function(t){
     return '<button type="button" class="vc-tab-btn'+(tab===t[0]?' active':'')+'" data-stock-tab="'+t[0]+'">'+t[1]+'</button>';
   }).join('');
   var prev = null; // 7日前(なければいちばん古い)の記録と比べる
@@ -12359,6 +12359,8 @@ function renderStockTab(){
       '40ft換算は 40ftドライコンテナの内容積 '+STOCK_FT40_M3+'m³(約'+formatNum(Math.round(STOCK_FT40_SAI))+'才)で割った本数です(実際に積めるのはその8〜9割)。※ = 入数か才数の分からない商品を含む(その分は才数に入っていません)。</div>';
   }else if(tab==='outlook'){
     body = renderStockOutlook(st);
+  }else if(tab==='storage'){
+    body = renderStorageSim(st);
   }else if(tab==='locs'){
     var blockList = Object.keys(c.blocks).sort();
     var selB = state.stockLocBlock && c.blocks[state.stockLocBlock] ? state.stockLocBlock : (blockList.indexOf('A')!==-1 ? 'A' : blockList[0]);
@@ -12531,6 +12533,82 @@ function computeStockOutlook(st, site){
   return { rows:rows, noEst:noEst, events:events, lines:lines.length };
 }
 function outlookCasesText(q, pack){ return pack ? (Math.round(q/pack*10)/10).toLocaleString('ja-JP')+'ケース' : ''; }
+/* ---------- 保管料の試算(在庫を圧縮できたら、保管料がどうなるか) ----------
+   請求と同じ考え方: 保管料 = (1期・2期・3期の在庫のケース数 + 入庫のケース数)× 1ケースの才数 × 単価(BILLING_RATES.storage 円)。
+   在庫がずっと同じなら、1か月の保管料 ≒ 在庫のケース数(切り上げ)× 才数 × 単価 × 3(期)。入庫の分は数えない(圧縮しても変わらないため)。
+   圧縮後 = 品番ごとに「○日分の出荷」(作業量CSVの出荷記録の1日あたり × 日数)まで減らした在庫。見積もりの分を残すなら、今日以降の見積もりより少なくしない。
+   品番ごとに「残すケース数」を手で変えられる(この画面だけ。保存しない)。才数の分からない品番は、請求と同じく 1才 で計算する。 */
+function computeStorageSim(st, opt){
+  var P = (st.lz && st.lz.products) || {}, pm = st.pm || {}, ship = st.ship || { days:0, byCode:{} };
+  var rate = BILLING_RATES.storage, days = Math.max(0, Number(opt.days)||0), over = opt.overrides || {};
+  var est = {};
+  if(opt.keepEstimates && st.outlook) (st.outlook.estimates||[]).forEach(function(x){
+    if(isDummyProductCode(x.code) || (opt.site && outlookSiteOfWarehouse(x.warehouse)!==opt.site)) return;
+    est[x.code] = (est[x.code]||0) + x.qty;
+  });
+  var rows = [];
+  Object.keys(P).forEach(function(code){
+    var q = 0;
+    Object.keys(P[code].blocks||{}).forEach(function(b){
+      var site = stockSiteOfBlock(b);
+      if(site==='other' || (opt.site && site!==opt.site)) return;
+      var x = P[code].blocks[b]; q += Number(x.qty)||0;
+      if(x.locAlloc) Object.keys(x.locAlloc).forEach(function(l){ q -= Number(x.locAlloc[l])||0; });
+    });
+    if(q<=0) return;
+    var m = pm[code] || {}, pack = m.packQty ? Number(m.packQty) : null;
+    var saiKnown = m.cubicVolume!==null && m.cubicVolume!==undefined && m.cubicVolume!=='';
+    var sai = saiKnown ? Number(m.cubicVolume) : 1;
+    var perDay = ship.days ? (ship.byCode[code]||0)/ship.days : 0;
+    var cases = pack ? Math.ceil(q/pack) : 0;
+    if(!cases) return; // 入数が分からない品番は請求でもケース数 0(保管料なし)
+    var keepQty = Math.min(q, Math.max(perDay*days, est[code]||0));
+    var keepCases = Math.min(cases, Math.ceil(keepQty/pack));
+    var manual = Object.prototype.hasOwnProperty.call(over, code);
+    if(manual) keepCases = Math.max(0, Math.min(cases, Math.floor(Number(over[code])||0)));
+    var now = billingYen(cases*sai*rate*3), after = billingYen(keepCases*sai*rate*3);
+    rows.push({ code:code, name:P[code].name||'', qty:q, pack:pack, cases:cases, sai:sai, saiKnown:saiKnown, perDay:perDay, est:est[code]||0,
+      keepCases:keepCases, manual:manual, cutCases:cases-keepCases, cutCube:(cases-keepCases)*sai, now:now, after:after, save:now-after,
+      daysNow: perDay>0 ? q/perDay : null });
+  });
+  rows.sort(function(a,b){ return b.save-a.save || b.now-a.now; });
+  var tot = rows.reduce(function(a,r){ a.now += r.now; a.after += r.after; a.cube += r.cases*r.sai; a.cutCube += r.cutCube; return a; }, { now:0, after:0, cube:0, cutCube:0 });
+  return { rows: rows, totals: tot, rate: rate, shipDays: ship.days||0 };
+}
+function renderStorageSim(st){
+  var o = state.storageSimOpt || (state.storageSimOpt = { days: 60, keepEstimates: true, site: '', overrides: {} });
+  var r = computeStorageSim(st, o), t = r.totals, LIMIT = 300;
+  function yen(v){ return '¥'+formatNum(Math.round(v)); }
+  var head = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px;font-size:13px;">'+
+    '<label>残す在庫: <select id="ssDays">'+[30,60,90,120,180].map(function(d){ return '<option value="'+d+'"'+(Number(o.days)===d?' selected':'')+'>'+d+'日分の出荷</option>'; }).join('')+'</select></label>'+
+    '<label><input type="checkbox" id="ssKeepEst"'+(o.keepEstimates?' checked':'')+(st.outlook ? '' : ' disabled')+'> 見積もりの分は残す'+(st.outlook ? '' : '(将来在庫で取り込むと使えます)')+'</label>'+
+    '<label>拠点 <select id="ssSite"><option value="">全部</option>'+Object.keys(SHUKEI_SITES).map(function(k){ return '<option value="'+k+'"'+(o.site===k?' selected':'')+'>'+esc(SHUKEI_SITES[k].name)+'</option>'; }).join('')+'</select></label>'+
+    (Object.keys(o.overrides).length ? '<button type="button" class="vc-manage-toggle-btn" id="ssResetOv">手で変えた '+Object.keys(o.overrides).length+'品番を戻す</button>' : '')+
+    '<button type="button" class="vc-manage-toggle-btn" id="ssCsv" style="margin-left:auto;">CSV出力</button></div>';
+  var cards = '<div class="vca-cards">'+
+    '<div class="vca-card"><div class="vca-card-label">今の保管料(1か月)</div><div class="vca-card-val">'+yen(t.now)+'</div><div class="vca-card-sub">約'+stockFmtCube(t.cube)+'才 × '+r.rate+'円 × 3期</div></div>'+
+    '<div class="vca-card"><div class="vca-card-label">圧縮後の保管料(1か月)</div><div class="vca-card-val">'+yen(t.after)+'</div><div class="vca-card-sub">'+esc(o.days+'日分の出荷'+(o.keepEstimates && st.outlook ? '・見積もりの分' : '')+'を残す')+'</div></div>'+
+    '<div class="vca-card" style="border-color:#ABEFC6;"><div class="vca-card-label" style="color:#067647;">下がる額(1か月)</div><div class="vca-card-val" style="color:#067647;">'+yen(t.now-t.after)+'</div><div class="vca-card-sub">'+(t.now ? '今の '+((t.now-t.after)/t.now*100).toFixed(1)+'% ・ 1年で '+yen((t.now-t.after)*12) : '')+'</div></div>'+
+    '<div class="vca-card"><div class="vca-card-label">減らせる在庫</div><div class="vca-card-val">'+stockFmtCube(t.cutCube)+'<span style="font-size:13px;font-weight:600;"> 才</span></div><div class="vca-card-sub">40ftコンテナ 約'+stockFt40(t.cutCube)+'本分</div></div>'+
+  '</div>';
+  var table = '<div style="overflow-x:auto;max-height:620px;" data-keep-scroll="storageSim"><table class="report-table shukei-table"><thead><tr><th>品番</th><th>商品名</th><th class="num">今の在庫</th><th class="num">1日の出荷</th><th class="num">在庫日数</th><th class="num">見積もり</th><th class="num">残すケース</th><th class="num">減らすケース</th><th class="num">才/ケース</th><th class="num">今の保管料</th><th class="num">圧縮後</th><th class="num">下がる額</th></tr></thead><tbody>'+
+    (r.rows.slice(0, LIMIT).map(function(x){
+      return '<tr><td><b>'+esc(x.code)+'</b></td><td class="sk-minor">'+esc(x.name)+'</td>'+
+        '<td class="num">'+formatNum(x.cases)+'ケース<div class="sk-minor">'+formatNum(x.qty)+'</div></td>'+
+        '<td class="num">'+(x.perDay>0 ? (function(v){ return v<0.1 ? '0.1未満' : (Math.round(v*10)/10)+''; })(x.perDay/x.pack)+'ケース' : '<span class="sk-minor">出荷なし</span>')+'</td>'+
+        '<td class="num">'+(x.daysNow===null ? '' : (x.daysNow>3650 ? '10年以上' : formatNum(Math.round(x.daysNow))+'日'))+'</td>'+
+        '<td class="num">'+(x.est ? formatNum(x.est) : '')+'</td>'+
+        '<td class="num"><input type="number" min="0" max="'+x.cases+'" step="1" data-ss-keep="'+esc(x.code)+'" value="'+x.keepCases+'" style="width:70px;text-align:right;'+(x.manual?'background:#FFFAEB;':'')+'"></td>'+
+        '<td class="num">'+(x.cutCases ? formatNum(x.cutCases) : '')+'</td>'+
+        '<td class="num">'+(x.saiKnown ? stockFmtCube(x.sai) : '<span class="sk-minor" title="才数が商品台帳に無いので、請求と同じく1才で計算">1(不明)</span>')+'</td>'+
+        '<td class="num">'+yen(x.now)+'</td><td class="num">'+yen(x.after)+'</td><td class="num"><b'+(x.save>0?' style="color:#067647;"':'')+'>'+(x.save ? yen(x.save) : '')+'</b></td></tr>';
+    }).join('') || '<tr><td colspan="12" class="empty-note">在庫がありません</td></tr>')+
+    '</tbody></table></div>'+(r.rows.length>LIMIT ? '<div class="pool-hint">ほか '+formatNum(r.rows.length-LIMIT)+'品番(CSV出力で全部)</div>' : '');
+  return head+cards+table+
+    '<div class="pool-hint" style="margin-top:10px;">保管料は請求と同じ考え方(在庫のケース数(切り上げ)× 1ケースの才数 × '+r.rate+'円。1期・2期・3期の月3回)で、在庫がずっと同じとした1か月分です。入庫の分は入れていません。'+
+    '今の在庫 = ロジザードの在庫('+esc(fmtDateTime(st.lz.uploadedAt))+'取込)から引当数を除いた数。1日の出荷は作業量CSVの出荷記録('+r.shipDays+'日分)から。'+
+    '圧縮後 = 「○日分の出荷」'+(o.keepEstimates ? 'と「見積もり(今日以降)」の多い方' : '')+'まで減らした在庫(今の在庫より多くはしない)。「残すケース」を書き換えると、その品番だけ手で決めた数で計算します(この画面だけ。保存しません)。入数の分からない品番は、請求でも保管料が出ないので入れていません。</div>';
+}
 function renderStockOutlook(st){
   var ol = st.outlook, site = state.outlookSite || '';
   var sync = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
@@ -12615,6 +12693,27 @@ function bindStockTab(){
       }
     }catch(e){ state.outlookMsg = '⚠️ 取り込めませんでした'; }
     state.outlookSyncing = false; render();
+  });
+  // 保管料の試算
+  var sso = state.storageSimOpt;
+  var ssDays = document.getElementById('ssDays');
+  if(ssDays) ssDays.addEventListener('change', function(){ sso.days = Number(ssDays.value); sso.overrides = {}; render(); });
+  var ssKeep = document.getElementById('ssKeepEst');
+  if(ssKeep) ssKeep.addEventListener('change', function(){ sso.keepEstimates = ssKeep.checked; render(); });
+  var ssSite = document.getElementById('ssSite');
+  if(ssSite) ssSite.addEventListener('change', function(){ sso.site = ssSite.value; render(); });
+  var ssReset = document.getElementById('ssResetOv');
+  if(ssReset) ssReset.addEventListener('click', function(){ sso.overrides = {}; render(); });
+  document.querySelectorAll('[data-ss-keep]').forEach(function(el){
+    el.addEventListener('change', function(){ var v = el.value.trim(); if(v==='') delete sso.overrides[el.getAttribute('data-ss-keep')]; else sso.overrides[el.getAttribute('data-ss-keep')] = Math.max(0, Math.floor(Number(v)||0)); render(); });
+  });
+  var ssCsv = document.getElementById('ssCsv');
+  if(ssCsv) ssCsv.addEventListener('click', function(){
+    var rr = computeStorageSim(state.stockData, sso);
+    var rows = [['品番','商品名','今の在庫(ピース)','入数','今の在庫(ケース)','1日の出荷(ピース)','在庫日数','見積もり(今日以降)','残すケース','手で決めた','減らすケース','才/ケース','才数不明','今の保管料(月)','圧縮後(月)','下がる額(月)']];
+    rr.rows.forEach(function(x){ rows.push([x.code, x.name, x.qty, x.pack, x.cases, Math.round(x.perDay*10)/10, x.daysNow===null ? '' : Math.round(x.daysNow), x.est||'', x.keepCases, x.manual ? 'はい' : '', x.cutCases, x.sai, x.saiKnown ? '' : 'はい', x.now, x.after, x.save]); });
+    rows.push(['合計','','','','','','','','','','','','', rr.totals.now, rr.totals.after, rr.totals.now-rr.totals.after]);
+    downloadCSV('在庫_保管料の試算_'+sso.days+'日分_'+todayStr()+'.csv', rows);
   });
   var osi = document.getElementById('outlookSite');
   if(osi) osi.addEventListener('change', function(){ state.outlookSite = osi.value; render(); });

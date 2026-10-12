@@ -12499,7 +12499,7 @@ function outlookCountable(x){
 }
 /* 見積もりを、将来在庫に数える物に絞る。
    ・作り直した見積もり: 件名の「○月○回」が同じ見積もりが、同じ得意先に何件もあれば、いちばん新しい1件(レコード番号が大きい)だけ(生協の計画数→校正数→アバウト数など)
-   ・アマゾン・楽天: 見積日が月曜 = PO数(確定)、それ以外の日 = 需要予測(forecast: true)。予測は includeForecast のときだけ数える
+   ・アマゾン・楽天: 件名に「月曜」が入っている = PO数(確定)、それ以外 = 需要予測(forecast: true)。予測は includeForecast のときだけ数える
    戻り値: { lines, forecast(予測で外した行数), old(古い版で外した行数) } */
 function outlookRoundKey(subject){
   var m = String(subject||'').normalize('NFKC').match(/(\d{1,2})\s*月\s*(\d{1,2})\s*回/);
@@ -12512,7 +12512,8 @@ function outlookEstimateLines(ol, includeForecast){
   est.forEach(function(x){
     var rk = outlookRoundKey(x.subject);
     if(rk && String(latest[x.party+'|'+rk])!==String(x.recordId)){ old++; return; }
-    var isFc = /アマゾン|ｱﾏｿﾞﾝ|amazon|楽天/i.test(x.party||'') && new Date(x.date+'T00:00:00').getDay()!==1;
+    var isFc = /アマゾン|ｱﾏｿﾞﾝ|amazon|楽天/i.test(x.party||'') &&
+      (x.subject!==undefined ? !/月曜/.test(String(x.subject).normalize('NFKC')) : new Date(x.date+'T00:00:00').getDay()!==1); // 件名を取り込む前のデータは見積日の曜日で
     if(isFc && !includeForecast){ forecast++; return; }
     out.push(isFc ? Object.assign({}, x, { forecast:true }) : x);
   });
@@ -12643,7 +12644,7 @@ function renderStockOutlook(st){
   var sync = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
     (hasManagerSession() ? '<button type="button" class="add-btn" id="outlookSync"'+(state.outlookSyncing?' disabled':'')+'>'+(state.outlookSyncing?'取り込み中…':'kintone から見積もり・入荷予定を取り込む')+'</button>' : '<span class="pool-hint" style="margin:0;">取り込みは管理者でログインしたときだけできます。</span>')+
     '<span class="pool-hint" style="margin:0;">'+(ol && ol.syncedAt ? '最後に取り込んだ日時 '+esc(fmtDateTime(ol.syncedAt))+'(見積日が '+esc(ol.from||'')+' 以降の見積もり '+formatNum(ol.estimateRecords||0)+'件)' : 'まだ取り込んでいません')+(ol && ol.arrivalNote ? ' ・ '+esc(ol.arrivalNote) : '')+'</span>'+
-    '<label class="pool-hint" style="margin:0 0 0 auto;"><input type="checkbox" id="outlookForecast"'+(state.outlookForecast?' checked':'')+'> 需要予測(アマゾン・楽天の月曜以外)も差し引く</label>'+
+    '<label class="pool-hint" style="margin:0 0 0 auto;"><input type="checkbox" id="outlookForecast"'+(state.outlookForecast?' checked':'')+'> 需要予測(アマゾン・楽天の件名に「月曜」の無い見積もり)も差し引く</label>'+
     '<label class="pool-hint" style="margin:0;">拠点 <select id="outlookSite"><option value="">全部</option>'+Object.keys(SHUKEI_SITES).map(function(k){ return '<option value="'+k+'"'+(site===k?' selected':'')+'>'+esc(SHUKEI_SITES[k].name)+'</option>'; }).join('')+'</select></label>'+
   '</div>'+(state.outlookMsg ? '<div class="vc-import-status" style="white-space:pre-line;">'+esc(state.outlookMsg)+'</div>' : '');
   if(!ol) return sync+'<div class="empty-note">kintone の見積もりアプリ(956)から取り込むと、将来在庫と、見積もりの入っていない在庫が出ます。</div>';

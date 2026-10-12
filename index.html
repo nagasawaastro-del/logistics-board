@@ -354,6 +354,7 @@ input,select{font-family:inherit;}
 .vca-site.is-tannan{background:#ECFDF3;color:#15803D;}
 .vca-site.is-split{background:#FFFAEB;color:#B54708;}
 .vca-site.is-none{background:#FEF3F2;color:#B42318;}
+.vca-site.is-handled{background:#F4EBFF;color:#6941C6;}
 .vca-table td.vca-use{font-weight:800;color:var(--ink-900);}
 .vca-table tr.vca-row-none td{background:#FEF3F2 !important;}
 .vca-site-sel{font-size:12px;padding:2px 4px;}
@@ -9525,6 +9526,29 @@ function vcAllocStockOf(lz, blocks){
 function vcAllocDestGroups(dests){
   return (dests && dests.groups) ? dests.groups : VC_ALLOC_DEFAULT_DESTS;
 }
+/* 引当の決まり(設定 → 得意先・単価 の「VC引当の納品先一覧」で変える。納品先一覧と同じ kv に rules として保存)
+   first: 先に使う拠点 / split: 1か所で足りないとき2拠点に分けるか / reserveCases: 拠点ごとに引き当てずに残すケース数 / blocks: 拠点ごとに在庫に数えるブロック */
+var VC_ALLOC_RULES_DEFAULT = { first:'takaya', split:true, reserveCases:{ takaya:0, tannan:0 }, blocks: VC_ALLOC_BLOCKS };
+var VC_ALLOC_HANDLINGS_DEFAULT = ['停止連絡', 'セット対応'];
+function vcAllocRules(dests){
+  var r = (dests && dests.rules) || {};
+  function blocksOf(site){
+    var b = r.blocks && Array.isArray(r.blocks[site]) ? r.blocks[site].filter(function(x){ return SHUKEI_SITES[site].stockBlocks.indexOf(x)!==-1; }) : null;
+    return (b && b.length) ? b : VC_ALLOC_BLOCKS[site];
+  }
+  var rc = r.reserveCases || {};
+  // 要確認になった品番を確認したあとの対応の種類(品番ごとに倉庫の代わりに選ぶ)。設定で足す・消す
+  var handlings = Array.isArray(r.handlings) ? r.handlings.map(function(x){ return String(x||'').trim(); }).filter(function(x, i, a){ return x && a.indexOf(x)===i; }) : VC_ALLOC_HANDLINGS_DEFAULT.slice();
+  return { handlings: handlings, first: r.first==='tannan' ? 'tannan' : 'takaya', split: r.split!==false,
+    reserveCases: { takaya: Math.max(0, Math.floor(Number(rc.takaya)||0)), tannan: Math.max(0, Math.floor(Number(rc.tannan)||0)) },
+    blocks: { takaya: blocksOf('takaya'), tannan: blocksOf('tannan') } };
+}
+function vcAllocRulesText(R){
+  var other = R.first==='takaya' ? 'tannan' : 'takaya';
+  return SHUKEI_SITES[R.first].name+'を先に使い、足りなければ'+SHUKEI_SITES[other].name+(R.split ? '、1か所で足りなければ'+SHUKEI_SITES[R.first].name+'から先に分ける' : '、1か所で足りなければ「要確認」(分けない)')+
+    ((R.reserveCases.takaya || R.reserveCases.tannan) ? '。残しておく数: '+['takaya','tannan'].map(function(k){ return SHUKEI_SITES[k].name+' '+R.reserveCases[k]+'ケース'; }).join('・') : '')+
+    '。在庫に数えるブロック: '+['takaya','tannan'].map(function(k){ return SHUKEI_SITES[k].name+' '+R.blocks[k].join('・'); }).join(' / ');
+}
 /* 計算。order: 取り込んだ出荷指示 / dests: 納品先一覧 / stock: loadShukeiData の結果(ロジザード・弥生) / pm: 商品台帳 */
 function computeVcAlloc(order, dests, stock, pm){
   var groups = vcAllocDestGroups(dests);
@@ -9560,22 +9584,28 @@ function computeVcAlloc(order, dests, stock, pm){
     tot.qty += qty; tot.cases += cases; tot.hasu += hasu; tot.lines++;
   });
   var overrides = (order && order.overrides) || {};
+  var R = vcAllocRules(dests), A = R.first, B = A==='takaya' ? 'tannan' : 'takaya';
   var list = Object.keys(prods).map(function(code){
     var p = prods[code];
     p.inLogi = !!lz[code];
-    p.takaya = vcAllocStockOf(lz[code], VC_ALLOC_BLOCKS.takaya);
-    p.tannan = vcAllocStockOf(lz[code], VC_ALLOC_BLOCKS.tannan);
-    p.auto = p.qty<=p.takaya ? 'takaya' : (p.qty<=p.tannan ? 'tannan' : null);
+    p.takaya = vcAllocStockOf(lz[code], R.blocks.takaya);
+    p.tannan = vcAllocStockOf(lz[code], R.blocks.tannan);
+    // 引き当てに使える数 = 在庫 − 残しておく数(ケース × 入数。入数が分からなければ残さない)
+    var avail = { takaya: p.takaya - R.reserveCases.takaya*(p.pack||0), tannan: p.tannan - R.reserveCases.tannan*(p.pack||0) };
+    p.auto = p.qty<=avail[A] ? A : (p.qty<=avail[B] ? B : null);
     p.split = null; p.shortage = 0;
     if(!p.auto){
-      var tk = Math.max(0, p.takaya), tn = Math.max(0, p.tannan);
-      if(tk>0 && tn>0 && tk+tn>=p.qty) p.split = { takaya: tk, tannan: p.qty-tk };
-      else p.shortage = Math.max(0, p.qty - Math.max(tk, tn));
+      var ka = Math.max(0, avail[A]), kb = Math.max(0, avail[B]);
+      if(R.split && ka>0 && kb>0 && ka+kb>=p.qty){ p.split = {}; p.split[A] = ka; p.split[B] = p.qty-ka; }
+      else p.shortage = Math.max(0, p.qty - Math.max(ka, kb));
     }
     var ov = overrides[code];
     if(ov==='split' && !p.split) ov = null;
+    p.handling = null;
+    if(ov && String(ov).indexOf('x:')===0){ p.handling = String(ov).slice(2); ov = 'handled'; } // 確認して決めた対応(停止連絡・セット対応など)
     p.overridden = !!ov && ov!==p.auto;
-    p.site = ov || p.auto; // 'takaya' | 'tannan' | 'split' | null(要確認)
+    p.site = ov || p.auto; // 'takaya' | 'tannan' | 'split' | 'handled'(対応を選んだ) | null(要確認)
+    p.memo = overrides[code] ? String(((order && order.notes) || {})[code] || '') : ''; // 手で変えた品番に手で書いた備考
     p.kind = p.hasu===0 && p.pack ? 'case' : 'piece';
     p.casesUp = p.pack ? Math.ceil(p.qty/p.pack) : null;
     p.groups = Object.keys(p.byGroup).sort();
@@ -9585,25 +9615,29 @@ function computeVcAlloc(order, dests, stock, pm){
   var rows = [];
   list.forEach(function(p){ p.groups.forEach(function(g){ rows.push({ p: p, group: g, qty: p.byGroup[g] }); }); });
   return { products: list, rows: rows, dests: Object.keys(destMap).map(function(k){ return destMap[k]; }),
-    poCount: Object.keys(pos).length, unknownDests: unknownDests, totals: tot };
+    poCount: Object.keys(pos).length, unknownDests: unknownDests, totals: tot, rules: R };
 }
 function vcAllocSiteLabel(p){
   if(p.site==='takaya') return SHUKEI_SITES.takaya.name;
   if(p.site==='tannan') return SHUKEI_SITES.tannan.name;
   if(p.site==='split') return '分ける';
+  if(p.site==='handled') return p.handling || '対応済み';
   return '要確認';
 }
+/* 備考に出す文: 手で変えた品番で備考を書いていればそれ、なければ自動の備考 */
+function vcAllocNoteText(p){ return p.memo ? p.memo : vcAllocNote(p); }
 function vcAllocNote(p){
   var out = [];
+  if(p.site==='handled') out.push('確認して「'+(p.handling||'')+'」にした');
   if(!p.inLogi) out.push('ロジザードの在庫に無い品番');
   if(p.split) out.push('高屋'+formatNum(p.split.takaya)+'+丹南'+formatNum(p.split.tannan)+'なら足りる');
   else if(p.shortage) out.push(formatNum(p.shortage)+'不足(多い方の倉庫で)');
   if(!p.pack) out.push('入数が不明');
   if(p.groups.length>1) out.push('振り分け番号が'+p.groups.join('・')+'に分かれる');
-  if(p.overridden) out.push('倉庫を手で変更');
+  if(p.overridden && p.site!=='handled') out.push('倉庫を手で変更');
   return out.join('・');
 }
-/* 集計表へ送る行: 倉庫ごと [{ vc, code, qty }]。分ける品番は、行の順に高屋の在庫まで高屋、残りを丹南 */
+/* 集計表へ送る行: 倉庫ごと [{ vc, code, qty }]。分ける品番は、行の順に先に使う拠点(引当の決まり)の分まで、残りをもう一方 */
 function vcAllocSheetRows(calc, kind){
   var out = { takaya:[], tannan:[] }, skipped = [];
   var used = {};
@@ -9614,11 +9648,12 @@ function vcAllocSheetRows(calc, kind){
     var vc = r.group==='?' ? '' : r.group;
     if(p.site==='takaya' || p.site==='tannan'){ out[p.site].push({ vc: vc, code: p.code, qty: r.qty }); return; }
     if(p.site==='split' && p.split){
-      var left = p.split.takaya - (used[p.code]||0);
+      var fa = (calc.rules && calc.rules.first) || 'takaya', fb = fa==='takaya' ? 'tannan' : 'takaya';
+      var left = p.split[fa] - (used[p.code]||0);
       var tk = Math.max(0, Math.min(left, r.qty));
       used[p.code] = (used[p.code]||0) + tk;
-      if(tk) out.takaya.push({ vc: vc, code: p.code, qty: tk });
-      if(r.qty-tk) out.tannan.push({ vc: vc, code: p.code, qty: r.qty-tk });
+      if(tk) out[fa].push({ vc: vc, code: p.code, qty: tk });
+      if(r.qty-tk) out[fb].push({ vc: vc, code: p.code, qty: r.qty-tk });
       return;
     }
     if(skipped.indexOf(p.code)===-1) skipped.push(p.code);
@@ -9695,14 +9730,15 @@ function renderVcAlloc(){
 function renderVcAllocDash(calc){
   var t = calc.totals;
   function card(label, val, sub){ return '<div class="vca-card"><div class="vca-card-label">'+esc(label)+'</div><div class="vca-card-val">'+val+'</div>'+(sub ? '<div class="vca-card-sub">'+sub+'</div>' : '')+'</div>'; }
-  var nSite = { takaya:0, tannan:0, split:0, none:0 };
-  calc.products.forEach(function(p){ nSite[p.site || 'none']++; });
+  var nSite = { takaya:0, tannan:0, split:0, none:0, handled:0 }, byHandling = {};
+  calc.products.forEach(function(p){ nSite[p.site || 'none']++; if(p.site==='handled') byHandling[p.handling] = (byHandling[p.handling]||0)+1; });
   var byGroup = {};
   calc.rows.forEach(function(r){ byGroup[r.group] = (byGroup[r.group]||0) + r.qty; });
   var top = calc.products.slice().sort(function(a,b){ return b.qty-a.qty; }).slice(0,10);
   var topDest = calc.dests.slice().sort(function(a,b){ return b.qty-a.qty; }).slice(0,5);
   var nCase = calc.products.filter(function(p){ return p.kind==='case'; }).length;
-  return '<div class="vca-cards">'+
+  return '<div class="pool-hint" style="margin:0 0 8px;">引当の決まり: '+esc(vcAllocRulesText(calc.rules || vcAllocRules(null)))+'(設定 → 得意先・単価 で変えられます)</div>'+
+    '<div class="vca-cards">'+
       card('PO数', formatNum(calc.poCount), formatNum(t.lines)+'行')+
       card('数量', formatNum(t.qty), 'ピース')+
       card('ケース数', formatNum(t.cases), '行ごとの入数で切り捨て')+
@@ -9713,7 +9749,8 @@ function renderVcAllocDash(calc){
       card('高屋から', formatNum(nSite.takaya)+'品番', '')+
       card('丹南から', formatNum(nSite.tannan)+'品番', '')+
       card('分ける', formatNum(nSite.split)+'品番', '高屋と丹南から')+
-      '<div class="vca-card'+(nSite.none ? ' is-danger' : '')+'"><div class="vca-card-label">要確認</div><div class="vca-card-val">'+formatNum(nSite.none)+'品番</div><div class="vca-card-sub">在庫が足りない</div></div>'+
+      '<div class="vca-card'+(nSite.none ? ' is-danger' : '')+'"><div class="vca-card-label">要確認</div><div class="vca-card-val">'+formatNum(nSite.none)+'品番</div><div class="vca-card-sub">在庫が足りない(確認して、表で対応を選ぶ)</div></div>'+
+      (nSite.handled ? card('確認して対応を決めた', formatNum(nSite.handled)+'品番', Object.keys(byHandling).map(function(h){ return esc(h)+' '+byHandling[h]; }).join('・')) : '')+
       card('振り分け番号別', Object.keys(byGroup).sort().map(function(g){ return '<span class="vca-grp">'+esc(g)+'</span>'+formatNum(byGroup[g]); }).join(' '), '数量(ピース)')+
     '</div>'+
     '<div class="vca-two">'+
@@ -9731,7 +9768,7 @@ function vcAllocDateLabel(){
   return (o && o.workDates && o.workDates.length) ? '出荷作業日 '+o.workDates.map(dateLabelFromStr).join('・') : dateLabelFromStr(todayStr());
 }
 function vcAllocSiteBadge(p){
-  var cls = p.site==='takaya' ? 'is-takaya' : (p.site==='tannan' ? 'is-tannan' : (p.site==='split' ? 'is-split' : 'is-none'));
+  var cls = p.site==='takaya' ? 'is-takaya' : (p.site==='tannan' ? 'is-tannan' : (p.site==='split' ? 'is-split' : (p.site==='handled' ? 'is-handled' : 'is-none')));
   return '<span class="vca-site '+cls+'">'+esc(vcAllocSiteLabel(p))+'</span>';
 }
 function renderVcAllocTable(calc, kind){
@@ -9748,7 +9785,10 @@ function renderVcAllocTable(calc, kind){
     var p = r.p;
     sumQty += r.qty;
     var opts = [['', '自動('+(p.auto==='takaya' ? '高屋' : (p.auto==='tannan' ? '丹南' : (p.split ? '分ける' : '要確認')))+')'],['takaya','高屋'],['tannan','丹南']].concat(p.split ? [['split','分ける']] : []);
+    var hs = (vcAllocRules(state.vcAllocData.dests).handlings || []).slice();
     var ov = (state.vcAllocData.order.overrides||{})[p.code] || '';
+    if(String(ov).indexOf('x:')===0 && hs.indexOf(String(ov).slice(2))===-1) hs.push(String(ov).slice(2)); // 設定から消した対応でも、選んでいる品番はそのまま出す
+    opts = opts.concat(hs.map(function(h){ return ['x:'+h, '対応: '+h]; }));
     var sel = editable ? '<select class="vca-site-sel no-print" data-vca-site="'+esc(p.code)+'">'+opts.map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===ov?' selected':'')+'>'+esc(o[1])+'</option>'; }).join('')+'</select>' : '';
     return '<tr class="'+(!p.site ? 'vca-row-none' : '')+'">'+
       '<td class="sk-no">'+(i+1)+'</td>'+
@@ -9761,7 +9801,9 @@ function renderVcAllocTable(calc, kind){
       '<td class="num'+(p.site==='takaya' ? ' vca-use' : '')+'">'+formatNum(p.takaya)+'</td>'+
       '<td class="num'+(p.site==='tannan' ? ' vca-use' : '')+'">'+formatNum(p.tannan)+'</td>'+
       '<td>'+vcAllocSiteBadge(p)+sel+'</td>'+
-      '<td class="sk-note">'+esc(vcAllocNote(p))+'</td>'+
+      '<td class="sk-note">'+((ov && editable)
+        ? '<input type="text" class="vca-note-in no-print" data-vca-note="'+esc(p.code)+'" value="'+esc(p.memo)+'" placeholder="備考を入力" title="自動の備考: '+esc(vcAllocNote(p))+'" style="width:100%;min-width:160px;font-size:12px;"><span class="print-only">'+esc(p.memo)+'</span>'
+        : esc(vcAllocNoteText(p)))+'</td>'+
     '</tr>';
   }).join('') || '<tr><td colspan="11" class="empty-note">品番がありません</td></tr>';
   body += '<tr class="sk-total"><td></td><td colspan="3">合計 '+formatNum(rows.length)+'行</td><td class="num">'+formatNum(sumQty)+'</td><td colspan="6"></td></tr>';
@@ -9850,8 +9892,18 @@ function bindVcAlloc(){
       var code = el.getAttribute('data-vca-site');
       var order = JSON.parse(JSON.stringify(d.order));
       order.overrides = order.overrides || {};
-      if(el.value) order.overrides[code] = el.value; else delete order.overrides[code];
-      if(await saveOrder(order, 'VC引き当ての倉庫を変更', code+' → '+(el.value ? ({ takaya:'高屋', tannan:'丹南', split:'分ける' })[el.value] : '自動'))){ d.order = order; render(); }
+      if(el.value) order.overrides[code] = el.value; else { delete order.overrides[code]; if(order.notes) delete order.notes[code]; } // 自動に戻したら手で書いた備考も消す
+      if(await saveOrder(order, 'VC引き当ての倉庫を変更', code+' → '+(el.value ? (el.value.indexOf('x:')===0 ? el.value.slice(2) : ({ takaya:'高屋', tannan:'丹南', split:'分ける' })[el.value]) : '自動'))){ d.order = order; render(); }
+    });
+  });
+  // 手で変えた品番の備考(手で書く)
+  document.querySelectorAll('[data-vca-note]').forEach(function(el){
+    el.addEventListener('change', async function(){
+      var code = el.getAttribute('data-vca-note'), v = el.value.trim();
+      var order = JSON.parse(JSON.stringify(d.order));
+      order.notes = order.notes || {};
+      if(v) order.notes[code] = v; else delete order.notes[code];
+      if(await saveOrder(order, 'VC引き当ての備考を変更', code+': '+(v || '(消した)'))){ d.order = order; render(); }
     });
   });
   // 集計表へ送る(この端末の集計表の入力中の表に追加)
@@ -9864,7 +9916,7 @@ function bindVcAlloc(){
       var parts = Object.keys(r.bySite).filter(function(k){ return r.bySite[k].length && (!only || k===only); });
       if(!parts.length){ alert('送れる行がありません(要確認の品番は送りません)'); return; }
       var msg = parts.map(function(k){ var cur = loadShukeiDraft(k).rows.length; return SHUKEI_SITES[k].name+'の集計表に'+r.bySite[k].length+'行'+(cur ? '(今入っている'+cur+'行のあとに追加)' : ''); }).join('\n');
-      if(!confirm(msg+'\nを追加します。'+(r.skipped.length ? '\n要確認の'+r.skipped.length+'品番('+r.skipped.slice(0,8).join('・')+(r.skipped.length>8?'…':'')+')は送りません。' : '')+'\nよろしいですか?')) return;
+      if(!confirm(msg+'\nを追加します。'+(r.skipped.length ? '\n要確認・対応を選んだ(停止連絡など)'+r.skipped.length+'品番('+r.skipped.slice(0,8).join('・')+(r.skipped.length>8?'…':'')+')は送りません。' : '')+'\nよろしいですか?')) return;
       parts.forEach(function(k){
         var dr = loadShukeiDraft(k);
         r.bySite[k].forEach(function(x){ dr.rows.push({ vc: x.vc, code: x.code, qty: String(x.qty), note:'' }); });
@@ -9883,7 +9935,7 @@ function bindVcAlloc(){
 function bindVcAllocDestEditor(d){
   // 納品先一覧
   async function saveDests(groups, after){
-    var obj = { groups: groups, updatedAt: new Date().toISOString() };
+    var obj = Object.assign({}, d.dests || {}, { groups: groups, updatedAt: new Date().toISOString() }); // 引当の決まり(rules)などは残す
     var ok = await persistKey(VC_ALLOC_KEYS.dests, obj);
     if(!ok){ state.dataHubMsg = '⚠️ 納品先一覧を保存できませんでした'; render(); return; }
     await appendAuditLog({ action:'VC引き当ての納品先一覧を変更', target:'納品先一覧', before:null, after: after });
@@ -12503,7 +12555,7 @@ var CSV_EXPORTERS = {
     var rows2 = [['区分','振り分け番号','品番','商品名','発注数','品番計','入数','ケース数','高屋の在庫','丹南の在庫','倉庫','備考']];
     calc.rows.filter(function(r){ return tab==='dash' || r.p.kind===tab; })
       .sort(function(a,b){ return shukeiCompareValues(vcAllocSortValue('group',a), vcAllocSortValue('group',b), 'asc') || (b.qty-a.qty) || shukeiCompareValues(a.p.code, b.p.code, 'asc'); })
-      .forEach(function(r){ var p = r.p; rows2.push([p.kind==='case' ? 'ケース' : 'ピース', r.group, p.code, p.name, r.qty, p.qty, p.pack||'', p.casesUp===null ? '' : p.casesUp, p.takaya, p.tannan, vcAllocSiteLabel(p), vcAllocNote(p)]); });
+      .forEach(function(r){ var p = r.p; rows2.push([p.kind==='case' ? 'ケース' : 'ピース', r.group, p.code, p.name, r.qty, p.qty, p.pack||'', p.casesUp===null ? '' : p.casesUp, p.takaya, p.tannan, vcAllocSiteLabel(p), vcAllocNoteText(p)]); });
     downloadCSV('VC引当_'+({ dash:'全品番', piece:'ピース引当', 'case':'ケース引当' })[tab]+'_'+day+'.csv', rows2);
   },
   // 集計表: 入力中の表(棚番とロケの在庫つき)
@@ -13647,13 +13699,73 @@ function renderDestListPanel(){
     if(!memo || memo.order!==d.order || memo.destsJson!==destsJson) memo = state.vcDestInfoMemo = { order: d.order, destsJson: destsJson, calc: vcAllocDestInfo(d.order, d.dests) };
     calc = memo.calc;
   }
-  return '<div class="panel" style="margin-top:16px;"><div class="panel-title">VC引当の納品先一覧</div>'+
+  return '<div class="panel" style="margin-top:16px;"><div class="panel-title">VC引当の決まりと納品先一覧</div>'+
     (state.dataHubMsg ? '<div class="vc-import-status">'+esc(state.dataHubMsg)+'</div>' : '')+
-    renderVcAllocDestEditor(d, calc)+'</div>';
+    renderVcAllocRulesEditor(d)+renderVcAllocDestEditor(d, calc)+'</div>';
 }
 function bindDestListPanel(){
   var d = state.vcAllocData || state.vcDestData;
-  if(d) bindVcAllocDestEditor(d);
+  if(d){ bindVcAllocRulesEditor(d); bindVcAllocDestEditor(d); }
+}
+function renderVcAllocRulesEditor(d){
+  var R = vcAllocRules(d.dests), editable = !isReadOnlyAccount(), dis = editable ? '' : ' disabled';
+  function blockChecks(site){
+    return SHUKEI_SITES[site].stockBlocks.map(function(b){ return '<label style="margin-right:8px;white-space:nowrap;"><input type="checkbox" data-vca-rule-block="'+site+'" value="'+esc(b)+'"'+(R.blocks[site].indexOf(b)!==-1?' checked':'')+dis+'> '+esc(b)+'</label>'; }).join('');
+  }
+  return '<div class="ll-form-group" style="margin-bottom:14px;"><div class="ll-form-group-title">引当の決まり(どの拠点から出すか)</div>'+
+    '<div style="display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;font-size:13px;">'+
+      '<span>先に使う拠点</span><span>'+['takaya','tannan'].map(function(k){ return '<label style="margin-right:12px;"><input type="radio" name="vcaRuleFirst" value="'+k+'"'+(R.first===k?' checked':'')+dis+'> '+esc(SHUKEI_SITES[k].name)+'</label>'; }).join('')+'</span>'+
+      '<span>1か所で足りないとき</span><span><label style="margin-right:12px;"><input type="radio" name="vcaRuleSplit" value="1"'+(R.split?' checked':'')+dis+'> 2拠点に分ける(先に使う拠点の分から)</label><label><input type="radio" name="vcaRuleSplit" value="0"'+(!R.split?' checked':'')+dis+'> 分けずに「要確認」にする</label></span>'+
+      '<span>残しておく数</span><span>'+['takaya','tannan'].map(function(k){ return '<label style="margin-right:12px;">'+esc(SHUKEI_SITES[k].name)+' <input type="number" min="0" step="1" data-vca-rule-reserve="'+k+'" value="'+R.reserveCases[k]+'" style="width:70px;"'+dis+'> ケース</label>'; }).join('')+'<span class="sk-minor">(引き当てずに在庫に残す。入数の分からない品番は残しません)</span></span>'+
+      '<span>在庫に数えるブロック</span><span>'+['takaya','tannan'].map(function(k){ return '<div><b>'+esc(SHUKEI_SITES[k].name)+'</b> '+blockChecks(k)+'</div>'; }).join('')+'</span>'+
+      '<span>要確認の対応の種類</span><span>'+R.handlings.map(function(h, i){ return '<span class="vca-site is-handled" style="margin-right:6px;">'+esc(h)+(editable ? ' <button type="button" data-vca-handling-del="'+i+'" title="消す" style="border:none;background:none;cursor:pointer;color:#6941C6;padding:0 2px;">×</button>' : '')+'</span>'; }).join('')+
+        (editable ? '<input type="text" id="vcaHandlingNew" placeholder="例: 入荷待ち" style="width:120px;"> <button type="button" class="vc-manage-toggle-btn" id="vcaHandlingAdd" style="padding:2px 10px;">足す</button>' : '')+
+        '<div class="sk-minor">要確認になった品番を確認したら、ピース引当・ケース引当の表で倉庫の代わりにこの対応を選べます(選んだ品番は集計表に送りません)</div></span>'+
+    '</div>'+
+    '<div class="pool-hint" style="margin:8px 0 0;">いまの決まり: '+esc(vcAllocRulesText(R))+'。変えるとすぐ保存し、VC引当の拠点の振り分けを計算し直します(品番ごとに手で選んだ拠点はそのまま優先)。</div>'+
+  '</div>';
+}
+function bindVcAllocRulesEditor(d){
+  async function saveRules(patch, label){
+    var cur = vcAllocRules(d.dests), next = Object.assign({}, cur, patch);
+    var obj = Object.assign({}, d.dests || { groups: vcAllocDestGroups(d.dests) }, { rules: next, updatedAt: new Date().toISOString() });
+    var ok = await persistKey(VC_ALLOC_KEYS.dests, obj);
+    if(!ok){ state.dataHubMsg = '⚠️ 引当の決まりを保存できませんでした'; render(); return; }
+    await appendAuditLog({ action:'VC引当の決まりを変更', target: label, before: vcAllocRulesText(cur), after: vcAllocRulesText(vcAllocRules(obj)) });
+    d.dests = obj;
+    if(state.vcAllocData && state.vcAllocData!==d) state.vcAllocData.dests = obj;
+    if(state.vcDestData && state.vcDestData!==d) state.vcDestData.dests = obj;
+    state.dataHubMsg = '✅ 引当の決まりを保存しました';
+    render();
+  }
+  document.querySelectorAll('input[name="vcaRuleFirst"]').forEach(function(el){ el.addEventListener('change', function(){ saveRules({ first: el.value }, '先に使う拠点'); }); });
+  document.querySelectorAll('input[name="vcaRuleSplit"]').forEach(function(el){ el.addEventListener('change', function(){ saveRules({ split: el.value==='1' }, '足りないとき'); }); });
+  document.querySelectorAll('[data-vca-rule-reserve]').forEach(function(el){
+    el.addEventListener('change', function(){ var rc = Object.assign({}, vcAllocRules(d.dests).reserveCases); rc[el.getAttribute('data-vca-rule-reserve')] = Math.max(0, Math.floor(Number(el.value)||0)); saveRules({ reserveCases: rc }, '残しておく数'); });
+  });
+  var hAdd = document.getElementById('vcaHandlingAdd');
+  if(hAdd) hAdd.addEventListener('click', function(){
+    var v = String((document.getElementById('vcaHandlingNew')||{}).value||'').trim();
+    if(!v){ alert('対応の名前を入れてください'); return; }
+    var hs = vcAllocRules(d.dests).handlings.slice();
+    if(hs.indexOf(v)!==-1){ alert('すでにあります'); return; }
+    hs.push(v); saveRules({ handlings: hs }, '要確認の対応の種類に「'+v+'」を足す');
+  });
+  document.querySelectorAll('[data-vca-handling-del]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var hs = vcAllocRules(d.dests).handlings.slice(), i = Number(el.getAttribute('data-vca-handling-del')), v = hs[i];
+      if(!v || !confirm('対応の種類「'+v+'」を消しますか?(すでに選んでいる品番はそのままです)')) return;
+      hs.splice(i, 1); saveRules({ handlings: hs }, '要確認の対応の種類から「'+v+'」を消す');
+    });
+  });
+  document.querySelectorAll('[data-vca-rule-block]').forEach(function(el){
+    el.addEventListener('change', function(){
+      var site = el.getAttribute('data-vca-rule-block');
+      var list = Array.prototype.filter.call(document.querySelectorAll('[data-vca-rule-block="'+site+'"]'), function(x){ return x.checked; }).map(function(x){ return x.value; });
+      if(!list.length){ alert('ブロックを1つ以上選んでください'); el.checked = true; return; }
+      var bl = Object.assign({}, vcAllocRules(d.dests).blocks); bl[site] = list; saveRules({ blocks: bl }, '在庫に数えるブロック');
+    });
+  });
 }
 function renderCustomerMappingPanel(){
   if(state.customerTaskMapping===null){

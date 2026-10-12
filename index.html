@@ -10606,12 +10606,26 @@ async function wrCheckSynced(cache){
   if(local && local.syncedAt===syncedAt){ cache.ranges = local.ranges; cache.byDate = local.byDate; }
   else wrForgetLocal();
 }
+/* 読み込み済みの期間をつなげる(重なる・隣り合う期間を1つに)。分けて読んだ期間でも「読み込み済み」と分かるように */
+function wrMergeRanges(ranges){
+  var list = (ranges||[]).slice().sort(function(a,b){ return a[0]<b[0] ? -1 : (a[0]>b[0] ? 1 : 0); }), out = [];
+  list.forEach(function(r){
+    var last = out[out.length-1];
+    if(last && r[0] <= wrDateAdd(last[1], 1)){ if(r[1] > last[1]) last[1] = r[1]; }
+    else out.push([r[0], r[1]]);
+  });
+  return out;
+}
+function wrRangeCovered(cache, from, to){
+  return !!cache && wrMergeRanges(cache.ranges).some(function(r){ return r[0]<=from && r[1]>=to; });
+}
 /* from〜to の作業日報を読み込んでおく(読み込み済みの期間は読み直さない)。state.workReportCache.byDate[日付] = 行の配列 */
 async function ensureWorkReportRange(from, to){
   if(!hasManagerSession()) return;
   var cache = state.workReportCache || (state.workReportCache = { ranges:[], byDate:{}, error:'', syncedAt:null, checkedAt:0 });
   try{ await wrCheckSynced(cache); }catch(e){}
-  if(cache.ranges.some(function(r){ return r[0]<=from && r[1]>=to; })) return;
+  cache.ranges = wrMergeRanges(cache.ranges);
+  if(wrRangeCovered(cache, from, to)) return;
   // 読み込み済みの期間と重なる分は読まない(前後の足りない分だけ読む)
   var need = [[from, to]];
   cache.ranges.forEach(function(r){
@@ -10631,6 +10645,7 @@ async function ensureWorkReportRange(from, to){
     r.rows.forEach(function(x){ (cache.byDate[x.work_date] || (cache.byDate[x.work_date] = [])).push(x); });
     cache.ranges.push([a, b]);
   }
+  cache.ranges = wrMergeRanges(cache.ranges);
   cache.error = '';
   wrSaveLocal(cache);
 }
@@ -10700,8 +10715,9 @@ function renderWorkReportPanel(){
   if(!hasManagerSession()) return '';
   var today = todayStr();
   var lookFrom = wrDateAdd(today, -120);
-  if(!state.workReportPanelLoading && (!state.workReportCache || !state.workReportCache.ranges.some(function(r){ return r[0]<=lookFrom && r[1]>=today; }) || !state.workReportMapping || !state.workReportStatusLoaded)){
-    state.workReportPanelLoading = true;
+  // 読み込み → 描き直し を繰り返さない(失敗しても1分は読み直さない。繰り返すと同じタブの入力欄に文字が打てなくなる)
+  if(!state.workReportPanelLoading && Date.now()-(state.workReportPanelTriedAt||0) > 60000 && (!wrRangeCovered(state.workReportCache, lookFrom, today) || !state.workReportMapping || !state.workReportStatusLoaded)){
+    state.workReportPanelLoading = true; state.workReportPanelTriedAt = Date.now();
     Promise.all([ensureWorkReportRange(lookFrom, today), loadWorkReportMapping(), loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; })])
       .then(function(r){ state.workReportStatus = r[2]; })
       .catch(function(){})

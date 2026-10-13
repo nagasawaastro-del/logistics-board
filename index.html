@@ -4184,6 +4184,20 @@ function addWorkingMinutesSkippingBreaks(fromMs, neededWorkingMinutes, breakSett
   }
   return cursor;
 }
+/* 本日の勤務開始時刻(day.shiftStartOverrides。AM有休・遅れて出勤など、その日だけ)を設定する。
+   今より後の時刻にしたときは、その時刻まで欠勤にして、その時刻に自動出勤させる(自動出勤の済みの印を消す)。
+   空欄にすると通常の始業に戻す。戻り値: 変えたら true */
+function setTodayShiftStart(day, staffId, value){
+  var cur = (day.shiftStartOverrides && day.shiftStartOverrides[staffId]) || '';
+  var next = isClockStr(value) ? value : '';
+  if(cur===next) return false;
+  if(!day.shiftStartOverrides) day.shiftStartOverrides = {};
+  if(next) day.shiftStartOverrides[staffId] = next; else delete day.shiftStartOverrides[staffId];
+  if(day.autoShiftStarted) delete day.autoShiftStarted[staffId];
+  var now = new Date(), nowStr = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  if(next && day.date===todayStr() && nowStr < next && day.attendance && day.attendance[staffId] && !openLogsForStaff(day, staffId).length) day.attendance[staffId] = false;
+  return true;
+}
 function staffRemainingMinutes(staffId, day, nowDate, shiftSettings){
   var endStr = staffShiftEndStr(staffId, day, shiftSettings);
   var startStr = (day.shiftStartOverrides && day.shiftStartOverrides[staffId]) || (shiftSettings && shiftSettings.enabled ? shiftSettings.start : null) || '09:00';
@@ -14436,7 +14450,7 @@ function renderStaffSettingsPanel(){
     var ownEnd = isClockStr(s.shiftEnd) ? s.shiftEnd : '';
     var endStr = (endOverride || ownEnd) ? staffShiftEndStr(s.id, day, state.shiftSettings, s) : (shiftOn ? state.shiftSettings.end : '');
     var startStr = (day.shiftStartOverrides && day.shiftStartOverrides[s.id]) || (shiftOn ? state.shiftSettings.start : '');
-    var hoursText = (startStr && endStr) ? (startStr+'〜'+endStr+(endOverride && endStr===endOverride ? '(本日変更)' : '')) : '勤務時間の設定なし';
+    var hoursText = (startStr && endStr) ? (startStr+'〜'+endStr+((endOverride && endStr===endOverride) || (day.shiftStartOverrides && day.shiftStartOverrides[s.id]) ? '(本日変更)' : '')) : '勤務時間の設定なし';
     var ownEndText = ownEnd ? '退勤 '+ownEnd : '';
     var open = (day.logs||[]).find(function(l){ return l.staffId===s.id && l.end===null; });
     var nowText = !on ? '' : (open ? (open.taskId==='BREAK' ? '🍽 休憩中' : '▶ '+taskById(open.taskId).name) : '作業なし');
@@ -14474,6 +14488,7 @@ function openStaffEditModal(s){
   var day = state.day;
   state.modal = { kind:'staffEdit', staffId: s.id, name: s.name, avatarColor: avatarColorForStaff(s), pattern: (s.pattern || defaultPattern()).slice(),
     attendance: !!day.attendance[s.id], shiftEnd: (day.shiftEndOverrides && day.shiftEndOverrides[s.id]) || '',
+    shiftStart: (day.shiftStartOverrides && day.shiftStartOverrides[s.id]) || '',
     ownShiftEnd: isClockStr(s.shiftEnd) ? s.shiftEnd : '',
     offOnHolidays: !!s.offOnHolidays, autoAssignExcluded: s.autoAssignExcluded===true, workerType: s.workerType==='lift' ? 'lift' : 'part' };
   state.suppressRender = true;
@@ -14501,6 +14516,8 @@ function renderStaffEditModal(m){
           '<label><input type="radio" name="staffEditAtt" value="on" '+(m.attendance?'checked':'')+'> 🟢 出勤</label>'+
           '<label><input type="radio" name="staffEditAtt" value="off" '+(!m.attendance?'checked':'')+'> ⚪ 欠勤</label>'+
         '</div>'+
+        (shiftOn ? lbl('本日の勤務開始時刻(本日だけのAM有休・遅れての出勤。入力するとこの時刻まで欠勤で、この時刻に自動で出勤。空欄なら通常の始業 '+esc(state.shiftSettings.start)+')')+
+          '<input type="time" id="staffEditShiftStart" value="'+esc(m.shiftStart||'')+'" style="border:2px solid var(--paper-line);border-radius:10px;padding:8px;font-size:14px;">' : '')+
         (shiftOn ? (lbl('本日の勤務終了時刻(本日だけの早退・残業。入力するとこの時刻を優先。空欄なら退勤時間または通常の終業 '+esc(state.shiftSettings.end)+')')+
           '<input type="time" id="staffEditShiftEnd" value="'+esc(m.shiftEnd)+'" style="border:2px solid var(--paper-line);border-radius:10px;padding:8px;font-size:14px;">')
           : '<div class="pool-hint" style="margin:0;">本日の勤務終了時刻は、「勤務時間設定」で自動出退勤を有効にすると設定できます。</div>')+
@@ -14537,6 +14554,7 @@ function bindStaffEditModal(m){
     if(nameEl) state.modal.name = nameEl.value;
     var att = document.querySelector('input[name="staffEditAtt"]:checked'); if(att) state.modal.attendance = att.value==='on';
     var se = document.getElementById('staffEditShiftEnd'); if(se) state.modal.shiftEnd = se.value;
+    var ss = document.getElementById('staffEditShiftStart'); if(ss) state.modal.shiftStart = ss.value;
     var ose = document.getElementById('staffEditOwnShiftEnd'); if(ose) state.modal.ownShiftEnd = ose.value;
     var h =document.getElementById('staffEditHoliday'); if(h) state.modal.offOnHolidays = h.checked;
     var ax = document.getElementById('staffEditAutoExcluded'); if(ax) state.modal.autoAssignExcluded = ax.checked;
@@ -14589,12 +14607,15 @@ function bindStaffEditModal(m){
         dayChanged = true;
       }
     }
+    var beforeTodayStart = (day.shiftStartOverrides && day.shiftStartOverrides[s.id]) || '', todayStartChanged = false;
+    if(state.shiftSettings && state.shiftSettings.enabled && setTodayShiftStart(day, s.id, d.shiftStart)){ todayStartChanged = true; dayChanged = true; }
     state.modal = null; state.suppressRender = false;
     var ok = true;
     var rosterSaved = true;
     if(rosterChanged){ rosterSaved = (await saveRoster(state.roster))!==false; ok = rosterSaved && ok; }
     var daySaved = true;
     if(dayChanged){ daySaved = (await saveDay(day))!==false; ok = daySaved && ok; }
+    if(todayStartChanged && daySaved) await appendAuditLog({ action:'本日の勤務開始時刻の設定', target: s.name, before: beforeTodayStart||'未設定', after: (d.shiftStart||'')||'未設定' });
     if(todayEndChanged && daySaved) await appendAuditLog({ action:'本日の勤務終了時刻の設定', target: s.name, before: beforeTodayEnd||'未設定', after: (d.shiftEnd||'')||'未設定' });
     if(beforeName!==s.name) await appendAuditLog({ action:'スタッフ名変更', target: s.name, before: beforeName, after: s.name });
     var afterBasic = staffBasicText();
@@ -15158,15 +15179,20 @@ function renderManager(){
       ? '<button type="button" class="ll-att '+(on?'on':'off')+'" data-mgr-att="'+s.id+'" title="押すとすぐに切り替わります">'+(on?'🟢 出勤':'⚪ 欠勤')+'</button>'
       : '<span class="ll-att '+(on?'on':'off')+'">'+(on?'🟢 出勤':'⚪ 欠勤')+'</span>';
     var endHtml = '';
+    var sov = (day.shiftStartOverrides && day.shiftStartOverrides[s.id]) || '';
     if(shiftOnM){
-      endHtml = isToday
+      endHtml = (isToday
+        ? '<span class="mgr-today-staff-end"><label>本日の勤務開始 <input type="time" data-mgr-shift-start="'+s.id+'" value="'+esc(sov)+'"></label>'+
+            (sov ? '<button type="button" class="vc-manage-toggle-btn" data-mgr-shift-start-clear="'+s.id+'" style="padding:2px 8px;font-size:11px;">解除</button>' : '<span class="muted">空欄なら '+esc(state.shiftSettings.start)+'</span>')+'</span>'
+        : (sov ? '<span class="muted">勤務開始 '+esc(sov)+'(本日変更)</span>' : ''));
+      endHtml += isToday
         ? '<span class="mgr-today-staff-end"><label>本日の勤務終了 <input type="time" data-mgr-shift-end="'+s.id+'" value="'+esc(ov)+'"></label>'+
             (ov ? '<button type="button" class="vc-manage-toggle-btn" data-mgr-shift-end-clear="'+s.id+'" style="padding:2px 8px;font-size:11px;">解除</button>' : '<span class="muted">空欄なら '+esc(baseEnd)+'</span>')+'</span>'
         : '<span class="muted">勤務終了 '+esc(ov || baseEnd)+(ov ? '(本日変更)' : '')+'</span>';
     }
     return '<div class="mgr-today-staff-row" data-today-staff="'+s.id+'"><span class="mgr-today-staff-name">'+esc(s.name)+'</span>'+attHtml+endHtml+'</div>';
   }).join('')+'</div>'+
-  (isToday ? '<div class="pool-hint" style="margin:6px 0 0;">出勤/欠勤・本日の勤務終了時刻は、押す・入力するとすぐに保存されます(本日の勤務終了時刻は本日だけの早退・残業です)。</div>' : '<div class="pool-hint" style="margin:6px 0 0;">本日以外の日付は表示のみです。</div>');
+  (isToday ? '<div class="pool-hint" style="margin:6px 0 0;">出勤/欠勤・本日の勤務開始・終了時刻は、押す・入力するとすぐに保存されます(勤務開始は本日だけのAM有休・遅れての出勤で、その時刻に自動で出勤。勤務終了は本日だけの早退・PM有休・残業です)。</div>' : '<div class="pool-hint" style="margin:6px 0 0;">本日以外の日付は表示のみです。</div>');
   var staffSummaryTitle = '👥 出勤・業務時間のまとめ'+(needsCheckRows.length ? '(要確認 '+needsCheckRows.length+'人)' : '');
 
   return ''+
@@ -15653,6 +15679,24 @@ function bindManager(){
     el.addEventListener('focusin', function(){ state.suppressRender = true; });
     el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
     el.addEventListener('change', function(){ saveTodayShiftEnd(el.getAttribute('data-mgr-shift-end'), el.value); });
+  });
+  async function saveTodayShiftStart(id, value){
+    if(managerActiveDate()!==todayStr()) return;
+    var day = state.day;
+    var cur = (day.shiftStartOverrides && day.shiftStartOverrides[id]) || '';
+    state.suppressRender = false;
+    if(!setTodayShiftStart(day, id, value)){ render(); return; }
+    var saved = await saveDay(day);
+    if(saved!==false) await appendAuditLog({ action:'本日の勤務開始時刻の設定', target: staffById(id).name, before: cur||'未設定', after: (isClockStr(value) ? value : '')||'未設定' });
+    render();
+  }
+  document.querySelectorAll('[data-mgr-shift-start]').forEach(function(el){
+    el.addEventListener('focusin', function(){ state.suppressRender = true; });
+    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
+    el.addEventListener('change', function(){ saveTodayShiftStart(el.getAttribute('data-mgr-shift-start'), el.value); });
+  });
+  document.querySelectorAll('[data-mgr-shift-start-clear]').forEach(function(el){
+    el.addEventListener('click', function(){ saveTodayShiftStart(el.getAttribute('data-mgr-shift-start-clear'), ''); });
   });
   document.querySelectorAll('[data-mgr-shift-end-clear]').forEach(function(el){
     el.addEventListener('click', function(){ saveTodayShiftEnd(el.getAttribute('data-mgr-shift-end-clear'), ''); });
@@ -18737,7 +18781,8 @@ async function checkAutoShift(){
     // 管理者が手動で祝日出勤にした場合の自動退勤処理までは妨げない。
     var holidayOff = isHolidayOffForStaff(s, day.date);
 
-    if(!isOn && !holidayOff && !day.autoShiftStarted[s.id] && nowStr >= state.shiftSettings.start && nowStr < endTime){
+    var startTime = (day.shiftStartOverrides && isClockStr(day.shiftStartOverrides[s.id]) && day.shiftStartOverrides[s.id]) || state.shiftSettings.start; // 本日の勤務開始 → 始業
+    if(!isOn && !holidayOff && !day.autoShiftStarted[s.id] && nowStr >= startTime && nowStr < endTime){
       day.attendance[s.id] = true;
       day.autoShiftStarted[s.id] = true;
       changed = true;
@@ -20524,7 +20569,7 @@ function safeSnapshotForChangeDetection(){
     // それらが変わるたびに丸ごと描き直すと重いので、設定ページを開いている間は見ない(2026-10-12)
     if(state.role==='settingsHub') return JSON.stringify({
       settings: true, roster: state.roster, backlog: state.backlog, templates: state.templates,
-      attendance: state.day && state.day.attendance, shiftEndOverrides: state.day && state.day.shiftEndOverrides,
+      attendance: state.day && state.day.attendance, shiftEndOverrides: state.day && state.day.shiftEndOverrides, shiftStartOverrides: state.day && state.day.shiftStartOverrides,
       breakSettings: state.breakSettings, shiftSettings: state.shiftSettings, achievementSettings: state.achievementSettings
     });
     return JSON.stringify({

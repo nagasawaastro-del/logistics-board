@@ -12513,6 +12513,7 @@ function exportStockCsv(kind){
      ・見積もりの入っていない在庫 = 在庫があるのに、今日以降の見積もりが1件も無い品番
    数量はピース。拠点は明細の倉庫コード(弥生の倉庫コード: 高屋 0018・丹南 0000)で分ける。 */
 var STOCK_OUTLOOK_KEY = 'stock-outlook';
+var STOCK_OUTLOOK_STATUS_KEY = 'stock-outlook-status'; // 最後に取り込んだ日時と件数だけ(データ取込の画面で、大きな本体を読まずに出す)
 function outlookSiteOfWarehouse(code){
   var k = Object.keys(SHUKEI_SITES).filter(function(x){ return SHUKEI_SITES[x].yayoiWarehouse===String(code||'').trim(); })[0];
   return k || '';
@@ -12693,15 +12694,18 @@ function arrivalSheetRows(st, site, dateStr){
     return String(a.code).localeCompare(String(b.code), 'ja', { numeric:true }) || String(a.no).localeCompare(String(b.no)); // 品番順(遅れも同じ並びに。赤で出す)
   });
 }
-function arrivalSheetCanvas(st, site, dateStr){
+function arrivalSheetCanvas(st, site, dateStr, supplier){
   var rows = arrivalSheetRows(st, site, dateStr), ol = st.outlook || {};
-  var cols = [['確認',34],['品番',96],['商品名',226],['数量',62],['入数',44],['ケース',54],['仕入先',104],['発注番号',76],['備考',84]];
+  if(supplier) rows = rows.filter(function(r){ return r.supplier===supplier; }); // 仕入先ごとの PDF
+  // 品番・数量・ケースを左に大きく(太字・薄い色の帯)。商品名・入数・仕入先などは小さく右に
+  var cols = [['確認',36,'chk'],['品番',112,'key'],['数量',84,'keyNum'],['ケース+端数',84,'keyNum'],['入数',46,'num'],['商品名',204,''],['仕入先',84,'sub'],['発注番号',66,'sub'],['備考',88,'sub']];
   var FONT = '"Yu Gothic UI","Meiryo","Hiragino Sans",sans-serif';
   var W = cols.reduce(function(a,c){ return a+c[1]; }, 0) + 32, TOP = 58, SC = 2;
-  // A4縦(595×842pt・余白24)に横幅を合わせたときの、1ページに入る高さ。行の高さを 16〜28 の間で、なるべく1枚に入るように決める
+  // A4縦(595×842pt・余白24)に横幅を合わせたときの、1ページに入る高さ。行の高さを 18〜32 の間で、なるべく1枚に入るように決める
   var k = (595-48)/W, pageH = Math.floor((842-48)/k);
-  var RH = Math.max(16, Math.min(28, Math.floor((pageH - TOP - 4) / (Math.max(rows.length,1)+1))));
-  var FS = Math.max(10, Math.min(13, Math.round(RH*0.52)));
+  var RH = Math.max(18, Math.min(32, Math.floor((pageH - TOP - 4) / (Math.max(rows.length,1)+1))));
+  var FS = Math.max(10, Math.min(13, Math.round(RH*0.5)));   // ふつうの文字
+  var KFS = Math.max(13, Math.min(19, Math.round(RH*0.66))); // 品番・数量・ケース
   var H = TOP + RH*(Math.max(rows.length,1)+1) + 4;
   var cv = document.createElement('canvas'); cv.width = W*SC; cv.height = H*SC;
   var g = cv.getContext('2d'); g.scale(SC, SC); g.textBaseline = 'middle';
@@ -12709,57 +12713,100 @@ function arrivalSheetCanvas(st, site, dateStr){
   var nToday = rows.filter(function(r){ return !r.late; }).length, nLate = rows.length-nToday;
   var orders = {}; rows.forEach(function(r){ orders[r.supplier+'|'+r.no] = true; });
   var qtyT = rows.reduce(function(a,r){ return a+r.qty; }, 0), casesT = rows.reduce(function(a,r){ return a+(r.cases||0); }, 0);
-  g.fillStyle = '#101828'; g.font = '700 18px '+FONT;
-  g.fillText('入庫明細 '+dateStr.replace(/-/g,'/')+(site ? ' '+SHUKEI_SITES[site].name : ''), 16, 20);
-  g.font = '11px '+FONT; g.fillStyle = '#475467';
-  g.fillText('発注 '+Object.keys(orders).length+'件 ・ 明細 '+nToday+'行'+(nLate ? '(ほかに遅れ '+nLate+'行)' : '')+' ・ 数量 '+formatNum(qtyT)+' ・ 約'+formatNum(Math.round(casesT*10)/10)+'ケース'+
-    ' ・ kintone 発注履歴(949) '+(ol.syncedAt ? fmtDateTime(ol.syncedAt) : '')+'取込', 16, 42);
   function fit(t, w){ t = String(t===null||t===undefined ? '' : t); if(g.measureText(t).width<=w) return t; while(t.length && g.measureText(t+'…').width>w) t = t.slice(0,-1); return t+'…'; }
+  g.fillStyle = '#101828'; g.font = '700 18px '+FONT;
+  g.fillText(fit('入庫明細 '+dateStr.replace(/-/g,'/')+(site ? ' '+SHUKEI_SITES[site].name : '')+(supplier ? ' '+supplier : ''), W-32), 16, 20);
+  g.font = '11px '+FONT; g.fillStyle = '#475467';
+  g.fillText(fit('発注 '+Object.keys(orders).length+'件 ・ 明細 '+nToday+'行'+(nLate ? '(ほかに遅れ '+nLate+'行)' : '')+' ・ 数量 '+formatNum(qtyT)+' ・ 約'+formatNum(Math.round(casesT*10)/10)+'ケース'+
+    ' ・ kintone 発注履歴(949) '+(ol.syncedAt ? fmtDateTime(ol.syncedAt) : '')+'取込', W-32), 16, 42);
   function row(y, cells, head, r, idx){
     var x = 16;
-    g.fillStyle = head ? '#F2F4F7' : (r.late ? '#FEF3F2' : (idx%2 ? '#F9FAFB' : '#fff')); g.fillRect(16, y, W-32, RH);
+    g.fillStyle = head ? '#E4E7EC' : (r.late ? '#FEF3F2' : (idx%2 ? '#F9FAFB' : '#fff')); g.fillRect(16, y, W-32, RH);
     cols.forEach(function(col, i){
-      var num = !head && i>=3 && i<=5;
-      if(!head && i===0){ var b = Math.min(14, RH-6); g.strokeStyle = '#98A2B3'; g.lineWidth = 1.1; g.strokeRect(x+col[1]/2-b/2, y+RH/2-b/2, b, b); x += col[1]; return; }
-      g.fillStyle = head ? '#344054' : (i===1 ? '#101828' : (i===8 && r.late ? '#B42318' : '#344054'));
-      g.font = (head || i===1 || i===3 ? '700 ' : '')+(i>=6 && !head ? FS-1 : FS)+'px '+FONT;
-      var t = fit(cells[i], col[1]-10);
-      if(num){ g.textAlign = 'right'; g.fillText(t, x+col[1]-5, y+RH/2); g.textAlign = 'left'; } else g.fillText(t, x+5, y+RH/2);
-      x += col[1];
+      var kind = col[2], w = col[1];
+      if(!head && (kind==='key' || kind==='keyNum') && !r.late){ g.fillStyle = idx%2 ? 'rgba(46,144,250,.10)' : 'rgba(46,144,250,.06)'; g.fillRect(x, y, w, RH); }
+      if(!head && kind==='chk'){ var b = Math.min(16, RH-6); g.strokeStyle = '#667085'; g.lineWidth = 1.2; g.strokeRect(x+w/2-b/2, y+RH/2-b/2, b, b); x += w; return; }
+      var big = !head && (kind==='key' || kind==='keyNum');
+      g.font = (head || big ? '700 ' : '')+(big ? KFS : (kind==='sub' && !head ? FS-1 : FS))+'px '+FONT;
+      g.fillStyle = head ? '#101828' : (big ? '#101828' : (i===8 && r.late ? '#B42318' : (kind==='sub' ? '#667085' : '#344054')));
+      var t = fit(cells[i], w-10), right = !head ? (kind==='keyNum' || kind==='num') : (kind==='keyNum' || kind==='num');
+      if(right){ g.textAlign = 'right'; g.fillText(t, x+w-6, y+RH/2); g.textAlign = 'left'; } else g.fillText(t, x+6, y+RH/2);
+      x += w;
+      if(i===3){ g.strokeStyle = '#98A2B3'; g.lineWidth = 1; g.beginPath(); g.moveTo(x, y); g.lineTo(x, y+RH); g.stroke(); } // 大きく出す列の区切り
     });
-    g.strokeStyle = '#EAECF0'; g.lineWidth = 1; g.beginPath(); g.moveTo(16, y+RH); g.lineTo(W-16, y+RH); g.stroke();
+    g.strokeStyle = head ? '#98A2B3' : '#D0D5DD'; g.lineWidth = 1; g.beginPath(); g.moveTo(16, y+RH); g.lineTo(W-16, y+RH); g.stroke();
   }
   row(TOP, cols.map(function(c){ return c[0]; }), true);
   rows.forEach(function(r, i){
     var note = (r.late ? '遅れ '+r.due.slice(5).replace('-','/') : '')+(r.site && !site ? (r.late ? ' ' : '')+SHUKEI_SITES[r.site].name : '');
-    row(TOP+RH*(i+1), ['', r.code, r.name, formatNum(r.qty), r.pack ? formatNum(r.pack) : '', r.cases===null ? '' : formatNum(Math.round(r.cases*10)/10), r.supplier, r.no, note], false, r, i);
+    var cs = r.cases===null ? '' : (Math.abs(r.cases-Math.round(r.cases))<1e-9 ? formatNum(Math.round(r.cases)) : formatNum(Math.floor(r.cases))+'+'+formatNum(Math.round(r.qty - Math.floor(r.cases)*r.pack)));
+    row(TOP+RH*(i+1), ['', r.code, formatNum(r.qty), cs, r.pack ? formatNum(r.pack) : '', r.name, r.supplier, r.no, note], false, r, i);
   });
   if(!rows.length){ g.fillStyle = '#475467'; g.font = '14px '+FONT; g.fillText('今日入る発注はありません', 24, TOP+RH*1.5); }
   return { canvas: cv, headH: TOP+RH, rowH: RH, rows: rows.length, scale: SC, width: W, height: H, portrait: true };
 }
-/* 本日の入庫明細を PDF にする(管理 → 今日の状況)。入荷予定は将来在庫で取り込んだ物。
-   最後の取り込みから30分以上たっていれば、先に kintone から取り込み直す(入ったかどうかを新しくする) */
-async function arrivalSheetPdf(site){
-  if(state.arrivalSheetBusy) return;
-  state.arrivalSheetBusy = true; render();
+/* 本日の入庫明細(管理 → 今日の状況)。ボタンで仕入先ごとの一覧を開き、仕入先ごと(または全部)の PDF を保存する。
+   入荷予定は将来在庫で取り込んだ物。開くときに、最後の取り込みから30分以上たっていれば kintone から取り込み直す(入ったかどうかを新しくする) */
+async function arrivalSheetToggle(){
+  var a = state.arrivalSheet || (state.arrivalSheet = {});
+  if(a.open){ a.open = false; render(); return; }
+  if(a.loading) return;
+  a.open = true; a.loading = true; a.msg = ''; render();
   try{
     var ol = await loadKeyJson(STOCK_OUTLOOK_KEY, function(){ return null; });
     var fresh = ol && !isUnverified(ol) && ol.syncedAt && (Date.now() - Date.parse(ol.syncedAt)) < 30*60000;
     if(!fresh && hasManagerSession()){
       var r = await runStockOutlookSync();
-      if(!r.ok) showToast(r.msg+'(前に取り込んだ内容で出します)');
+      if(!r.ok) a.msg = r.msg+'(前に取り込んだ内容で出します)';
       else ol = await loadKeyJson(STOCK_OUTLOOK_KEY, function(){ return null; });
     }
-    if(!ol || isUnverified(ol)){ showToast('入荷予定がまだありません(在庫 → 将来在庫で取り込んでください)'); return; }
-    if(state.stockData && !state.stockData.error) state.stockData.outlook = ol;
+    if(!ol || isUnverified(ol)){ a.st = null; a.msg = '入荷予定がまだありません(管理 → データ取込 の「kintoneの同期」で取り込んでください)'; return; }
     var dateStr = todayStr();
     var codes = {}; (ol.arrivals||[]).forEach(function(x){ if(x.date <= dateStr) codes[x.code] = true; });
     var pm = Object.keys(codes).length ? await getProductMasterInfoBatch(Object.keys(codes)) : {};
     if(!pm || pm.__error) pm = {};
-    var blob = vcCanvasToPdf(arrivalSheetCanvas({ outlook: ol, pm: pm }, site, dateStr));
-    await vcSavePdf(blob, '入庫明細_'+dateStr+(site ? '_'+SHUKEI_SITES[site].name : '')+'.pdf');
+    a.st = { outlook: ol, pm: pm }; a.date = dateStr;
+  }catch(e){ a.st = null; a.msg = '⚠️ 入荷予定を読めませんでした'; }
+  finally{ a.loading = false; render(); }
+}
+function renderArrivalSheetPanel(){
+  var a = state.arrivalSheet;
+  if(!a || !a.open) return '';
+  var body;
+  if(a.loading) body = '<div class="pool-hint" style="margin:0;">入荷予定を読み込んでいます…</div>';
+  else if(!a.st) body = '';
+  else {
+    var rows = arrivalSheetRows(a.st, '', a.date), by = {}, order = [];
+    rows.forEach(function(r){
+      var g = by[r.supplier] || (by[r.supplier] = (order.push(r.supplier), { name: r.supplier, nos: {}, lines: 0, qty: 0, cases: 0, late: 0 }));
+      g.nos[r.no] = true; g.lines++; g.qty += r.qty; g.cases += r.cases||0; if(r.late) g.late++;
+    });
+    order.sort(function(x,y){ return String(x).localeCompare(String(y), 'ja'); });
+    body = rows.length ? '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>仕入先</th><th>発注番号</th><th class="num">明細</th><th class="num">数量</th><th class="num">ケース</th><th></th></tr></thead><tbody>'+
+      order.map(function(k){
+        var g = by[k];
+        return '<tr><td><b>'+esc(g.name || '(仕入先なし)')+'</b></td><td class="sk-minor">'+esc(Object.keys(g.nos).join('・'))+'</td>'+
+          '<td class="num">'+g.lines+'行'+(g.late ? '<div class="sk-minor" style="color:#B42318;">うち遅れ '+g.late+'行</div>' : '')+'</td>'+
+          '<td class="num">'+formatNum(g.qty)+'</td><td class="num">'+formatNum(Math.round(g.cases*10)/10)+'</td>'+
+          '<td><button type="button" class="vc-manage-toggle-btn" data-arrival-pdf="'+esc(g.name)+'">PDF</button></td></tr>';
+      }).join('')+
+      '</tbody></table></div>'+
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;"><button type="button" class="vc-manage-toggle-btn" data-arrival-pdf-all="1">全部を1つのPDFに</button>'+
+      '<span class="pool-hint" style="margin:0;">納入期日が今日の発注と、期日を過ぎてまだ入っていない発注(遅れ)。kintone 発注履歴(949) '+esc(a.st.outlook.syncedAt ? fmtDateTime(a.st.outlook.syncedAt) : '')+'取込。PDFは品番順・A4縦</span></div>'
+      : '<div class="pool-hint" style="margin:0;">今日入る発注はありません</div>';
+  }
+  return '<div class="stf-card" id="arrivalSheetPanel" style="margin:8px 0 12px;border-left-color:#2E90FA;">'+
+    '<div class="stf-section-title" style="margin-top:0;">📦 本日の入庫明細(仕入先ごと)</div>'+
+    (a.msg ? '<div class="vc-import-status">'+esc(a.msg)+'</div>' : '')+body+'</div>';
+}
+async function arrivalSheetDownload(supplier){
+  var a = state.arrivalSheet;
+  if(!a || !a.st) return;
+  try{
+    var blob = vcCanvasToPdf(arrivalSheetCanvas(a.st, '', a.date, supplier || ''));
+    var safe = String(supplier||'').replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 30);
+    await vcSavePdf(blob, '入庫明細_'+a.date+(safe ? '_'+safe : '')+'.pdf');
   }catch(e){ showToast('PDFを作れませんでした'); }
-  finally{ state.arrivalSheetBusy = false; render(); }
 }
 /* kintone から見積もり・入荷予定を取り込む(将来在庫の取り込みボタン・入庫明細)。戻り値 { ok, msg } */
 async function runStockOutlookSync(){
@@ -12774,17 +12821,20 @@ async function runStockOutlookSync(){
     }
     if(window.storage.forget) window.storage.forget(STOCK_OUTLOOK_KEY); // 取り込む前に読んだ内容を使わない
     await appendAuditLog({ action:'kintoneから見積もり・入荷予定を取り込む', target:'将来在庫', before:null, after: d.estimateLines+'行' });
+    state.outlookStatus = { syncedAt: d.syncedAt, estimateRecords: d.estimateRecords, estimateLines: d.estimateLines, arrivalLines: d.arrivalLines||0 };
+    try{ await persistKey(STOCK_OUTLOOK_STATUS_KEY, state.outlookStatus); }catch(e){}
+    if(state.stockData && !state.stockData.error){ var ol2 = await loadKeyJson(STOCK_OUTLOOK_KEY, function(){ return null; }); if(!isUnverified(ol2)) state.stockData.outlook = ol2; }
     return { ok:true, msg:'✅ 見積もり '+formatNum(d.estimateRecords)+'件(明細 '+formatNum(d.estimateLines)+'行)を取り込みました'+(d.estimateLineDate ? '(明細の日付は「'+d.estimateLineDate+'」)' : '')+(d.arrivalLines ? '・入荷予定 '+formatNum(d.arrivalLines)+'行' : '')+(d.arrivalNote ? '('+d.arrivalNote+')' : '') };
   }catch(e){ return { ok:false, msg:'⚠️ 取り込めませんでした' }; }
 }
 function renderStockOutlook(st){
   var ol = st.outlook, site = state.outlookSite || '';
   var sync = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
-    (hasManagerSession() ? '<button type="button" class="add-btn" id="outlookSync"'+(state.outlookSyncing?' disabled':'')+'>'+(state.outlookSyncing?'取り込み中…':'kintone から見積もり・入荷予定を取り込む')+'</button>' : '<span class="pool-hint" style="margin:0;">取り込みは管理者でログインしたときだけできます。</span>')+
+    '<span class="pool-hint" style="margin:0;">取り込みは 管理 → データ取込 の「kintoneの同期」で。</span>'+
     '<span class="pool-hint" style="margin:0;">'+(ol && ol.syncedAt ? '最後に取り込んだ日時 '+esc(fmtDateTime(ol.syncedAt))+(ol.estimateLineDate ? '(明細の「'+esc(ol.estimateLineDate)+'」が '+esc(ol.from||'')+' 以降の行。見積もり '+formatNum(ol.estimateRecords||0)+'件を確認)' : '(見積日が '+esc(ol.from||'')+' 以降の見積もり '+formatNum(ol.estimateRecords||0)+'件)') : 'まだ取り込んでいません')+(ol && ol.arrivalNote ? ' ・ '+esc(ol.arrivalNote) : '')+'</span>'+
     '<label class="pool-hint" style="margin:0 0 0 auto;">拠点 <select id="outlookSite"><option value="">全部</option>'+Object.keys(SHUKEI_SITES).map(function(k){ return '<option value="'+k+'"'+(site===k?' selected':'')+'>'+esc(SHUKEI_SITES[k].name)+'</option>'; }).join('')+'</select></label>'+
-  '</div>'+(state.outlookMsg ? '<div class="vc-import-status" style="white-space:pre-line;">'+esc(state.outlookMsg)+'</div>' : '');
-  if(!ol) return sync+'<div class="empty-note">kintone の見積もりアプリ(956)から取り込むと、将来在庫と、見積もりの入っていない在庫が出ます。</div>';
+  '</div>';
+  if(!ol) return sync+'<div class="empty-note">管理 → データ取込 の「kintoneの同期」で見積もり・入荷予定を取り込むと、将来在庫と、見積もりの入っていない在庫が出ます。</div>';
   var o = computeStockOutlook(st, site);
   var shortN = o.rows.filter(function(g){ return g.shortDate; }).length;
   var noEstCube = o.noEst.reduce(function(a,x){ return a+(x.cube||0); }, 0);
@@ -12840,17 +12890,6 @@ function bindStockTab(){
   });
   var rl = document.getElementById('stockReload');
   if(rl) rl.addEventListener('click', function(){ state.stockData = null; render(); });
-  var osy = document.getElementById('outlookSync');
-  if(osy) osy.addEventListener('click', async function(){
-    state.outlookSyncing = true; state.outlookMsg = ''; render();
-    var r = await runStockOutlookSync();
-    state.outlookMsg = r.msg;
-    if(r.ok){
-      var ol = await loadKeyJson(STOCK_OUTLOOK_KEY, function(){ return null; });
-      if(state.stockData && !isUnverified(ol)) state.stockData.outlook = ol;
-    }
-    state.outlookSyncing = false; render();
-  });
   // 保管料の試算
   var sso = state.storageSimOpt;
   var ssSite = document.getElementById('ssSite');
@@ -13714,13 +13753,13 @@ function renderAdminHub(){
 function renderKintoneSyncPanel(){
   if(!state.kSyncLoaded && !state.kSyncLoading){
     state.kSyncLoading = true;
-    Promise.all([loadKintoneProductSettings(), loadKintoneSyncStatus(), fetchWorkPriceMaster(), loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; })])
-      .then(function(r){ state.kintoneProductSettings = r[0]; state.kintoneSyncStatus = r[1]; state.workPriceMaster = r[2]; state.workReportStatus = r[3]; })
+    Promise.all([loadKintoneProductSettings(), loadKintoneSyncStatus(), fetchWorkPriceMaster(), loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; }), loadKeyJson(STOCK_OUTLOOK_STATUS_KEY, function(){ return null; })])
+      .then(function(r){ state.kintoneProductSettings = r[0]; state.kintoneSyncStatus = r[1]; state.workPriceMaster = r[2]; state.workReportStatus = r[3]; if(r[4] && !isUnverified(r[4])) state.outlookStatus = r[4]; })
       .catch(function(){})
       .then(function(){ state.kSyncLoaded = true; state.kSyncLoading = false; render(); });
   }
   var busy = state.kSyncBusy || '';
-  var ps = state.kintoneSyncStatus, wp = state.workPriceMaster, ws = state.workReportStatus;
+  var ps = state.kintoneSyncStatus, wp = state.workPriceMaster, ws = state.workReportStatus, os = state.outlookStatus;
   var f = state.workReportForm || (state.workReportForm = { from: wrDateAdd(todayStr().slice(0,8)+'01', -1).slice(0,8)+'01', to: todayStr() });
   function row(label, at, extra, btnId, more){
     return '<tr><td><b>'+esc(label)+'</b></td><td>'+(at ? esc(fmtDateTime(at)) : '―')+(extra ? '<span class="sk-minor"> '+esc(extra)+'</span>' : '')+'</td>'+
@@ -13734,8 +13773,9 @@ function renderKintoneSyncPanel(){
       row('作業単価', wp && wp.lastSyncedAt, wp && wp.prices ? formatNum(wp.prices.length)+'件' : '', 'kSyncPrice')+
       row('作業日報', ws && ws.syncedAt, ws ? (ws.from||'')+'〜'+(ws.to||'') : '', 'kSyncReport',
         '<input type="date" id="kSyncFrom" value="'+esc(f.from)+'"> 〜 <input type="date" id="kSyncTo" value="'+esc(f.to)+'"> ')+
+      row('見積もり・入荷予定', os && os.syncedAt, os ? '見積もり '+formatNum(os.estimateLines||0)+'行・入荷予定 '+formatNum(os.arrivalLines||0)+'行' : '', 'kSyncOutlook')+
     '</tbody></table>'+
-    '<div class="pool-hint" style="margin-top:6px;">対応表(作業単価の得意先・計算単位、作業日報の対応表)は「設定 → 得意先・単価」で決めます。</div>'+
+    '<div class="pool-hint" style="margin-top:6px;">対応表(作業単価の得意先・計算単位、作業日報の対応表)は「設定 → 得意先・単価」で決めます。見積もり(アプリ956)・入荷予定(発注履歴 949)は、在庫 → 将来在庫・保管料の試算と、管理 → 今日の状況の「本日の入庫明細」で使います。</div>'+
   '</div>';
 }
 function bindKintoneSyncPanel(){
@@ -13748,6 +13788,8 @@ function bindKintoneSyncPanel(){
     try{ state.kSyncMsg = await fn(); }catch(e){ state.kSyncMsg = '⚠️ 取得できませんでした'; }
     state.kSyncBusy = ''; state.gateDataStatus = null; render();
   }
+  var ko = document.getElementById('kSyncOutlook');
+  if(ko) ko.addEventListener('click', function(){ run('kSyncOutlook', async function(){ return (await runStockOutlookSync()).msg; }); });
   var p = document.getElementById('kSyncProduct');
   if(p) p.addEventListener('click', function(){ run('kSyncProduct', async function(){
     var st = state.kintoneProductSettings || await loadKintoneProductSettings();
@@ -15046,7 +15088,8 @@ function renderTodayStatusBoard(tasks){
   var noneNote = (!red.length && !yellow.length && !green.length) ? '<div class="empty-note">本日の作業の状況はまだありません(CSV取込・作業開始で表示されます)</div>' : '';
   var notStartedHtml = notStarted.length ? '<div class="pool-hint" style="margin-top:10px;">未着手(CSVの数量なし): '+notStarted.map(function(t){ return esc(t.name); }).join('・')+'</div>' : '';
   return '<div class="panel" style="margin-bottom:14px;" id="todayStatusBoard">'+
-    '<div class="stf-head"><div class="panel-title">📋 今日の状況</div>'+'<button type="button" class="vc-manage-toggle-btn" id="arrivalSheetPdf"'+(state.arrivalSheetBusy?' disabled':'')+' title="今日入る発注(納入期日が今日・遅れ)の一覧を、品番順に A4縦の PDF にします" style="margin-left:auto;">'+(state.arrivalSheetBusy ? '作っています…' : '📦 本日の入庫明細(PDF)')+'</button>'+'<div class="stf-asof">'+esc(fmtClockMs(plan.nowMs))+'時点・自動計算'+(plan.breakHold?'・休憩中':'')+'</div></div>'+
+    '<div class="stf-head"><div class="panel-title">📋 今日の状況</div>'+'<button type="button" class="vc-manage-toggle-btn" id="arrivalSheetPdf" title="今日入る発注(納入期日が今日・遅れ)を仕入先ごとに出し、仕入先ごとに PDF を保存します" style="margin-left:auto;">📦 本日の入庫明細'+(state.arrivalSheet && state.arrivalSheet.open ? ' ▴' : ' ▾')+'</button>'+'<div class="stf-asof">'+esc(fmtClockMs(plan.nowMs))+'時点・自動計算'+(plan.breakHold?'・休憩中':'')+'</div></div>'+
+    renderArrivalSheetPanel()+
     bar+
     section('🔴 要対応', red, 'red')+
     section('🟡 進行中', yellow, 'yellow')+
@@ -15140,7 +15183,8 @@ function renderManager(){
   ) : '';
 
   var todayDashboardHtml = '<div class="panel" style="margin-bottom:14px;">'+
-    '<div style="display:flex;align-items:center;gap:8px;"><div class="panel-title">📋 今日の状況</div>'+(isToday ? '<button type="button" class="vc-manage-toggle-btn" id="arrivalSheetPdf"'+(state.arrivalSheetBusy?' disabled':'')+' title="今日入る発注(納入期日が今日・遅れ)の一覧を、品番順に A4縦の PDF にします" style="margin-left:auto;">'+(state.arrivalSheetBusy ? '作っています…' : '📦 本日の入庫明細(PDF)')+'</button>' : '')+'</div>'+
+    '<div style="display:flex;align-items:center;gap:8px;"><div class="panel-title">📋 今日の状況</div>'+(isToday ? '<button type="button" class="vc-manage-toggle-btn" id="arrivalSheetPdf" title="今日入る発注(納入期日が今日・遅れ)を仕入先ごとに出し、仕入先ごとに PDF を保存します" style="margin-left:auto;">📦 本日の入庫明細'+(state.arrivalSheet && state.arrivalSheet.open ? ' ▴' : ' ▾')+'</button>' : '')+'</div>'+
+    (isToday ? renderArrivalSheetPanel() : '')+
     summaryCardsHtml+
     '<div class="panel-title" style="font-size:15px;margin-top:18px;">👥 作業者別 業務時間</div>'+
     checkAlertHtml+
@@ -15800,7 +15844,9 @@ function bindManager(){
     render();
   }
   var asp = document.getElementById('arrivalSheetPdf');
-  if(asp) asp.addEventListener('click', function(){ arrivalSheetPdf(''); });
+  if(asp) asp.addEventListener('click', function(){ arrivalSheetToggle(); });
+  document.querySelectorAll('[data-arrival-pdf]').forEach(function(el){ el.addEventListener('click', function(){ arrivalSheetDownload(el.getAttribute('data-arrival-pdf')); }); });
+  document.querySelectorAll('[data-arrival-pdf-all]').forEach(function(el){ el.addEventListener('click', function(){ arrivalSheetDownload(''); }); });
   document.querySelectorAll('[data-mgr-shift-start]').forEach(function(el){
     el.addEventListener('focusin', function(){ state.suppressRender = true; });
     el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });

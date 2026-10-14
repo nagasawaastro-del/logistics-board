@@ -4375,6 +4375,9 @@ function computeTodayStaffingPlan(ctx){
   roster.forEach(function(s){
     if(s.archived) return;
     var present = !!(day.attendance && day.attendance[s.id]);
+    // 休憩明けの試算では、休憩終了までに出勤する人(本日の勤務開始時刻が休憩終了まで。PM出勤など)も出勤として数える
+    var lateStart = day.shiftStartOverrides && day.shiftStartOverrides[s.id];
+    if(!present && ctx.afterBreakPreview && isClockStr(lateStart) && new Date(dateStr+'T'+lateStart+':00').getTime() <= nowMs) present = true;
     var endMs = staffShiftEndMs(s.id, day, shift, s);
     var log = openByStaff[s.id];
     staffInfo[s.id] = {
@@ -6715,6 +6718,16 @@ function presentStaff(){
 }
 function presentStaffForDay(day){
   return state.roster.filter(function(s){ return !s.archived && day.attendance[s.id]; });
+}
+/* 今日、これから出勤する人(本日の勤務開始時刻が今より後で、まだ欠勤。AM有休・PM出勤など)。
+   出勤前でも作業を割り当てておけるように、管理の割り当て・休憩明けの配置予定に出す */
+function laterStartStaffForDay(day){
+  if(!day || day.date!==todayStr() || !day.shiftStartOverrides) return [];
+  var now = new Date(), nowStr = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  return state.roster.filter(function(s){
+    var st = day.shiftStartOverrides[s.id];
+    return !s.archived && !day.attendance[s.id] && isClockStr(st) && st > nowStr;
+  });
 }
 function activeRoster(){
   return state.roster.filter(function(s){ return !s.archived; });
@@ -14972,6 +14985,8 @@ function renderManager(){
 
   var roster = activeRoster();
   var present = presentStaffForDay(day);
+  var laterStart = laterStartStaffForDay(day); // これから出勤する人(本日の勤務開始時刻が後)
+  function laterStartLabel(s){ return day.shiftStartOverrides[s.id]+'から出勤'; }
   var tasks = tasksForDate(viewDate).slice().sort(byTaskColor(function(t){ return t.color; }));
   var WD = ['日','月','火','水','木','金','土'];
 
@@ -15042,10 +15057,12 @@ function renderManager(){
   '</div>';
 
 
-  var poolHtml = present.map(function(s){
+  var poolHtml = (present.map(function(s){
     var isUnassigned = !(day.assignments[s.id]||[]).length;
     return '<div class="chip '+(isUnassigned?'chip-warn':'')+'" draggable="true" data-staff-chip="'+s.id+'"><span class="chip-dot"></span>'+esc(s.name)+(isUnassigned?' <span class="chip-warn-label">未割当</span>':'')+'</div>';
-  }).join('') || '<div class="pool-hint">出勤中のスタッフがここに表示されます</div>';
+  }).concat(laterStart.map(function(s){
+    return '<div class="chip" draggable="true" data-staff-chip="'+s.id+'" style="opacity:.75;border-style:dashed;" title="出勤前でも作業を割り当てておけます"><span class="chip-dot"></span>'+esc(s.name)+' <span class="chip-warn-label" style="background:#EFF8FF;color:#175CD3;">'+esc(laterStartLabel(s))+'</span></div>';
+  })).join('')) || '<div class="pool-hint">出勤中のスタッフがここに表示されます</div>';
 
   var unassignedStaff = present.filter(function(s){ return !(day.assignments[s.id]||[]).length; });
   var unassignedBanner = unassignedStaff.length ? (
@@ -15115,7 +15132,7 @@ function renderManager(){
   var newTaskForm = state.newTaskColIndex>=0 ? renderTaskForm() : '<button class="new-task-btn" id="addTaskBtn">+ 作業を追加</button>';
   var boardBodyHtml;
   if(state.managerViewMode==='byStaff'){
-    var byStaffHtml = present.map(function(s){
+    var byStaffHtml = present.concat(laterStart).map(function(s){
       var assignedTaskIds = day.assignments[s.id]||[];
       var taskRows = assignedTaskIds.map(function(tid){
         var t = taskById(tid==='BREAK'?'BREAK':tid);
@@ -15126,7 +15143,7 @@ function renderManager(){
         '</div>';
       }).join('') || '<div class="pool-hint" style="margin:0;">本日の割り当てなし</div>';
       return '<div class="mgr-staff-card">'+
-        '<div class="mgr-staff-card-name">'+esc(s.name)+'</div>'+
+        '<div class="mgr-staff-card-name">'+esc(s.name)+(day.attendance[s.id] ? '' : ' <span class="muted" style="font-size:11px;">('+esc(laterStartLabel(s))+')</span>')+'</div>'+
         taskRows+
       '</div>';
     }).join('') || '<div class="empty-note">出勤中のスタッフがいません</div>';

@@ -4355,6 +4355,153 @@ function computeAfterBreakStaffingPlan(ctx){
   if(!(endMs>startMs && nowMs>=startMs && nowMs<endMs)) return null; // 通常の計算の「休憩中」と同じ判定
   return computeTodayStaffingPlan(Object.assign({}, ctx, { now: new Date(endMs), afterBreakPreview: true }));
 }
+/* ---------- このあとの配置の見込み(作業者ごとに、勤務終了まで) ----------
+   人員配置の計算(computeTodayStaffingPlan)を、作業が終わる時刻・勤務が終わる時刻・休憩が明ける時刻ごとにくり返し、
+   その時に出る配置案のとおりに人が動いたとして、作業者ごとの「今の作業 → 次 → その次…」を見込む。表示専用(確定・保存はしない)。
+   ・確定済みでまだ始めていない指示は、今から始めたとみなす。作業完了後の配置予定は、前の作業が終わったら始めたとみなす
+   ・休憩中の人は、休憩前の作業を続けるとみなす。本日の勤務開始時刻が後の人は、その時刻から出勤とみなす
+   戻り値: { startMs, endMs, rows:[{ staffId, name, segs:[{ taskId(null=空き), from, to }] }] } */
+var STAFF_TIMELINE_MAX_STEPS = 40;
+function simulateStaffTimeline(ctx){
+  var day = JSON.parse(JSON.stringify(ctx.day));
+  day.logs = day.logs || []; day.attendance = day.attendance || {};
+  var shift = ctx.shiftSettings, brk = ctx.breakSettings, dateStr = day.date;
+  var startMs = (ctx.now || new Date()).getTime(), T = startMs;
+  var dayEnd = defaultShiftEndMs(day, shift), seq = 0;
+  var roster = (ctx.roster || []).filter(function(s){ return !s.archived; });
+  var brkS = (brk && brk.enabled && brk.start) ? new Date(dateStr+'T'+brk.start+':00').getTime() : null;
+  var brkE = (brk && brk.enabled && brk.end) ? new Date(dateStr+'T'+brk.end+':00').getTime() : null;
+  var segs = {};
+  function cur(sid){ var a = segs[sid]; return (a && a.length && a[a.length-1].to===null) ? a[a.length-1] : null; }
+  function startSeg(sid, taskId, at){ var c = cur(sid); if(c){ if(c.taskId===taskId) return; c.to = at; } (segs[sid] || (segs[sid] = [])).push({ taskId: taskId, from: at, to: null }); }
+  function switchTo(sid, taskId, at){
+    var iso = new Date(at).toISOString();
+    day.logs.forEach(function(l){ if(l.staffId===sid && l.end===null) l.end = iso; });
+    day.logs.push({ id: 'sim'+(++seq), staffId: sid, taskId: taskId, start: iso, end: null, quantity: null });
+    day.attendance[sid] = true;
+    startSeg(sid, taskId, at);
+  }
+  function calc(withConfirmed){ return computeTodayStaffingPlan(Object.assign({}, ctx, { day: day, now: new Date(T), staffingSuggestion: withConfirmed ? ctx.staffingSuggestion : null })); }
+  var plan = calc(true), pendingResv = [];
+  // 今の状態: 作業中の人(休憩中は休憩前の作業を続ける)
+  Object.keys(plan.staff).forEach(function(sid){
+    var info = plan.staff[sid];
+    if(!info.present || info.remainMin<=0) return;
+    var tid = info.currentTaskId && info.currentTaskId!=='BREAK' ? info.currentTaskId : null;
+    if(tid){
+      var open = day.logs.some(function(l){ return l.staffId===sid && l.end===null && l.taskId===tid; });
+      if(!open) switchTo(sid, tid, T); else startSeg(sid, tid, T);
+    } else startSeg(sid, null, T);
+  });
+  // 確定済み・未開始の指示: すぐの物は今から、作業完了後の物は前の作業が終わったら
+  (plan.confirmed || []).forEach(function(it){
+    if(it.progress!=='pending' || !plan.staff[it.staffId] || !plan.staff[it.staffId].present) return;
+    if(it.startAfterTaskId) pendingResv.push({ staffId: it.staffId, taskId: it.taskId, afterTaskId: it.startAfterTaskId });
+    else switchTo(it.staffId, it.taskId, T);
+  });
+  for(var step=0; step<STAFF_TIMELINE_MAX_STEPS; step++){
+   // 同じ時刻で、配置 → 作業が終わった人の「空き」→ もう一度配置、を変わらなくなるまで(3回まで)
+   for(var again=0; again<3; again++){
+    plan = calc(false);
+    var applied = false;
+    (plan.reservations || []).forEach(function(r){ if(!pendingResv.some(function(x){ return x.staffId===r.staffId; })) pendingResv.push({ staffId: r.staffId, taskId: r.taskId, afterTaskId: r.afterTaskId }); });
+    (plan.proposals || []).forEach(function(p){
+      if(!p.taskId || pendingResv.some(function(x){ return x.staffId===p.staffId; })) return;
+      var c = cur(p.staffId); if(c && c.taskId===p.taskId) return;
+      switchTo(p.staffId, p.taskId, T); applied = true;
+    });
+    // 作業完了後の配置予定: 前の作業が終わっていたら始める
+    pendingResv = pendingResv.filter(function(r){
+      var c = plan.taskById[r.afterTaskId];
+      if(c && c.remainingQty>0) return true;
+      switchTo(r.staffId, r.taskId, T); applied = true; return false;
+    });
+    if(applied) plan = calc(false);
+    // 作業が終わった人で、次の作業が無い人は「空き」
+    var freed = false;
+    Object.keys(segs).forEach(function(sid){
+      var c = cur(sid); if(!c || !c.taskId) return;
+      var tc = plan.taskById[c.taskId];
+      if(tc && tc.remainingQty<=0){ startSeg(sid, null, Math.max(c.from, Math.min(T, tc.etaMs || T))); freed = true; }
+    });
+    if(!freed && !applied) break;
+   }
+    // 次に何かが変わる時刻
+    var next = Infinity;
+    plan.tasks.forEach(function(c){ if(c.remainingQty>0 && c.etaMs && c.etaMs>T+60000) next = Math.min(next, c.etaMs); });
+    roster.forEach(function(s){
+      var info = plan.staff[s.id];
+      if(info && info.present){ if(info.shiftEndMs>T) next = Math.min(next, info.shiftEndMs); }
+      else {
+        var st = day.shiftStartOverrides && day.shiftStartOverrides[s.id];
+        if(isClockStr(st)){ var sm = new Date(dateStr+'T'+st+':00').getTime(); if(sm>T) next = Math.min(next, sm); }
+      }
+    });
+    if(brkS!==null && brkE!==null && T>=brkS && T<brkE) next = Math.min(next, brkE);
+    if(!isFinite(next) || next>=dayEnd) break;
+    T = next + 60000;
+    // 勤務が終わった人は退勤。勤務開始時刻になった人は出勤
+    roster.forEach(function(s){
+      var endMs = staffShiftEndMs(s.id, day, shift, s);
+      if(day.attendance[s.id] && endMs<=T){
+        var iso = new Date(endMs).toISOString();
+        day.logs.forEach(function(l){ if(l.staffId===s.id && l.end===null) l.end = iso; });
+        day.attendance[s.id] = false;
+        var c = cur(s.id); if(c) c.to = endMs;
+      }
+      var st = day.shiftStartOverrides && day.shiftStartOverrides[s.id];
+      if(!day.attendance[s.id] && isClockStr(st)){ var sm = new Date(dateStr+'T'+st+':00').getTime(); if(sm<=T && endMs>T){ day.attendance[s.id] = true; startSeg(s.id, null, sm); } }
+    });
+  }
+  var rows = roster.filter(function(s){ return segs[s.id] && segs[s.id].length; }).map(function(s){
+    var endMs = Math.min(staffShiftEndMs(s.id, day, shift, s), dayEnd);
+    var list = segs[s.id].map(function(g){ return { taskId: g.taskId, from: g.from, to: g.to===null ? endMs : Math.min(g.to, endMs) }; })
+      .filter(function(g){ return g.to-g.from >= 60000; });
+    // 続けて同じ作業・空きはまとめる
+    var merged = [];
+    list.forEach(function(g){ var p = merged[merged.length-1]; if(p && p.taskId===g.taskId && Math.abs(p.to-g.from)<=60000) p.to = g.to; else merged.push(g); });
+    return { staffId: s.id, name: s.name, segs: merged, endMs: endMs };
+  }).filter(function(r){ return r.segs.length; });
+  return { startMs: startMs, endMs: dayEnd, rows: rows, breakStartMs: brkS, breakEndMs: brkE };
+}
+var staffTimelineCache = null;
+function renderStaffTimelineSection(plan){
+  var open = state.staffTimelineOpen === true;
+  var body = '';
+  if(open){
+    var minuteKey = Math.floor(plan.nowMs/60000)+'|'+JSON.stringify((state.day && state.day.logs || []).length)+'|'+JSON.stringify(state.staffingSuggestion||null).length;
+    var tl;
+    if(staffTimelineCache && staffTimelineCache.key===minuteKey) tl = staffTimelineCache.tl;
+    else { try{ tl = simulateStaffTimeline(buildTodayStaffingContext(new Date(plan.nowMs))); }catch(e){ tl = null; } staffTimelineCache = { key: minuteKey, tl: tl }; }
+    if(!tl || !tl.rows.length) body = '<div class="pool-hint" style="margin:6px 0 0;">見込みを出せる作業者がいません(出勤中の人・CSVの作業量が無いとき)</div>';
+    else {
+      var span = Math.max(60000, tl.endMs - tl.startMs);
+      body = '<div style="overflow-x:auto;"><table class="report-table stf-timeline"><thead><tr><th style="width:110px;">作業者</th><th>このあとの作業(見込み)</th></tr></thead><tbody>'+
+        tl.rows.map(function(r){
+          var brkBand = (tl.breakStartMs!==null && tl.breakEndMs!==null && tl.breakEndMs>tl.startMs && tl.breakStartMs<tl.endMs)
+            ? '<span title="休憩" style="position:absolute;top:0;bottom:0;z-index:1;left:'+(Math.max(0,(tl.breakStartMs-tl.startMs)/span*100)).toFixed(2)+'%;width:'+(Math.max(0.5,(Math.min(tl.breakEndMs,tl.endMs)-Math.max(tl.breakStartMs,tl.startMs))/span*100)).toFixed(2)+'%;background:rgba(255,255,255,.75);"></span>' : '';
+          var bar = '<div style="position:relative;height:10px;background:#F2F4F7;border-radius:5px;overflow:hidden;margin-bottom:6px;">'+brkBand+
+            r.segs.map(function(g){
+              var left = Math.max(0, (g.from-tl.startMs)/span*100), w = Math.max(0.5, (g.to-g.from)/span*100);
+              var color = g.taskId ? (taskById(g.taskId).color || '#98A2B3') : 'transparent';
+              return '<span style="position:absolute;top:0;bottom:0;left:'+left.toFixed(2)+'%;width:'+w.toFixed(2)+'%;background:'+color+';'+(g.taskId ? '' : 'background-image:repeating-linear-gradient(45deg,#D0D5DD 0 3px,transparent 3px 6px);')+'"></span>';
+            }).join('')+'</div>';
+          var chips = r.segs.map(function(g, i){
+            var name = g.taskId ? taskById(g.taskId).name : '空き(次の作業なし)';
+            return (i ? '<span class="muted" style="margin:0 2px;">→</span>' : '')+
+              '<span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;'+(g.taskId ? '' : 'color:var(--slate-500);')+'">'+
+                (g.taskId ? '<span class="task-color-dot" style="background:'+(taskById(g.taskId).color||'#98A2B3')+'"></span>' : '')+
+                '<span class="muted" style="font-size:11px;">'+esc(fmtClockMs(g.from))+'〜'+esc(fmtClockMs(g.to))+'</span> <b>'+esc(name)+'</b></span>';
+          }).join(' ')+' <span class="muted" style="font-size:11px;">('+esc(fmtClockMs(r.endMs))+' 終業)</span>';
+          return '<tr><td><b>'+esc(r.name)+'</b></td><td>'+bar+'<div style="display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;">'+chips+'</div></td></tr>';
+        }).join('')+
+        '</tbody></table></div>'+
+        '<div class="pool-hint" style="margin:6px 0 0;">今の配置案・作業完了後の配置予定・確定済みの指示のとおりに動いたとして、作業が終わる時刻ごとに人員配置の計算をくり返した見込みです(生産性・CSVの数量から計算。確定はしません)。棒の左端が今('+esc(fmtClockMs(tl.startMs))+')、右端が終業('+esc(fmtClockMs(tl.endMs))+')'+(tl.breakStartMs!==null && tl.breakEndMs>tl.startMs ? '。白くうすい所は休憩('+esc(fmtClockMs(tl.breakStartMs))+'〜'+esc(fmtClockMs(tl.breakEndMs))+'。休憩の時間は作業に数えません)' : '')+'。VCなど生産性が当たりにくい作業は、見込みも当たりにくくなります。</div>';
+    }
+  }
+  return '<details class="stf-diag" id="staffTimeline"'+(open ? ' open' : '')+' style="margin:10px 0;">'+
+    '<summary style="cursor:pointer;font-weight:700;">🗓 このあとの配置の見込み(作業者ごと・終業まで)</summary>'+body+'</details>';
+}
 function computeTodayStaffingPlan(ctx){
   var day = ctx.day, wv = ctx.workVolume||emptyWorkVolume(), backlog = ctx.backlog||[], roster = ctx.roster||[];
   var master = ctx.productivityMaster||{}, shift = ctx.shiftSettings, brk = ctx.breakSettings;
@@ -7626,6 +7773,7 @@ function renderStaffing(){
       noneHtml+
       needSection+
       renderAfterBreakStaffingSection(afterBreak)+
+      renderStaffTimelineSection(plan)+
       idleSection+
       resvSection+
       idleNextSection+
@@ -7667,6 +7815,8 @@ function renderAfterBreakStaffingSection(ab){
 function bindStaffing(){
   var diagEl = document.getElementById('staffingDiag');
   if(diagEl) diagEl.addEventListener('toggle', function(){ state.staffingDiagOpen = diagEl.open; });
+  var tlEl = document.getElementById('staffTimeline');
+  if(tlEl) tlEl.addEventListener('toggle', function(){ if(state.staffTimelineOpen===tlEl.open) return; state.staffTimelineOpen = tlEl.open; render(); });
   var detailEl = document.getElementById('staffingDetail');
   if(detailEl) detailEl.addEventListener('toggle', function(){ state.staffingDetailOpen = detailEl.open; });
   var autoEl = document.getElementById('staffingAutoConfirm');

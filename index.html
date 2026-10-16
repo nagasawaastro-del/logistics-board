@@ -12686,9 +12686,11 @@ function outlookRoundKey(subject){
   var m = String(subject||'').normalize('NFKC').match(/(\d{1,2})\s*月\s*(\d{1,2})\s*回/);
   return m ? Number(m[1])+'月'+Number(m[2])+'回' : '';
 }
-function outlookEstimateLines(ol){
+function outlookEstimateLines(ol, opt){
   var today = todayStr();
-  var est = ((ol && ol.estimates) || []).filter(function(x){ return outlookCountable(x) && !(x.estDate && x.date < today); }), latest = {}, latestFc = {};
+  // 見積日が今日より前の見積もり(生協の企画は見積日から1週間が進行中なので、取り込みで6日前まで残している)は、
+  // 生協の入れ替え(opt.includeActive)だけで使い、将来在庫・保管料の試算では数えない
+  var est = ((ol && ol.estimates) || []).filter(function(x){ return outlookCountable(x) && !(x.date < today && (x.estDate || !(opt && opt.includeActive))); }), latest = {}, latestFc = {};
   function isFc(x){
     return /アマゾン|ｱﾏｿﾞﾝ|amazon|楽天/i.test(x.party||'') &&
       (x.subject!==undefined ? !/月曜/.test(String(x.subject).normalize('NFKC')) : new Date(x.date+'T00:00:00').getDay()!==1); // 件名を取り込む前のデータは見積日の曜日で
@@ -13021,6 +13023,7 @@ async function runStockOutlookSync(){
 }
 /* ---------- 生協の入れ替え(在庫 → 生協の入れ替え) ----------
    生協ロケ(ロジザードのブロック S)を、生協の企画に合わせて入れ替える指示。Excel「生協ロケ在庫管理」の代わり。現場の順番どおりに出す:
+   ・見積日から COOP_ACTIVE_DAYS 日は進行中の企画とみなす(見積日が6日前までの企画は、今週の企画に入れる。片付けない)
    ① 片付け: S1-1 から S4 の順に、今日から COOP_PUTAWAY_DAYS 日の間に企画が無い品番(2週間以上企画が無い)を片付ける
    ② 今週の企画: 生協ロケの在庫を整頓し、足りない分を補充する
    ③ 来週の企画: 入れられるだけ入れる(今週の分を引いた残りの在庫で足りない分)
@@ -13030,6 +13033,7 @@ async function runStockOutlookSync(){
    ・在庫は引当数を除いた数。持ってくるロケは、高屋の生協ロケ以外で在庫の多いロケから(今週の分を先に取る) */
 var COOP_BLOCK = 'S';
 var COOP_PUTAWAY_DAYS = 14;
+var COOP_ACTIVE_DAYS = 7;
 var COOP_HOLD_LOCS = [[3, 9, 12], [4, 1, 4]]; // [列, 番号の始め, 終わり]: 棚在庫(保留)
 var COOP_PARTY_RE = /コープ|ｺｰﾌﾟ|生協|パルシステム|coop|co-op/i;
 function coopLocParts(l){ return String(l||'').split('-').map(function(x){ return parseInt(x,10)||0; }); }
@@ -13044,14 +13048,15 @@ function coopWeekRange(today){
 function coopPartyShort(p){ return String(p||'').replace(/株式会社|生活協同組合|事業連合/g, '').replace(/[\s　]+/g, '').slice(0, 10); }
 function computeCoopSwap(st){
   var P = (st.lz && st.lz.products) || {}, pm = st.pm || {}, today = todayStr(), wk = coopWeekRange(today), limit = coopDateAdd(today, COOP_PUTAWAY_DAYS);
+  wk.activeFrom = coopDateAdd(today, -(COOP_ACTIVE_DAYS-1)); // これより後の見積日の企画は進行中
   var plans = {}, later = {};
-  var lines = st.outlook ? outlookEstimateLines(st.outlook).lines : [];
+  var lines = st.outlook ? outlookEstimateLines(st.outlook, { includeActive: true }).lines : [];
   lines.forEach(function(x){
     if(!COOP_PARTY_RE.test(x.party||'')) return;
     if(String(x.warehouse||'').trim() && outlookSiteOfWarehouse(x.warehouse)!=='takaya') return;
-    if(x.date < wk.thisFrom) return;
+    if(x.date < wk.activeFrom) return;
     if(x.date > wk.nextTo){ if(!later[x.code] || x.date < later[x.code].date) later[x.code] = x; return; }
-    (plans[x.code] || (plans[x.code] = [])).push({ date: x.date, party: x.party, qty: Number(x.qty)||0, week: x.date<=wk.thisTo ? 'this' : 'next', name: x.name });
+    (plans[x.code] || (plans[x.code] = [])).push({ date: x.date, party: x.party, qty: Number(x.qty)||0, week: x.date<=wk.thisTo ? 'this' : 'next', active: x.date<=today, name: x.name });
   });
   function locAvail(blk, l){ return (Number((blk.locQty||{})[l])||0) - (blk.locAlloc ? (Number(blk.locAlloc[l])||0) : 0); }
   function sLocsOf(code){ // 生協ロケ(保留のロケを除く)の在庫
@@ -13121,7 +13126,7 @@ function coopDate(d){ return d ? d.slice(5).replace('-','/') : ''; }
 function coopLocName(l){ return 'S'+l; }
 function renderCoopSwapTables(r, forPrint){
   function locsText(m){ return Object.keys(m).sort(coopLocCmp).map(function(l){ return '<b>'+esc(coopLocName(l))+'</b> '+formatNum(m[l]); }).join(forPrint ? '、' : '<br>'); }
-  function plansText(ps, week){ return ps.filter(function(p){ return p.week===week; }).map(function(p){ return esc(coopDate(p.date)+' '+coopPartyShort(p.party))+' '+formatNum(p.qty); }).join('<br>'); }
+  function plansText(ps, week){ return ps.filter(function(p){ return p.week===week; }).map(function(p){ return esc(coopDate(p.date)+' '+coopPartyShort(p.party))+' '+formatNum(p.qty)+(p.active ? ' <span class="sk-minor">(進行中)</span>' : ''); }).join('<br>'); }
   function pickText(x){
     return x.pick.map(function(p){ return '<b>'+esc((p.block===COOP_BLOCK ? 'S' : p.block+' ')+p.loc)+'</b> '+formatNum(p.qty)+(p.qty<p.has ? '<span class="sk-minor">(ロケに'+formatNum(p.has)+')</span>' : ''); }).join('<br>')+
       (x.noStock ? '<div style="color:#B42318;font-weight:700;">在庫が '+formatNum(x.noStock)+' 足りない</div>' : '');
@@ -13148,7 +13153,7 @@ function coopTitles(r){
   var w = r.weeks;
   return {
     put: '① 片付け(S1-1 から順に。'+COOP_PUTAWAY_DAYS+'日以内('+coopDate(r.limit)+'まで)に企画が無い)',
-    thisW: '② 今週の企画 '+coopDate(w.thisFrom)+'〜'+coopDate(w.thisTo)+'(整頓して、足りない分を補充)',
+    thisW: '② 今週の企画(進行中の見積日 '+coopDate(w.activeFrom)+'〜 と 今週 〜'+coopDate(w.thisTo)+'。整頓して、足りない分を補充)',
     nextW: '③ 来週の企画 '+coopDate(w.nextFrom)+'〜'+coopDate(w.nextTo)+'(入れられるだけ入れる)'
   };
 }
@@ -13158,7 +13163,8 @@ function renderCoopSwap(st){
   var sumShort = function(rows){ return rows.reduce(function(a,x){ return a+x.short; }, 0); };
   var head = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
     '<span class="pool-hint" style="margin:0;">企画: kintone の見積もり '+esc(fmtDateTime(st.outlook.syncedAt))+'取込 ・ 在庫: ロジザード '+esc(fmtDateTime(st.lz.uploadedAt))+'取込 ・ 棚在庫で保留: '+esc(coopHoldText())+'</span>'+
-    '<button type="button" class="vc-manage-toggle-btn" id="coopPrint" style="margin-left:auto;">🖨 入れ替え指示を印刷</button></div>';
+    '<button type="button" class="vc-manage-toggle-btn" id="coopPrint" style="margin-left:auto;">🖨 入れ替え指示を印刷</button></div>'+
+    (state.coopMsg ? '<div class="vc-import-status">'+state.coopMsg+'</div>' : '');
   var cards = '<div class="vca-cards">'+
     '<div class="vca-card"><div class="vca-card-label">① 片付け</div><div class="vca-card-val">'+formatNum(r.putAway.length)+'<span style="font-size:13px;font-weight:600;"> ロケ・品番</span></div><div class="vca-card-sub">'+COOP_PUTAWAY_DAYS+'日以内に企画が無い</div></div>'+
     '<div class="vca-card"><div class="vca-card-label">② 今週の補充</div><div class="vca-card-val">'+formatNum(r.thisRows.filter(function(x){ return x.short; }).length)+'<span style="font-size:13px;font-weight:600;"> / '+r.thisRows.length+' 品番</span></div><div class="vca-card-sub">'+formatNum(sumShort(r.thisRows))+'個を生協ロケへ</div></div>'+
@@ -13167,12 +13173,37 @@ function renderCoopSwap(st){
   var keepList = r.keep.length ? '<details style="margin-top:10px;"><summary class="pool-hint" style="cursor:pointer;">残す(再来週〜'+coopDate(r.limit)+'に企画がある)('+r.keep.length+') ▾</summary><div class="sk-minor" style="line-height:1.8;">'+
     r.keep.map(function(x){ return '<b>'+esc(coopLocName(x.loc))+'</b> '+esc(x.code)+' '+formatNum(x.qty)+' ・ 次の企画 '+esc(coopDate(x.next.date)+' '+coopPartyShort(x.next.party))+' '+formatNum(x.next.qty); }).join('<br>')+'</div></details>' : '';
   return head+cards+
-    '<div class="stf-section-title">'+esc(ti.put)+'</div><div style="overflow-x:auto;">'+t.putAway+'</div>'+keepList+
-    '<div class="stf-section-title" style="margin-top:16px;">'+esc(ti.thisW)+'</div><div style="overflow-x:auto;">'+t.thisWeek+'</div>'+
-    '<div class="stf-section-title" style="margin-top:16px;">'+esc(ti.nextW)+'</div><div style="overflow-x:auto;">'+t.nextWeek+'</div>'+
+    '<div class="stf-section-title" style="display:flex;align-items:center;gap:8px;">'+esc(ti.put)+coopSendBtn('put', r.putAway.length)+'</div><div style="overflow-x:auto;">'+t.putAway+'</div>'+keepList+
+    '<div class="stf-section-title" style="margin-top:16px;display:flex;align-items:center;gap:8px;">'+esc(ti.thisW)+coopSendBtn('this', r.thisRows.filter(function(x){ return x.short; }).length)+'</div><div style="overflow-x:auto;">'+t.thisWeek+'</div>'+
+    '<div class="stf-section-title" style="margin-top:16px;display:flex;align-items:center;gap:8px;">'+esc(ti.nextW)+coopSendBtn('next', r.nextRows.filter(function(x){ return x.short; }).length)+'</div><div style="overflow-x:auto;">'+t.nextWeek+'</div>'+
     '<div class="pool-hint" style="margin-top:10px;">生協ロケ = ロジザードのブロック「'+COOP_BLOCK+'」(棚在庫の '+esc(coopHoldText())+' は保留: 生協ロケの在庫に数えず、片付けにも出しません)。'+
     '企画 = kintone の見積もりのうち得意先がコープ・生協・パルシステムの物(見積日を企画の日とする。作り直した見積もりは新しい版だけ。高屋の倉庫の物だけ)。'+
     '来週の補充数 = 来週の企画の数 − 今週の分を引いた生協ロケの残り。在庫は引当数を除いた数。持ってくるロケは、高屋の生協ロケ以外で在庫の多いロケから(今週の分を先に取る)。</div>';
+}
+function coopSendBtn(kind, n){
+  return '<button type="button" class="vc-manage-toggle-btn" data-coop-send="'+kind+'"'+(n ? '' : ' disabled')+' style="margin-left:auto;font-weight:400;">🧾 高屋の集計表へ('+n+'行)</button>';
+}
+/* 生協の入れ替えの行を、高屋の集計表(この端末の入力中の表)に 品番・数量・備考 で追加する。同じ備考・品番の行が既にあれば足さない */
+function coopSendToShukei(st, kind){
+  var r = computeCoopSwap(st), rows = [];
+  function planNote(x, week){ return x.plans.filter(function(p){ return p.week===week; }).map(function(p){ return coopDate(p.date)+coopPartyShort(p.party); }).join('・'); }
+  if(kind==='put') r.putAway.forEach(function(x){ rows.push({ code: x.code, qty: x.qty, note: '生協 片付け '+coopLocName(x.loc) }); });
+  else (kind==='this' ? r.thisRows : r.nextRows).forEach(function(x){
+    if(!x.short) return;
+    rows.push({ code: x.code, qty: x.short, note: '生協 '+(kind==='this' ? '今週' : '来週')+'補充 '+planNote(x, kind)+(Object.keys(x.sLocs).length ? ' →'+Object.keys(x.sLocs).sort(coopLocCmp).map(coopLocName).join('・') : '') });
+  });
+  if(!rows.length){ showToast('送る行がありません'); return; }
+  var dr = loadShukeiDraft('takaya'), have = {};
+  dr.rows.forEach(function(x){ have[x.code+'|'+x.note] = true; });
+  var add = rows.filter(function(x){ return !have[x.code+'|'+x.note]; });
+  var label = { put:'① 片付け', this:'② 今週の補充', next:'③ 来週の補充' }[kind];
+  if(!add.length){ showToast(label+'の行は、もう集計表に入っています'); return; }
+  if(!confirm('高屋の集計表に'+label+'の '+add.length+'行を追加します'+(dr.rows.length ? '(今入っている'+dr.rows.length+'行のあとに)' : '')+(rows.length>add.length ? '\n同じ行が既にある'+(rows.length-add.length)+'行は足しません。' : '')+'\nよろしいですか?')) return;
+  add.forEach(function(x){ dr.rows.push({ vc:'', code: x.code, qty: String(x.qty), note: x.note }); });
+  saveShukeiDraft('takaya', { requester: dr.requester, rows: dr.rows });
+  state.shukeiDraft = null; // 集計表を開いたときに読み直す
+  state.coopMsg = '✅ 高屋の集計表に'+esc(label)+'の '+add.length+'行を追加しました。<button type="button" class="vc-manage-toggle-btn" id="coopGoShukei" style="margin-left:8px;">🧾 高屋の集計表を開く</button>';
+  render();
 }
 /* 入れ替え指示を印刷する(A4縦。保存はしない)。① 片付け → ② 今週 → ③ 来週 の順 */
 function coopSwapPrint(st){
@@ -13257,6 +13288,9 @@ function bindStockTab(){
   });
   var cpp = document.getElementById('coopPrint');
   if(cpp) cpp.addEventListener('click', function(){ if(state.stockData) coopSwapPrint(state.stockData); });
+  document.querySelectorAll('[data-coop-send]').forEach(function(el){ el.addEventListener('click', function(){ if(state.stockData) coopSendToShukei(state.stockData, el.getAttribute('data-coop-send')); }); });
+  var cgo = document.getElementById('coopGoShukei');
+  if(cgo) cgo.addEventListener('click', function(){ state.coopMsg = ''; state.role = 'shukei'; state.shukeiSite = 'takaya'; state.shukeiTab = 'sheet'; state.shukeiSheetSort = null; state.shukeiDraft = null; render(); });
   document.querySelectorAll('[data-stock-tab]').forEach(function(el){
     el.addEventListener('click', function(){ state.stockTab = el.getAttribute('data-stock-tab'); render(); });
   });

@@ -13095,6 +13095,9 @@ function computeCoopSwap(st){
     var sLocs = sLocsOf(code), sQty = sumOf(sLocs);
     var base = { code: code, name: (P[code] && P[code].name) || ps[0].name || '', plans: ps, sLocs: sLocs, sQty: sQty, pack: packOf(code) };
     var shortThis = Math.max(0, thisQ - sQty), leftAfter = Math.max(0, sQty - thisQ), shortNext = Math.max(0, nextQ - leftAfter);
+    // 企画ごとの足りない数(得意先ごとに集計表へ送るため): 生協ロケの在庫を、日付の早い企画(今週が先)から当てる
+    var sLeft = sQty;
+    ps.forEach(function(p){ var use = Math.min(sLeft, p.qty); sLeft -= use; p.short = p.qty - use; });
     if(thisQ>0) thisRows.push(Object.assign({}, base, { need: thisQ, short: shortThis }, shortThis ? take(code, shortThis) : { pick: [], noStock: 0 }));
     if(nextQ>0) nextRows.push(Object.assign({}, base, { need: nextQ, have: leftAfter, short: shortNext }, shortNext ? take(code, shortNext) : { pick: [], noStock: 0 }));
     if(!shortThis && !shortNext) ok.push(Object.assign({}, base, { need: thisQ+nextQ }));
@@ -13117,6 +13120,29 @@ function computeCoopSwap(st){
   function byLoc(a, b){ var x = firstLoc(a), y = firstLoc(b); if(x && y) return coopLocCmp(x, y) || a.code.localeCompare(b.code); if(x) return -1; if(y) return 1; return a.code.localeCompare(b.code, 'ja', { numeric:true }); }
   thisRows.sort(byLoc); nextRows.sort(byLoc);
   return { weeks: wk, limit: limit, thisRows: thisRows, nextRows: nextRows, ok: ok, putAway: putAway, keep: keep, hasOutlook: !!st.outlook };
+}
+/* 得意先で絞る(空なら全部)。②③ はその得意先の企画がある品番だけにし、企画の数・補充数をその得意先の分にする。
+   持ってくるロケは、全部のときの順のまま、その得意先の補充数の分まで */
+function coopApplyParty(r, party){
+  if(!party) return r;
+  function cut(rows, week){
+    var out = [];
+    rows.forEach(function(x){
+      var mine = x.plans.filter(function(p){ return p.week===week && p.party===party; });
+      if(!mine.length) return;
+      var short = mine.reduce(function(a,p){ return a+(p.short||0); }, 0), left = short, pick = [];
+      x.pick.forEach(function(k){ if(left<=0) return; var q = Math.min(left, k.qty); pick.push(Object.assign({}, k, { qty: q })); left -= q; });
+      out.push(Object.assign({}, x, { plans: x.plans.filter(function(p){ return p.party===party; }), need: mine.reduce(function(a,p){ return a+p.qty; }, 0), short: short, pick: pick, noStock: left }));
+    });
+    return out;
+  }
+  return Object.assign({}, r, { thisRows: cut(r.thisRows, 'this'), nextRows: cut(r.nextRows, 'next'), party: party });
+}
+/* 今週・来週の企画がある得意先(選ぶ欄に出す) */
+function coopPartiesOf(r){
+  var m = {};
+  r.thisRows.concat(r.nextRows).forEach(function(x){ x.plans.forEach(function(p){ m[p.party] = true; }); });
+  return Object.keys(m).sort(function(a,b){ return a.localeCompare(b, 'ja'); });
 }
 function coopCasesText(q, pack){
   if(!pack) return '';
@@ -13160,11 +13186,14 @@ function coopTitles(r){
 }
 function renderCoopSwap(st){
   if(!st.outlook) return '<div class="empty-note">生協の企画(kintone の見積もり)がまだありません。管理 → データ取込 の「kintoneの同期」で「見積もり・入荷予定」を取り込んでください。</div>';
-  var r = computeCoopSwap(st), t = renderCoopSwapTables(r, false), ti = coopTitles(r);
+  var r0 = computeCoopSwap(st), parties = coopPartiesOf(r0);
+  if(state.coopParty && parties.indexOf(state.coopParty)===-1) state.coopParty = '';
+  var r = coopApplyParty(r0, state.coopParty), t = renderCoopSwapTables(r, false), ti = coopTitles(r);
   var sumShort = function(rows){ return rows.reduce(function(a,x){ return a+x.short; }, 0); };
   var head = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
     '<span class="pool-hint" style="margin:0;">企画: kintone の見積もり '+esc(fmtDateTime(st.outlook.syncedAt))+'取込 ・ 在庫: ロジザード '+esc(fmtDateTime(st.lz.uploadedAt))+'取込 ・ 棚在庫で保留: '+esc(coopHoldText())+'</span>'+
-    '<button type="button" class="vc-manage-toggle-btn" id="coopPrint" style="margin-left:auto;">🖨 入れ替え指示を印刷</button></div>'+
+    '<label style="margin-left:auto;font-size:13px;">得意先 <select id="coopParty"><option value="">全部</option>'+parties.map(function(p){ return '<option value="'+esc(p)+'"'+(state.coopParty===p?' selected':'')+'>'+esc(p)+'</option>'; }).join('')+'</select></label>'+
+    '<button type="button" class="vc-manage-toggle-btn" id="coopPrint">🖨 入れ替え指示を印刷</button></div>'+
     (state.coopMsg ? '<div class="vc-import-status">'+state.coopMsg+'</div>' : '');
   var cards = '<div class="vca-cards">'+
     '<div class="vca-card"><div class="vca-card-label">① 片付け</div><div class="vca-card-val">'+formatNum(r.putAway.length)+'<span style="font-size:13px;font-weight:600;"> ロケ・品番</span></div><div class="vca-card-sub">'+COOP_PUTAWAY_DAYS+'日以内に企画が無い</div></div>'+
@@ -13186,7 +13215,7 @@ function coopSendBtn(kind, n){
 }
 /* 生協の入れ替えの行を、高屋の集計表(この端末の入力中の表)に 品番・数量・備考 で追加する。同じ備考・品番の行が既にあれば足さない */
 function coopSendToShukei(st, kind){
-  var r = computeCoopSwap(st), rows = [];
+  var r = coopApplyParty(computeCoopSwap(st), state.coopParty), rows = [];
   function planNote(x, week){ return x.plans.filter(function(p){ return p.week===week; }).map(function(p){ return coopDate(p.date)+coopPartyShort(p.party); }).join('・'); }
   if(kind==='put') r.putAway.forEach(function(x){ rows.push({ code: x.code, qty: x.qty, note: '生協 片付け '+coopLocName(x.loc) }); });
   else (kind==='this' ? r.thisRows : r.nextRows).forEach(function(x){
@@ -13197,7 +13226,7 @@ function coopSendToShukei(st, kind){
   var dr = loadShukeiDraft('takaya'), have = {};
   dr.rows.forEach(function(x){ have[x.code+'|'+x.note] = true; });
   var add = rows.filter(function(x){ return !have[x.code+'|'+x.note]; });
-  var label = { put:'① 片付け', this:'② 今週の補充', next:'③ 来週の補充' }[kind];
+  var label = { put:'① 片付け', this:'② 今週の補充', next:'③ 来週の補充' }[kind]+(kind!=='put' && state.coopParty ? '('+state.coopParty+')' : '');
   if(!add.length){ showToast(label+'の行は、もう集計表に入っています'); return; }
   if(!confirm('高屋の集計表に'+label+'の '+add.length+'行を追加します'+(dr.rows.length ? '(今入っている'+dr.rows.length+'行のあとに)' : '')+(rows.length>add.length ? '\n同じ行が既にある'+(rows.length-add.length)+'行は足しません。' : '')+'\nよろしいですか?')) return;
   add.forEach(function(x){ dr.rows.push({ vc:'', code: x.code, qty: String(x.qty), note: x.note }); });
@@ -13208,8 +13237,8 @@ function coopSendToShukei(st, kind){
 }
 /* 入れ替え指示を印刷する(A4縦。保存はしない)。① 片付け → ② 今週 → ③ 来週 の順 */
 function coopSwapPrint(st){
-  var r = computeCoopSwap(st), t = renderCoopSwapTables(r, true), ti = coopTitles(r);
-  var html = '<h1>生協の入れ替え指示 '+esc(todayStr().replace(/-/g,'/'))+'</h1>'+
+  var r = coopApplyParty(computeCoopSwap(st), state.coopParty), t = renderCoopSwapTables(r, true), ti = coopTitles(r);
+  var html = '<h1>生協の入れ替え指示 '+esc(todayStr().replace(/-/g,'/'))+(state.coopParty ? ' '+esc(state.coopParty) : '')+'</h1>'+
     '<div class="sub">在庫 ロジザード '+esc(fmtDateTime(st.lz.uploadedAt))+'取込 ・ 企画 kintone '+esc(fmtDateTime(st.outlook.syncedAt))+'取込 ・ 棚在庫で保留 '+esc(coopHoldText())+'</div>'+
     '<h2>'+esc(ti.put)+' '+r.putAway.length+'件</h2>'+t.putAway+'<h2>'+esc(ti.thisW)+'</h2>'+t.thisWeek+'<h2>'+esc(ti.nextW)+'</h2>'+t.nextWeek;
   printHtmlDoc('生協の入れ替え指示_'+todayStr(), html,
@@ -13289,6 +13318,8 @@ function bindStockTab(){
   });
   var cpp = document.getElementById('coopPrint');
   if(cpp) cpp.addEventListener('click', function(){ if(state.stockData) coopSwapPrint(state.stockData); });
+  var cpt = document.getElementById('coopParty');
+  if(cpt) cpt.addEventListener('change', function(){ state.coopParty = cpt.value; state.coopMsg = ''; render(); });
   document.querySelectorAll('[data-coop-send]').forEach(function(el){ el.addEventListener('click', function(){ if(state.stockData) coopSendToShukei(state.stockData, el.getAttribute('data-coop-send')); }); });
   var cgo = document.getElementById('coopGoShukei');
   if(cgo) cgo.addEventListener('click', function(){ state.coopMsg = ''; state.role = 'shukei'; state.shukeiSite = 'takaya'; state.shukeiTab = 'sheet'; state.shukeiSheetSort = null; state.shukeiDraft = null; render(); });

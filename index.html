@@ -1257,6 +1257,30 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,input[typ
 .task-tile:active{transform:scale(.97);}
 .task-tile.active-task{box-shadow:0 0 0 3px rgba(46,144,250,.22),0 14px 30px -14px rgba(46,144,250,.55) !important;background:linear-gradient(180deg,#F5FAFF 0%,#fff 60%) !important;}
 .staff-header{position:sticky;top:var(--topbar-h,0px);z-index:12;background:rgba(255,255,255,.92) !important;backdrop-filter:saturate(1.4) blur(8px);-webkit-backdrop-filter:saturate(1.4) blur(8px);}
+
+/* ---------- トップページ・管理の見た目(2026-10-17) ---------- */
+.gate{justify-content:flex-start;padding-top:40px;background:radial-gradient(1200px 500px at 50% -120px,#EEF2FF 0%,rgba(238,242,255,0) 70%),var(--paper-100);}
+.gate-hero{width:100%;max-width:920px;text-align:left;margin:0 0 22px;}
+.gate-brand{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:13px;letter-spacing:.08em;color:var(--amber-500);margin-bottom:10px;}
+.gate-brand-mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#6172F3,#4338CA);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 4px 10px -4px rgba(67,56,202,.6);}
+.gate-hello{font-size:clamp(26px,4vw,34px);font-weight:800;color:var(--ink-900);margin:0 0 4px;letter-spacing:-.01em;}
+.gate-today{font-size:14px;color:var(--slate-500);}
+.gate-status{margin:0 0 22px !important;border-radius:16px !important;box-shadow:0 1px 3px rgba(16,24,40,.05);}
+.gate-section-title{font-size:12px !important;letter-spacing:.08em;color:var(--slate-500) !important;margin:10px 0 10px !important;}
+.gate-grid{grid-template-columns:repeat(auto-fill,minmax(260px,1fr)) !important;gap:12px !important;}
+.gate-card{flex-direction:row !important;align-items:center !important;text-align:left;gap:14px !important;padding:16px 18px !important;border-radius:18px !important;}
+.gate-card:hover{transform:translateY(-2px);box-shadow:0 12px 24px -12px rgba(16,24,40,.25) !important;border-color:#C7D7FE !important;}
+.gate-icon{width:48px !important;height:48px !important;border-radius:14px !important;font-size:22px !important;flex:none;}
+.gate-card-title{font-size:16px !important;font-weight:700 !important;}
+.gate-card-desc{font-size:12.5px !important;margin-top:2px;}
+.gate-card > .gate-card-title{margin-bottom:0;}
+.gate-card .gate-text{display:flex;flex-direction:column;}
+.gate-lock-badge{top:8px !important;right:10px !important;}
+/* 管理: やること */
+.todo-btn{border-radius:14px !important;border-color:var(--paper-line) !important;box-shadow:0 1px 2px rgba(16,24,40,.05);transition:transform .1s ease,box-shadow .15s ease,border-color .15s ease;}
+.todo-btn:hover{transform:translateY(-1px);box-shadow:0 10px 20px -12px rgba(16,24,40,.25);border-color:#C7D7FE !important;background:#fff !important;}
+.todo-btn:active{transform:scale(.98);}
+.sub-switch-btn{transition:background .12s ease,color .12s ease;}
 </style>
 </head>
 <body>
@@ -13905,23 +13929,21 @@ function gateCard(role, bg, fg, icon, title, desc, locked, adminTab){
   return '<button class="gate-card" data-role="'+role+'"'+(adminTab ? ' data-admin-tab="'+adminTab+'"' : '')+'>'+
     (locked ? '<div class="gate-lock-badge" title="管理者ログインが必要です">&#128274;</div>' : '')+
     '<div class="gate-icon" style="background:'+bg+';color:'+fg+';">'+icon+'</div>'+
-    '<div class="gate-card-title">'+esc(title)+'</div>'+
-    '<div class="gate-card-desc">'+esc(desc)+'</div>'+
+    '<div class="gate-text"><div class="gate-card-title">'+esc(title)+'</div>'+
+    '<div class="gate-card-desc">'+esc(desc)+'</div></div>'+
   '</button>';
 }
 function renderGate(){
   return ''+
   '<div class="gate">'+
-    '<div class="gate-eyebrow">Warehouse Dispatch Board</div>'+
-    '<h1 class="gate-title">LOGI LINK</h1>'+
-    '<p class="gate-sub">使う画面を選んでください。</p>'+
+    gateHeroHtml()+
     renderGateDataStatus()+
     '<div class="gate-section-title">現場</div>'+
     '<div class="gate-grid">'+
       '<button class="gate-card" data-role="input"'+readOnlyBlockedAttrs('input')+(isRoleBlockedForAccount('input')?' title="'+READONLY_BLOCKED_TITLE+'"':'')+'>'+
         '<div class="gate-icon" style="background:#FFFAEB;color:#4338CA;">&#9997;</div>'+
-        '<div class="gate-card-title">作業記録</div>'+
-        '<div class="gate-card-desc">'+(isRoleBlockedForAccount('input') ? '閲覧専用アカウントでは使えません' : '作業の開始・切り替え・終了')+'</div>'+
+        '<div class="gate-text"><div class="gate-card-title">作業記録</div>'+
+        '<div class="gate-card-desc">'+(isRoleBlockedForAccount('input') ? '閲覧専用アカウントでは使えません' : '作業の開始・切り替え・終了')+'</div></div>'+
       '</button>'+
       gateCard('report', '#EEF0FB', '#4C5FD5', '&#128202;', '集計', '日別・期間の実績', false)+
       gateCard('monitor', '#111827', '#F2A93B', '&#128225;', 'モニター', '稼働状況を大きく表示', false)+
@@ -13938,13 +13960,23 @@ function renderGate(){
       '<a class="gate-card" href="factory.html" style="text-decoration:none;color:inherit;">'+
         '<div class="gate-lock-badge" title="ログインが必要です">&#128274;</div>'+
         '<div class="gate-icon" style="background:#E7F7F5;color:#1D7A70;">&#9986;</div>'+
-        '<div class="gate-card-title">生産管理</div>'+
-        '<div class="gate-card-desc">不織布加工の製品・受注・生産計画・資材・生産実績・品質</div>'+
+        '<div class="gate-text"><div class="gate-card-title">生産管理</div>'+
+        '<div class="gate-card-desc">不織布加工の製品・受注・生産計画・資材・生産実績・品質</div></div>'+
       '</a>'+
     '</div>'+
     '<div class="gate-links"><button class="changelog-link" id="changelogOpenBtn">更新履歴を見る</button>'+
       '<a class="changelog-link" href="manual.pdf" target="_blank" rel="noopener" download="LOGI LINK 説明書.pdf">説明書(PDF)</a></div>'+
     renderGateAccountLine()+
+  '</div>';
+}
+/* トップの見出し: 時間に合わせたあいさつ・今日の日付・使う画面を選ぶ案内 */
+function gateHeroHtml(){
+  var d = new Date(), h = d.getHours(), WDJ = ['日','月','火','水','木','金','土'];
+  var hello = h<10 ? 'おはようございます' : (h<17 ? 'こんにちは' : 'おつかれさまです');
+  return '<div class="gate-hero">'+
+    '<div class="gate-brand"><span class="gate-brand-mark">L</span>LOGI LINK</div>'+
+    '<h1 class="gate-hello">'+hello+'</h1>'+
+    '<div class="gate-today">'+(d.getMonth()+1)+'月'+d.getDate()+'日('+WDJ[d.getDay()]+') ・ 使う画面を選んでください</div>'+
   '</div>';
 }
 /* トップ画面の最下部: この端末でログイン中のアカウントと、端末からのログアウト */

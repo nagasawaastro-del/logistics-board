@@ -1235,6 +1235,28 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,input[typ
   body.with-sidebar .topbar{order:0;}
 }
 @media print{ body.with-sidebar #app{padding-left:0 !important;} }
+
+/* ---------- 作業記録(タブレット)の見た目(2026-10-17) ---------- */
+.staff-avatar{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;color:#fff;font-weight:800;flex:none;box-shadow:inset 0 0 0 2px rgba(255,255,255,.35),0 4px 10px -4px rgba(16,24,40,.35);}
+.staff-avatar-lg{width:56px;height:56px;font-size:24px;}
+.staff-avatar-md{width:46px;height:46px;font-size:20px;}
+.name-grid{grid-template-columns:repeat(auto-fill,minmax(190px,1fr)) !important;gap:16px !important;}
+.name-tile{display:flex !important;flex-direction:column;align-items:center;gap:8px;padding:22px 14px 18px !important;border-radius:20px !important;border:1px solid var(--paper-line) !important;box-shadow:0 1px 3px rgba(16,24,40,.06);transition:transform .1s ease,box-shadow .15s ease,border-color .15s ease !important;}
+.name-tile:hover{box-shadow:0 10px 24px -10px rgba(16,24,40,.25);border-color:#C7D7FE !important;}
+.name-tile:active{transform:scale(.96);}
+.name-tile-name{font-size:21px;font-weight:700;color:var(--ink-900);}
+.name-tile-state{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;padding:4px 10px;border-radius:999px;}
+.name-tile-state.is-idle{background:#F2F4F7;color:#667085;}
+.name-tile-state.is-break{background:#FFFAEB;color:#B54708;}
+.name-tile-state.is-work{background:#EFF8FF;color:#175CD3;}
+.name-tile-state.is-work i{width:7px;height:7px;border-radius:50%;background:#2E90FA;animation:pulse 1.6s infinite;}
+.name-tile.has-instr{background:#fff !important;border-color:var(--amber-500) !important;box-shadow:0 0 0 3px rgba(79,70,229,.12),0 6px 16px -8px rgba(79,70,229,.35);}
+.name-tile-instr{margin-top:0 !important;color:#4338CA !important;background:#EEF2FF;padding:3px 8px;border-radius:8px;}
+.task-tile{border-radius:20px !important;transition:transform .1s ease,box-shadow .15s ease !important;}
+.task-tile:hover{box-shadow:0 10px 24px -12px rgba(16,24,40,.25);}
+.task-tile:active{transform:scale(.97);}
+.task-tile.active-task{box-shadow:0 0 0 3px rgba(46,144,250,.22),0 14px 30px -14px rgba(46,144,250,.55) !important;background:linear-gradient(180deg,#F5FAFF 0%,#fff 60%) !important;}
+.staff-header{position:sticky;top:var(--topbar-h,0px);z-index:12;background:rgba(255,255,255,.92) !important;backdrop-filter:saturate(1.4) blur(8px);-webkit-backdrop-filter:saturate(1.4) blur(8px);}
 </style>
 </head>
 <body>
@@ -17612,6 +17634,11 @@ function defaultAvatarColor(staffId){
   for(var i=0;i<staffId.length;i++) sum += staffId.charCodeAt(i);
   return TASK_COLORS[sum % TASK_COLORS.length].hex;
 }
+/* 名前の1文字目を丸に入れたアイコン(その人の色)。size: 'lg' = 名前の画面、'md' = 作業の画面の上 */
+function staffAvatarHtml(s, size){
+  var ch = String((s && s.name) || '?').trim().charAt(0) || '?';
+  return '<span class="staff-avatar staff-avatar-'+(size||'md')+'" style="background:'+avatarColorForStaff(s)+';">'+esc(ch)+'</span>';
+}
 function avatarColorForStaff(s){
   return (s && s.avatarColor) || defaultAvatarColor(s ? s.id : 'x');
 }
@@ -17779,9 +17806,16 @@ function renderInput(){
     var present = presentStaff();
     var instrByStaff = {};
     currentWorkInstructions().forEach(function(i){ instrByStaff[i.staffId] = i; });
+    var nowMs = Date.now();
     var tiles = present.map(function(s){
       var ins = instrByStaff[s.id];
-      return '<button class="name-tile'+(ins?' has-instr':'')+'" data-pick-staff="'+s.id+'">'+esc(s.name)+
+      // 今の状態: 作業中(作業名と経過分)・休憩中・待機中
+      var open = (state.day && state.day.logs || []).filter(function(l){ return l.staffId===s.id && l.end===null; })[0];
+      var st = !open ? '<span class="name-tile-state is-idle">待機中</span>'
+        : (open.taskId==='BREAK' ? '<span class="name-tile-state is-break">🍽 休憩中</span>'
+          : '<span class="name-tile-state is-work"><i></i>'+esc(taskById(open.taskId).name)+' '+Math.max(0, Math.floor((nowMs - new Date(open.start).getTime())/60000))+'分</span>');
+      return '<button class="name-tile'+(ins?' has-instr':'')+'" data-pick-staff="'+s.id+'">'+
+        staffAvatarHtml(s, 'lg')+'<span class="name-tile-name">'+esc(s.name)+'</span>'+st+
         (ins ? '<span class="name-tile-instr">📋 指示あり: '+esc(ins.taskName)+'</span>' : '')+'</button>';
     }).join('');
     return '<div class="input-wrap"><div class="name-grid-wrap">'+
@@ -17972,7 +18006,7 @@ function renderInput(){
 
   return '<div class="input-wrap">'+
     '<div class="staff-header">'+
-      '<div><div class="staff-header-name">'+esc(staff.name)+'</div><div class="staff-header-sub">作業をタップすると開始/切替します</div></div>'+
+      '<div style="display:flex;align-items:center;gap:14px;">'+staffAvatarHtml(staff, 'md')+'<div><div class="staff-header-name">'+esc(staff.name)+'</div><div class="staff-header-sub">作業をタップすると開始/切替します</div></div></div>'+
       '<button class="back-link" id="backToNames">戻る</button>'+
     '</div>'+
     '<div class="task-tile-wrap">'+workInstructionBanner+breakBanner+suggestBanner+body+otherTasksHtml+'</div>'+

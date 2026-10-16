@@ -851,6 +851,7 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .sk-pick tbody tr:nth-child(even) td{background:rgba(15,23,42,.035);}
 .sk-pick td{vertical-align:middle;}
 .sk-pick .sk-no{color:var(--slate-500);font-size:11px;text-align:right;width:1%;}
+.sk-pick .sk-no-in{display:inline-flex;align-items:center;white-space:nowrap;}
 .sk-pick .sk-key{font-weight:700;font-size:15px;}
 .sk-pick .sk-minor{color:var(--slate-500);font-size:12px;}
 .sk-pick .sk-name{font-size:11px;color:var(--slate-500);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;}
@@ -9373,7 +9374,7 @@ function renderShukeiSheet(siteKey, site, data, draft){
     .concat(zonesShown.map(function(z, zi){ return [z, 'zone:'+z, 'sk-zone'+(zi===0 ? ' sk-grp' : '')]; })).concat([['弥生','yayoi','num sk-minor sk-grp'],['ロジ','logi','num sk-minor'],['才数','cubic','num sk-minor']]).concat([['備考','note','sk-note']]);
   var sheetSort = state.shukeiSheetSort;
   var head = '<tr><th class="sk-no">No</th>'+cols.map(function(c){ return '<th class="shukei-sortable '+c[2]+'" data-shukei-colsort="'+esc(c[1])+'" title="押すと「'+esc(c[0])+'」で並び替え">'+esc(c[0])+shukeiSortMark(sheetSort, c[1])+'</th>'; }).join('')+
-    '<th class="print-only-cell sk-check">✓</th><th class="no-print"></th></tr>';
+    '<th class="print-only-cell sk-check">✓</th></tr>';
   function inp(i, field, v, w){
     return '<input type="'+(field==='qty'?'number':'text')+'" class="shukei-in" data-shukei-row="'+i+'" data-shukei-field="'+field+'" value="'+esc(v===undefined||v===null?'':v)+'" style="width:'+w+'px;">';
   }
@@ -9382,7 +9383,8 @@ function renderShukeiSheet(siteKey, site, data, draft){
     var v = views[i];
     var unknown = v.code && !v.name && !v.packQty;
     if(v.code){ tot.n++; tot.qty += shukeiNum(r.qty); tot.cases += v.cases||0; tot.fraction += v.fraction||0; }
-    var cells = '<td class="sk-no">'+(i+1)+'</td>'+
+    // 行の削除(×)は左端の No の列に置く(備考などで表が横に長くなっても、横に動かさずに押せるように)
+    var cells = '<td class="sk-no"><span class="sk-no-in"><button type="button" class="icon-x no-print" data-shukei-del="'+i+'" title="この行を削除" style="margin-right:4px;">&times;</button>'+(i+1)+'</span></td>'+
       '<td>'+inp(i,'vc',r.vc,56)+'<span class="print-only">'+esc(r.vc||'')+'</span></td>'+
       '<td class="sk-item">'+inp(i,'code',r.code,90)+'<span class="print-only sk-code">'+esc(r.code||'')+'</span>'+
         (v.name ? '<div class="sk-name" title="'+esc(v.name)+'">'+esc(v.name)+'</div>' : '')+
@@ -9398,15 +9400,14 @@ function renderShukeiSheet(siteKey, site, data, draft){
       '<td class="sk-note"><span class="sk-note-edit">'+inp(i,'note',r.note,110)+
         (i<draft.rows.length-1 ? '<button type="button" class="shukei-filldown no-print" data-shukei-filldown="'+i+'" title="この備考を下の行すべてにコピー">↓</button>' : '')+
         '</span><span class="print-only">'+esc(r.note||'')+'</span></td>'+
-      '<td class="print-only-cell sk-check">□</td>'+
-      '<td class="no-print"><button type="button" class="icon-x" data-shukei-del="'+i+'" title="この行を削除">&times;</button></td>';
+      '<td class="print-only-cell sk-check">□</td>';
     return '<tr>'+cells+'</tr>';
-  }).join('') || '<tr><td colspan="'+(cols.length+3)+'" class="empty-note">「行を追加」か「まとめて貼り付け」で入力してください。</td></tr>';
+  }).join('') || '<tr><td colspan="'+(cols.length+2)+'" class="empty-note">「行を追加」か「まとめて貼り付け」で入力してください。</td></tr>';
   // 合計行(数量・ケース・端数)。tfoot は印刷でページごとに繰り返されるため、表の最後の行にする
   var foot = tot.n ? '<tbody><tr class="sk-total"><td></td><td></td><td>合計 '+formatNum(tot.n)+'品目</td>'+
     '<td class="num sk-key">'+formatNum(tot.qty)+'</td><td class="num sk-key">'+formatNum(tot.cases)+'</td>'+
     (site.showFraction ? '<td class="num sk-key">'+formatNum(tot.fraction)+'</td>' : '')+
-    '<td colspan="'+(zonesShown.length+5)+'"></td><td class="print-only-cell"></td><td class="no-print"></td></tr></tbody>' : '';
+    '<td colspan="'+(zonesShown.length+5)+'"></td><td class="print-only-cell"></td></tr></tbody>' : '';
   var oldLogi = data.logizard && data.logizard.products && Object.keys(data.logizard.products).slice(0,50).some(function(c){
     var bl = data.logizard.products[c].blocks; return Object.keys(bl).some(function(k){ return !bl[k].locQty || !bl[k].locAlloc; });
   });
@@ -14172,7 +14173,8 @@ function renderKintoneSyncPanel(){
       '<td>'+(more||'')+'<button type="button" class="vc-manage-toggle-btn" id="'+btnId+'"'+(busy?' disabled':'')+'>'+(busy===btnId ? '取得中…' : 'kintoneから取得')+'</button></td></tr>';
   }
   return '<div class="panel" style="margin-top:14px;">'+
-    '<div class="panel-title">kintoneの同期</div>'+
+    '<div class="panel-title" style="display:flex;align-items:center;gap:8px;">kintoneの同期'+
+      '<button type="button" class="add-btn" id="kSyncAll"'+(busy?' disabled':'')+' style="margin-left:auto;font-size:13px;">'+(busy==='kSyncAll' ? '取得中…' : '🔄 全部まとめて取得')+'</button></div>'+
     (state.kSyncMsg ? '<div class="vc-import-status" style="white-space:pre-line;">'+esc(state.kSyncMsg)+'</div>' : '')+
     '<table class="report-table"><thead><tr><th>データ</th><th>最終同期</th><th></th></tr></thead><tbody>'+
       row('商品台帳(入数・才数)', ps && ps.fetchedAt, ps ? formatNum(ps.savedCount||0)+'件' : '', 'kSyncProduct')+
@@ -14194,37 +14196,52 @@ function bindKintoneSyncPanel(){
     try{ state.kSyncMsg = await fn(); }catch(e){ state.kSyncMsg = '⚠️ 取得できませんでした'; }
     state.kSyncBusy = ''; state.gateDataStatus = null; render();
   }
-  var ko = document.getElementById('kSyncOutlook');
-  if(ko) ko.addEventListener('click', function(){ run('kSyncOutlook', async function(){ return (await runStockOutlookSync()).msg; }); });
-  var p = document.getElementById('kSyncProduct');
-  if(p) p.addEventListener('click', function(){ run('kSyncProduct', async function(){
-    var st = state.kintoneProductSettings || await loadKintoneProductSettings();
-    if(!st || !st.kintoneAppId) return '⚠️ 商品台帳のkintoneアプリIDが未設定です(設定 → システム)。';
-    var r = await syncProductMasterFromKintone(st);
-    if(!r.ok) return '⚠️ 商品台帳: '+r.error;
-    state.kintoneSyncStatus = r.status;
-    await appendAuditLog({ action:'kintone商品マスタ同期', target:'product_master', before:null, after: '取得'+r.status.fetchedCount+'件・保存'+r.status.savedCount+'件' });
-    return '✅ 商品台帳を取得しました('+formatNum(r.status.savedCount)+'件)';
-  }); });
-  var w = document.getElementById('kSyncPrice');
-  if(w) w.addEventListener('click', function(){ run('kSyncPrice', async function(){
-    var r = await syncWorkPriceMasterFromKintone();
-    if(!r.ok) return '⚠️ 作業単価: '+r.error;
-    await appendAuditLog({ action:'kintone作業単価マスタ同期', target:'work_price_master', before:null, after: '取得'+r.result.fetchedCount+'件・保存'+r.result.savedCount+'件・削除'+r.result.deletedCount+'件' });
-    state.workPriceMaster = await fetchWorkPriceMaster();
-    state.financialPriceModel = null; // 収支は次に開いたときに読み直す
-    return '✅ 作業単価を取得しました('+formatNum(r.result.savedCount)+'件)';
-  }); });
-  var rp = document.getElementById('kSyncReport');
-  if(rp) rp.addEventListener('click', function(){ run('kSyncReport', async function(){
-    var f = state.workReportForm;
-    if(!f.from || !f.to || f.from>f.to) return '⚠️ 作業日報の期間を正しく選んでください';
-    var r = await syncWorkReportFromKintone(f.from, f.to);
-    if(!r.ok) return '⚠️ 作業日報: '+r.error;
-    state.workReportStatus = r.result;
-    state.financialPriceModel = null;
-    await appendAuditLog({ action:'kintoneから作業日報を取得', target: f.from+'〜'+f.to, before:null, after: r.result.rowCount+'行' });
-    return '✅ 作業日報を取得しました('+esc(f.from)+'〜'+esc(f.to)+'・'+formatNum(r.result.rowCount)+'行)';
+  // 1つずつの取得(ボタンごと・まとめて取得で同じ処理を使う)。戻り値はメッセージ
+  var jobs = {
+    kSyncProduct: async function(){
+      var st = state.kintoneProductSettings || await loadKintoneProductSettings();
+      if(!st || !st.kintoneAppId) return '⚠️ 商品台帳のkintoneアプリIDが未設定です(設定 → システム)。';
+      var r = await syncProductMasterFromKintone(st);
+      if(!r.ok) return '⚠️ 商品台帳: '+r.error;
+      state.kintoneSyncStatus = r.status;
+      await appendAuditLog({ action:'kintone商品マスタ同期', target:'product_master', before:null, after: '取得'+r.status.fetchedCount+'件・保存'+r.status.savedCount+'件' });
+      return '✅ 商品台帳を取得しました('+formatNum(r.status.savedCount)+'件)';
+    },
+    kSyncPrice: async function(){
+      var r = await syncWorkPriceMasterFromKintone();
+      if(!r.ok) return '⚠️ 作業単価: '+r.error;
+      await appendAuditLog({ action:'kintone作業単価マスタ同期', target:'work_price_master', before:null, after: '取得'+r.result.fetchedCount+'件・保存'+r.result.savedCount+'件・削除'+r.result.deletedCount+'件' });
+      state.workPriceMaster = await fetchWorkPriceMaster();
+      state.financialPriceModel = null; // 収支は次に開いたときに読み直す
+      return '✅ 作業単価を取得しました('+formatNum(r.result.savedCount)+'件)';
+    },
+    kSyncReport: async function(){
+      var f = state.workReportForm;
+      if(!f.from || !f.to || f.from>f.to) return '⚠️ 作業日報の期間を正しく選んでください';
+      var r = await syncWorkReportFromKintone(f.from, f.to);
+      if(!r.ok) return '⚠️ 作業日報: '+r.error;
+      state.workReportStatus = r.result;
+      state.financialPriceModel = null;
+      await appendAuditLog({ action:'kintoneから作業日報を取得', target: f.from+'〜'+f.to, before:null, after: r.result.rowCount+'行' });
+      return '✅ 作業日報を取得しました('+esc(f.from)+'〜'+esc(f.to)+'・'+formatNum(r.result.rowCount)+'行)';
+    },
+    kSyncOutlook: async function(){ return (await runStockOutlookSync()).msg; }
+  };
+  Object.keys(jobs).forEach(function(id){
+    var el = document.getElementById(id);
+    if(el) el.addEventListener('click', function(){ run(id, jobs[id]); });
+  });
+  // 全部まとめて: 商品台帳 → 作業単価 → 作業日報 → 見積もり・入荷予定 の順に1つずつ(どれかが失敗しても残りは続ける)
+  var all = document.getElementById('kSyncAll');
+  if(all) all.addEventListener('click', function(){ run('kSyncAll', async function(){
+    var order = [['kSyncProduct','商品台帳'],['kSyncPrice','作業単価'],['kSyncReport','作業日報'],['kSyncOutlook','見積もり・入荷予定']], msgs = [];
+    for(var i=0;i<order.length;i++){
+      state.kSyncMsg = '取得中… '+order[i][1]+'('+(i+1)+'/'+order.length+')'+(msgs.length ? '\n'+msgs.join('\n') : ''); render();
+      var m;
+      try{ m = await jobs[order[i][0]](); }catch(e){ m = '⚠️ '+order[i][1]+': 取得できませんでした'; }
+      msgs.push(m);
+    }
+    return msgs.join('\n');
   }); });
 }
 function bindAdminHub(){

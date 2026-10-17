@@ -1611,6 +1611,84 @@ function ProductTab({ data, addProduct, updateProduct, removeProduct, packSet, i
 /* ------------------------------------------------------------------ */
 /* 受注タブ                                                             */
 /* ------------------------------------------------------------------ */
+/* kintone の発注履歴(アプリ 949)から受注を取り込む。
+   LOGI LINK の「見積もり・入荷予定」の取り込み(kv: stock-outlook の入荷予定 = 仕入番号の無い、まだ入っていない発注)のうち、
+   仕入先が「ユニリンク」で、商品コードが商品マスタにある明細。同じ発注番号・商品コードの受注は二重に入れない(kintoneKey)。
+   受注番号 = 発注番号、納期 = 納入期日(遅れている物は元の納入期日)、受注数量 = 発注の数量、得意先 = 商品マスタの主な得意先(無ければ「発注(kintone)」)、
+   備考 = 発注の備考 */
+const KINTONE_PO_SUPPLIER_RE = /ユニリンク/;
+async function loadKintonePoLines() {
+  const r = await supabaseClient.from('kv_store').select('value').eq('key', 'stock-outlook').maybeSingle();
+  if (r.error) return { error: '発注履歴を読めませんでした' };
+  if (!r.data) return { error: 'まだ取り込まれていません(LOGI LINK の 管理 → データ取込 → kintoneの同期 で「見積もり・入荷予定」を取り込んでください)' };
+  let v = r.data.value; try { if (typeof v === 'string') v = JSON.parse(v); } catch (e) { return { error: '発注履歴を読めませんでした' }; }
+  return { lines: (v.arrivals || []).filter((x) => KINTONE_PO_SUPPLIER_RE.test(x.party || '')), syncedAt: v.syncedAt || '' };
+}
+function KintonePoImport({ data, addSalesOrder }) {
+  const [st, setSt] = useState(null); // { loading, error, rows, syncedAt, picked:{key:true}, msg }
+  const productByCode = useMemo(() => { const m = {}; data.products.forEach((p) => { if (p.productCode) m[String(p.productCode).trim()] = p; }); return m; }, [data.products]);
+  const have = useMemo(() => { const m = {}; data.salesOrders.forEach((so) => { if (so.kintoneKey) m[so.kintoneKey] = true; }); return m; }, [data.salesOrders]);
+  const open = async () => {
+    setSt({ loading: true });
+    const r = await loadKintonePoLines();
+    if (r.error) { setSt({ error: r.error }); return; }
+    const rows = [], noMaster = {};
+    r.lines.forEach((x) => {
+      const p = productByCode[String(x.code || '').trim()];
+      if (!p) { noMaster[x.code] = true; return; }
+      const key = x.no + '|' + x.code;
+      rows.push({ key, x, p, already: !!have[key] });
+    });
+    rows.sort((a, b) => String(a.x.late || a.x.date).localeCompare(String(b.x.late || b.x.date)) || String(a.x.no).localeCompare(String(b.x.no)));
+    const picked = {}; rows.forEach((r2) => { if (!r2.already) picked[r2.key] = true; });
+    setSt({ rows, picked, syncedAt: r.syncedAt, noMaster: Object.keys(noMaster) });
+  };
+  const doImport = () => {
+    const list = st.rows.filter((r2) => st.picked[r2.key] && !r2.already);
+    if (!list.length) return;
+    list.forEach(({ key, x, p }) => addSalesOrder({
+      orderNo: x.no, productId: p.id, productName: p.productName, customerName: p.defaultCustomer || '発注(kintone)',
+      orderedQty: Number(x.qty) || 0, orderDate: todayStr(), dueDate: x.late || x.date, note: x.note || '', kintoneKey: key, source: 'kintone',
+    }));
+    setSt({ msg: list.length + '件を受注に追加しました。' });
+  };
+  const btn = <PrimaryButton onClick={open}><FileText size={14} /> kintone の発注履歴から取り込む</PrimaryButton>;
+  if (!st) return <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>{btn}<span style={{ fontSize: 12, color: C.textFaint }}>仕入先がユニリンクで、商品マスタに商品コードがある発注(まだ入っていない物)を受注にします</span></div>;
+  if (st.loading) return <div style={{ fontSize: 13, color: C.textDim }}>発注履歴を読み込んでいます…</div>;
+  if (st.error || st.msg) return <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>{btn}<span style={{ fontSize: 13, color: st.error ? C.red : C.green }}>{st.error || st.msg}</span></div>;
+  const n = st.rows.filter((r2) => st.picked[r2.key] && !r2.already).length;
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 8 }}>
+        kintone 発注履歴 {st.syncedAt ? new Date(st.syncedAt).toLocaleString('ja-JP') : ''}取込(LOGI LINK のデータ取込)・ 仕入先 ユニリンク・まだ入っていない発注 {st.rows.length}行
+        {st.noMaster.length ? ` ・ 商品マスタに無い商品コード ${st.noMaster.length}件(${st.noMaster.slice(0, 6).join('・')}${st.noMaster.length > 6 ? '…' : ''})は出していません` : ''}
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 720, marginBottom: 10 }}>
+        <thead><tr style={{ textAlign: 'left', color: C.textDim, borderBottom: `1px solid ${C.border}` }}>
+          {['', '発注番号', '商品コード', '製品名', '数量', '納入期日', '備考'].map((h) => <th key={h} style={{ padding: '6px 8px', fontWeight: 500 }}>{h}</th>)}
+        </tr></thead>
+        <tbody>
+          {st.rows.map((r2) => (
+            <tr key={r2.key} style={{ borderBottom: `1px solid ${C.border}`, opacity: r2.already ? 0.5 : 1 }}>
+              <td style={{ padding: '6px 8px' }}>{r2.already ? <span style={{ fontSize: 11 }}>取込済</span> : <input type="checkbox" checked={!!st.picked[r2.key]} onChange={(e) => setSt({ ...st, picked: { ...st.picked, [r2.key]: e.target.checked } })} />}</td>
+              <td className="fm-mono" style={{ padding: '6px 8px' }}>{r2.x.no}</td>
+              <td className="fm-mono" style={{ padding: '6px 8px' }}>{r2.x.code}</td>
+              <td style={{ padding: '6px 8px' }}>{r2.p.productName}</td>
+              <td className="fm-mono" style={{ padding: '6px 8px', textAlign: 'right' }}>{fmt(r2.x.qty)}</td>
+              <td className="fm-mono" style={{ padding: '6px 8px', color: r2.x.late ? C.red : undefined }}>{r2.x.late || r2.x.date}{r2.x.late ? '(遅れ)' : ''}</td>
+              <td style={{ padding: '6px 8px', fontSize: 12, color: C.textDim }}>{r2.x.note || ''}</td>
+            </tr>
+          ))}
+          {!st.rows.length && <tr><td colSpan={7} style={{ padding: 10, color: C.textFaint }}>取り込める発注はありません</td></tr>}
+        </tbody>
+      </table>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <PrimaryButton onClick={doImport} style={n ? undefined : { opacity: 0.5, pointerEvents: 'none' }}><Plus size={14} /> 選んだ {n}件を受注に追加</PrimaryButton>
+        <PrimaryButton onClick={() => setSt(null)} style={{ background: C.panelAlt2, color: C.text }}>閉じる</PrimaryButton>
+      </div>
+    </div>
+  );
+}
 function SalesOrderTab({ data, addSalesOrder, updateSalesOrder, removeSalesOrder, salesOrderStats, productById, isEditor }) {
   const blankForm = { orderNo: '', productId: '', customerName: '', productName: '', orderedQty: '', orderDate: todayStr(), dueDate: '' };
   const [form, setForm] = useState(blankForm);
@@ -1667,6 +1745,12 @@ function SalesOrderTab({ data, addSalesOrder, updateSalesOrder, removeSalesOrder
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {isEditor && (
+        <Panel style={{ padding: 16 }}>
+          <div className="fm-display" style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>kintone の発注履歴から取り込む</div>
+          <KintonePoImport data={data} addSalesOrder={addSalesOrder} />
+        </Panel>
+      )}
       {isEditor ? (
         <Panel style={{ padding: 16, border: editingId ? `1px solid ${C.teal}` : undefined }}>
           <div className="fm-display" style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{editingId ? '受注を編集' : '受注を入力'}</div>
@@ -1743,7 +1827,7 @@ function SalesOrderTab({ data, addSalesOrder, updateSalesOrder, removeSalesOrder
                   <td className="fm-mono" style={{ padding: '8px' }}>{so.orderNo}</td>
                   <td style={{ padding: '8px' }}>{so.customerName}</td>
                   <td className="fm-mono" style={{ padding: '8px', fontSize: 12, color: C.textDim }}>{soProduct?.productCode || '—'}</td>
-                  <td style={{ padding: '8px' }}>{so.productName}</td>
+                  <td style={{ padding: '8px' }}>{so.productName}{(so.note || so.source === 'kintone') && <div style={{ fontSize: 11, color: C.textFaint }}>{so.source === 'kintone' ? 'kintone 発注履歴' : ''}{so.note ? (so.source === 'kintone' ? ' ・ ' : '') + so.note : ''}</div>}</td>
                   <td className="fm-mono" style={{ padding: '8px' }}>{fmt(so.orderedQty)}{unitLabel2}</td>
                   <td style={{ padding: '8px', minWidth: 170 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

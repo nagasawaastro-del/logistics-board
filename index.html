@@ -13970,8 +13970,11 @@ function renderGate(){
         '<div class="gate-text"><div class="gate-card-title">作業記録</div>'+
         '<div class="gate-card-desc">'+(isRoleBlockedForAccount('input') ? '閲覧専用アカウントでは使えません' : '作業の開始・切り替え・終了')+'</div></div>'+
       '</button>'+
-      gateCard('report', '#EEF0FB', '#4C5FD5', '&#128202;', '集計', '日別・期間の実績', false)+
       gateCard('monitor', '#111827', '#F2A93B', '&#128225;', 'モニター', '稼働状況を大きく表示', false)+
+    '</div>'+
+    '<div class="gate-section-title">事務・リーダー</div>'+
+    '<div class="gate-grid">'+
+      gateCard('report', '#EEF0FB', '#4C5FD5', '&#128202;', '集計', '日別・期間の実績', false)+
       gateCard('calendar', '#EFF8FF', '#175CD3', '&#128197;', 'カレンダー', isReadOnlyAccount() ? '作業・出勤予定を見る' : '作業・出勤予定を見る・直す', false)+
       gateCard('shukei', '#ECFDF3', '#027A48', '&#129534;', '集計表', '高屋・丹南のピッキングリストと在庫差異', false)+
       gateCard('vcAlloc', '#FFF4ED', '#C4320A', '&#128230;', 'VC引当', 'VCの出荷指示から倉庫と振り分け番号を決める', false)+

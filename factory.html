@@ -656,6 +656,8 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState('idle'); // idle | saving | saved | error
   const [tab, setTab] = useState('dashboard');
+  const [planPrefill, setPlanPrefill] = useState(null); // 「計画を作る」で選んだ受注({ salesOrderId, at })
+  const makePlanFor = (salesOrderId) => { setPlanPrefill({ salesOrderId, at: Date.now() }); setTab('plan'); window.scrollTo(0, 0); };
   const [session, setSession] = useState(null);
   const [role, setRole] = useState(undefined); // undefined = 確認中、null = 役割なし
   const canView = role === 'admin' || role === 'manager' || role === 'factory';
@@ -1081,16 +1083,16 @@ function App() {
       </div>
 
       {tab === 'dashboard' && (
-        <DashboardTab data={data} lineById={lineById} orderById={orderById} lotById={lotById} orderStats={orderStats} salesOrderById={salesOrderById} salesOrderStats={salesOrderStats} productById={productById} />
+        <DashboardTab data={data} lineById={lineById} orderById={orderById} lotById={lotById} orderStats={orderStats} salesOrderById={salesOrderById} salesOrderStats={salesOrderStats} productById={productById} makePlanFor={isEditor ? makePlanFor : null} />
       )}
       {tab === 'products' && (
         <ProductTab data={data} addProduct={addProduct} updateProduct={updateProduct} removeProduct={removeProduct} packSet={packSet} isEditor={isEditor} />
       )}
       {tab === 'salesorders' && (
-        <SalesOrderTab data={data} addSalesOrder={addSalesOrder} updateSalesOrder={updateSalesOrder} removeSalesOrder={removeSalesOrder} salesOrderStats={salesOrderStats} productById={productById} isEditor={isEditor} />
+        <SalesOrderTab data={data} addSalesOrder={addSalesOrder} updateSalesOrder={updateSalesOrder} removeSalesOrder={removeSalesOrder} salesOrderStats={salesOrderStats} productById={productById} isEditor={isEditor} makePlanFor={makePlanFor} />
       )}
       {tab === 'plan' && (
-        <PlanTab data={data} orderStats={orderStats} salesOrderStats={salesOrderStats} addOrder={addOrder} updateOrder={updateOrder} removeOrder={removeOrder} lineById={lineById} lotById={lotById} addLine={addLine} removeLine={removeLine} salesOrderById={salesOrderById} productById={productById} isEditor={isEditor} />
+        <PlanTab data={data} orderStats={orderStats} salesOrderStats={salesOrderStats} addOrder={addOrder} updateOrder={updateOrder} removeOrder={removeOrder} lineById={lineById} lotById={lotById} addLine={addLine} removeLine={removeLine} salesOrderById={salesOrderById} productById={productById} isEditor={isEditor} planPrefill={planPrefill} clearPlanPrefill={() => setPlanPrefill(null)} />
       )}
       {tab === 'inventory' && (
         <InventoryTab data={data} addLot={addLot} updateLot={updateLot} removeLot={removeLot} addMaterialTransaction={addMaterialTransaction} removeMaterialTransaction={removeMaterialTransaction} isEditor={isEditor} />
@@ -1119,7 +1121,7 @@ function App() {
 /* ------------------------------------------------------------------ */
 /* ダッシュボード                                                       */
 /* ------------------------------------------------------------------ */
-function DashboardTab({ data, lineById, orderById, lotById, orderStats, salesOrderById, salesOrderStats, productById }) {
+function DashboardTab({ data, lineById, orderById, lotById, orderStats, salesOrderById, salesOrderStats, productById, makePlanFor }) {
   const [date, setDate] = useState(todayStr());
   const todays = data.records.filter((r) => r.date === date);
 
@@ -1210,6 +1212,7 @@ function DashboardTab({ data, lineById, orderById, lotById, orderStats, salesOrd
                       <span style={{ fontWeight: 600 }}>{so.orderNo}</span>
                       <span style={{ color: C.textDim }}>{so.customerName} / {so.productName}</span>
                       <span className="fm-mono" style={{ marginLeft: 'auto', fontSize: 11, color: C.textFaint }}>納期 {so.dueDate}</span>
+                      {makePlanFor && <button type="button" onClick={() => makePlanFor(so.id)} style={{ fontSize: 12, padding: '3px 10px', borderRadius: 8, border: `1px solid ${C.teal}`, background: 'transparent', color: C.teal, cursor: 'pointer' }}>計画を作る</button>}
                     </div>
                   ))}
                 </div>
@@ -1689,7 +1692,7 @@ function KintonePoImport({ data, addSalesOrder }) {
     </div>
   );
 }
-function SalesOrderTab({ data, addSalesOrder, updateSalesOrder, removeSalesOrder, salesOrderStats, productById, isEditor }) {
+function SalesOrderTab({ data, addSalesOrder, updateSalesOrder, removeSalesOrder, salesOrderStats, productById, isEditor, makePlanFor }) {
   const blankForm = { orderNo: '', productId: '', customerName: '', productName: '', orderedQty: '', orderDate: todayStr(), dueDate: '' };
   const [form, setForm] = useState(blankForm);
   const [editingId, setEditingId] = useState(null);
@@ -1834,7 +1837,7 @@ function SalesOrderTab({ data, addSalesOrder, updateSalesOrder, removeSalesOrder
                       <div style={{ flex: 1 }}><ProgressBar ratio={ratio} color={status === '完了' ? C.green : C.teal} /></div>
                       <span className="fm-mono" style={{ fontSize: 11, color: C.textDim, whiteSpace: 'nowrap' }}>{fmt(progressQty)}/{fmt(so.orderedQty)}{unitLabel2}</span>
                     </div>
-                    {linkedPlans.length === 0 && <div style={{ fontSize: 11, color: C.amber, marginTop: 4 }}>⚠ 生産計画が未作成です</div>}
+                    {linkedPlans.length === 0 && <div style={{ fontSize: 11, color: C.amber, marginTop: 4 }}>⚠ 生産計画が未作成です{isEditor && makePlanFor && <button type="button" onClick={() => makePlanFor(so.id)} style={{ fontSize: 11, marginLeft: 6, padding: '1px 8px', borderRadius: 6, border: `1px solid ${C.teal}`, background: 'transparent', color: C.teal, cursor: 'pointer' }}>計画を作る</button>}</div>}
                   </td>
                   <td className="fm-mono" style={{ padding: '8px' }}>{so.dueDate}</td>
                   <td style={{ padding: '8px' }}>
@@ -1917,11 +1920,48 @@ function printProgress(t) {
   if (!w) { alert('印刷の画面を開けませんでした(ポップアップを許可してください)'); return; }
   w.document.open(); w.document.write(html); w.document.close();
 }
-function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, removeOrder, lineById, lotById, addLine, removeLine, salesOrderById, productById, isEditor }) {
-  const blankForm = { planNo: '', salesOrderId: '', productId: '', productName: '', lineId: data.lines[0]?.id || '', lotId: '', targetQty: '', startDate: todayStr(), dueDate: '' };
+/* 次の計画番号: 今ある計画番号(MO-0001 など)の数字のいちばん大きい物 + 1。形が無ければ MO-0001 から */
+function nextPlanNo(orders) {
+  let max = 0, prefix = 'MO-', width = 4;
+  (orders || []).forEach((o) => {
+    const m = String(o.planNo || '').match(/^(.*?)(\d+)$/);
+    if (m && Number(m[2]) >= max) { max = Number(m[2]); prefix = m[1]; width = m[2].length; }
+  });
+  return prefix + String(max + 1).padStart(width, '0');
+}
+const PLAN_HOURS_PER_DAY = 8; // 開始日の提案に使う、1日に作れる時間
+/* 祝日(LOGI LINK と同じ共有の祝日データ kv: jp-holidays。{ data: { 'YYYY-MM-DD': '名前' } })。1回だけ読む */
+let jpHolidays = null;
+async function loadJpHolidaysOnce() {
+  if (jpHolidays) return jpHolidays;
+  try {
+    const r = await supabaseClient.from('kv_store').select('value').eq('key', 'jp-holidays').maybeSingle();
+    const v = r.data && r.data.value ? (typeof r.data.value === 'string' ? JSON.parse(r.data.value) : r.data.value) : null;
+    jpHolidays = (v && v.data) || {};
+  } catch (e) { jpHolidays = {}; }
+  return jpHolidays;
+}
+/* 開始日の提案: 納期から、目標数量 ÷ 生産速度(1日 PLAN_HOURS_PER_DAY 時間・土日と祝日を除く)の日数だけ前。今日より前なら今日 */
+function suggestPlanStart(dueDate, targetQty, speedPerHour) {
+  const q = Number(targetQty) || 0, sp = Number(speedPerHour) || 0;
+  if (!dueDate || !(sp > 0) || !(q > 0)) return null;
+  const hours = q / sp, days = Math.max(1, Math.ceil(hours / PLAN_HOURS_PER_DAY));
+  const d = new Date(dueDate + 'T00:00:00'); let left = days - 1;
+  const key = (x) => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+  const off = (x) => { const w = x.getDay(); return w === 0 || w === 6 || !!(jpHolidays && jpHolidays[key(x)]); }; // 土日・祝日
+  while (off(d)) d.setDate(d.getDate() - 1); // 納期が休みの日なら、その前の作る日から数える
+  while (left > 0) { d.setDate(d.getDate() - 1); if (!off(d)) left--; }
+  const ds = key(d);
+  const today = todayStr();
+  return { start: ds < today ? today : ds, hours, days, late: ds < today };
+}
+function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, removeOrder, lineById, lotById, addLine, removeLine, salesOrderById, productById, isEditor, planPrefill, clearPlanPrefill }) {
+  const blankForm = { planNo: nextPlanNo(data.orders), salesOrderId: '', productId: '', productName: '', lineId: data.lines[0]?.id || '', lotId: '', targetQty: '', startDate: todayStr(), dueDate: '' };
   const [form, setForm] = useState(blankForm);
   const [editingId, setEditingId] = useState(null);
   const [newLine, setNewLine] = useState('');
+  const [, setHolidaysReady] = useState(!!jpHolidays);
+  useEffect(() => { if (!jpHolidays) loadJpHolidaysOnce().then(() => setHolidaysReady(true)); }, []); // 祝日を読んだら提案を出し直す
   const [err, setErr] = useState('');
 
   const startEdit = (o) => {
@@ -1950,7 +1990,7 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
     } else {
       addOrder({ ...form, targetQty: Number(form.targetQty) });
     }
-    setForm(blankForm);
+    setForm({ ...blankForm, planNo: nextPlanNo([...data.orders, { planNo: form.planNo }]) });
   };
 
   const onPickSalesOrder = (soId) => {
@@ -1971,6 +2011,8 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
         targetQty = num(soProduct.piecesPerSet) * num(so.orderedQty);
       }
     }
+    const tp = targetProductId ? productById(targetProductId) : null;
+    const sg = suggestPlanStart(so.dueDate, targetQty, tp && tp.speedPerHour);
     setForm((f) => ({
       ...f,
       salesOrderId: soId,
@@ -1978,8 +2020,17 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
       productName: targetProductName || f.productName,
       targetQty: targetQty ? String(targetQty) : f.targetQty,
       dueDate: so.dueDate || f.dueDate,
+      startDate: sg ? sg.start : f.startDate,
     }));
   };
+  // ダッシュボード・受注の「計画を作る」から来たとき: その受注を選んだ状態にする
+  useEffect(() => {
+    if (!planPrefill || !planPrefill.salesOrderId) return;
+    setEditingId(null); setErr('');
+    setForm({ ...blankForm });
+    onPickSalesOrder(planPrefill.salesOrderId);
+    if (clearPlanPrefill) clearPlanPrefill();
+  }, [planPrefill && planPrefill.at]);
 
   const onPickProduct = (productId) => {
     const p = productById(productId);
@@ -2030,7 +2081,16 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
             <Field label="紐づく受注(任意)">
               <select className="fm-input" value={form.salesOrderId} onChange={(e) => onPickSalesOrder(e.target.value)}>
                 <option value="">受注と紐づけない</option>
-                {data.salesOrders.map((so) => <option key={so.id} value={so.id}>{so.orderNo} - {so.customerName} / {so.productName}</option>)}
+                {(() => {
+                  const planned = (so) => data.orders.some((o) => o.salesOrderId === so.id);
+                  const byDue = (a, b) => String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999'));
+                  const un = data.salesOrders.filter((so) => !planned(so)).sort(byDue), done = data.salesOrders.filter(planned).sort(byDue);
+                  const opt = (so, tag) => <option key={so.id} value={so.id}>{tag}{so.orderNo} - {so.productName} ・ 納期 {so.dueDate || '—'} ・ {fmt(so.orderedQty)} / {so.customerName}</option>;
+                  return [
+                    un.length ? <optgroup key="un" label={'未計画の受注(' + un.length + '件・納期の早い順)'}>{un.map((so) => opt(so, ''))}</optgroup> : null,
+                    done.length ? <optgroup key="done" label={'計画のある受注(' + done.length + '件)'}>{done.map((so) => opt(so, '済 '))}</optgroup> : null,
+                  ];
+                })()}
               </select>
             </Field>
             <Field label="計画番号"><input className="fm-input" value={form.planNo} onChange={(e) => setForm({ ...form, planNo: e.target.value })} placeholder="MO-0004" /></Field>
@@ -2068,7 +2128,10 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
             <Field label={selectedProduct?.isSet ? '目標数量(セット)' : '目標数量(枚)'}>
               <input type="number" className="fm-input" value={form.targetQty} onChange={(e) => setForm({ ...form, targetQty: e.target.value })} placeholder={selectedProduct?.isSet ? '500' : '5000'} />
             </Field>
-            <Field label="開始日"><input type="date" className="fm-input" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} /></Field>
+            <Field label="開始日">
+              <input type="date" className="fm-input" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
+              {(() => { const sg = suggestPlanStart(form.dueDate, form.targetQty, selectedProduct && selectedProduct.speedPerHour); return sg ? <div style={{ fontSize: 11, color: sg.late ? C.red : C.textFaint, marginTop: 4 }}>提案 {sg.start}(約{Math.round(sg.hours * 10) / 10}時間・{sg.days}日。1日{PLAN_HOURS_PER_DAY}時間・土日祝除く){sg.late ? ' ・ 今日から始めても納期ぎりぎり' : ''}{sg.start !== form.startDate ? <> <button type="button" onClick={() => setForm({ ...form, startDate: sg.start })} style={{ fontSize: 11, marginLeft: 4 }}>提案にする</button></> : null}</div> : null; })()}
+            </Field>
             <Field label="終了日(納期)"><input type="date" className="fm-input" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></Field>
           </div>
           {form.productId && (

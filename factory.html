@@ -466,11 +466,11 @@ const planSpanDays = (o) => {
   return Math.max(1, Math.round((e - s) / 86400000) + 1);
 };
 const planActiveOn = (o, dateStr) => dateStr >= planStart(o) && dateStr <= planEnd(o);
-const planDailyTarget = (o) => num(o.targetQty) / planSpanDays(o);
-/* 計画の進み具合(物差しは完成数 = たたみ済み)。
-   予定 = 目標 × (開始日から今日までの日数 ÷ 生産期間の日数)。実績が予定の9割に届かなければ「遅れ」、予定より1割以上多ければ「前倒し」。
-   見込み = 開始日(または最初の実績の日)から今日までの1日あたりの実績で、残りを作り終える日。納期より後なら「納期に間に合わない見込み」。
-   日数はカレンダーの日数(休みの日も数える) */
+const planDailyTarget = (o) => num(o.targetQty) / planSpanDays(o); // 以前の数え方(カレンダーの日数)。今はノルマ(planDayQuota)を使う
+/* 計画の進み具合(物差しは完成数 = たたみ済み。機械の計画は機械で上がった数)。
+   予定 = 今日までのノルマの合計 = 目標 × (開始日から今日までの作る日の数 ÷ 期間の作る日の数)。実績が予定の9割に届かなければ「遅れ」、予定より1割以上多ければ「前倒し」。
+   見込み = 開始日(または最初の実績の日)から今日までの、作る日1日あたりの実績で、残りを作り終える日(作る日で数える)。納期より後なら「納期に間に合わない見込み」。
+   作る日 = 土日祝を除く日(2026-10-19 から。それまではカレンダーの日数で数えていた。ガントチャートのノルマと同じ数え方) */
 const addDaysStr = (dateStr, n) => { const d = parseDate(dateStr); d.setDate(d.getDate() + n); return toDateStr(d.getFullYear(), d.getMonth(), d.getDate()); };
 const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 86400000);
 const planPace = (o, folded, records, today) => {
@@ -480,13 +480,23 @@ const planPace = (o, folded, records, today) => {
   if (!target || !start) return r;
   if (folded >= target) { r.status = '完了'; r.tone = 'green'; return r; }
   if (today < start) { r.status = '開始前'; return r; }
-  const span = planSpanDays(o), elapsed = Math.min(span, daysBetween(start, today) + 1);
-  r.expected = Math.round(target * elapsed / span);
+  const wd = planWorkDayCount(o);
+  if (wd > 0) {
+    let n = 0;
+    for (let d = start; d <= end && d <= today; d = addDaysStr(d, 1)) if (isWorkDay(d)) n++;
+    r.expected = Math.round(target * n / wd);
+  } else r.expected = today >= end ? target : 0; // 期間に作る日が無い計画は、終了日に全部
   r.shortfall = Math.max(0, r.expected - folded);
   const recDates = (records || []).filter((x) => x.orderId === o.id && (o.kind === 'machine' ? num(x.machineUpQty) : num(x.foldedQty)) > 0).map((x) => x.date).sort();
   const from = recDates.length && recDates[0] < start ? recDates[0] : start;
-  const days = Math.max(1, daysBetween(from, today) + 1), pace = folded / days;
-  if (pace > 0) { r.forecast = addDaysStr(today, Math.ceil((target - folded) / pace)); r.late = r.forecast > end; }
+  let wdays = 0;
+  for (let d = from; d <= today; d = addDaysStr(d, 1)) { if (isWorkDay(d)) wdays++; if (wdays > 2000) break; }
+  const pace = folded / Math.max(1, wdays);
+  if (pace > 0) {
+    let left = Math.ceil((target - folded) / pace), d = today;
+    while (left > 0 && left < 3000) { d = nextWorkDay(d, false); left--; }
+    r.forecast = left > 0 ? addDaysStr(today, left) : d; r.late = r.forecast > end;
+  }
   else r.late = today >= end;
   if (today > end) { r.status = '納期超過'; r.tone = 'red'; }
   else if (folded < r.expected * 0.9) { r.status = '遅れ'; r.tone = 'red'; }
@@ -719,6 +729,8 @@ function AuthBar({ session }) {
 }
 
 function App() {
+  const [, setJpReady] = useState(!!jpHolidays);
+  useEffect(() => { if (!jpHolidays) loadJpHolidaysOnce().then(() => setJpReady(true)).catch(() => {}); }, []); // 土日祝(作る日でない日)の判定に使う
   const [data, setData] = useState(null);
   const dataRef = React.useRef(null);
   dataRef.current = data;
@@ -2000,7 +2012,7 @@ function printProgress(t) {
     '.bar{display:inline-block;width:70px;height:7px;background:#eee;border-radius:4px;vertical-align:middle;margin-right:4px;overflow:hidden;}.bar i{display:block;height:100%;background:#1f8a70;}' +
     '.st{font-weight:700;padding:1px 6px;border-radius:8px;white-space:nowrap;}.st.g{background:#dcfae6;color:#067647;}.st.r{background:#fee4e2;color:#b42318;}.st.b{background:#d1e9ff;color:#175cd3;}.late{color:#b42318;font-weight:700;}' +
     '@page{size:A4 landscape;}</style></head><body>' +
-    '<h1>生産の進み具合</h1><div>' + e(t.today) + ' 時点(完成数 = たたみ済みの数。今日までの予定 = 目標 × 開始日からの日数 ÷ 生産期間。見込み = これまでの1日あたりの実績で作り終える日)</div>' +
+    '<h1>生産の進み具合</h1><div>' + e(t.today) + ' 時点(完成数 = たたみ済みの数。今日までの予定 = 目標 × 開始日から今日までの作る日の数 ÷ 期間の作る日の数(土日祝を除く)。見込み = これまでの作る日1日あたりの実績で作り終える日)</div>' +
     '<h2>生産計画(' + t.plans.length + '件)</h2><table><thead><tr><th>計画番号</th><th>受注 / 得意先</th><th>製品名</th><th>ライン</th><th>完成 / 目標</th><th>進捗</th><th>生産期間</th><th>状態</th><th>今日までの予定</th><th>完了の見込み</th></tr></thead><tbody>' +
     (t.plans.map((p) => '<tr><td>' + e(p.planNo) + '</td><td>' + e([p.order, p.customer].filter(Boolean).join(' / ')) + '</td><td>' + e(p.product) + '</td><td>' + e(p.line) + '</td>' +
       '<td class="n">' + f(p.done) + ' / ' + f(p.target) + e(p.unit) + '</td><td>' + bar(p.ratio) + '</td><td>' + e(p.start) + '〜' + e(p.end) + '</td>' +
@@ -3147,11 +3159,241 @@ function ProductionTab({ data, addRecord, updateRecord, removeRecord, lineById, 
 /* ------------------------------------------------------------------ */
 /* カレンダータブ                                                       */
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* カレンダー(ガントチャート): 行 = 生産計画(ラインごと)、列 = その月の日。                    */
+/* 計画の期間(開始日〜終了日)に色を付け、各日に「実績 / ノルマ」を出す。                         */
+/* ノルマ = 目標数量 ÷ 期間の中の作る日(土日祝を除く)の数。作る日でない日はノルマ 0(休み)。         */
+/* 実績 = 機械の計画は機械で上がった数、ほかの計画はたたみ済みの数(計画の進み具合と同じ物差し)。      */
+/* ------------------------------------------------------------------ */
+const GANTT_KIND = {
+  machine: { label: '機械の生産', color: '#6366F1' },
+  pack: { label: '検品・たたみ・パッキング', color: '#10B981' },
+  other: { label: '以前の計画', color: '#64748B' },
+};
+const planKindOf = (o) => (o.kind === 'machine' ? 'machine' : o.kind === 'pack' ? 'pack' : 'other');
+function planWorkDayCount(o) {
+  let n = 0;
+  const end = planEnd(o);
+  for (let d = planStart(o); d && d <= end; d = addDaysStr(d, 1)) { if (isWorkDay(d)) n++; if (n > 400) break; }
+  return n;
+}
+/* その日のノルマ(作る日でなければ 0。期間に作る日が無い計画は、終了日に目標の全部) */
+function planDayQuota(o, ds, workDays) {
+  if (!planActiveOn(o, ds)) return 0;
+  const target = num(o.targetQty);
+  if (workDays > 0) return isWorkDay(ds) ? target / workDays : 0;
+  return ds === planEnd(o) ? target : 0;
+}
+const recPlanQty = (o, r) => (o.kind === 'machine' ? num(r.machineUpQty) : num(r.foldedQty));
+const hexA = (hex, a) => { const h = hex.replace('#', ''); const n = parseInt(h, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; };
+
+function GanttMonth({ data, year, month, selected, setSelected, lineById, productById }) {
+  const today = todayStr();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const days = Array.from({ length: daysInMonth }, (_, i) => toDateStr(year, month, i + 1));
+  const monthStart = days[0], monthEnd = days[days.length - 1];
+  const WD = ['日', '月', '火', '水', '木', '金', '土'];
+  const [kindFilter, setKindFilter] = useState('all');
+
+  const rows = useMemo(() => {
+    const plans = data.orders
+      .filter((o) => planStart(o) && planEnd(o) >= monthStart && planStart(o) <= monthEnd)
+      .filter((o) => kindFilter === 'all' || planKindOf(o) === kindFilter);
+    return plans.map((o) => {
+      const wd = planWorkDayCount(o);
+      const pr = o.productId ? productById(o.productId) : null;
+      const unit = pr && pr.isSet ? 'セット' : '枚';
+      const recs = data.records.filter((r) => r.orderId === o.id);
+      const byDay = {};
+      recs.forEach((r) => { byDay[r.date] = (byDay[r.date] || 0) + recPlanQty(o, r); });
+      const total = recs.reduce((a, r) => a + recPlanQty(o, r), 0);
+      // 今日までのノルマの合計(今日を含む)
+      let quotaToDate = 0;
+      for (let d = planStart(o); d <= planEnd(o) && d <= today; d = addDaysStr(d, 1)) quotaToDate += planDayQuota(o, d, wd);
+      const line = o.lineId ? lineById(o.lineId) : null;
+      const done = num(o.targetQty) > 0 && total >= num(o.targetQty);
+      return { o, wd, unit, byDay, total, quotaToDate, done, lineName: line ? line.name : '(ラインなし)', kind: planKindOf(o) };
+    }).sort((a, b) => (a.done - b.done) || a.lineName.localeCompare(b.lineName, 'ja') || String(planStart(a.o)).localeCompare(String(planStart(b.o)))); // 完了した計画は下にまとめる
+  }, [data, monthStart, monthEnd, kindFilter, today]);
+
+  // 日ごとの合計(種類ごと。単位が違うので分ける)
+  const totals = useMemo(() => {
+    const t = {};
+    ['machine', 'pack', 'other'].forEach((k) => {
+      const rs = rows.filter((r) => r.kind === k);
+      if (!rs.length) return;
+      t[k] = { unit: k === 'machine' ? '枚' : (rs.every((r) => r.unit === 'セット') ? 'セット' : ''), byDay: {} };
+      days.forEach((d) => {
+        let a = 0, q = 0;
+        rs.forEach((r) => { a += r.byDay[d] || 0; q += planDayQuota(r.o, d, r.wd); });
+        t[k].byDay[d] = { a, q };
+      });
+    });
+    return t;
+  }, [rows, days.join()]);
+
+  const CELL = 46;
+  const cellState = (q, a, d) => {
+    if (d > today) return 'future';
+    if (q <= 0) return a > 0 ? 'extra' : 'off';
+    if (a >= q - 0.5) return 'ok';
+    if (d === today) return a > 0 ? 'partial' : 'today';
+    return a > 0 ? 'partial' : 'miss';
+  };
+  const stateColor = { ok: C.green, partial: C.amber, miss: C.red, today: C.textDim, extra: C.green, future: C.textFaint, off: C.textFaint };
+  const stateLabel = { ok: 'ノルマ達成', partial: 'ノルマに届かない', miss: '実績なし', today: '今日(まだ実績なし)', extra: '休みの日の実績', future: 'これから', off: '休み' };
+
+  let lastLine = null;
+  const headCell = (d) => {
+    const dt = parseDate(d), w = dt.getDay();
+    const hol = !isWorkDay(d);
+    const isT = d === today, isSel = d === selected;
+    return (
+      <th key={d} onClick={() => setSelected(d)} title={d + (hol ? '(休み)' : '')}
+        style={{ width: CELL, minWidth: CELL, padding: '4px 0', textAlign: 'center', cursor: 'pointer', fontWeight: 600, fontSize: 11,
+          background: isSel ? C.tealDim : isT ? hexA('#6366F1', 0.08) : C.panel, borderBottom: `1px solid ${C.border}`,
+          color: w === 0 || (hol && w !== 6) ? C.red : w === 6 ? '#2E90FA' : C.textDim, position: 'sticky', top: 0, zIndex: 1 }}>
+        <div className="fm-mono" style={{ fontSize: 12, color: isT ? C.teal : undefined, fontWeight: isT ? 800 : 600 }}>{dt.getDate()}</div>
+        <div style={{ fontSize: 10 }}>{WD[w]}</div>
+      </th>
+    );
+  };
+  const stickyL = { position: 'sticky', left: 0, background: C.panel, zIndex: 2 };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginBottom: 10, fontSize: 12, color: C.textDim }}>
+        {Object.keys(GANTT_KIND).map((k) => (
+          <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 14, height: 10, borderRadius: 3, background: hexA(GANTT_KIND[k].color, 0.35), border: `1px solid ${GANTT_KIND[k].color}` }} />{GANTT_KIND[k].label}
+          </span>
+        ))}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><b style={{ color: C.green }}>●</b>ノルマ達成</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><b style={{ color: C.amber }}>●</b>届かない</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><b style={{ color: C.red }}>●</b>実績なし</span>
+        <span>斜線 = 休み(ノルマなし)</span>
+        <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 2, padding: 3, border: `1px solid ${C.border}`, borderRadius: 8, background: C.panelAlt }}>
+          {[['all', 'すべて'], ['machine', '機械'], ['pack', '検品・たたみ']].map(([k, l]) => (
+            <button key={k} type="button" className="fm-btn" onClick={() => setKindFilter(k)}
+              style={{ border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                background: kindFilter === k ? C.tealDim : 'transparent', color: kindFilter === k ? C.teal : C.textDim }}>{l}</button>
+          ))}
+        </span>
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ fontSize: 13, color: C.textFaint, padding: '12px 0' }}>この月に期間がかかる生産計画はありません。</div>
+      ) : (
+        <div style={{ overflowX: 'auto', border: `1px solid ${C.border}`, borderRadius: 12 }}>
+          <table style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: 12, minWidth: '100%' }}>
+            <thead>
+              <tr>
+                <th style={{ ...stickyL, zIndex: 3, minWidth: 210, textAlign: 'left', padding: '6px 10px', borderBottom: `1px solid ${C.border}`, color: C.textDim, fontWeight: 600 }}>計画</th>
+                {days.map(headCell)}
+                <th style={{ minWidth: 130, padding: '6px 10px', textAlign: 'right', borderBottom: `1px solid ${C.border}`, color: C.textDim, fontWeight: 600 }}>今日までの累計</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const groupKey = r.done ? '__done' : r.lineName;
+                const head = groupKey !== lastLine;
+                lastLine = groupKey;
+                const doneCount = rows.filter((x) => x.done).length;
+                const col = GANTT_KIND[r.kind].color;
+                const diff = Math.round(r.total - r.quotaToDate);
+                const doneAll = num(r.o.targetQty) > 0 && r.total >= num(r.o.targetQty);
+                return (
+                  <React.Fragment key={r.o.id}>
+                    {head && (
+                      <tr><td colSpan={days.length + 2} style={{ ...stickyL, padding: '8px 10px 4px', fontWeight: 700, fontSize: 12, color: C.textDim, background: C.panelAlt, borderBottom: `1px solid ${C.border}` }}>{r.done ? `✓ 完了した計画(${doneCount}件)` : r.lineName}</td></tr>
+                    )}
+                    <tr style={r.done ? { opacity: 0.5 } : undefined}>
+                      <td style={{ ...stickyL, padding: '6px 10px', borderBottom: `1px solid ${C.border}`, borderLeft: `3px solid ${col}`, minWidth: 210, maxWidth: 240 }}>
+                        <div style={{ fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`${r.o.planNo || ''} ${r.o.productName || ''}`}>
+                          <span className="fm-mono">{r.o.planNo}</span> {r.o.productName}
+                        </div>
+                        <div style={{ fontSize: 10.5, color: C.textFaint }}>{r.done ? r.lineName + ' ・ ' : ''}{GANTT_KIND[r.kind].label} ・ 目標 {fmt(r.o.targetQty)}{r.unit} ・ {planStart(r.o).slice(5).replace('-', '/')}〜{planEnd(r.o).slice(5).replace('-', '/')}</div>
+                      </td>
+                      {days.map((d) => {
+                        const inP = planActiveOn(r.o, d);
+                        const a = r.byDay[d] || 0;
+                        const q = planDayQuota(r.o, d, r.wd);
+                        const st = cellState(q, a, d);
+                        const isStart = d === planStart(r.o), isEnd = d === planEnd(r.o);
+                        const off = inP && q <= 0;
+                        const bg = !inP ? (a > 0 ? hexA(col, 0.08) : 'transparent')
+                          : off ? `repeating-linear-gradient(135deg, ${hexA(col, 0.10)} 0 4px, ${hexA(col, 0.22)} 4px 8px)`
+                          : hexA(col, d > today ? 0.12 : 0.22);
+                        return (
+                          <td key={d} onClick={() => setSelected(d)}
+                            title={`${d} ${r.o.planNo || ''}\n実績 ${fmt(Math.round(a))}${r.unit} / ノルマ ${fmt(Math.round(q))}${r.unit}\n${inP ? stateLabel[st] : '期間外'}${isEnd ? '\n終了日(完了予定)' : ''}`}
+                            style={{ width: CELL, minWidth: CELL, height: 40, padding: 0, textAlign: 'center', cursor: 'pointer', borderBottom: `1px solid ${C.border}`,
+                              background: bg, borderTop: inP ? `2px solid ${hexA(col, 0.9)}` : '2px solid transparent',
+                              borderTopLeftRadius: isStart ? 6 : 0, borderTopRightRadius: isEnd ? 6 : 0,
+                              outline: d === selected ? `2px solid ${C.teal}` : 'none', outlineOffset: -2,
+                              boxShadow: d === today ? `inset 0 0 0 1px ${hexA('#6366F1', 0.35)}` : 'none' }}>
+                            {(inP || a > 0) && (
+                              <div className="fm-mono" style={{ lineHeight: 1.15 }}>
+                                {d <= today && (q > 0 || a > 0) && <div style={{ fontSize: 11.5, fontWeight: 800, color: stateColor[st] }}>{fmt(Math.round(a))}</div>}
+                                {q > 0 && <div style={{ fontSize: 9.5, color: C.textFaint }}>/{fmt(Math.round(q))}</div>}
+                                {off && a <= 0 && <div style={{ fontSize: 9.5, color: C.textFaint }}>休</div>}
+                                {isEnd && <div style={{ fontSize: 9 }} aria-label="終了日">🏁</div>}
+                              </div>
+                            )}
+                          </td>
+                        );
+                      })}
+                      <td style={{ padding: '6px 10px', textAlign: 'right', borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>
+                        <div className="fm-mono" style={{ fontWeight: 700 }}>{fmt(Math.round(r.total))} <span style={{ color: C.textFaint, fontWeight: 500 }}>/ {fmt(Math.round(r.quotaToDate))}</span></div>
+                        <div style={{ fontSize: 11, color: doneAll ? C.green : diff >= 0 ? C.green : C.red, fontWeight: 600 }}>
+                          {doneAll ? '完了' : planStart(r.o) > today ? '開始前' : (diff >= 0 ? `+${fmt(diff)} 先行` : `${fmt(diff)} 不足`)}
+                        </div>
+                      </td>
+                    </tr>
+                  </React.Fragment>
+                );
+              })}
+              {Object.keys(totals).map((k) => (
+                <tr key={'t-' + k}>
+                  <td style={{ ...stickyL, padding: '6px 10px', fontWeight: 700, fontSize: 11.5, background: C.panelAlt, borderTop: `1px solid ${C.borderLight}` }}>
+                    日の合計({k === 'machine' ? '機械' : k === 'pack' ? '検品・たたみ' : '以前の計画'}{totals[k].unit ? '・' + totals[k].unit : ''})
+                  </td>
+                  {days.map((d) => {
+                    const v = totals[k].byDay[d];
+                    const st = cellState(v.q, v.a, d);
+                    return (
+                      <td key={d} onClick={() => setSelected(d)} style={{ textAlign: 'center', background: C.panelAlt, borderTop: `1px solid ${C.borderLight}`, cursor: 'pointer', padding: '4px 0' }}
+                        title={`${d} 実績 ${fmt(Math.round(v.a))} / ノルマ ${fmt(Math.round(v.q))}`}>
+                        {(v.q > 0 || v.a > 0) && (
+                          <div className="fm-mono" style={{ lineHeight: 1.15 }}>
+                            {d <= today && <div style={{ fontSize: 11, fontWeight: 800, color: stateColor[st] }}>{fmt(Math.round(v.a))}</div>}
+                            {v.q > 0 && <div style={{ fontSize: 9.5, color: C.textFaint }}>/{fmt(Math.round(v.q))}</div>}
+                          </div>
+                        )}
+                      </td>
+                    );
+                  })}
+                  <td style={{ background: C.panelAlt, borderTop: `1px solid ${C.borderLight}` }} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 8, lineHeight: 1.7 }}>
+        各日の上の数 = その日の実績(機械の計画は機械で上がった数、ほかはたたみ済みの数)、下の「/数」= その日のノルマ(目標 ÷ 期間の作る日の数。土日祝は休みでノルマなし)。右端は今日までの実績の合計 / 今日までのノルマの合計。日付や升目を押すと、下にその日の実績詳細が出ます。
+      </div>
+    </div>
+  );
+}
+
 function CalendarTab({ data, lineById, orderById, orderStats, productById }) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const [selected, setSelected] = useState(todayStr());
+  const [view, setView] = useState('gantt'); // 'gantt' ガントチャート / 'month' 月のカレンダー
+  const [, setHolidaysReady] = useState(!!jpHolidays);
+  useEffect(() => { if (!jpHolidays) loadJpHolidaysOnce().then(() => setHolidaysReady(true)); }, []); // 土日祝(休み)の判定に使う
 
   const cells = useMemo(() => buildMonthGrid(year, month), [year, month]);
   const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
@@ -3244,12 +3486,22 @@ function CalendarTab({ data, lineById, orderById, orderStats, productById }) {
       <Panel style={{ padding: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
           <div className="fm-display" style={{ fontSize: 18, fontWeight: 700 }}>{year}年 {month + 1}月</div>
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ display: 'inline-flex', gap: 2, padding: 3, border: `1px solid ${C.border}`, borderRadius: 8, background: C.panelAlt, marginRight: 6 }}>
+              {[['gantt', 'ガントチャート'], ['month', '月のカレンダー']].map(([k, l]) => (
+                <button key={k} type="button" className="fm-btn" onClick={() => setView(k)}
+                  style={{ border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    background: view === k ? C.tealDim : 'transparent', color: view === k ? C.teal : C.textDim }}>{l}</button>
+              ))}
+            </span>
             <PrimaryButton onClick={prevMonth} style={{ background: C.panelAlt2, color: C.text }}>‹ 前月</PrimaryButton>
             <PrimaryButton onClick={goToday} style={{ background: C.panelAlt2, color: C.text }}>今日</PrimaryButton>
             <PrimaryButton onClick={nextMonth} style={{ background: C.panelAlt2, color: C.text }}>次月 ›</PrimaryButton>
           </div>
         </div>
+        {view === 'gantt' ? (
+          <GanttMonth data={data} year={year} month={month} selected={selected} setSelected={setSelected} lineById={lineById} productById={productById} />
+        ) : (<>
         <div style={{ display: 'flex', gap: 14, marginBottom: 10, fontSize: 11, color: C.textFaint, alignItems: 'center' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 999, background: C.green }} /> 実績あり</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>🏁 この日が納期の計画あり</span>
@@ -3296,9 +3548,10 @@ function CalendarTab({ data, lineById, orderById, orderStats, productById }) {
             );
           })}
         </div>
+        </>)}
       </Panel>
 
-      <Panel style={{ padding: 16, overflowX: 'auto' }}>
+      {view === 'month' && <Panel style={{ padding: 16, overflowX: 'auto' }}>
         <div className="fm-display" style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>生産計画スケジュール({year}年{month + 1}月)</div>
         <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 12 }}>バーが計画の生産期間(開始日〜終了日)、オレンジの縦線がその日に実績が入力されたことを示します。</div>
         {ganttPlans.length === 0 ? (
@@ -3344,7 +3597,7 @@ function CalendarTab({ data, lineById, orderById, orderStats, productById }) {
             </div>
           </div>
         )}
-      </Panel>
+      </Panel>}
 
       <Panel style={{ padding: 16 }}>
         <div className="fm-display" style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>{selected} の実績詳細</div>
@@ -3409,27 +3662,28 @@ function CalendarTab({ data, lineById, orderById, orderStats, productById }) {
             {activePlansOnSelected.length > 0 && (
               <div style={{ marginBottom: 16 }}>
                 <div className="fm-display" style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: C.textDim, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  📅 この日の生産計画(1日あたり計画 vs この日の実績)
+                  📅 この日の生産計画(この日のノルマ vs この日の実績)
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {activePlansOnSelected.map((o) => {
-                    const dailyTarget = planDailyTarget(o);
+                    const dailyTarget = planDayQuota(o, selected, planWorkDayCount(o)); // その日のノルマ(土日祝は 0)
                     const dayRecs = data.records.filter((r) => r.orderId === o.id && r.date === selected);
                     const dayActual = dayRecs.reduce((s, r) => s + num(r.machineUpQty), 0);
-                    const dayFolded = dayRecs.reduce((s, r) => s + num(r.foldedQty), 0);
+                    const dayFolded = dayRecs.reduce((s, r) => s + recPlanQty(o, r), 0); // 計画の進み具合と同じ物差し(機械の計画は機械で上がった数、ほかはたたみ済み)
                     const ratio = pct(dayFolded, dailyTarget);
-                    const behind = dailyTarget > 0 && dayFolded < dailyTarget * 0.8; // 計画の進み具合と同じく完成数(たたみ済み)で比べる
+                    const behind = dailyTarget > 0 && dayFolded < dailyTarget * 0.8;
                     const tone = dailyTarget === 0 ? 'dim' : behind ? 'red' : 'green';
+                    const pUnit = (o.productId && productById(o.productId) && productById(o.productId).isSet) ? 'セット' : '枚';
                     return (
                       <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: C.panelAlt, borderRadius: 6, padding: '8px 10px' }}>
                         <span style={{ fontSize: 12, fontWeight: 600, minWidth: 140 }}>{o.planNo} <span style={{ color: C.textDim, fontWeight: 400 }}>{o.productName}</span></span>
                         <span style={{ fontSize: 10, color: C.textFaint, whiteSpace: 'nowrap' }}>{planStart(o)}〜{planEnd(o)}</span>
                         <div style={{ flex: 1, minWidth: 100, maxWidth: 200 }}><ProgressBar ratio={ratio} color={behind ? C.red : C.teal} /></div>
                         <span className="fm-mono" style={{ fontSize: 11, color: C.textDim, whiteSpace: 'nowrap' }}>
-                          実績(たたみ済) {fmt(dayFolded)} / 1日計画 {fmt(Math.round(dailyTarget))}枚
+                          実績({o.kind === 'machine' ? '機械で上がった数' : 'たたみ済'}) {fmt(dayFolded)} / ノルマ {fmt(Math.round(dailyTarget))}{pUnit}
                         </span>
                         <span className="fm-mono" style={{ fontSize: 10, color: C.textFaint }}>機械上がり {fmt(dayActual)}枚</span>
-                        <Badge tone={tone}>{dailyTarget === 0 ? '—' : behind ? 'ペース遅れ' : '順調'}</Badge>
+                        <Badge tone={tone}>{dailyTarget === 0 ? (isWorkDay(selected) ? '—' : '休み') : behind ? 'ペース遅れ' : '順調'}</Badge>
                       </div>
                     );
                   })}

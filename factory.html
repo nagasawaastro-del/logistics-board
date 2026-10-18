@@ -16,8 +16,8 @@
 <script src="usage-meter.js"></script>
 
 <style>
-  html, body { margin: 0; padding: 0; background: #121417; }
-  #root { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  html, body { margin: 0; padding: 0; background: #09090b; color-scheme: dark; }
+  #root { margin: 0 auto; padding: 0; }
 </style>
 </head>
 <body>
@@ -247,36 +247,40 @@ const k981Target = (cfg, r) => !!(cfg && cfg.enabled && cfg.startDate && r.date 
 /* ==================================================================== */
 /* アイコン(lucide-reactの代わりに絵文字ベースの軽量シムを使用)             */
 /* ==================================================================== */
-function makeIcon(glyph) {
+function makeIcon(paths) {
   return function IconGlyph({ size = 16, color, style, className }) {
-    return React.createElement('span', {
-      className,
-      style: { fontSize: size, lineHeight: 1, display: 'inline-block', ...style },
-    }, glyph);
+    return React.createElement('svg', {
+      className, width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: color || 'currentColor',
+      strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true,
+      style: { display: 'inline-block', verticalAlign: 'middle', flex: 'none', ...style },
+      dangerouslySetInnerHTML: { __html: paths },
+    });
   };
 }
-const Activity = makeIcon('📈');
-const Package = makeIcon('📦');
-const ClipboardList = makeIcon('📋');
-const AlertTriangle = makeIcon('⚠️');
-const CheckCircle2 = makeIcon('✅');
-const Plus = makeIcon('＋');
-const Trash2 = makeIcon('🗑');
-const Gauge = makeIcon('🧭');
-const Loader2 = makeIcon('⏳');
-const Factory = makeIcon('🏭');
-const Scissors = makeIcon('✂️');
-const ChevronRight = makeIcon('›');
-const Calendar = makeIcon('🗓');
-const User = makeIcon('👤');
-const FileText = makeIcon('📄');
-const Coins = makeIcon('💰');
-const Lock = makeIcon('🔒');
-const Pencil = makeIcon('✏️');
-const Box = makeIcon('📐');
-const Settings = makeIcon('⚙️');
-const ArrowUp = makeIcon('↑');
-const ArrowDown = makeIcon('↓');
+const Activity = makeIcon('<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>');
+const Package = makeIcon('<path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><path d="m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7"/>');
+const ClipboardList = makeIcon('<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>');
+const AlertTriangle = makeIcon('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>');
+const CheckCircle2 = makeIcon('<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>');
+const Plus = makeIcon('<path d="M5 12h14"/><path d="M12 5v14"/>');
+const Trash2 = makeIcon('<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>');
+const Gauge = makeIcon('<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>');
+const Loader2 = makeIcon('<path d="M21 12a9 9 0 1 1-6.219-8.56"/>');
+const Factory = makeIcon('<path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M17 18h1"/><path d="M12 18h1"/><path d="M7 18h1"/>');
+const Scissors = makeIcon('<circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/>');
+const ChevronRight = makeIcon('<path d="m9 18 6-6-6-6"/>');
+const Calendar = makeIcon('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>');
+const User = makeIcon('<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>');
+const FileText = makeIcon('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>');
+const Coins = makeIcon('<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/>');
+const Lock = makeIcon('<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>');
+const Pencil = makeIcon('<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>');
+const Box = makeIcon('<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>');
+const Settings = makeIcon('<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>');
+const ArrowUp = makeIcon('<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>');
+const ChevronLeft = makeIcon('<path d="m15 18-6-6 6-6"/>');
+const Home = makeIcon('<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>');
+const ArrowDown = makeIcon('<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>');
 
 /* ==================================================================== */
 /* セットアップ未完了時の案内画面                                          */
@@ -299,23 +303,23 @@ function SetupGuide() {
 /* トークン(色・タイポグラフィ)                                        */
 /* ------------------------------------------------------------------ */
 const C = {
-  bg: '#181B20',
-  panel: '#20242B',
-  panelAlt: '#282D36',
-  panelAlt2: '#2F3540',
-  border: '#383F4A',
-  borderLight: '#454D5A',
-  text: '#E9ECF1',
-  textDim: '#8D96A3',
-  textFaint: '#5E6674',
-  amber: '#E3A13D',
-  amberDim: '#5B4425',
-  teal: '#33B8AA',
-  tealDim: '#1D4640',
-  green: '#4FB374',
-  greenDim: '#234A31',
-  red: '#E4585F',
-  redDim: '#502227',
+  bg: '#09090b',
+  panel: '#18181b',
+  panelAlt: '#1f1f23',
+  panelAlt2: '#27272a',
+  border: '#27272a',
+  borderLight: '#3f3f46',
+  text: '#fafafa',
+  textDim: '#a1a1aa',
+  textFaint: '#71717a',
+  amber: '#f59e0b',
+  amberDim: '#3d2c0c',
+  teal: '#818cf8',
+  tealDim: '#25284a',
+  green: '#22c55e',
+  greenDim: '#123a22',
+  red: '#ef4444',
+  redDim: '#401618',
 };
 
 const FONT_STYLE = `
@@ -336,6 +340,39 @@ const FONT_STYLE = `
   .fm-btn:focus-visible { outline: 2px solid ${C.teal}; outline-offset: 2px; }
   .fm-tab:focus-visible { outline: 2px solid ${C.teal}; outline-offset: -2px; }
   select.fm-input { appearance: none; }
+  .fm-root { font-feature-settings: "tnum"; }
+  .fm-btn { transition: all .2s ease-in-out; }
+  .fm-btn:active { transform: scale(.97); }
+  .fm-card { transition: all .2s ease-in-out; }
+  .fm-card:hover { border-color: rgba(99,102,241,.5) !important; transform: translateY(-2px); }
+  .fm-shell { display: flex; min-height: 100vh; }
+  .fm-side { display: none; }
+  .fm-main { flex: 1; min-width: 0; }
+  .fm-header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid ${C.border}; background: rgba(9,9,11,.82); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 20; flex-wrap: wrap; }
+  .fm-crumb { display: flex; align-items: center; gap: 8px; font-size: 14px; color: ${C.textDim}; min-width: 0; white-space: nowrap; }
+  .fm-crumb a { color: ${C.textDim}; text-decoration: none; }
+  .fm-crumb a:hover { color: ${C.text}; }
+  .fm-crumb b { color: ${C.text}; font-weight: 600; }
+  .fm-header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .fm-content { padding: 16px; max-width: 1280px; }
+  .fm-page-title { font-size: 24px; font-weight: 700; letter-spacing: -.01em; margin: 4px 0 18px; display: flex; align-items: center; gap: 10px; }
+  .fm-toptabs { display: flex; gap: 2px; padding: 4px; border: 1px solid ${C.border}; border-radius: 10px; background: ${C.panel}; margin-bottom: 18px; overflow-x: auto; }
+  .fm-toptab { background: transparent; border: none; cursor: pointer; color: ${C.textDim}; padding: 7px 12px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; border-radius: 7px; white-space: nowrap; }
+  .fm-toptab.active { background: rgba(255,255,255,.1); color: #fff; }
+  .fm-side-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 12px; border: none; border-radius: 8px; background: transparent; color: #a1a1aa; font-size: 14px; font-weight: 500; cursor: pointer; text-align: left; text-decoration: none; transition: all .2s ease-in-out; font-family: inherit; }
+  .fm-side-item:hover { color: #fff; background: rgba(255,255,255,.05); }
+  .fm-side-item.active { color: #fff; background: rgba(255,255,255,.08); box-shadow: inset 2px 0 0 #6366f1; }
+  .fm-side-group { font-size: 11px; font-weight: 600; letter-spacing: .08em; color: #71717a; padding: 14px 12px 6px; }
+  .fm-brand { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 800; color: #fff; text-decoration: none; padding: 22px 20px 12px; }
+  .fm-brand-mark { width: 28px; height: 28px; border-radius: 8px; background: #6366f1; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; }
+  @media (min-width: 1100px) {
+    .fm-side { display: flex; flex-direction: column; width: 240px; flex: none; position: sticky; top: 0; height: 100vh; overflow-y: auto; border-right: 1px solid ${C.border}; background: #09090b; }
+    .fm-side-nav { display: flex; flex-direction: column; gap: 2px; padding: 0 12px 16px; }
+    .fm-toptabs { display: none; }
+    .fm-header { padding: 0 24px; height: 60px; flex-wrap: nowrap; }
+    .fm-content { padding: 24px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .fm-btn, .fm-card, .fm-side-item { transition: none; } .fm-card:hover { transform: none; } }
   @media (max-width: 640px) {
     .fm-hide-mobile { display: none !important; }
   }
@@ -517,7 +554,7 @@ function Badge({ children, tone = 'dim' }) {
 
 function Panel({ children, style, ...rest }) {
   return (
-    <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, ...style }} {...rest}>
+    <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 16, ...style }} {...rest}>
       {children}
     </div>
   );
@@ -548,7 +585,7 @@ function PrimaryButton({ children, onClick, type = 'button', style }) {
       onClick={onClick}
       className="fm-btn"
       style={{
-        background: C.teal, color: '#0E1F1C', border: 'none', borderRadius: 7,
+        background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8,
         padding: '9px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
         display: 'inline-flex', alignItems: 'center', gap: 6, ...style,
       }}
@@ -570,7 +607,7 @@ function Field({ label, children }) {
 function StatCard({ icon: Icon, label, value, unit, tone = 'teal' }) {
   const toneColor = { teal: C.teal, amber: C.amber, red: C.red, green: C.green }[tone];
   return (
-    <Panel style={{ padding: '14px 16px', flex: '1 1 150px', minWidth: 150 }}>
+    <Panel className="fm-card" style={{ padding: '18px 20px', flex: '1 1 150px', minWidth: 150 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <Icon size={15} color={toneColor} />
         <span style={{ fontSize: 12, color: C.textDim }}>{label}</span>
@@ -990,7 +1027,7 @@ function App() {
 
   if (!session || role === null || (role !== undefined && !canView)) {
     return (
-      <div style={{ background: C.bg, color: C.text, minHeight: 400, borderRadius: 12, padding: 28, fontFamily: 'sans-serif' }}>
+      <div style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text, minHeight: 300, borderRadius: 16, padding: 28, fontFamily: "'Inter', sans-serif", maxWidth: 720, margin: '48px auto' }}>
         <style>{FONT_STYLE}</style>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div className="fm-display" style={{ fontSize: 22, fontWeight: 700 }}>生産管理</div>
@@ -1030,79 +1067,75 @@ function App() {
     ...TABS.filter((t) => !tabOrder.includes(t.id)),
   ];
 
+  const curTab = tab === 'settings' ? { label: '設定', icon: Settings } : (TABS.find((t) => t.id === tab) || TABS[0]);
+  const CurIcon = curTab.icon;
+  const sideItem = (t) => {
+    const Icon = t.icon;
+    return (
+      <button key={t.id} type="button" className={'fm-side-item fm-tab' + (tab === t.id ? ' active' : '')} onClick={() => setTab(t.id)}>
+        <Icon size={18} /> {t.label}
+      </button>
+    );
+  };
   return (
-    <div className="fm-root" style={{ background: C.bg, color: C.text, borderRadius: 12, padding: 18, minHeight: 400 }}>
+    <div className="fm-root fm-shell" style={{ background: C.bg, color: C.text }}>
       <style>{FONT_STYLE}</style>
 
-      {/* ヘッダー */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 8, background: C.tealDim, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Scissors size={17} color={C.teal} />
-          </div>
-          <div>
-            <div className="fm-display" style={{ fontSize: 22, fontWeight: 700, lineHeight: 1 }}>不織布加工 生産管理 <a href="./" style={{ color: C.teal, fontSize: 12, fontWeight: 500, marginLeft: 8 }}>← LOGI LINK</a></div>
-            <div style={{ fontSize: 11, color: C.textFaint, marginTop: 2 }}>資材 → 溶着・裁断 → 検品 → たたみ 工程トラッカー</div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-          <div className="fm-mono" style={{ fontSize: 11, color: C.textFaint, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{
-                width: 6, height: 6, borderRadius: 999,
-                background: saveStatus === 'saving' ? C.amber : saveStatus === 'error' ? C.red : C.green,
-              }} />
-              {saveStatus === 'saving' ? '保存中…' : saveStatus === 'error' ? '保存エラー(接続を確認)' : 'クラウドと同期済み'}
-            </span>
-            <button onClick={loadFromCloud} className="fm-btn" style={{ background: C.panelAlt2, border: `1px solid ${C.border}`, color: C.textDim, borderRadius: 6, padding: '3px 9px', cursor: 'pointer', fontSize: 11 }}>更新</button>
-          </div>
-          <AuthBar session={session} />
-        </div>
-      </div>
+      {/* サイドバー(広い画面だけ。狭い画面では中身の上のタブ) */}
+      <aside className="fm-side">
+        <a href="./" className="fm-brand"><span className="fm-brand-mark">L</span>LOGI LINK</a>
+        <nav className="fm-side-nav" aria-label="生産管理のメニュー">
+          <a href="./" className="fm-side-item"><Home size={18} /> LOGI LINK のトップ</a>
+          <div className="fm-side-group">生産管理</div>
+          {orderedTabs.map(sideItem)}
+          {sideItem({ id: 'settings', label: '設定', icon: Settings })}
+        </nav>
+      </aside>
 
-      {!isEditor && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.panelAlt, border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', marginBottom: 14, fontSize: 12, color: C.textDim }}>
-          <Lock size={13} /> 閲覧のみです(編集できるのは admin と生産管理者のアカウントです)。
-        </div>
-      )}
+      <div className="fm-main">
+        {/* 見出しバー: いまの画面・保存の状態・ログイン */}
+        <header className="fm-header">
+          <div className="fm-crumb">
+            <a href="./">LOGI LINK</a><span style={{ opacity: .6 }}>/</span><span>生産管理</span><span style={{ opacity: .6 }}>/</span><b>{curTab.label}</b>
+          </div>
+          <div className="fm-header-right">
+            <div className="fm-mono" style={{ fontSize: 11, color: C.textFaint, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{
+                  width: 6, height: 6, borderRadius: 999,
+                  background: saveStatus === 'saving' ? C.amber : saveStatus === 'error' ? C.red : C.green,
+                }} />
+                {saveStatus === 'saving' ? '保存中…' : saveStatus === 'error' ? '保存エラー(接続を確認)' : 'クラウドと同期済み'}
+              </span>
+              <button onClick={loadFromCloud} className="fm-btn" style={{ background: 'transparent', border: `1px solid ${C.borderLight}`, color: C.textDim, borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12 }}>更新</button>
+            </div>
+            <AuthBar session={session} />
+          </div>
+        </header>
 
-      {/* タブ */}
-      <div style={{ display: 'flex', gap: 4, borderBottom: `1px solid ${C.border}`, marginBottom: 16, overflowX: 'auto' }}>
-        {orderedTabs.map((t) => {
-          const active = tab === t.id;
-          const Icon = t.icon;
-          return (
-            <button
-              key={t.id}
-              className="fm-tab"
-              onClick={() => setTab(t.id)}
-              style={{
-                background: 'transparent', border: 'none', cursor: 'pointer',
-                color: active ? C.teal : C.textDim, padding: '8px 12px', fontSize: 13,
-                fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
-                borderBottom: active ? `2px solid ${C.teal}` : '2px solid transparent',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              <Icon size={14} /> {t.label}
+        <div className="fm-content">
+          <div className="fm-page-title"><CurIcon size={22} color={C.textDim} /> {curTab.label}<span style={{ fontSize: 12, fontWeight: 500, color: C.textFaint, marginLeft: 6 }}>不織布加工 生産管理 ・ 資材 → 溶着・裁断 → 検品 → たたみ</span></div>
+
+          {!isEditor && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.panelAlt, border: `1px solid ${C.border}`, borderRadius: 10, padding: '8px 12px', marginBottom: 14, fontSize: 12, color: C.textDim }}>
+              <Lock size={13} /> 閲覧のみです(編集できるのは admin と生産管理者のアカウントです)。
+            </div>
+          )}
+
+          {/* タブ(狭い画面だけ。広い画面では左のサイドバー) */}
+          <div className="fm-toptabs">
+            {orderedTabs.map((t) => {
+              const Icon = t.icon;
+              return (
+                <button key={t.id} className={'fm-toptab fm-tab' + (tab === t.id ? ' active' : '')} onClick={() => setTab(t.id)}>
+                  <Icon size={14} /> {t.label}
+                </button>
+              );
+            })}
+            <button key="settings" className={'fm-toptab fm-tab' + (tab === 'settings' ? ' active' : '')} onClick={() => setTab('settings')} style={{ marginLeft: 'auto' }}>
+              <Settings size={14} /> 設定
             </button>
-          );
-        })}
-        <button
-          key="settings"
-          className="fm-tab"
-          onClick={() => setTab('settings')}
-          style={{
-            background: 'transparent', border: 'none', cursor: 'pointer',
-            color: tab === 'settings' ? C.teal : C.textFaint, padding: '8px 12px', fontSize: 13,
-            fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
-            borderBottom: tab === 'settings' ? `2px solid ${C.teal}` : '2px solid transparent',
-            whiteSpace: 'nowrap', marginLeft: 'auto',
-          }}
-        >
-          <Settings size={14} /> 設定
-        </button>
-      </div>
+          </div>
 
       {tab === 'dashboard' && (
         <DashboardTab data={data} lineById={lineById} orderById={orderById} lotById={lotById} orderStats={orderStats} salesOrderById={salesOrderById} salesOrderStats={salesOrderStats} productById={productById} makePlanFor={isEditor ? makePlanFor : null} />
@@ -1136,6 +1169,8 @@ function App() {
         <SettingsTab TABS={TABS} tabOrder={tabOrder} updateTabOrder={updateTabOrder} resetTabOrder={resetTabOrder} isEditor={isEditor} />
         </>
       )}
+        </div>
+      </div>
     </div>
   );
 }

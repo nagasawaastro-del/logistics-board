@@ -376,6 +376,9 @@ const lotTotalCostJPY = (lot) => lotUnitCostJPY(lot) * num(lot.initialLength);
 // 計画の期間(開始日が無い過去データは終了日を1日だけの期間として扱う)
 const parseDate = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const planStart = (o) => o.startDate || o.dueDate;
+/* 実績の「機械で上がった数」。検品・たたみ・パッキングの計画(kind: 'pack')の実績は、たたみ数を kintone の生産数に使うため
+   machineUpQty にも入っているが、機械で上がった数(合計・不良率)には数えない */
+const recMachineUp = (data, r) => { const o = r && r.orderId ? (data.orders || []).find((x) => x.id === r.orderId) : null; return o && o.kind === 'pack' ? 0 : num(r.machineUpQty); };
 const planEnd = (o) => o.dueDate || o.startDate;
 // 開始時刻・終了時刻から所要時間の文字列を計算(日をまたぐ場合も考慮)
 const workDuration = (start, end) => {
@@ -414,7 +417,7 @@ const planPace = (o, folded, records, today) => {
   const span = planSpanDays(o), elapsed = Math.min(span, daysBetween(start, today) + 1);
   r.expected = Math.round(target * elapsed / span);
   r.shortfall = Math.max(0, r.expected - folded);
-  const recDates = (records || []).filter((x) => x.orderId === o.id && num(x.foldedQty) > 0).map((x) => x.date).sort();
+  const recDates = (records || []).filter((x) => x.orderId === o.id && (o.kind === 'machine' ? num(x.machineUpQty) : num(x.foldedQty)) > 0).map((x) => x.date).sort();
   const from = recDates.length && recDates[0] < start ? recDates[0] : start;
   const days = Math.max(1, daysBetween(from, today) + 1), pace = folded / days;
   if (pace > 0) { r.forecast = addDaysStr(today, Math.ceil((target - folded) / pace)); r.late = r.forecast > end; }
@@ -780,7 +783,8 @@ function App() {
     const line = data.lines.find((l) => l.id === lineId);
     const plans = data.orders.filter((o) => o.lineId === lineId).map((o) => {
       const folded = data.records.filter((r) => r.orderId === o.id).reduce((a, r) => a + num(r.foldedQty), 0);
-      return { id: o.id, planNo: o.planNo || '', productName: o.productName || (data.products.find((p) => p.id === o.productId) || {}).productName || '', remaining: Math.max(0, num(o.targetQty) - folded) };
+      const pr = data.products.find((p) => p.id === o.productId) || {};
+      return { id: o.id, planNo: o.planNo || '', productName: o.productName || pr.productName || '', remaining: Math.max(0, num(o.targetQty) - folded), unit: pr.isSet ? 'セット' : '枚' };
     }).filter((p) => p.remaining > 0);
     return { lineId, lineName: line ? line.name : '', plans };
   }, [data]);
@@ -814,19 +818,37 @@ function App() {
   const salesOrderById = useCallback((id) => data?.salesOrders.find((s) => s.id === id), [data]);
   const productById = useCallback((id) => data?.products.find((p) => p.id === id), [data]);
 
+  /* 計画ごとの実績。folded は「その計画の実績(完成)」として各画面で使う:
+     機械の計画(kind: 'machine')は機械で上がった数(machineUpQty)、検品・たたみ・パッキングの計画と以前の計画はたたみ数(foldedQty) */
   const orderStats = useCallback((orderId) => {
     const recs = (data?.records || []).filter((r) => r.orderId === orderId);
-    return recs.reduce((acc, r) => ({
+    const t = recs.reduce((acc, r) => ({
       machineUp: acc.machineUp + num(r.machineUpQty),
       inspected: acc.inspected + num(r.inspectedQty),
       folded: acc.folded + num(r.foldedQty),
       defect: acc.defect + num(r.defectQty),
     }), { machineUp: 0, inspected: 0, folded: 0, defect: 0 });
+    const plan = (data?.orders || []).find((o) => o.id === orderId);
+    if (plan && plan.kind === 'machine') return { ...t, foldedRaw: t.folded, folded: t.machineUp };
+    return t;
   }, [data]);
 
   const salesOrderStats = useCallback((salesOrderId) => {
     const so = (data?.salesOrders || []).find((s) => s.id === salesOrderId);
-    const planIds = (data?.orders || []).filter((o) => o.salesOrderId === salesOrderId).map((o) => o.id);
+    const soPlans = (data?.orders || []).filter((o) => o.salesOrderId === salesOrderId);
+    const packPlans = soPlans.filter((o) => o.kind === 'pack');
+    if (so && packPlans.length) {
+      // 検品・たたみ・パッキングの計画のたたみ数で数える(計画の単位: セット品はセット、ほかは枚)
+      const ids = packPlans.map((o) => o.id);
+      const prs = (data?.records || []).filter((r) => ids.includes(r.orderId));
+      const mIds = soPlans.filter((o) => o.kind === 'machine').map((o) => o.id);
+      const machineUp = (data?.records || []).filter((r) => mIds.includes(r.orderId)).reduce((a, r) => a + num(r.machineUpQty), 0);
+      const packed = prs.reduce((a, r) => a + num(r.foldedQty), 0);
+      const soProduct = (data?.products || []).find((p) => p.id === so.productId);
+      const per = soProduct?.isSet ? num(soProduct.piecesPerSet) : 0;
+      return { machineUp, folded: per > 0 ? packed * per : packed, setsCompleted: soProduct?.isSet ? packed : 0 };
+    }
+    const planIds = soPlans.map((o) => o.id);
     const recs = (data?.records || []).filter((r) => planIds.includes(r.orderId));
     const base = recs.reduce((acc, r) => ({
       machineUp: acc.machineUp + num(r.machineUpQty),
@@ -1126,7 +1148,7 @@ function DashboardTab({ data, lineById, orderById, lotById, orderStats, salesOrd
   const todays = data.records.filter((r) => r.date === date);
 
   const totals = todays.reduce((acc, r) => ({
-    machineUp: acc.machineUp + num(r.machineUpQty),
+    machineUp: acc.machineUp + recMachineUp(data, r),
     inspected: acc.inspected + num(r.inspectedQty),
     folded: acc.folded + num(r.foldedQty),
     defect: acc.defect + num(r.defectQty),
@@ -1972,9 +1994,11 @@ function planBaseOf(data, so) {
   }
   return { product: sp, productName: sp ? sp.productName : so.productName, qty: Number(so.orderedQty) || 0, perSet: 0 };
 }
-function plannedQtyFor(data, soId, excludePlanId) {
-  return data.orders.filter((o) => o.salesOrderId === soId && o.id !== excludePlanId).reduce((a, o) => a + (Number(o.targetQty) || 0), 0);
+/* 同じ受注の計画済みの数(kind が同じ計画。以前の計画(種類なし)は両方に数える) */
+function plannedQtyFor(data, soId, excludePlanId, kind) {
+  return data.orders.filter((o) => o.salesOrderId === soId && o.id !== excludePlanId && (!kind || !o.kind || o.kind === kind)).reduce((a, o) => a + (Number(o.targetQty) || 0), 0);
 }
+const PLAN_KIND_LABEL = { machine: '機械の生産', pack: '検品・たたみ・パッキング' };
 const ymd = (x) => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
 function isWorkDay(ds) { const d = new Date(ds + 'T00:00:00'), w = d.getDay(); return !(w === 0 || w === 6 || (jpHolidays && jpHolidays[ds])); }
 function nextWorkDay(ds, includeSelf) { const d = new Date(ds + 'T00:00:00'); if (!includeSelf) d.setDate(d.getDate() + 1); while (!isWorkDay(ymd(d))) d.setDate(d.getDate() + 1); return ymd(d); }
@@ -1996,16 +2020,18 @@ function lineBusyUntil(data, excludePlanId) {
 function lineStartFor(busy, lineId) { const today = todayStr(); return busy[lineId] ? nextWorkDay(busy[lineId], false) : nextWorkDay(today, true); }
 function autoPlanFields(data, so, excludePlanId, busyIn) {
   const b = planBaseOf(data, so), p = b.product;
-  const planned = plannedQtyFor(data, so.id, excludePlanId);
+  const planned = plannedQtyFor(data, so.id, excludePlanId, 'machine');
   const qty = Math.max(0, b.qty - planned);
+  const foldLine = foldLineIdOf(data);
   const busy = busyIn || lineBusyUntil(data, excludePlanId);
   let lineId = '';
   if (p) {
-    const last = data.orders.filter((o) => o.productId === p.id && o.id !== excludePlanId && o.lineId && data.lines.some((l) => l.id === o.lineId))
+    const last = data.orders.filter((o) => o.productId === p.id && o.id !== excludePlanId && o.lineId && o.lineId !== foldLine && data.lines.some((l) => l.id === o.lineId))
       .sort((x, y) => String(planStart(y) || '').localeCompare(String(planStart(x) || '')))[0];
     if (last) lineId = last.lineId;
   }
-  if (!lineId && data.lines.length) lineId = data.lines.map((l) => l.id).sort((x, y) => lineStartFor(busy, x).localeCompare(lineStartFor(busy, y)))[0];
+  const machineLines = data.lines.filter((l) => l.id !== foldLine).map((l) => l.id);
+  if (!lineId && machineLines.length) lineId = machineLines.sort((x, y) => lineStartFor(busy, x).localeCompare(lineStartFor(busy, y)))[0];
   let lotId = '';
   if (p && p.materialType) {
     const need = qty * (Number(p.materialPerUnit) || 0);
@@ -2019,12 +2045,34 @@ function autoPlanFields(data, so, excludePlanId, busyIn) {
   const end = wd ? planEndFrom(start, wd.days) : (so.dueDate || start);
   const late = !!(so.dueDate && end > so.dueDate);
   return {
-    fields: { salesOrderId: so.id, productId: p ? p.id : '', productName: b.productName || so.productName, lineId, lotId, targetQty: qty ? String(qty) : '', startDate: start, dueDate: end < start ? start : end },
+    fields: { kind: 'machine', salesOrderId: so.id, productId: p ? p.id : '', productName: b.productName || so.productName, lineId, lotId, targetQty: qty ? String(qty) : '', startDate: start, dueDate: end < start ? start : end },
     info: { orderQty: b.qty, planned, qty, perSet: b.perSet, late, soDue: so.dueDate || '', hours: wd ? wd.hours : null, days: wd ? wd.days : null },
   };
 }
+/* 検品・たたみ・パッキングの計画(人の作業。たたみのラインに入れる)
+   ・商品・単位: 受注の商品(セット品はセットの数)
+   ・目標数量 = 受注の数 − 同じ受注の検品・たたみ・パッキングの計画済みの数
+   ・開始日 = 機械の計画の開始日の次の作る日(機械と並んで進める)
+   ・完了日 = 開始日 + 受注の商品の速さ(商品マスタの生産速度。セット品は1時間に何セット)から出した日数。
+     機械が終わる前には終わらないので、機械の完了日より前なら機械の完了日の次の作る日。速さが無ければ受注の納期(機械の完了日より後) */
+function autoPackFields(data, so, machine, excludePlanId) {
+  const sp = so.productId ? data.products.find((p) => p.id === so.productId) : null;
+  const unit = sp && sp.isSet ? 'セット' : '枚';
+  const planned = plannedQtyFor(data, so.id, excludePlanId, 'pack');
+  const qty = Math.max(0, (Number(so.orderedQty) || 0) - planned);
+  const lineId = foldLineIdOf(data);
+  const start = nextWorkDay(machine.startDate || todayStr(), false);
+  const wd = planWorkDays(qty, sp && sp.speedPerHour);
+  const afterMachine = machine.dueDate ? nextWorkDay(machine.dueDate, false) : start;
+  let end = wd ? planEndFrom(start, wd.days) : (so.dueDate || afterMachine);
+  if (end < afterMachine) end = afterMachine;
+  return {
+    fields: { kind: 'pack', salesOrderId: so.id, productId: sp ? sp.id : '', productName: sp ? sp.productName : so.productName, lineId, lotId: '', targetQty: qty ? String(qty) : '', startDate: start, dueDate: end },
+    info: { qty, unit, late: !!(so.dueDate && end > so.dueDate), hours: wd ? wd.hours : null, days: wd ? wd.days : null, noLine: !lineId, noSpeed: !wd },
+  };
+}
 function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, removeOrder, lineById, lotById, addLine, removeLine, salesOrderById, productById, isEditor, planPrefill, clearPlanPrefill }) {
-  const blankForm = { planNo: nextPlanNo(data.orders), salesOrderId: '', productId: '', productName: '', lineId: data.lines[0]?.id || '', lotId: '', targetQty: '', startDate: todayStr(), dueDate: '' };
+  const blankForm = { planNo: nextPlanNo(data.orders), kind: '', salesOrderId: '', productId: '', productName: '', lineId: data.lines[0]?.id || '', lotId: '', targetQty: '', startDate: todayStr(), dueDate: '' };
   const [form, setForm] = useState(blankForm);
   const [editingId, setEditingId] = useState(null);
   const [newLine, setNewLine] = useState('');
@@ -2035,12 +2083,12 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
   const startEdit = (o) => {
     setEditingId(o.id);
     setForm({
-      planNo: o.planNo, salesOrderId: o.salesOrderId || '', productId: o.productId || '', productName: o.productName,
+      planNo: o.planNo, kind: o.kind || '', salesOrderId: o.salesOrderId || '', productId: o.productId || '', productName: o.productName,
       lineId: o.lineId, lotId: o.lotId || '', targetQty: String(o.targetQty),
       startDate: planStart(o), dueDate: planEnd(o),
     });
   };
-  const cancelEdit = () => { setEditingId(null); setForm(blankForm); setErr(''); };
+  const cancelEdit = () => { setEditingId(null); setForm(blankForm); setErr(''); setPackDraft(null); };
 
   const submit = () => {
     if (!form.planNo || !form.productName || !form.lineId || !form.targetQty || !form.startDate || !form.dueDate) {
@@ -2058,19 +2106,34 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
     } else {
       addOrder({ ...form, targetQty: Number(form.targetQty) });
     }
-    setForm({ ...blankForm, planNo: nextPlanNo([...data.orders, { planNo: form.planNo }]) });
-    setAutoInfo(null); setBatchMsg('');
+    let after = nextPlanNo([...data.orders, { planNo: form.planNo }]);
+    // 検品・たたみ・パッキングの計画も一緒に作る(受注を選んで作った機械の計画のとき)
+    if (!editingId && packDraft && packDraft.on && Number(packDraft.fields.targetQty) > 0 && packDraft.fields.lineId) {
+      addOrder({ ...packDraft.fields, planNo: after, targetQty: Number(packDraft.fields.targetQty) });
+      after = nextPlanNo([{ planNo: after }]);
+    }
+    setForm({ ...blankForm, planNo: after });
+    setAutoInfo(null); setBatchMsg(''); setPackDraft(null);
   };
 
-  const [autoInfo, setAutoInfo] = useState(null); // 目標数量の内わけ(受注 − 計画済み − 完成在庫)
+  const [autoInfo, setAutoInfo] = useState(null); // 目標数量の内わけ(受注 − 計画済み)
   const [batchMsg, setBatchMsg] = useState('');
+  const [packDraft, setPackDraft] = useState(null); // 一緒に作る検品・たたみ・パッキングの計画 { on, fields, info }
   const onPickSalesOrder = (soId) => {
     const so = salesOrderById(soId);
-    if (!so) { setForm((f) => ({ ...f, salesOrderId: soId })); setAutoInfo(null); return; }
+    if (!so) { setForm((f) => ({ ...f, salesOrderId: soId })); setAutoInfo(null); setPackDraft(null); return; }
     const a = autoPlanFields(data, so, editingId);
     setForm((f) => ({ ...f, ...a.fields }));
     setAutoInfo(a.info);
+    if (!editingId) { const pk = autoPackFields(data, so, a.fields, null); setPackDraft({ on: Number(pk.fields.targetQty) > 0 && !pk.info.noLine, ...pk }); }
   };
+  // 機械の計画の開始日・完了日を変えたら、一緒に作る検品・たたみ・パッキングの計画も合わせ直す
+  useEffect(() => {
+    if (!packDraft || editingId || !form.salesOrderId) return;
+    const so = salesOrderById(form.salesOrderId); if (!so) return;
+    const pk = autoPackFields(data, so, form, null);
+    if (pk.fields.startDate !== packDraft.fields.startDate || pk.fields.dueDate !== packDraft.fields.dueDate) setPackDraft({ ...packDraft, fields: { ...packDraft.fields, startDate: pk.fields.startDate, dueDate: pk.fields.dueDate }, info: { ...packDraft.info, late: pk.info.late } });
+  }, [form.startDate, form.dueDate]);
   // 未計画の受注をまとめて計画にする(上と同じ決め方。目標数量が0の受注(計画済み・完成在庫で足りる)は作らない)
   const unplannedSOs = data.salesOrders.filter((so) => !data.orders.some((o) => o.salesOrderId === so.id))
     .sort((a, b) => String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999')));
@@ -2079,7 +2142,7 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
     if (!window.confirm('未計画の受注 ' + unplannedSOs.length + '件を、まとめて生産計画にします(ライン・資材・目標数量・開始日は自動)。\nよろしいですか?')) return;
     const busy = lineBusyUntil(data, null); // ラインの空き(作るたびに詰める)
     const madeOrders = [];
-    let no = nextPlanNo(data.orders), made = 0, skipped = [];
+    let no = nextPlanNo(data.orders), made = 0, madePack = 0, skipped = [];
     const lateList = [];
     unplannedSOs.forEach((so) => {
       // 前回作ったラインを見るため、この中で作った計画も含めて決める
@@ -2088,10 +2151,16 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
       const o = { ...a.fields, planNo: no, targetQty: Number(a.fields.targetQty) };
       addOrder(o); madeOrders.push({ ...o, id: 'tmp' + made });
       if (o.lineId && (!busy[o.lineId] || o.dueDate > busy[o.lineId])) busy[o.lineId] = o.dueDate;
-      if (a.info.late) lateList.push(so.orderNo + '(完了 ' + o.dueDate + ' / 納期 ' + so.dueDate + ')');
       no = nextPlanNo([{ planNo: no }]); made++;
+      // 検品・たたみ・パッキングの計画も
+      const pk = autoPackFields(data, so, o, null);
+      if (Number(pk.fields.targetQty) > 0 && pk.fields.lineId) {
+        addOrder({ ...pk.fields, planNo: no, targetQty: Number(pk.fields.targetQty) });
+        no = nextPlanNo([{ planNo: no }]); madePack++;
+      }
+      if (a.info.late || pk.info.late) lateList.push(so.orderNo + '(完了 ' + (pk.fields.lineId ? pk.fields.dueDate : o.dueDate) + ' / 納期 ' + so.dueDate + ')');
     });
-    setBatchMsg('✅ ' + made + '件の生産計画を作りました(ラインの空きから順に並べました)。' + (skipped.length ? ' 数量0(計画済み)の受注 ' + skipped.length + '件は作っていません。' : '') + (lateList.length ? ' ⚠ 納期に遅れる見込み ' + lateList.length + '件: ' + lateList.slice(0, 4).join('・') + (lateList.length > 4 ? '…' : '') : ''));
+    setBatchMsg('✅ ' + made + '件の受注に、機械の生産の計画 ' + made + '件' + (madePack ? '・検品・たたみ・パッキングの計画 ' + madePack + '件' : '') + 'を作りました(ラインの空きから順に並べました)。' + (made && !madePack ? ' ⚠ たたみのライン(名前に「たたみ」を含むライン)が無いため、検品・たたみ・パッキングの計画は作っていません。' : '') + (skipped.length ? ' 数量0(計画済み)の受注 ' + skipped.length + '件は作っていません。' : '') + (lateList.length ? ' ⚠ 納期に遅れる見込み ' + lateList.length + '件: ' + lateList.slice(0, 4).join('・') + (lateList.length > 4 ? '…' : '') : ''));
     setForm({ ...blankForm, planNo: no });
   };
   // ダッシュボード・受注の「計画を作る」から来たとき: その受注を選んだ状態にする
@@ -2228,6 +2297,24 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
               })()}
             </Field>
           </div>
+          {(form.kind || (!editingId && form.salesOrderId)) && (
+            <div style={{ fontSize: 12, marginBottom: 8 }}><Badge tone={(form.kind || 'machine') === 'pack' ? 'amber' : 'teal'}>{PLAN_KIND_LABEL[form.kind || 'machine']}</Badge> <span style={{ color: C.textFaint }}>{(form.kind || 'machine') === 'pack' ? 'たたみのラインで、人が検品・たたみ・パッキングする計画' : '機械(ライン)で作る計画。単位はバラ'}</span></div>
+          )}
+          {!editingId && packDraft && (
+            <div style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 8, border: `1px dashed ${C.border}` }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600 }}>
+                <input type="checkbox" checked={!!packDraft.on} disabled={packDraft.info.noLine || !(Number(packDraft.fields.targetQty) > 0)} onChange={(e) => setPackDraft({ ...packDraft, on: e.target.checked })} />
+                検品・たたみ・パッキングの計画も一緒に作る
+              </label>
+              {packDraft.info.noLine ? <div style={{ fontSize: 12, color: C.red, marginTop: 4 }}>たたみのライン(名前に「たたみ」を含むライン)が無いので作れません。生産計画のラインに追加してください。</div> :
+                <div style={{ fontSize: 12, color: C.textDim, marginTop: 4, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span>{packDraft.fields.productName} ・ <b>{fmt(Number(packDraft.fields.targetQty) || 0)}{packDraft.info.unit}</b> ・ {lineById(packDraft.fields.lineId)?.name}</span>
+                  <span>開始 <input type="date" className="fm-input" value={packDraft.fields.startDate} onChange={(e) => setPackDraft({ ...packDraft, fields: { ...packDraft.fields, startDate: e.target.value } })} style={{ width: 140, padding: '2px 6px' }} /></span>
+                  <span>完了 <input type="date" className="fm-input" value={packDraft.fields.dueDate} onChange={(e) => setPackDraft({ ...packDraft, fields: { ...packDraft.fields, dueDate: e.target.value } })} style={{ width: 140, padding: '2px 6px' }} /></span>
+                  <span style={{ fontSize: 11, color: packDraft.info.late ? C.red : C.textFaint }}>{packDraft.info.hours ? `約${Math.round(packDraft.info.hours * 10) / 10}時間・${packDraft.info.days}日(セット品の生産速度から)` : '速さが無いので、完了は納期'}{packDraft.info.late ? ' ・ ⚠ 納期に遅れる見込み' : ''}</span>
+                </div>}
+            </div>
+          )}
           {form.productId && (
             <div style={{ fontSize: 11, color: C.textFaint, marginBottom: 8 }}>製品名は商品マスタから自動入力されています。変更したい場合は「選択しない」に戻してください。</div>
           )}
@@ -2300,7 +2387,7 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
               const unitLabel3 = planProduct?.isSet ? 'セット' : '枚';
               return (
                 <tr key={o.id} style={{ borderBottom: `1px solid ${C.border}`, background: o.id === editingId ? C.tealDim + '55' : done ? 'rgba(79,179,116,0.08)' : 'transparent' }}>
-                  <td className="fm-mono" style={{ padding: '8px' }}>{o.planNo}</td>
+                  <td className="fm-mono" style={{ padding: '8px' }}>{o.planNo}{o.kind && <div style={{ fontSize: 10, color: o.kind === 'pack' ? C.amber : C.teal, fontFamily: 'inherit' }}>{PLAN_KIND_LABEL[o.kind]}</div>}</td>
                   <td style={{ padding: '8px', fontSize: 12, color: C.textDim }}>{so ? `${so.orderNo} / ${so.customerName}` : '—'}</td>
                   <td style={{ padding: '8px' }}>{o.productName}</td>
                   <td style={{ padding: '8px' }}>{lineById(o.lineId)?.name || '—'}</td>
@@ -3000,7 +3087,7 @@ function CalendarTab({ data, lineById, orderById, orderStats, productById }) {
   const dayTotals = useCallback((dateStr) => {
     const recs = data.records.filter((r) => r.date === dateStr);
     return recs.reduce((acc, r) => ({
-      machineUp: acc.machineUp + num(r.machineUpQty),
+      machineUp: acc.machineUp + recMachineUp(data, r),
       inspected: acc.inspected + num(r.inspectedQty),
       folded: acc.folded + num(r.foldedQty),
       defect: acc.defect + num(r.defectQty),
@@ -3057,7 +3144,7 @@ function CalendarTab({ data, lineById, orderById, orderStats, productById }) {
   const lineBreak = data.lines.map((line) => {
     const recs = selectedRecords.filter((r) => r.lineId === line.id);
     const t = recs.reduce((acc, r) => ({
-      machineUp: acc.machineUp + num(r.machineUpQty),
+      machineUp: acc.machineUp + recMachineUp(data, r),
       inspected: acc.inspected + num(r.inspectedQty),
       folded: acc.folded + num(r.foldedQty),
       defect: acc.defect + num(r.defectQty),
@@ -3458,7 +3545,7 @@ function SettingsTab({ TABS, tabOrder, updateTabOrder, resetTabOrder, isEditor }
 /* ------------------------------------------------------------------ */
 function QualityTab({ data, lineById, orderById }) {
   const defectRecords = data.records.filter((r) => num(r.defectQty) > 0);
-  const totalMachineUp = data.records.reduce((a, r) => a + num(r.machineUpQty), 0);
+  const totalMachineUp = data.records.reduce((a, r) => a + recMachineUp(data, r), 0);
   const totalDefect = data.records.reduce((a, r) => a + num(r.defectQty), 0);
   const overallRate = totalMachineUp > 0 ? (totalDefect / totalMachineUp) * 100 : 0;
 

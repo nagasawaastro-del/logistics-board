@@ -1,0 +1,31 @@
+# 生産管理の定期取り込み
+# ・LOGI LINK のタブレットで入れたたたみ数を、生産管理の生産実績に取り込む(Edge Function factory-fold-import)
+# ・生産管理の実績を、kintone の生産実績アプリ(981)へ送る(Edge Function push-production-981。生産管理の設定が「使う」のときだけ)
+# 生産管理の画面を開かなくても進むように、毎時(日本時間 9〜19時・月〜土)に呼ぶ。
+# 合言葉: GitHub の Secrets と Supabase の Secrets の両方に、同じ値の FACTORY_CRON_KEY を登録する(16文字以上)。
+#         登録していない間は、何もせずに終わる。
+name: factory-sync
+on:
+  schedule:
+    - cron: '0 0-10 * * 1-6'   # UTC の 0〜10時 = 日本時間 9〜19時
+  workflow_dispatch: {}
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      KEY: ${{ secrets.FACTORY_CRON_KEY }}
+      BASE: https://iywmunzneirtxipnpveu.supabase.co/functions/v1
+    steps:
+      - name: たたみ数を生産実績に取り込む
+        run: |
+          if [ -z "$KEY" ]; then echo "FACTORY_CRON_KEY が登録されていないので、何もしません"; exit 0; fi
+          curl -sS --fail-with-body -X POST -H "x-cron-key: $KEY" -H "Content-Type: application/json" -d '{}' "$BASE/factory-fold-import"
+          echo
+      - name: kintone(981)へ送る
+        run: |
+          if [ -z "$KEY" ]; then exit 0; fi
+          # 「使う」になっていない(409)ときは失敗にしない
+          code=$(curl -sS -o out.json -w '%{http_code}' -X POST -H "x-cron-key: $KEY" -H "Content-Type: application/json" -d '{"action":"push"}' "$BASE/push-production-981")
+          cat out.json; echo
+          if [ "$code" != "200" ] && [ "$code" != "409" ]; then exit 1; fi

@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<script>/* テーマ: この端末に保存(はじめは暗い) */(function(){var t="dark";try{t=localStorage.getItem("ll-theme")||"dark";}catch(e){}document.documentElement.setAttribute("data-app-theme",t);})();</script>
+<script>/* テーマ: この端末に保存(はじめは明るい) */(function(){var t="light";try{t=localStorage.getItem("ll-theme")||"light";}catch(e){}document.documentElement.setAttribute("data-app-theme",t);})();</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>LOGI LINK - 物流現場管理</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -40,8 +40,8 @@
   --radius-sm:6px;
   --radius-md:10px;
   --radius-lg:14px;
-  --font-display:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
-  --font-body:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-display:'Inter','Hiragino Sans','Hiragino Kaku Gothic ProN','Yu Gothic UI','Meiryo',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-body:'Inter','Hiragino Sans','Hiragino Kaku Gothic ProN','Yu Gothic UI','Meiryo',-apple-system,BlinkMacSystemFont,sans-serif;
   --font-mono:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
 }
 *{box-sizing:border-box;}
@@ -1427,6 +1427,76 @@ html[data-app-theme="dark"] body .hd-page .is-bad.is-bad, html[data-app-theme="d
 html[data-app-theme="dark"] body .hd-page .hd-tile.is-ok .v{color:#4ade80 !important;}
 html[data-app-theme="dark"] .hd-chip.is-warn{color:#fcd34d;}
 @media (prefers-reduced-motion: reduce){ .hd-card,.hd-btn{transition:none;} }
+
+/* ==== 明るい画面の基本(Modern SaaS × 物流。2026-10-19) ====
+   背景は薄いグレー、カードは白、メインはインディゴ、状態は色と文字のラベル。暗い画面(data-app-theme="dark")には効かない */
+html:not([data-app-theme="dark"]){ --paper-100:#F4F5F7; }
+html:not([data-app-theme="dark"]) body{ background:#F4F5F7; color:#101828; }
+/* 上のバー・サイドバーも明るく */
+html:not([data-app-theme="dark"]) .topbar{ background:#fff; color:#101828; border-bottom:1px solid #E4E7EC; }
+html:not([data-app-theme="dark"]) .topbar-date{ color:#667085; }
+html:not([data-app-theme="dark"]) .topbar .pill-btn{ background:#fff; border:1px solid #D0D5DD; color:#344054; }
+html:not([data-app-theme="dark"]) .topbar .pill-btn:hover{ background:#F2F4F7; color:#101828; border-color:#D0D5DD; }
+html:not([data-app-theme="dark"]) .topbar-nav-item{ color:#475467; }
+html:not([data-app-theme="dark"]) .topbar-nav-item:hover{ background:#F2F4F7; color:#101828; }
+html:not([data-app-theme="dark"]) .topbar-nav-item.active{ background:#EEF2FF !important; color:#4338CA !important; }
+@media screen and (min-width:1100px){
+  html:not([data-app-theme="dark"]) body.with-sidebar .topbar{ background:#fff; border-right:1px solid #E4E7EC; }
+  html:not([data-app-theme="dark"]) body.with-sidebar .topbar-right{ border-top-color:#EAECF0; }
+  html:not([data-app-theme="dark"]) body.with-sidebar .topbar-nav-item{ color:#475467; }
+  html:not([data-app-theme="dark"]) body.with-sidebar .topbar-nav-item:hover{ background:#F2F4F7; color:#101828; }
+  html:not([data-app-theme="dark"]) body.with-sidebar .topbar-nav-item.active{ background:#EEF2FF !important; color:#4338CA !important; box-shadow:inset 2px 0 0 #4F46E5; }
+  html:not([data-app-theme="dark"]) body.with-sidebar .nav-group{ color:#98A2B3; }
+  html:not([data-app-theme="dark"]) body.with-sidebar .app-header{ background:rgba(255,255,255,.88); border-bottom-color:#E4E7EC; }
+}
+/* カード・表・入力欄・ボタンをそろえる */
+html:not([data-app-theme="dark"]) .panel{ border-color:#EAECF0; box-shadow:0 1px 2px rgba(16,24,40,.04); }
+html:not([data-app-theme="dark"]) .report-table th{ background:#F9FAFB; color:#475467; font-size:12px; font-weight:600; border-bottom:1px solid #EAECF0; }
+html:not([data-app-theme="dark"]) .report-table td{ border-bottom-color:#F2F4F7; }
+html:not([data-app-theme="dark"]) .report-table tbody tr:hover td{ background:#FAFBFC; }
+html:not([data-app-theme="dark"]) input:not([type=checkbox]):not([type=radio]):not([type=range]):focus-visible,
+html:not([data-app-theme="dark"]) select:focus-visible, html:not([data-app-theme="dark"]) textarea:focus-visible{ outline:2px solid rgba(79,70,229,.35); outline-offset:1px; border-color:#6366F1; }
+button:focus-visible, a:focus-visible, [role="link"]:focus-visible{ outline:2px solid #6366F1; outline-offset:2px; }
+.report-table td.num, .report-table th.num{ font-variant-numeric:tabular-nums; }
+/* 状態のラベル(色と文字の両方で出す) */
+.st-label{ display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:600; line-height:1; padding:4px 8px; border-radius:999px; white-space:nowrap; border:1px solid transparent; }
+.st-label::before{ content:""; width:6px; height:6px; border-radius:999px; background:currentColor; }
+.st-label.is-blue{ background:#EFF8FF; color:#175CD3; border-color:#D1E9FF; }
+.st-label.is-green{ background:#ECFDF3; color:#027A48; border-color:#D1FADF; }
+.st-label.is-gray{ background:#F2F4F7; color:#475467; border-color:#EAECF0; }
+.st-label.is-orange{ background:#FFFAEB; color:#B54708; border-color:#FEF0C7; }
+.st-label.is-red{ background:#FEF3F2; color:#B42318; border-color:#FEE4E2; }
+.st-label.is-teal{ background:#F0FDF9; color:#107569; border-color:#CCFBEF; }
+html[data-app-theme="dark"] .st-label.is-blue{ background:rgba(46,144,250,.14); color:#84CAFF; border-color:transparent; }
+html[data-app-theme="dark"] .st-label.is-green{ background:rgba(18,183,106,.14); color:#6CE9A6; border-color:transparent; }
+html[data-app-theme="dark"] .st-label.is-gray{ background:rgba(255,255,255,.07); color:#D0D5DD; border-color:transparent; }
+html[data-app-theme="dark"] .st-label.is-orange{ background:rgba(247,144,9,.15); color:#FEC84B; border-color:transparent; }
+html[data-app-theme="dark"] .st-label.is-red{ background:rgba(240,68,56,.15); color:#FDA29B; border-color:transparent; }
+html[data-app-theme="dark"] .st-label.is-teal{ background:rgba(21,183,158,.14); color:#5FE9D0; border-color:transparent; }
+/* 割り当て(スタッフ別の表) */
+.asg-filter{ display:inline-flex; margin:0 0 10px; }
+.asg-count{ display:inline-block; min-width:18px; padding:0 5px; margin-left:4px; border-radius:999px; background:rgba(127,127,127,.15); font-size:11px; }
+.asg-table-wrap{ overflow-x:auto; border:1px solid var(--paper-line); border-radius:12px; }
+.asg-table{ margin:0; min-width:760px; }
+.asg-table td{ vertical-align:middle; padding-top:10px; padding-bottom:10px; }
+.asg-name{ display:flex; align-items:center; gap:10px; min-width:140px; }
+.asg-sub{ font-size:11.5px; color:var(--slate-500); margin-top:2px; font-weight:400; }
+.asg-cur{ min-width:150px; }
+.asg-muted{ color:var(--slate-500); font-size:13px; }
+.asg-chips{ display:flex; flex-wrap:wrap; gap:6px; }
+.asg-chip{ display:inline-flex; align-items:center; gap:6px; padding:4px 4px 4px 10px; border:1px solid var(--paper-line); border-radius:999px; background:var(--paper-50); font-size:13px; }
+.asg-chip button{ border:none; background:transparent; color:var(--slate-500); font-size:15px; line-height:1; width:22px; height:22px; border-radius:999px; cursor:pointer; }
+.asg-chip button:hover{ background:#FEE4E2; color:#B42318; }
+.asg-act{ text-align:right; white-space:nowrap; }
+@media (max-width:700px){
+  .asg-table{ min-width:0; }
+  .asg-table thead{ display:none; }
+  .asg-table tr{ display:block; padding:10px 4px; border-bottom:1px solid var(--paper-line); }
+  .asg-table td{ display:block; border:none !important; padding:4px 10px !important; }
+  .asg-act{ text-align:left; }
+}
+/* 明るい画面: 選んでいるタブ・切り替えはメインの色(インディゴ) */
+html:not([data-app-theme="dark"]) .vc-tab-btn.active, html:not([data-app-theme="dark"]) .sub-switch-btn.active{ background:#4F46E5; border-color:#4F46E5; color:#fff; }
 /* ==== DARK THEME (generated) ==== */
 /* 暗いテーマ(2026-10-19)。html に data-app-theme="dark" が付いているときだけ。画面だけで、印刷は今までどおり白。
    下の手書きの部分(色・部品)と、darkgen.py が今のスタイル・画面の色から作った置き換え(明るい背景 → 暗いカード、濃い文字 → 明るい文字、
@@ -1901,6 +1971,20 @@ html[data-app-theme="dark"] .hd-muted{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .hd-tile .v{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] .hd-tile .k{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .hd-empty{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] /* 上のバー・サイドバーも明るく */
+html:not([data-app-theme="dark"]) .topbar{background:var(--dk-card) !important;color:#a5bbe8 !important;border-bottom-color:rgba(77,124,203,0.45) !important}
+html[data-app-theme="dark"] /* カード・表・入力欄・ボタンをそろえる */
+html:not([data-app-theme="dark"]) .panel{border-color:rgba(77,119,203,0.45) !important}
+html[data-app-theme="dark"] .st-label.is-blue{background:rgba(25,154,255,0.13) !important;color:#99baf3 !important;border-color:rgba(25,145,255,0.45) !important}
+html[data-app-theme="dark"] .st-label.is-green{background:rgba(47,233,123,0.13) !important;color:#90fdcf !important;border-color:rgba(48,232,111,0.45) !important}
+html[data-app-theme="dark"] .st-label.is-gray{background:rgba(77,127,203,0.13) !important;color:#a5c0e8 !important;border-color:rgba(77,119,203,0.45) !important}
+html[data-app-theme="dark"] .st-label.is-orange{background:rgba(255,197,25,0.13) !important;color:#fab893 !important;border-color:rgba(250,194,29,0.45) !important}
+html[data-app-theme="dark"] .st-label.is-red{background:rgba(238,58,41,0.13) !important;color:#f1a29b !important;border-color:rgba(247,48,33,0.45) !important}
+html[data-app-theme="dark"] .st-label.is-teal{background:rgba(52,228,173,0.13) !important;color:#9cf1e7 !important;border-color:rgba(42,238,188,0.45) !important}
+html[data-app-theme="dark"] .asg-sub{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] .asg-muted{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] .asg-chip button{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] .asg-chip button:hover{background:rgba(247,48,33,0.16) !important;color:#f1a29b !important}
 html[data-app-theme="dark"] [style*="background:#eee" i]{background:var(--dk-elev) !important}
 html[data-app-theme="dark"] [style*="background: #eee" i]{background:var(--dk-elev) !important}
 html[data-app-theme="dark"] [style*="background:#fff" i]{background:var(--dk-card) !important}
@@ -3133,7 +3217,7 @@ var state = {
   logMgmtFilterTaskId: '',
   logMgmtFilterStaffId: '',
   logMgmtGroupOpen: {},
-  managerViewMode: 'byTask',
+  managerViewMode: 'byStaff',
   kintoneProductSettings: null,
   kintoneSyncStatus: null,
   kintoneSyncing: false,
@@ -16740,29 +16824,15 @@ function renderManager(){
     '</div>';
   }).join('');
 
+  var byStaffMode = state.managerViewMode!=='byTask'; // はじめはスタッフ別(2026-10-19)
   var viewModeTabsHtml = '<div class="mgr-view-tabs">'+
-    '<button type="button" class="mgr-view-tab'+(state.managerViewMode!=='byStaff'?' active':'')+'" data-manager-view="byTask">作業別</button>'+
-    '<button type="button" class="mgr-view-tab'+(state.managerViewMode==='byStaff'?' active':'')+'" data-manager-view="byStaff">スタッフ別</button>'+
+    '<button type="button" class="mgr-view-tab'+(byStaffMode?' active':'')+'" data-manager-view="byStaff">スタッフ別</button>'+
+    '<button type="button" class="mgr-view-tab'+(!byStaffMode?' active':'')+'" data-manager-view="byTask">作業別</button>'+
   '</div>';
   var newTaskForm = state.newTaskColIndex>=0 ? renderTaskForm() : '<button class="new-task-btn" id="addTaskBtn">+ 作業を追加</button>';
   var boardBodyHtml;
-  if(state.managerViewMode==='byStaff'){
-    var byStaffHtml = present.concat(laterStart).map(function(s){
-      var assignedTaskIds = day.assignments[s.id]||[];
-      var taskRows = assignedTaskIds.map(function(tid){
-        var t = taskById(tid==='BREAK'?'BREAK':tid);
-        return '<div class="mgr-staff-task-row">'+
-          '<span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span>'+
-          '<span>'+esc(t.name)+'</span>'+
-          (tid!=='BREAK' ? '<button data-unassign="'+s.id+'|'+tid+'" title="'+esc(t.name)+'の割り当てを解除" aria-label="'+esc(t.name)+'の割り当てを解除">&times;</button>' : '')+
-        '</div>';
-      }).join('') || '<div class="pool-hint" style="margin:0;">本日の割り当てなし</div>';
-      return '<div class="mgr-staff-card">'+
-        '<div class="mgr-staff-card-name">'+esc(s.name)+(day.attendance[s.id] ? '' : ' <span class="muted" style="font-size:11px;">('+esc(laterStartLabel(s))+')</span>')+'</div>'+
-        taskRows+
-      '</div>';
-    }).join('') || '<div class="empty-note">出勤中のスタッフがいません</div>';
-    boardBodyHtml = '<div class="mgr-staff-view">'+byStaffHtml+'</div>';
+  if(byStaffMode){
+    boardBodyHtml = renderAssignByStaffTable(day, present, laterStart, laterStartLabel);
   }else{
     boardBodyHtml = '<div class="task-board">'+colsHtml+newTaskForm+'</div>';
   }
@@ -16869,7 +16939,7 @@ function renderManager(){
       '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>作業時間(内訳)</th><th></th></tr></thead><tbody>'+logRows+'</tbody></table></div>'+
     '</div>'+
     '</details>'+
-    '<div class="pool-hint" style="margin-top:16px;text-align:center;">スタッフ・作業マスタ・勤務時間と休憩・実績目標は、上部メニューの「⚙️ 設定」から変更できます。</div>'+
+    '<div class="pool-hint" style="margin-top:16px;text-align:center;">スタッフ・作業マスタ・勤務時間と休憩は、上部メニューの「⚙️ 設定」から変更できます。</div>'+
   '</div>';
 }
 
@@ -16973,7 +17043,9 @@ function renderSettingsPanels(){
     '</div>'+
   '</div>';
 
-  var achievementPanel = '<div class="panel" style="margin-top:14px;">'+
+  // 月間目標(実績画面のチームチャレンジ)は廃止(2026-10-19)。設定には出さない
+  var achievementPanel = '';
+  var achievementPanelOld = '<div class="panel" style="margin-top:14px;">'+
     '<div class="panel-title">🏆 実績画面の目標設定</div>'+
     '<div class="pool-hint" style="margin-bottom:10px;">「実績」画面のチームチャレンジで使う、今月の出荷数量(CSV取込の出荷引当数の合計・ピース)の目標値です。</div>'+
     '<label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">月間目標(出荷数量・ピース)</label>'+
@@ -17443,6 +17515,12 @@ function bindManager(){
       state.modal = { kind:'assignStaffPicker', taskId: taskId };
       render();
     });
+  });
+  document.querySelectorAll('[data-open-task-picker]').forEach(function(el){
+    el.addEventListener('click', function(){ state.modal = { kind:'assignTaskPicker', staffId: el.getAttribute('data-open-task-picker') }; render(); });
+  });
+  document.querySelectorAll('[data-mgr-staff-filter]').forEach(function(el){
+    el.addEventListener('click', function(){ state.mgrStaffFilter = el.getAttribute('data-mgr-staff-filter'); render(); });
   });
   var addTaskBtn = document.getElementById('addTaskBtn');
   if(addTaskBtn){
@@ -18455,18 +18533,13 @@ function renderAchievements(){
   }else{
     var monthStats = achievementsMonthStats(result, result.curMonthKey);
     var curPieces = monthStats.pieces;
-    var target = (state.achievementSettings && state.achievementSettings.monthlyTargetPieces) || 25000;
-    var rate = target>0 ? curPieces/target : 0;
-    var remaining = Math.max(0, target-curPieces);
     var isNewRecord = !!(result.bestMonthKey && curPieces > result.bestPieces);
     var toRecord = Math.max(0, result.bestPieces - curPieces);
 
     var challengeSection =
-      '<div class="ach-section-title">🚚 今月のチームチャレンジ(出荷数量)</div>'+
+      '<div class="ach-section-title">🚚 今月のチームの出荷数量</div>'+
       '<div class="ach-challenge-card" data-ach-month="1">'+
-        '<div class="ach-challenge-nums"><b>'+formatNum(curPieces)+'</b> / '+formatNum(target)+'ピース</div>'+
-        '<div class="ach-progress-bar"><div class="ach-progress-fill" style="width:'+Math.min(100,rate*100).toFixed(1)+'%"></div></div>'+
-        '<div class="ach-challenge-sub">達成率 '+(rate*100).toFixed(1)+'%'+(remaining>0 ? ' ・ 残り '+formatNum(remaining)+'ピース' : '')+'</div>'+
+        '<div class="ach-challenge-nums"><b>'+formatNum(curPieces)+'</b> ピース</div>'+
       '</div>'+
       '<div class="ach-mini-stats" data-ach-month-split="1"><span>今月の出荷件数 <b>'+formatNum(monthStats.count)+'</b>件</span>'+
         (monthStats.splitTotal ? '<span>'+esc(shipStatsSplitText(monthStats))+'</span>' : '')+'</div>';
@@ -21078,6 +21151,7 @@ function renderModal(){
   if(m.kind==='addLog') return renderAddLogModal(m);
   if(m.kind==='vcPreview') return renderVcPreviewModal(m);
   if(m.kind==='assignStaffPicker') return renderAssignStaffPickerModal(m);
+  if(m.kind==='assignTaskPicker') return renderAssignTaskPickerModal(m);
   if(m.kind==='reassignConfirm') return renderReassignConfirmModal(m);
   if(m.kind==='wvImportEdit') return renderWvImportEditModal(m);
   if(m.kind==='autoMapPreview') return renderAutoMapPreviewModal(m);
@@ -21578,6 +21652,120 @@ function bindReassignConfirmModal(m){
     });
   }
 }
+/* ---------- 割り当て(スタッフ別の表) ----------
+   作業者ごとに: いまの状態(作業中・休憩中・空き・出勤前) / いまの作業と経過 / 割り当てた作業(作業ごとの状態) / 「割り当てを変える」。
+   割り当ての保存は今までと同じ(day.assignments・手動配置の記録・操作履歴)。表示と入口だけ */
+function assignTaskStatus(day, staffId, taskId){
+  var open = (day.logs||[]).some(function(l){ return !l.end && l.staffId===staffId && l.taskId===taskId; });
+  if(open) return { cls:'is-blue', label:'作業中' };
+  if(day.taskCompletion && day.taskCompletion[taskId]) return { cls:'is-green', label:'完了' };
+  var done = (day.logs||[]).some(function(l){ return l.end && l.staffId===staffId && l.taskId===taskId; });
+  if(done) return { cls:'is-teal', label:'着手済み' };
+  return { cls:'is-gray', label:'未着手' };
+}
+function renderAssignByStaffTable(day, present, laterStart, laterStartLabel){
+  var f = state.mgrStaffFilter || 'all';
+  var rows = present.map(function(s){ return { s:s, later:false }; }).concat(laterStart.map(function(s){ return { s:s, later:true }; })).map(function(x){
+    var s = x.s, assigned = day.assignments[s.id]||[];
+    var open = (day.logs||[]).filter(function(l){ return !l.end && l.staffId===s.id; })[0] || null;
+    var st;
+    if(x.later) st = { cls:'is-gray', label:'出勤前', sub: laterStartLabel(s) };
+    else if(open && open.taskId==='BREAK') st = { cls:'is-orange', label:'休憩中' };
+    else if(open) st = { cls:'is-blue', label:'作業中' };
+    else if(!assigned.filter(function(t){ return t!=='BREAK'; }).length) st = { cls:'is-orange', label:'未割り当て' };
+    else st = { cls:'is-gray', label:'空き' };
+    return { s:s, later:x.later, assigned:assigned, open:open, st:st };
+  });
+  var counts = { all: rows.length, working: rows.filter(function(r){ return r.st.label==='作業中'; }).length, unassigned: rows.filter(function(r){ return r.st.label==='未割り当て'; }).length };
+  var shown = rows.filter(function(r){ return f==='working' ? r.st.label==='作業中' : (f==='unassigned' ? r.st.label==='未割り当て' : true); });
+  var filterHtml = '<div class="sub-switch asg-filter" role="group" aria-label="表示する人">'+
+    [['all','全員'],['working','作業中'],['unassigned','未割り当て']].map(function(x){
+      return '<button type="button" class="sub-switch-btn'+(f===x[0]?' active':'')+'" data-mgr-staff-filter="'+x[0]+'">'+x[1]+' <span class="asg-count">'+counts[x[0]]+'</span></button>';
+    }).join('')+'</div>';
+  if(!rows.length) return filterHtml+'<div class="empty-note">出勤中のスタッフがいません</div>';
+  var body = shown.map(function(r){
+    var s = r.s;
+    var cur = r.open ? taskById(r.open.taskId) : null;
+    var curHtml = r.open
+      ? '<span class="task-color-dot" style="background:'+(cur.color||'#999')+'"></span>'+esc(cur.name)+'<div class="asg-sub">'+fmtClock(r.open.start)+'から ・ 経過 '+fmtDurationShort(Date.now()-new Date(r.open.start).getTime())+'</div>'
+      : '<span class="asg-muted">—</span>';
+    var chips = r.assigned.filter(function(tid){ return tid!=='BREAK'; }).map(function(tid){
+      var t = taskById(tid), ts = assignTaskStatus(day, s.id, tid);
+      return '<span class="asg-chip"><span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span>'+esc(t.name)+
+        '<span class="st-label '+ts.cls+'">'+ts.label+'</span>'+
+        '<button type="button" data-unassign="'+s.id+'|'+tid+'" title="'+esc(t.name)+'の割り当てを解除" aria-label="'+esc(s.name)+'さんの「'+esc(t.name)+'」の割り当てを解除">&times;</button></span>';
+    }).join('') || '<span class="asg-muted">割り当てなし</span>';
+    return '<tr>'+
+      '<td><div class="asg-name">'+staffAvatarHtml(s,'sm')+'<div><b>'+esc(s.name)+'</b>'+(r.st.sub ? '<div class="asg-sub">'+esc(r.st.sub)+'</div>' : '')+'</div></div></td>'+
+      '<td><span class="st-label '+r.st.cls+'">'+r.st.label+'</span></td>'+
+      '<td class="asg-cur">'+curHtml+'</td>'+
+      '<td><div class="asg-chips">'+chips+'</div></td>'+
+      '<td class="asg-act"><button type="button" class="vc-manage-toggle-btn" data-open-task-picker="'+s.id+'">割り当てを変える</button></td>'+
+    '</tr>';
+  }).join('') || '<tr><td colspan="5" class="asg-muted" style="padding:16px;">この条件の人はいません</td></tr>';
+  return filterHtml+
+    '<div class="asg-table-wrap"><table class="report-table asg-table"><thead><tr><th>作業者</th><th>状態</th><th>いまの作業</th><th>割り当てた作業</th><th></th></tr></thead><tbody>'+body+'</tbody></table></div>'+
+    '<div class="pool-hint" style="margin-top:6px;">「割り当てを変える」で、その人の作業をまとめて選べます。作業ごとに人を選ぶときや、作業の追加・編集は「作業別」で。</div>';
+}
+/* 作業者1人の割り当てを、作業の一覧から選ぶ(作業別の「＋ スタッフを追加」と同じ保存のしかた) */
+function renderAssignTaskPickerModal(m){
+  var day = managerActiveDay();
+  var tasks = tasksForDate(managerActiveDate()).slice().sort(byTaskColor(function(t){ return t.color; }));
+  var mine = day.assignments[m.staffId]||[];
+  var rows = tasks.map(function(t){
+    return '<label class="assign-picker-row"><input type="checkbox" data-picker-task="'+t.id+'" '+(mine.indexOf(t.id)!==-1?'checked':'')+'>'+
+      '<span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span><span>'+esc(t.name)+'</span></label>';
+  }).join('') || '<div class="empty-note">この日の作業がありません</div>';
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card" style="max-width:420px;text-align:left;">'+
+      '<div class="modal-task-name" style="text-align:center;margin-bottom:4px;">'+esc(staffById(m.staffId).name)+'さんの割り当て</div>'+
+      '<div class="pool-hint" style="text-align:center;margin-bottom:14px;">チェックした作業がこの人の担当になります。チェックを外すと割り当てが解除されます。</div>'+
+      '<div class="assign-picker-list" style="max-height:50vh;overflow-y:auto;">'+rows+'</div>'+
+      '<div id="taskPickerErr" style="color:#B42318;font-size:13px;font-weight:700;min-height:18px;margin-top:8px;"></div>'+
+      '<div class="modal-actions" style="margin-top:8px;">'+
+        '<button class="modal-cancel" id="taskPickerCancelBtn">キャンセル</button>'+
+        '<button class="modal-confirm" id="taskPickerSaveBtn">保存する</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+function bindAssignTaskPickerModal(m){
+  var cancelBtn = document.getElementById('taskPickerCancelBtn');
+  if(cancelBtn) cancelBtn.addEventListener('click', function(){ state.modal = null; render(); });
+  var saveBtn = document.getElementById('taskPickerSaveBtn');
+  if(!saveBtn) return;
+  var busy = false;
+  saveBtn.addEventListener('click', async function(){
+    if(busy) return; // 二重に押しても1回だけ
+    var checked = {};
+    document.querySelectorAll('[data-picker-task]:checked').forEach(function(el){ checked[el.getAttribute('data-picker-task')] = true; });
+    var day = managerActiveDay(), sid = m.staffId;
+    var before = (day.assignments[sid]||[]).slice();
+    var tasks = tasksForDate(managerActiveDate());
+    var added = [], removed = [];
+    var next = before.filter(function(tid){
+      var isTask = tasks.some(function(t){ return t.id===tid; });
+      if(isTask && !checked[tid]){ removed.push({ staffId: sid, taskId: tid }); return false; }
+      return true; // この日の作業でない物(休憩など)はそのまま
+    });
+    tasks.forEach(function(t){ if(checked[t.id] && next.indexOf(t.id)===-1){ next.push(t.id); added.push({ staffId: sid, taskId: t.id }); } });
+    if(!added.length && !removed.length){ state.modal = null; render(); return; }
+    busy = true; saveBtn.disabled = true; saveBtn.textContent = '保存中…';
+    day.assignments[sid] = next;
+    var ok = await saveDay(day);
+    if(ok===false){
+      day.assignments[sid] = before; // 保存できなかった: 画面の割り当ても元に戻し、選んだ内容は残す
+      busy = false; saveBtn.disabled = false; saveBtn.textContent = '保存する';
+      var e = document.getElementById('taskPickerErr'); if(e) e.textContent = '保存できませんでした。通信を確かめて、もう一度「保存する」を押してください。';
+      return;
+    }
+    if(!(await recordManualPlacements(managerActiveDate(), added, removed))) showToast('⚠️ 割り当ては保存しましたが、人員配置への反映(手動配置の記録)を保存できませんでした');
+    await appendAuditLog({ action:'スタッフ割り当て(作業を選択)', target: staffById(sid).name, before: before.map(function(t){ return taskById(t).name; }).join('・')||'なし', after: next.map(function(t){ return taskById(t).name; }).join('・')||'なし' });
+    state.modal = null;
+    showToast(staffById(sid).name+'さんの割り当てを保存しました');
+    render();
+  });
+}
 function renderAssignStaffPickerModal(m){
   var day = managerActiveDay();
   var present = presentStaffForDay(day);
@@ -21627,7 +21815,8 @@ function bindAssignStaffPickerModal(m){
         else if(!shouldHaveIt && hasIt){ day.assignments[s.id] = arr.filter(function(x){ return x!==taskId; }); changedCount++; removedPairs.push({ staffId: s.id, taskId: taskId }); }
       });
       var okAssignDay = await saveDay(day);
-      if(okAssignDay!==false && !(await recordManualPlacements(managerActiveDate(), addedPairs, removedPairs))){
+      if(okAssignDay===false){ showToast('⚠️ 保存できませんでした。通信を確かめて、もう一度お試しください'); render(); return; }
+      if(!(await recordManualPlacements(managerActiveDate(), addedPairs, removedPairs))){
         showToast('⚠️ 割り当ては保存しましたが、人員配置への反映(手動配置の記録)を保存できませんでした');
       }
       if(changedCount) await appendAuditLog({ action:'スタッフ割り当て(まとめて選択)', target: taskById(taskId).name, before:null, after: Object.keys(checkedIds).length+'名を割り当て' });
@@ -21926,6 +22115,7 @@ function bindModal(){
   if(m.kind==='addLog'){ bindAddLogModal(m); return; }
   if(m.kind==='vcPreview'){ bindVcPreviewModal(m); return; }
   if(m.kind==='assignStaffPicker'){ bindAssignStaffPickerModal(m); return; }
+  if(m.kind==='assignTaskPicker'){ bindAssignTaskPickerModal(m); return; }
   if(m.kind==='reassignConfirm'){ bindReassignConfirmModal(m); return; }
   if(m.kind==='wvImportEdit'){ bindWvImportEditModal(m); return; }
   if(m.kind==='autoMapPreview'){ bindAutoMapPreviewModal(m); return; }

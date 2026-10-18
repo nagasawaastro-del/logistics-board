@@ -15,8 +15,10 @@
 <!-- 通信量の目安を数える(ロジリンクと共通) -->
 <script src="usage-meter.js"></script>
 
+<script>/* テーマ: ロジリンクと同じ設定(この端末に保存。はじめは明るい) */(function(){var t="light";try{t=localStorage.getItem("ll-theme")||"light";}catch(e){}document.documentElement.setAttribute("data-app-theme",t);})();</script>
 <style>
-  html, body { margin: 0; padding: 0; background: #09090b; color-scheme: dark; }
+  html, body { margin: 0; padding: 0; background: #F4F5F7; }
+  html[data-app-theme="dark"], html[data-app-theme="dark"] body { background: #09090b; color-scheme: dark; }
   #root { margin: 0 auto; padding: 0; }
 </style>
 </head>
@@ -302,7 +304,28 @@ function SetupGuide() {
 /* ------------------------------------------------------------------ */
 /* トークン(色・タイポグラフィ)                                        */
 /* ------------------------------------------------------------------ */
-const C = {
+// 色: 明るい画面(はじめ)と暗い画面。ロジリンクの「明るく/暗く」と同じ設定を使う。透明度を後ろに足す色があるので、すべて #RRGGBB のまま
+const THEME = (() => { try { return localStorage.getItem('ll-theme') === 'dark' ? 'dark' : 'light'; } catch (e) { return 'light'; } })();
+const C_LIGHT = {
+  bg: '#F4F5F7',
+  panel: '#ffffff',
+  panelAlt: '#F9FAFB',
+  panelAlt2: '#F2F4F7',
+  border: '#EAECF0',
+  borderLight: '#D0D5DD',
+  text: '#101828',
+  textDim: '#475467',
+  textFaint: '#667085',
+  amber: '#DC6803',
+  amberDim: '#FFFAEB',
+  teal: '#4F46E5',
+  tealDim: '#EEF2FF',
+  green: '#039855',
+  greenDim: '#ECFDF3',
+  red: '#D92D20',
+  redDim: '#FEF3F2',
+};
+const C_DARK = {
   bg: '#09090b',
   panel: '#18181b',
   panelAlt: '#1f1f23',
@@ -321,6 +344,9 @@ const C = {
   red: '#ef4444',
   redDim: '#401618',
 };
+const C = THEME === 'dark' ? C_DARK : C_LIGHT;
+const ACCENT = THEME === 'dark' ? '#6366f1' : '#4F46E5';
+const toggleTheme = () => { try { localStorage.setItem('ll-theme', THEME === 'dark' ? 'light' : 'dark'); } catch (e) {} location.reload(); };
 
 const FONT_STYLE = `
   @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
@@ -332,7 +358,7 @@ const FONT_STYLE = `
   .fm-root ::-webkit-scrollbar-thumb { background: ${C.borderLight}; border-radius: 4px; }
   .fm-root ::-webkit-scrollbar-track { background: transparent; }
   .fm-input {
-    background: ${C.bg}; border: 1px solid ${C.border}; color: ${C.text};
+    background: ${THEME === 'dark' ? C.bg : '#fff'}; border: 1px solid ${THEME === 'dark' ? C.border : C.borderLight}; color: ${C.text};
     border-radius: 6px; padding: 7px 10px; font-size: 13px; width: 100%;
     font-family: 'Inter', sans-serif;
   }
@@ -344,11 +370,14 @@ const FONT_STYLE = `
   .fm-btn { transition: all .2s ease-in-out; }
   .fm-btn:active { transform: scale(.97); }
   .fm-card { transition: all .2s ease-in-out; }
-  .fm-card:hover { border-color: rgba(99,102,241,.5) !important; transform: translateY(-2px); }
+  .fm-card:hover { border-color: ${ACCENT}80 !important; transform: translateY(-2px); }
+  .fm-root { font-family: 'Inter', 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', -apple-system, sans-serif; }
+  .fm-theme-btn { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: 1px solid ${C.borderLight}; color: ${C.textDim}; border-radius: 8px; padding: 5px 12px; cursor: pointer; font-size: 12px; font-weight: 600; }
+  .fm-theme-btn:hover { color: ${C.text}; background: ${C.panelAlt2}; }
   .fm-shell { display: flex; min-height: 100vh; }
   .fm-side { display: none; }
   .fm-main { flex: 1; min-width: 0; }
-  .fm-header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid ${C.border}; background: rgba(9,9,11,.82); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 20; flex-wrap: wrap; }
+  .fm-header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid ${C.border}; background: ${THEME === 'dark' ? 'rgba(9,9,11,.82)' : 'rgba(255,255,255,.88)'}; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 20; flex-wrap: wrap; }
   .fm-crumb { display: flex; align-items: center; gap: 8px; font-size: 14px; color: ${C.textDim}; min-width: 0; white-space: nowrap; }
   .fm-crumb a { color: ${C.textDim}; text-decoration: none; }
   .fm-crumb a:hover { color: ${C.text}; }
@@ -358,15 +387,15 @@ const FONT_STYLE = `
   .fm-page-title { font-size: 24px; font-weight: 700; letter-spacing: -.01em; margin: 4px 0 18px; display: flex; align-items: center; gap: 10px; }
   .fm-toptabs { display: flex; gap: 2px; padding: 4px; border: 1px solid ${C.border}; border-radius: 10px; background: ${C.panel}; margin-bottom: 18px; overflow-x: auto; }
   .fm-toptab { background: transparent; border: none; cursor: pointer; color: ${C.textDim}; padding: 7px 12px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; border-radius: 7px; white-space: nowrap; }
-  .fm-toptab.active { background: rgba(255,255,255,.1); color: #fff; }
-  .fm-side-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 12px; border: none; border-radius: 8px; background: transparent; color: #a1a1aa; font-size: 14px; font-weight: 500; cursor: pointer; text-align: left; text-decoration: none; transition: all .2s ease-in-out; font-family: inherit; }
-  .fm-side-item:hover { color: #fff; background: rgba(255,255,255,.05); }
-  .fm-side-item.active { color: #fff; background: rgba(255,255,255,.08); box-shadow: inset 2px 0 0 #6366f1; }
-  .fm-side-group { font-size: 11px; font-weight: 600; letter-spacing: .08em; color: #71717a; padding: 14px 12px 6px; }
-  .fm-brand { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 800; color: #fff; text-decoration: none; padding: 22px 20px 12px; }
-  .fm-brand-mark { width: 28px; height: 28px; border-radius: 8px; background: #6366f1; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; }
+  .fm-toptab.active { background: ${C.tealDim}; color: ${C.teal}; }
+  .fm-side-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 12px; border: none; border-radius: 8px; background: transparent; color: ${C.textDim}; font-size: 14px; font-weight: 500; cursor: pointer; text-align: left; text-decoration: none; transition: all .2s ease-in-out; font-family: inherit; }
+  .fm-side-item:hover { color: ${C.text}; background: ${C.panelAlt2}; }
+  .fm-side-item.active { color: ${C.teal}; background: ${C.tealDim}; box-shadow: inset 2px 0 0 ${ACCENT}; }
+  .fm-side-group { font-size: 11px; font-weight: 600; letter-spacing: .08em; color: ${C.textFaint}; padding: 14px 12px 6px; }
+  .fm-brand { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 800; color: ${C.text}; text-decoration: none; padding: 22px 20px 12px; }
+  .fm-brand-mark { width: 28px; height: 28px; border-radius: 8px; background: ${ACCENT}; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; }
   @media (min-width: 1100px) {
-    .fm-side { display: flex; flex-direction: column; width: 240px; flex: none; position: sticky; top: 0; height: 100vh; overflow-y: auto; border-right: 1px solid ${C.border}; background: #09090b; }
+    .fm-side { display: flex; flex-direction: column; width: 240px; flex: none; position: sticky; top: 0; height: 100vh; overflow-y: auto; border-right: 1px solid ${C.border}; background: ${C.panel}; }
     .fm-side-nav { display: flex; flex-direction: column; gap: 2px; padding: 0 12px 16px; }
     .fm-toptabs { display: none; }
     .fm-header { padding: 0 24px; height: 60px; flex-wrap: nowrap; }
@@ -585,7 +614,7 @@ function PrimaryButton({ children, onClick, type = 'button', style }) {
       onClick={onClick}
       className="fm-btn"
       style={{
-        background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8,
+        background: ACCENT, color: '#fff', border: 'none', borderRadius: 8,
         padding: '9px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer',
         display: 'inline-flex', alignItems: 'center', gap: 6, ...style,
       }}
@@ -1116,6 +1145,7 @@ function App() {
               </span>
               <button onClick={loadFromCloud} className="fm-btn" style={{ background: 'transparent', border: `1px solid ${C.borderLight}`, color: C.textDim, borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12 }}>更新</button>
             </div>
+            <button type="button" className="fm-btn fm-theme-btn" onClick={toggleTheme} title="明るい画面と暗い画面を切り替える(この端末だけ。ロジリンクと共通)">{THEME === 'dark' ? '☀ 明るく' : '☾ 暗く'}</button>
             <AuthBar session={session} />
           </div>
         </header>

@@ -1957,11 +1957,12 @@ function suggestPlanStart(dueDate, targetQty, speedPerHour) {
 }
 /* ---------- 受注から生産計画を自動で埋める(なるべく入力しないで済むように) ----------
    ・商品: セット品(元の商品あり)はバラ、ほかは受注の商品。数量は計画の単位(セット品はバラの枚数)
-   ・目標数量 = 受注の数 − 同じ受注の計画済みの数 − 使える完成在庫
-     完成在庫は、計画の無い受注に、同じ商品で納期の早い順に当てる(計画のある受注の分は計画で作るとみなす)
-   ・ライン: その商品を前回作ったライン(無ければいちばん上のライン)
-   ・資材: 商品の資材と同じ種類のロットで、必要な長さが足りる物のうち残りのいちばん少ない物(足りる物が無ければ残りのいちばん多い物)
-   ・開始日: 納期と生産速度から提案(suggestPlanStart)。終了日 = 納期 */
+   ・目標数量 = 受注の数 − 同じ受注の計画済みの数(完成在庫は無い前提で引かない)
+   ・ライン: その商品を前回作ったライン。初めての商品は、空くのがいちばん早いライン
+   ・開始日 = そのラインのほかの計画(終了日が今日以降)が終わった次の作る日。空いていれば今日(作る日でなければ次の作る日)
+   ・完了日(終了日) = 開始日 + 作る日数(目標数量 ÷ 生産速度 ÷ PLAN_HOURS_PER_DAY 時間、土日祝を除く)。生産速度が無ければ納期
+   ・納期より完了日が後なら「遅れる見込み」
+   ・資材: 商品の資材と同じ種類のロットで、必要な長さが足りる物のうち残りのいちばん少ない物(足りる物が無ければ残りのいちばん多い物) */
 function planBaseOf(data, so) {
   const byId = (id) => data.products.find((p) => p.id === id);
   const sp = so.productId ? byId(so.productId) : null;
@@ -1974,29 +1975,37 @@ function planBaseOf(data, so) {
 function plannedQtyFor(data, soId, excludePlanId) {
   return data.orders.filter((o) => o.salesOrderId === soId && o.id !== excludePlanId).reduce((a, o) => a + (Number(o.targetQty) || 0), 0);
 }
-function stockAllocationForUnplanned(data) {
-  const stock = {}; data.products.forEach((p) => { stock[p.id] = Math.max(0, Number(p.finishedStock) || 0); });
-  const out = {};
-  data.salesOrders.filter((so) => !data.orders.some((o) => o.salesOrderId === so.id))
-    .sort((a, b) => String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999')))
-    .forEach((so) => {
-      const b = planBaseOf(data, so); if (!b.product) return;
-      const use = Math.min(b.qty, stock[b.product.id] || 0);
-      stock[b.product.id] -= use; out[so.id] = use;
-    });
-  return out;
+const ymd = (x) => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+function isWorkDay(ds) { const d = new Date(ds + 'T00:00:00'), w = d.getDay(); return !(w === 0 || w === 6 || (jpHolidays && jpHolidays[ds])); }
+function nextWorkDay(ds, includeSelf) { const d = new Date(ds + 'T00:00:00'); if (!includeSelf) d.setDate(d.getDate() + 1); while (!isWorkDay(ymd(d))) d.setDate(d.getDate() + 1); return ymd(d); }
+/* 作る日数(目標数量 ÷ 生産速度 ÷ 1日の時間、1日以上)。生産速度が分からなければ null */
+function planWorkDays(qty, speedPerHour) {
+  const q = Number(qty) || 0, sp = Number(speedPerHour) || 0;
+  if (!(q > 0) || !(sp > 0)) return null;
+  const hours = q / sp;
+  return { hours, days: Math.max(1, Math.ceil(hours / PLAN_HOURS_PER_DAY)) };
 }
-function autoPlanFields(data, so, excludePlanId, stockAlloc) {
+/* 開始日から作る日数ぶん進めた完了日(開始日を1日目として数える。土日祝は数えない) */
+function planEndFrom(start, days) { let d = nextWorkDay(start, true), left = days - 1; while (left > 0) { d = nextWorkDay(d, false); left--; } return d; }
+/* ライン → 空く日(その次の作る日から次の計画を始められる)。終了日が今日より前の計画は終わったとみなす */
+function lineBusyUntil(data, excludePlanId) {
+  const today = todayStr(), m = {};
+  data.orders.forEach((o) => { if (o.id === excludePlanId || !o.lineId) return; const e = o.dueDate || planStart(o); if (e && e >= today && (!m[o.lineId] || e > m[o.lineId])) m[o.lineId] = e; });
+  return m;
+}
+function lineStartFor(busy, lineId) { const today = todayStr(); return busy[lineId] ? nextWorkDay(busy[lineId], false) : nextWorkDay(today, true); }
+function autoPlanFields(data, so, excludePlanId, busyIn) {
   const b = planBaseOf(data, so), p = b.product;
   const planned = plannedQtyFor(data, so.id, excludePlanId);
-  const stockUse = planned > 0 ? 0 : ((stockAlloc || stockAllocationForUnplanned(data))[so.id] || 0);
-  const qty = Math.max(0, b.qty - planned - stockUse);
-  let lineId = data.lines[0] ? data.lines[0].id : '';
+  const qty = Math.max(0, b.qty - planned);
+  const busy = busyIn || lineBusyUntil(data, excludePlanId);
+  let lineId = '';
   if (p) {
-    const last = data.orders.filter((o) => o.productId === p.id && o.lineId && data.lines.some((l) => l.id === o.lineId))
+    const last = data.orders.filter((o) => o.productId === p.id && o.id !== excludePlanId && o.lineId && data.lines.some((l) => l.id === o.lineId))
       .sort((x, y) => String(planStart(y) || '').localeCompare(String(planStart(x) || '')))[0];
     if (last) lineId = last.lineId;
   }
+  if (!lineId && data.lines.length) lineId = data.lines.map((l) => l.id).sort((x, y) => lineStartFor(busy, x).localeCompare(lineStartFor(busy, y)))[0];
   let lotId = '';
   if (p && p.materialType) {
     const need = qty * (Number(p.materialPerUnit) || 0);
@@ -2005,10 +2014,13 @@ function autoPlanFields(data, so, excludePlanId, stockAlloc) {
     const pick = enough[0] || same.sort((x, y) => num(y.remainingLength) - num(x.remainingLength))[0];
     if (pick) lotId = pick.id;
   }
-  const sg = suggestPlanStart(so.dueDate, qty, p && p.speedPerHour);
+  const start = lineId ? lineStartFor(busy, lineId) : nextWorkDay(todayStr(), true);
+  const wd = planWorkDays(qty, p && p.speedPerHour);
+  const end = wd ? planEndFrom(start, wd.days) : (so.dueDate || start);
+  const late = !!(so.dueDate && end > so.dueDate);
   return {
-    fields: { salesOrderId: so.id, productId: p ? p.id : '', productName: b.productName || so.productName, lineId, lotId, targetQty: qty ? String(qty) : '', startDate: sg ? sg.start : todayStr(), dueDate: so.dueDate || '' },
-    info: { orderQty: b.qty, planned, stockUse, qty, perSet: b.perSet, late: !!(sg && sg.late) },
+    fields: { salesOrderId: so.id, productId: p ? p.id : '', productName: b.productName || so.productName, lineId, lotId, targetQty: qty ? String(qty) : '', startDate: start, dueDate: end < start ? start : end },
+    info: { orderQty: b.qty, planned, qty, perSet: b.perSet, late, soDue: so.dueDate || '', hours: wd ? wd.hours : null, days: wd ? wd.days : null },
   };
 }
 function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, removeOrder, lineById, lotById, addLine, removeLine, salesOrderById, productById, isEditor, planPrefill, clearPlanPrefill }) {
@@ -2032,11 +2044,11 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
 
   const submit = () => {
     if (!form.planNo || !form.productName || !form.lineId || !form.targetQty || !form.startDate || !form.dueDate) {
-      setErr('計画番号・製品名・ライン・目標数量・開始日・終了日(納期)は必須です。');
+      setErr('計画番号・製品名・ライン・目標数量・開始日・完了日は必須です。');
       return;
     }
     if (form.startDate > form.dueDate) {
-      setErr('開始日は終了日(納期)より前の日付にしてください。');
+      setErr('開始日は完了日より前の日付にしてください。');
       return;
     }
     setErr('');
@@ -2065,17 +2077,21 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
   const makeAllPlans = () => {
     if (!unplannedSOs.length) return;
     if (!window.confirm('未計画の受注 ' + unplannedSOs.length + '件を、まとめて生産計画にします(ライン・資材・目標数量・開始日は自動)。\nよろしいですか?')) return;
-    const alloc = stockAllocationForUnplanned(data);
+    const busy = lineBusyUntil(data, null); // ラインの空き(作るたびに詰める)
+    const madeOrders = [];
     let no = nextPlanNo(data.orders), made = 0, skipped = [];
     const lateList = [];
     unplannedSOs.forEach((so) => {
-      const a = autoPlanFields(data, so, null, alloc);
+      // 前回作ったラインを見るため、この中で作った計画も含めて決める
+      const a = autoPlanFields({ ...data, orders: data.orders.concat(madeOrders) }, so, null, busy);
       if (!(Number(a.fields.targetQty) > 0) || !a.fields.productName) { skipped.push(so.orderNo); return; }
-      addOrder({ ...a.fields, planNo: no, targetQty: Number(a.fields.targetQty) });
-      if (a.info.late) lateList.push(so.orderNo);
+      const o = { ...a.fields, planNo: no, targetQty: Number(a.fields.targetQty) };
+      addOrder(o); madeOrders.push({ ...o, id: 'tmp' + made });
+      if (o.lineId && (!busy[o.lineId] || o.dueDate > busy[o.lineId])) busy[o.lineId] = o.dueDate;
+      if (a.info.late) lateList.push(so.orderNo + '(完了 ' + o.dueDate + ' / 納期 ' + so.dueDate + ')');
       no = nextPlanNo([{ planNo: no }]); made++;
     });
-    setBatchMsg('✅ ' + made + '件の生産計画を作りました。' + (skipped.length ? ' 完成在庫で足りる・数量0の受注 ' + skipped.length + '件(' + skipped.slice(0, 5).join('・') + (skipped.length > 5 ? '…' : '') + ')は作っていません。' : '') + (lateList.length ? ' 納期ぎりぎり(今日から始めても間に合わない見込み): ' + lateList.slice(0, 5).join('・') + (lateList.length > 5 ? '…' : '') : ''));
+    setBatchMsg('✅ ' + made + '件の生産計画を作りました(ラインの空きから順に並べました)。' + (skipped.length ? ' 数量0(計画済み)の受注 ' + skipped.length + '件は作っていません。' : '') + (lateList.length ? ' ⚠ 納期に遅れる見込み ' + lateList.length + '件: ' + lateList.slice(0, 4).join('・') + (lateList.length > 4 ? '…' : '') : ''));
     setForm({ ...blankForm, planNo: no });
   };
   // ダッシュボード・受注の「計画を作る」から来たとき: その受注を選んだ状態にする
@@ -2131,7 +2147,7 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
       {isEditor ? (
         <Panel style={{ padding: 16, border: editingId ? `1px solid ${C.teal}` : undefined }}>
           <div className="fm-display" style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{editingId ? '生産計画を編集' : '生産計画を追加'}</div>
-          <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 12 }}>受注を選ぶと、ライン・資材・目標数量・開始日・終了日が自動で入ります(そのまま保存でOK。直したい所だけ書き換え)。受注と紐づけない在庫生産もOK。</div>
+          <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 12 }}>受注を選ぶと、ライン・資材・目標数量・開始日(ラインの空きから)・完了日(生産速度から)が自動で入ります(そのまま保存でOK。直したい所だけ書き換え)。受注と紐づけない在庫生産もOK。</div>
           {!editingId && (unplannedSOs.length > 0 || batchMsg) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12, padding: '10px 12px', borderRadius: 8, background: C.panelAlt }}>
               {unplannedSOs.length > 0 && <PrimaryButton onClick={makeAllPlans}><Plus size={14} /> 未計画の受注 {unplannedSOs.length}件をまとめて計画にする</PrimaryButton>}
@@ -2188,13 +2204,29 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
             </Field>
             <Field label={selectedProduct?.isSet ? '目標数量(セット)' : '目標数量(枚)'}>
               <input type="number" className="fm-input" value={form.targetQty} onChange={(e) => setForm({ ...form, targetQty: e.target.value })} placeholder={selectedProduct?.isSet ? '500' : '5000'} />
-              {autoInfo && form.salesOrderId && <div style={{ fontSize: 11, color: autoInfo.qty > 0 ? C.textFaint : C.amber, marginTop: 4 }}>受注 {fmt(autoInfo.orderQty)}{autoInfo.perSet ? `(${autoInfo.perSet}枚×セット)` : ''}{autoInfo.planned ? ` − 計画済み ${fmt(autoInfo.planned)}` : ''}{autoInfo.stockUse ? ` − 完成在庫 ${fmt(autoInfo.stockUse)}` : ''} = {fmt(autoInfo.qty)}{autoInfo.qty > 0 ? '' : '(作らなくて足ります)'}</div>}
+              {autoInfo && form.salesOrderId && <div style={{ fontSize: 11, color: autoInfo.qty > 0 ? C.textFaint : C.amber, marginTop: 4 }}>受注 {fmt(autoInfo.orderQty)}{autoInfo.perSet ? `(${autoInfo.perSet}枚×セット)` : ''}{autoInfo.planned ? ` − 計画済み ${fmt(autoInfo.planned)}` : ''}= {fmt(autoInfo.qty)}{autoInfo.qty > 0 ? '' : '(計画済みで足ります)'}</div>}
             </Field>
             <Field label="開始日">
               <input type="date" className="fm-input" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
-              {(() => { const sg = suggestPlanStart(form.dueDate, form.targetQty, selectedProduct && selectedProduct.speedPerHour); return sg ? <div style={{ fontSize: 11, color: sg.late ? C.red : C.textFaint, marginTop: 4 }}>提案 {sg.start}(約{Math.round(sg.hours * 10) / 10}時間・{sg.days}日。1日{PLAN_HOURS_PER_DAY}時間・土日祝除く){sg.late ? ' ・ 今日から始めても納期ぎりぎり' : ''}{sg.start !== form.startDate ? <> <button type="button" onClick={() => setForm({ ...form, startDate: sg.start })} style={{ fontSize: 11, marginLeft: 4 }}>提案にする</button></> : null}</div> : null; })()}
+              {(() => {
+                const busy = lineBusyUntil(data, editingId), ls = form.lineId ? lineStartFor(busy, form.lineId) : null;
+                return ls ? <div style={{ fontSize: 11, color: C.textFaint, marginTop: 4 }}>このラインは {busy[form.lineId] ? busy[form.lineId] + ' まで計画あり → ' + ls + ' から空き' : '空いています'}{ls !== form.startDate ? <> <button type="button" onClick={() => { const wd = planWorkDays(form.targetQty, selectedProduct && selectedProduct.speedPerHour); setForm({ ...form, startDate: ls, dueDate: wd ? planEndFrom(ls, wd.days) : form.dueDate }); }} style={{ fontSize: 11, marginLeft: 4 }}>空きから始める</button></> : null}</div> : null;
+              })()}
             </Field>
-            <Field label="終了日(納期)"><input type="date" className="fm-input" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></Field>
+            <Field label="完了日(終了日)">
+              <input type="date" className="fm-input" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+              {(() => {
+                const wd = planWorkDays(form.targetQty, selectedProduct && selectedProduct.speedPerHour);
+                const calc = wd && form.startDate ? planEndFrom(form.startDate, wd.days) : null;
+                const soDue = linkedSalesOrder && linkedSalesOrder.dueDate;
+                if (!calc && !soDue) return null;
+                const lateNow = soDue && form.dueDate && form.dueDate > soDue;
+                return <div style={{ fontSize: 11, color: lateNow ? C.red : C.textFaint, marginTop: 4 }}>
+                  {calc ? <>計算 {calc}(約{Math.round(wd.hours * 10) / 10}時間・{wd.days}日。1日{PLAN_HOURS_PER_DAY}時間・土日祝除く){calc !== form.dueDate ? <> <button type="button" onClick={() => setForm({ ...form, dueDate: calc })} style={{ fontSize: 11, marginLeft: 4 }}>計算にする</button></> : null}</> : null}
+                  {soDue ? <div>受注の納期 {soDue}{lateNow ? ' ・ ⚠ 納期に遅れる見込み' : ' ・ 間に合う'}</div> : null}
+                </div>;
+              })()}
+            </Field>
           </div>
           {form.productId && (
             <div style={{ fontSize: 11, color: C.textFaint, marginBottom: 8 }}>製品名は商品マスタから自動入力されています。変更したい場合は「選択しない」に戻してください。</div>

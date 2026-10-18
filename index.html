@@ -20064,22 +20064,30 @@ function bindTaskDoneConfirmModal(m){
    入れた数は kv「factory-fold:日付」に貯め、生産管理(factory.html)を開いたときに生産実績として取り込む。
    計画の候補は、生産管理が kv「factory-fold-plans」に出している(現場の端末はログインしないため、生産管理のデータは読めない)。 */
 var FACTORY_FOLD_PLANS_KEY = 'factory-fold-plans';
-function isFoldTask(taskId){ var t = taskById(taskId); return !!(t && t.name && String(t.name).indexOf('たたみ')!==-1); }
+/* 生産管理へ数を入れる作業の種類: 名前に「たたみ」→ たたみ数(fold)、名前に「機械」→ 機械で上がった数(machine)。どちらでもなければ '' */
+function factoryTaskKind(taskId){
+  var t = taskById(taskId), n = t && t.name ? String(t.name) : '';
+  if(n.indexOf('たたみ')!==-1) return 'fold';
+  if(n.indexOf('機械')!==-1) return 'machine';
+  return '';
+}
+function isFoldTask(taskId){ return factoryTaskKind(taskId)!==''; }
 function foldHM(iso){ if(!iso) return ''; var d = new Date(iso); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
-async function loadFoldPlanList(){
+async function loadFoldPlanList(kind){
   var plans = null;
   try{ plans = await loadKeyJson(FACTORY_FOLD_PLANS_KEY, function(){ return null; }); }catch(e){ plans = null; }
-  return (plans && Array.isArray(plans.plans)) ? plans.plans : [];
+  var list = plans ? (kind==='machine' ? plans.machinePlans : plans.plans) : null;
+  return Array.isArray(list) ? list : [];
 }
 function renderFoldPlanPickModal(m){
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" style="max-width:520px;">'+
       '<div class="modal-task-name">どの生産計画の分を作業しますか?</div>'+
-      '<div class="pool-hint" style="margin:6px 0 12px;">'+esc(taskById(m.taskId).name)+' を始めます。選んだ計画に、終わるときのたたみ数が入ります。</div>'+
+      '<div class="pool-hint" style="margin:6px 0 12px;">'+esc(taskById(m.taskId).name)+' を始めます。選んだ計画に、終わるときの'+(m.fkind==='machine' ? '機械で上がった数' : 'たたみ数')+'が入ります。</div>'+
       '<div style="display:flex;flex-direction:column;gap:8px;max-height:55vh;overflow-y:auto;">'+
         m.plans.map(function(p, i){
           return '<button type="button" class="ll-btn" data-fold-pick="'+i+'" style="text-align:left;padding:14px 16px;font-size:16px;border-radius:14px;">'+
-            '<b>'+esc(p.productName||'')+'</b>'+(p.planNo ? ' <span class="muted" style="font-size:12px;">計画'+esc(p.planNo)+'</span>' : '')+
+            '<b>'+esc(p.productName||'')+'</b>'+(p.planNo ? ' <span class="muted" style="font-size:12px;">計画'+esc(p.planNo)+'</span>' : '')+(p.lineName ? ' <span class="muted" style="font-size:12px;">'+esc(p.lineName)+'</span>' : '')+
             (p.remaining!==undefined && p.remaining!==null ? '<div class="muted" style="font-size:13px;margin-top:2px;">残り '+formatNum(p.remaining)+esc(p.unit||'')+'</div>' : '')+'</button>';
         }).join('')+
       '</div>'+
@@ -20096,10 +20104,11 @@ function bindFoldPlanPickModal(m){
   var cancel = document.getElementById('foldPickCancel'); if(cancel) cancel.addEventListener('click', function(){ state.modal = null; state.suppressRender = false; render(); });
 }
 async function openFoldQtyModal(log, cont){
-  var list = (await loadFoldPlanList()).slice();
+  var fkind = factoryTaskKind(log.taskId) || 'fold';
+  var list = (await loadFoldPlanList(fkind)).slice();
   // 始めるときに選んだ計画(候補から外れていても出す: 残りが0になった計画など)
-  if(log.foldPlanId && !list.some(function(p){ return p.id===log.foldPlanId; })) list.unshift({ id: log.foldPlanId, planNo: '', productName: log.foldPlanLabel || '始めるときに選んだ計画' });
-  state.modal = { kind:'foldQty', log: { start: log.start, end: log.end, staffId: log.staffId, taskId: log.taskId },
+  if(log.foldPlanId && !list.some(function(p){ return p.id===log.foldPlanId; })) list.unshift({ id: log.foldPlanId, planNo: '', productName: log.foldPlanLabel || '始めるときに選んだ計画', lineId: log.foldPlanLineId || '' });
+  state.modal = { kind:'foldQty', fkind: fkind, log: { start: log.start, end: log.end, staffId: log.staffId, taskId: log.taskId },
     date: (state.day && state.day.date) || todayStr(), plans: list, orderId: log.foldPlanId || (list.length===1 ? list[0].id : ''), cont: cont };
   state.suppressRender = true;
   render();
@@ -20112,12 +20121,13 @@ function renderFoldQtyModal(m){
   var inputStyle = 'width:100%;font-size:22px;padding:10px 12px;border:1px solid #D0D5DD;border-radius:10px;margin-top:4px;box-sizing:border-box;';
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" id="foldQtyModal">'+
-      '<div class="modal-task-name">たたみ数を入れてください</div>'+
+      '<div class="modal-task-name">'+(m.fkind==='machine' ? '機械で上がった数を入れてください' : 'たたみ数を入れてください')+'</div>'+
       '<div class="pool-hint" style="margin:6px 0 12px;">'+esc(staffById(m.log.staffId).name)+' ・ '+esc(foldHM(m.log.start))+'〜'+esc(foldHM(m.log.end))+'。生産管理の生産実績に入ります。</div>'+
       (m.plans.length
         ? '<label style="display:block;font-size:13px;font-weight:700;margin-bottom:10px;">生産計画<select id="foldPlan" style="'+inputStyle+'font-size:16px;">'+(m.plans.length>1 ? '<option value="">選んでください</option>' : '')+opts+'</select></label>'
         : '<div class="pool-hint" style="margin-bottom:10px;">生産計画の候補がありません(生産管理の担当者があとで計画を決めます)。</div>')+
-      '<label style="display:block;font-size:13px;font-weight:700;margin-bottom:10px;">できた数'+(m.plans.length===1 && m.plans[0].unit ? '('+esc(m.plans[0].unit)+')' : (m.plans.some(function(p){ return p.unit==='セット'; }) ? '(計画の単位。セット品はセットの数)' : ''))+'<input type="number" id="foldQty" inputmode="numeric" min="0" style="'+inputStyle+'"></label>'+
+      (m.fkind==='machine' ? '<div class="pool-hint" style="margin:-4px 0 10px;">良品の数を「上がった数」に、不良はその下に入れます(機械で上がった数 = 良品 + 不良)。</div>' : '')+
+      '<label style="display:block;font-size:13px;font-weight:700;margin-bottom:10px;">'+(m.fkind==='machine' ? '上がった数(良品・バラ)' : 'できた数')+(m.fkind!=='machine' && m.plans.length===1 && m.plans[0].unit ? '('+esc(m.plans[0].unit)+')' : (m.plans.some(function(p){ return p.unit==='セット'; }) ? '(計画の単位。セット品はセットの数)' : ''))+'<input type="number" id="foldQty" inputmode="numeric" min="0" style="'+inputStyle+'"></label>'+
       '<label style="display:block;font-size:13px;font-weight:700;margin-bottom:10px;">不良数(あれば)<input type="number" id="foldDefect" inputmode="numeric" min="0" style="'+inputStyle+'"></label>'+
       '<div id="foldErr" style="color:#B42318;font-size:13px;font-weight:700;min-height:18px;margin-bottom:6px;"></div>'+
       '<div style="display:flex;flex-direction:column;gap:8px;">'+
@@ -20169,14 +20179,15 @@ function bindFoldQtyModal(m){
     var defect = Math.floor(Number((document.getElementById('foldDefect')||{}).value)) || 0;
     var sel = document.getElementById('foldPlan');
     var orderId = sel ? sel.value : '';
-    if(!(qty>0)){ err.textContent = 'できた数を入れてください'; return; }
+    if(!(qty>0)){ err.textContent = m.fkind==='machine' ? '上がった数を入れてください' : 'できた数を入れてください'; return; }
     if(defect<0){ err.textContent = '不良数が正しくありません'; return; }
     if(m.plans.length>1 && !orderId){ err.textContent = '生産計画を選んでください'; return; }
     var plan = m.plans.filter(function(p){ return p.id===orderId; })[0] || null;
     busy = true; save.textContent = '保存中…'; err.textContent = '';
     var ok = await saveFoldEntry({
       id: 'F'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
-      date: m.date, staffId: m.log.staffId, staffName: staffById(m.log.staffId).name, taskName: (taskById(m.log.taskId)||{}).name || '',
+      date: m.date, kind: m.fkind==='machine' ? 'machine' : 'fold', lineId: plan && plan.lineId ? plan.lineId : '',
+      staffId: m.log.staffId, staffName: staffById(m.log.staffId).name, taskName: (taskById(m.log.taskId)||{}).name || '',
       orderId: orderId, planNo: plan ? plan.planNo||'' : '', productName: plan ? plan.productName||'' : '',
       qty: qty, defectQty: defect, startTime: foldHM(m.log.start), endTime: foldHM(m.log.end), at: new Date().toISOString()
     });
@@ -20186,7 +20197,7 @@ function bindFoldQtyModal(m){
   });
   if(skip) skip.addEventListener('click', async function(){
     if(busy) return;
-    if(!await appConfirm('たたみ数を入れずに進みますか?(あとで生産管理の担当者が入れます)')) return;
+    if(!await appConfirm((m.fkind==='machine' ? '機械で上がった数' : 'たたみ数')+'を入れずに進みますか?(あとで生産管理の担当者が入れます)')) return;
     next();
   });
 }
@@ -20288,16 +20299,17 @@ async function startTask(taskId, chosenSubcat, foldPick){
   }
   // 生産たたみ: どの生産計画の分を作業するかを、始めるときに選ぶ(終わるときのたたみ数にそのまま引き継ぐ)
   if(foldPick===undefined && isFoldTask(taskId)){
-    var fplans = await loadFoldPlanList();
+    var fkind = factoryTaskKind(taskId);
+    var fplans = await loadFoldPlanList(fkind);
     if(fplans.length){
-      state.modal = { kind:'foldPlanPick', taskId: taskId, chosenSubcat: chosenSubcat, plans: fplans };
+      state.modal = { kind:'foldPlanPick', fkind: fkind, taskId: taskId, chosenSubcat: chosenSubcat, plans: fplans };
       state.suppressRender = true;
       render();
       return;
     }
   }
   var entry = {id:uid(), staffId:state.activeStaffId, taskId:taskId, start:new Date().toISOString(), end:null, quantity:null};
-  if(foldPick && foldPick.id){ entry.foldPlanId = foldPick.id; entry.foldPlanLabel = ((foldPick.planNo ? '計画'+foldPick.planNo+' ' : '')+(foldPick.productName||'')).trim(); }
+  if(foldPick && foldPick.id){ entry.foldPlanId = foldPick.id; entry.foldPlanLabel = ((foldPick.planNo ? '計画'+foldPick.planNo+' ' : '')+(foldPick.productName||'')).trim(); if(foldPick.lineId) entry.foldPlanLineId = foldPick.lineId; }
   var snapshotName = taskNameSnapshot(taskId);
   if(snapshotName) entry.taskName = snapshotName;
   var task = taskById(taskId);

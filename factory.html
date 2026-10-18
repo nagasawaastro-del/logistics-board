@@ -823,7 +823,14 @@ function App() {
       const pr = data.products.find((p) => p.id === o.productId) || {};
       return { id: o.id, planNo: o.planNo || '', productName: o.productName || pr.productName || '', remaining: Math.max(0, num(o.targetQty) - folded), unit: pr.isSet ? 'セット' : '枚' };
     }).filter((p) => p.remaining > 0);
-    return { lineId, lineName: line ? line.name : '', plans };
+    // 機械の生産の計画(ロジリンクで「機械」の作業を始めるとき・終えるときの候補)。残り = 目標 − 機械で上がった数(バラ)
+    const machinePlans = data.orders.filter((o) => o.lineId !== lineId && o.kind !== 'pack').map((o) => {
+      const up = data.records.filter((r) => r.orderId === o.id).reduce((a, r) => a + num(r.machineUpQty), 0);
+      const pr = data.products.find((p) => p.id === o.productId) || {};
+      const ln = data.lines.find((l) => l.id === o.lineId);
+      return { id: o.id, planNo: o.planNo || '', productName: o.productName || pr.productName || '', remaining: Math.max(0, num(o.targetQty) - up), unit: '枚', lineId: o.lineId || '', lineName: ln ? ln.name : '' };
+    }).filter((p) => p.remaining > 0);
+    return { lineId, lineName: line ? line.name : '', plans, machinePlans };
   }, [data]);
   useEffect(() => {
     if (loading || !isEditor || !foldPlansPayload) return;
@@ -3447,9 +3454,10 @@ function FoldSettings({ data, setFold, isEditor }) {
   const fromLogi = data.records.filter((r) => r.source === 'logilink').length;
   return (
     <Panel style={{ padding: 16, marginBottom: 16 }}>
-      <div className="fm-display" style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>ロジリンクの現場入力(たたみ数)</div>
+      <div className="fm-display" style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>ロジリンクの現場入力(たたみ数・機械で上がった数)</div>
       <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 10 }}>
-        ロジリンクの作業記録で「生産たたみ、パッキング」を終えるときに入れたたたみ数を、ここで選んだラインの生産実績として取り込みます(生産管理を開いている間、1分ごと)。現場で選べる生産計画は、このラインの終わっていない計画です。これまでに取り込んだ実績: {fromLogi}件
+        ロジリンクの作業記録で「生産たたみ、パッキング」を終えるときに入れたたたみ数を、ここで選んだラインの生産実績として取り込みます(生産管理を開いている間、1分ごと)。現場で選べる生産計画は、このラインの終わっていない計画です。
+        名前に「機械」が入る作業(ロジリンクの設定 → 作業で作る)を終えるときに入れた「機械で上がった数」は、選んだ機械の計画のラインの生産実績として取り込みます(計画を選ばなかったときは、たたみ以外の最初のライン)。これまでに取り込んだ実績: {fromLogi}件
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <span style={{ fontSize: 13, minWidth: 120 }}>取り込み先のライン</span>

@@ -1474,6 +1474,29 @@ html[data-app-theme="dark"] .st-label.is-orange{ background:rgba(247,144,9,.15);
 html[data-app-theme="dark"] .st-label.is-red{ background:rgba(240,68,56,.15); color:#FDA29B; border-color:transparent; }
 html[data-app-theme="dark"] .st-label.is-teal{ background:rgba(21,183,158,.14); color:#5FE9D0; border-color:transparent; }
 /* 割り当て(スタッフ別の表) */
+.kpi-row{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:4px 0 18px; }
+.kpi-tile{ background:var(--paper-50); border:1px solid var(--paper-line); border-radius:12px; padding:14px 16px; min-width:0; }
+.kpi-label{ font-size:12.5px; color:var(--slate-500); font-weight:600; }
+.kpi-value{ font-size:26px; font-weight:700; letter-spacing:-.01em; font-variant-numeric:tabular-nums; color:var(--ink-text); margin-top:4px; line-height:1.2; }
+.kpi-unit{ font-size:13px; font-weight:600; color:var(--slate-500); margin-left:3px; }
+.kpi-sub{ font-size:11.5px; color:var(--slate-500); margin-top:4px; }
+.hd-kpi{ margin:0; grid-template-columns:repeat(6,minmax(0,1fr)); gap:16px; }
+.hd-kpi .kpi-tile{ border-radius:16px; padding:16px 18px; }
+@media (max-width:1280px){ .hd-kpi{ grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media (max-width:700px){ .hd-kpi{ grid-template-columns:repeat(2,minmax(0,1fr)); } }
+.hbar{ height:6px; border-radius:999px; background:rgba(127,127,127,.15); margin:6px 0 2px auto; max-width:160px; overflow:hidden; }
+.hbar > i{ display:block; height:100%; border-radius:999px; background:#6366F1; }
+/* 明るい画面: 白い地のボタン・濃い紺のボタンをメインの色に */
+html:not([data-app-theme="dark"]) .pill-btn{ background:#fff; border:1px solid #D0D5DD; color:#344054; }
+html:not([data-app-theme="dark"]) .pill-btn:hover{ background:#F2F4F7; color:#101828; border-color:#D0D5DD; }
+html:not([data-app-theme="dark"]) .report-mode-btn.active, html:not([data-app-theme="dark"]) .report-go-btn, html:not([data-app-theme="dark"]) .date-nav-today-btn,
+html:not([data-app-theme="dark"]) .category-toggle-btn.sel, html:not([data-app-theme="dark"]) .subcat-add-btn, html:not([data-app-theme="dark"]) .end-day-btn{ background:#4F46E5; border-color:#4F46E5; color:#fff; }
+.lm-stats{ display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin:0 0 14px; }
+.lm-stat{ background:var(--paper-50); border:1px solid var(--paper-line); border-radius:12px; padding:12px 14px; }
+.lm-stat-v{ font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--ink-text); }
+.lm-stat-v small{ font-size:12px; font-weight:600; color:var(--slate-500); margin-left:2px; }
+.lm-stat-k{ font-size:12px; color:var(--slate-500); margin-top:2px; }
+@media (max-width:800px){ .lm-stats{ grid-template-columns:repeat(2,minmax(0,1fr)); } }
 .asg-filter{ display:inline-flex; margin:0 0 10px; }
 .asg-count{ display:inline-block; min-width:18px; padding:0 5px; margin-left:4px; border-radius:999px; background:rgba(127,127,127,.15); font-size:11px; }
 .asg-table-wrap{ overflow-x:auto; border:1px solid var(--paper-line); border-radius:12px; }
@@ -1981,6 +2004,15 @@ html[data-app-theme="dark"] .st-label.is-gray{background:rgba(77,127,203,0.13) !
 html[data-app-theme="dark"] .st-label.is-orange{background:rgba(255,197,25,0.13) !important;color:#fab893 !important;border-color:rgba(250,194,29,0.45) !important}
 html[data-app-theme="dark"] .st-label.is-red{background:rgba(238,58,41,0.13) !important;color:#f1a29b !important;border-color:rgba(247,48,33,0.45) !important}
 html[data-app-theme="dark"] .st-label.is-teal{background:rgba(52,228,173,0.13) !important;color:#9cf1e7 !important;border-color:rgba(42,238,188,0.45) !important}
+html[data-app-theme="dark"] .kpi-label{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] .kpi-value{color:var(--dk-fg) !important}
+html[data-app-theme="dark"] .kpi-unit{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] .kpi-sub{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] /* 明るい画面: 白い地のボタン・濃い紺のボタンをメインの色に */
+html:not([data-app-theme="dark"]) .pill-btn{background:var(--dk-card) !important;border-color:rgba(77,125,203,0.45) !important;color:#a5bee8 !important}
+html[data-app-theme="dark"] .lm-stat-v{color:var(--dk-fg) !important}
+html[data-app-theme="dark"] .lm-stat-v small{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] .lm-stat-k{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .asg-sub{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .asg-muted{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .asg-chip button{color:var(--dk-muted) !important}
@@ -3216,6 +3248,8 @@ var state = {
   logMgmtMoveTargetDate: '',
   logMgmtFilterTaskId: '',
   logMgmtFilterStaffId: '',
+  logMgmtFilterStatus: '', // '' すべて / 'open' 計測中 / 'done' 完了
+  logMgmtGroupBy: 'task',  // 'task' 作業ごと / 'staff' 作業者ごと
   logMgmtGroupOpen: {},
   managerViewMode: 'byStaff',
   kintoneProductSettings: null,
@@ -7962,6 +7996,8 @@ function getFilteredLogMgmtEntries(){
   return state.logMgmtEntries.filter(function(e){
     if(state.logMgmtFilterTaskId && e.log.taskId!==state.logMgmtFilterTaskId) return false;
     if(state.logMgmtFilterStaffId && e.log.staffId!==state.logMgmtFilterStaffId) return false;
+    if(state.logMgmtFilterStatus==='open' && e.log.end!==null) return false;
+    if(state.logMgmtFilterStatus==='done' && e.log.end===null) return false;
     return true;
   });
 }
@@ -7994,40 +8030,53 @@ function renderLogManagementTab(){
         '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">スタッフ</label>'+
           '<select id="logMgmtFilterStaff">'+staffFilterOptions+'</select>'+
         '</div>'+
+        '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">状態</label>'+
+          '<select id="logMgmtFilterStatus"><option value="">すべて</option><option value="open"'+(state.logMgmtFilterStatus==='open'?' selected':'')+'>計測中</option><option value="done"'+(state.logMgmtFilterStatus==='done'?' selected':'')+'>完了</option></select>'+
+        '</div>'+
         '<button type="button" class="vc-manage-toggle-btn" id="logMgmtFilterClearBtn">条件クリア</button>'+
+        '<div style="margin-left:auto;"><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">まとめ方</label>'+
+          '<div class="sub-switch" style="margin:0;"><button type="button" class="sub-switch-btn'+(state.logMgmtGroupBy!=='staff'?' active':'')+'" data-logmgmt-group-by="task">作業ごと</button>'+
+          '<button type="button" class="sub-switch-btn'+(state.logMgmtGroupBy==='staff'?' active':'')+'" data-logmgmt-group-by="staff">作業者ごと</button></div>'+
+        '</div>'+
       '</div>'+
     '</div>';
 
     if(!state.logMgmtGroupOpen) state.logMgmtGroupOpen = {};
     // 親作業(taskId)ごとにグループ化して表示する。実績管理は「親作業 → 内訳作業」の階層で確認できるようにする。
+    var byStaffGroup = state.logMgmtGroupBy==='staff';
     var groupOrder = [];
     var groups = {};
     filteredEntries.forEach(function(e){
-      var tid = e.log.taskId;
-      if(!groups[tid]){ groups[tid] = []; groupOrder.push(tid); }
-      groups[tid].push(e);
+      var gk = byStaffGroup ? 'S:'+e.log.staffId : e.log.taskId;
+      if(!groups[gk]){ groups[gk] = []; groupOrder.push(gk); }
+      groups[gk].push(e);
     });
-    var rows = groupOrder.map(function(tid){
-      var groupEntries = groups[tid];
-      var t = taskById(tid==='BREAK' ? 'BREAK' : tid);
-      var isOpen = state.logMgmtGroupOpen[tid]!==false; // 既定は開いた状態
-      var groupMs = 0;
+    if(byStaffGroup) groupOrder.sort(function(a,b){ return String(staffById(a.slice(2)).name).localeCompare(String(staffById(b.slice(2)).name), 'ja'); });
+    var rows = groupOrder.map(function(gk){
+      var groupEntries = groups[gk];
+      var gStaff = byStaffGroup ? staffById(gk.slice(2)) : null;
+      var gTask = byStaffGroup ? null : taskById(gk==='BREAK' ? 'BREAK' : gk);
+      var isOpen = state.logMgmtGroupOpen[gk]!==false; // 既定は開いた状態
+      var groupMs = 0, groupOpen = 0;
       groupEntries.forEach(function(e){
+        if(e.log.taskId==='BREAK') return; // 合計の作業時間に休憩は入れない
         var end = e.log.end ? new Date(e.log.end) : new Date();
         groupMs += Math.max(0, end - new Date(e.log.start));
       });
+      groupEntries.forEach(function(e){ if(e.log.end===null) groupOpen++; });
       var headerRow = '<tr class="logmgmt-group-header">'+
-        '<td colspan="7">'+
-          '<button type="button" class="vc-manage-toggle-btn" data-logmgmt-group-toggle="'+tid+'" style="margin-right:8px;">'+(isOpen?'▼':'▶')+'</button>'+
-          '<span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span> '+
-          '<strong>'+esc(t.name)+'</strong>'+
-          ' <span class="pool-hint" style="margin:0;">('+groupEntries.length+'件・合計 '+fmtHM(groupMs)+')</span>'+
+        '<td colspan="8">'+
+          '<button type="button" class="vc-manage-toggle-btn" data-logmgmt-group-toggle="'+esc(gk)+'" style="margin-right:8px;" aria-expanded="'+(isOpen?'true':'false')+'" aria-label="'+(isOpen?'たたむ':'開く')+'">'+(isOpen?'▼':'▶')+'</button>'+
+          (gStaff ? staffAvatarHtml(gStaff,'sm')+' <strong style="vertical-align:middle;">'+esc(gStaff.name)+'</strong>' : '<span class="task-color-dot" style="background:'+(gTask.color||'#999')+'"></span> <strong>'+esc(gTask.name)+'</strong>')+
+          ' <span class="pool-hint" style="margin:0;">'+groupEntries.length+'件 ・ 作業時間 '+fmtHM(groupMs)+'</span>'+
+          (groupOpen ? ' <span class="st-label is-blue">計測中 '+groupOpen+'件</span>' : '')+
         '</td>'+
       '</tr>';
       if(!isOpen) return headerRow;
       var childRows = groupEntries.map(function(e){
         var log = e.log;
         var s = staffById(log.staffId);
+        var t = taskById(log.taskId==='BREAK' ? 'BREAK' : log.taskId);
         var inProgress = log.end===null;
         var checked = state.logMgmtSelected[log.id] ? 'checked' : '';
         // 数量(手入力)は表示しない。作業時間と内訳ごとの時間を表示する
@@ -8035,18 +8084,19 @@ function renderLogManagementTab(){
         var subText = logSubTimesText(log);
         var durMsL = Math.max(0, (log.end ? new Date(log.end).getTime() : Date.now()) - new Date(log.start).getTime());
         var qtyLabel = fmtHM(durMsL)+(subText ? '<div style="font-size:11px;color:var(--slate-500);">'+esc(subText)+'</div>' : '');
-        return '<tr'+(inProgress?' style="opacity:0.55;"':'')+'>'+
-          '<td class="num"><input type="checkbox" data-logmgmt-check="'+log.id+'" '+checked+' '+(inProgress?'disabled title="進行中のため対象外です"':'')+'></td>'+
+        return '<tr>'+
+          '<td class="num"><input type="checkbox" data-logmgmt-check="'+log.id+'" '+checked+' '+(inProgress?'disabled title="計測中のため対象外です"':'')+' aria-label="'+esc(s.name)+' '+esc(t.name)+' '+fmtClock(log.start)+'を選ぶ"></td>'+
           '<td>'+esc(dateLabelFromStr(e.dateStr))+'</td>'+
           '<td>'+esc(s.name)+'</td>'+
-          '<td style="padding-left:24px;">'+workLabel+(inProgress?' <span style="color:var(--rust-600);font-size:11px;">(進行中)</span>':'')+'</td>'+
+          '<td><span class="task-color-dot" style="background:'+(t.color||'#999')+'"></span> '+workLabel+'</td>'+
+          '<td>'+(inProgress ? '<span class="st-label is-blue">計測中</span>' : (log.taskId==='BREAK' ? '<span class="st-label is-orange">休憩</span>' : '<span class="st-label is-green">完了</span>'))+'</td>'+
           '<td class="num">'+fmtClock(log.start)+'</td>'+
           '<td class="num">'+(log.end?fmtClock(log.end):'-')+'</td>'+
           '<td class="num">'+qtyLabel+'</td>'+
         '</tr>';
       }).join('');
       return headerRow + childRows;
-    }).join('') || '<tr><td colspan="7" style="color:var(--slate-500);">条件に一致する実績はありません</td></tr>';
+    }).join('') || '<tr><td colspan="8" style="color:var(--slate-500);">条件に一致する実績はありません</td></tr>';
 
     var visibleIds = {};
     filteredEntries.forEach(function(e){ visibleIds[e.log.id] = true; });
@@ -8055,12 +8105,28 @@ function renderLogManagementTab(){
     var selectableCount = filteredEntries.length - inProgressCount;
     var allSelected = selectableCount>0 && selectedCount===selectableCount;
 
-    body = filterBarHtml+
+    var sumMs = 0, sumStaff = {}, sumDays = {};
+    filteredEntries.forEach(function(e){
+      sumDays[e.dateStr] = true;
+      if(e.log.taskId==='BREAK') return;
+      sumStaff[e.log.staffId] = true;
+      sumMs += Math.max(0, (e.log.end ? new Date(e.log.end).getTime() : Date.now()) - new Date(e.log.start).getTime());
+    });
+    var statTile = function(v, k){ return '<div class="lm-stat"><div class="lm-stat-v">'+v+'</div><div class="lm-stat-k">'+k+'</div></div>'; };
+    var statsHtml = '<div class="lm-stats">'+
+      statTile(formatNum(filteredEntries.length)+'<small>件</small>', '実績')+
+      statTile(fmtHM(sumMs), '作業時間(休憩を除く)')+
+      statTile(Object.keys(sumStaff).length+'<small>人</small>', '作業者')+
+      statTile(inProgressCount+'<small>件</small>', '計測中')+
+      statTile(Object.keys(sumDays).length+'<small>日</small>', '日数')+
+    '</div>';
+    body = filterBarHtml+statsHtml+
       '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">'+filteredEntries.length+'件の実績</div>'+
       '<div style="overflow-x:auto;"><table class="report-table"><thead><tr>'+
-        '<th><input type="checkbox" id="logMgmtSelectAll" '+(allSelected?'checked':'')+'></th><th>日付</th><th>スタッフ</th><th>作業</th><th>開始</th><th>終了</th><th>作業時間(内訳)</th>'+
+        '<th><input type="checkbox" id="logMgmtSelectAll" '+(allSelected?'checked':'')+' aria-label="表示中の実績をすべて選ぶ"></th><th>日付</th><th>スタッフ</th><th>作業</th><th>状態</th><th>開始</th><th>終了</th><th class="num">作業時間(内訳)</th>'+
       '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
-      (inProgressCount ? '<div class="pool-hint" style="margin-top:8px;">進行中の実績('+inProgressCount+'件)は、削除・日付変更の対象にできません(選択欄がグレー表示されています)。</div>' : '')+
+      (inProgressCount ? '<div class="pool-hint" style="margin-top:8px;">計測中の実績('+inProgressCount+'件)は、削除・日付変更の対象にできません(選択欄がグレー表示されています)。</div>' : '')+
+      '<div class="pool-hint" style="margin-top:4px;">件数・明細数・ピース数は作業ごと・日ごとの CSV の数なので、ここ(作業時間の記録)には出しません。「生産性」のタブと「集計」で見られます。</div>'+
       '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--paper-line);">'+
         '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">選択中: '+selectedCount+'件</div>'+
         '<button type="button" class="log-stop-btn" id="logMgmtDeleteBtn" '+(selectedCount?'':'disabled')+'>選択した実績をまとめて削除する</button>'+
@@ -8107,6 +8173,7 @@ function bindLogManagementTab(){
       state.logMgmtSelected = {};
       state.logMgmtFilterTaskId = '';
       state.logMgmtFilterStaffId = '';
+      state.logMgmtFilterStatus = '';
       render();
       state.logMgmtEntries = await loadLogEntriesForRange(state.logMgmtStartDate, state.logMgmtEndDate);
       state.logMgmtLoading = false;
@@ -8127,11 +8194,17 @@ function bindLogManagementTab(){
       render();
     });
   }
+  var filterStatusSelect = document.getElementById('logMgmtFilterStatus');
+  if(filterStatusSelect) filterStatusSelect.addEventListener('change', function(){ state.logMgmtFilterStatus = filterStatusSelect.value; render(); });
+  document.querySelectorAll('[data-logmgmt-group-by]').forEach(function(el){
+    el.addEventListener('click', function(){ state.logMgmtGroupBy = el.getAttribute('data-logmgmt-group-by'); render(); });
+  });
   var filterClearBtn = document.getElementById('logMgmtFilterClearBtn');
   if(filterClearBtn){
     filterClearBtn.addEventListener('click', function(){
       state.logMgmtFilterTaskId = '';
       state.logMgmtFilterStaffId = '';
+      state.logMgmtFilterStatus = '';
       render();
     });
   }
@@ -14856,7 +14929,21 @@ function renderGateDashboard(){
     '<button type="button" class="hd-btn'+(arr.open ? '' : ' is-primary')+'" id="arrivalSheetPdf">'+(arr.open ? '閉じる' : '仕入先ごとに見る・印刷')+'</button>'+
   '</article>';
   var dataCard = dataStatus ? '<article class="hd-card hd-span3 hd-data hd-link"'+link('adminHub','data','管理の「データ取込」を開く')+'>'+label('database','データの更新状況','データ取込',true)+dataStatus+'</article>' : '';
-  return '<section class="hd-grid">'+progress+staffCard+taskCard+statusCard+arrivalCard+dataCard+'</section>';
+  var kpiHtml = '';
+  try{
+    var sumT = computeTodaySummary(state.day, activeRoster(), state.workVolume);
+    var wsum = 0;
+    (state.day.logs||[]).forEach(function(l){ if(l.taskId==='BREAK') return; wsum += Math.max(0, (l.end ? new Date(l.end).getTime() : Date.now()) - new Date(l.start).getTime()); });
+    var gT = wvGrandTotals(state.workVolume);
+    kpiHtml = '<div class="kpi-row hd-kpi">'+
+      kpiTile('出荷件数', gT.importCount ? formatNum(sumT.totalPrimary) : '—', gT.importCount ? '件' : '', gT.importCount ? 'CSVの取込から(VCはPO数)' : 'まだCSVの取込がありません')+
+      kpiTile('ピース数', gT.importCount ? formatNum(sumT.totalQty) : '—', gT.importCount ? 'ピース' : '', '')+
+      kpiCaseSetTiles(gT)+
+      kpiTile('作業人数', String(sumT.presentCount), '人', '出勤している人')+
+      kpiTile('作業時間', fmtHM(wsum), '', '休憩を除く')+
+    '</div>';
+  }catch(e){ kpiHtml = ''; }
+  return kpiHtml+'<section class="hd-grid">'+progress+staffCard+taskCard+statusCard+arrivalCard+dataCard+'</section>';
 }
 /* トップの見出し: 時間に合わせたあいさつ・今日の日付・使う画面を選ぶ案内 */
 function gateHeroHtml(){
@@ -18631,6 +18718,45 @@ function staffAvatarHtml(s, size){
 function avatarColorForStaff(s){
   return (s && s.avatarColor) || defaultAvatarColor(s ? s.id : 'x');
 }
+/* 集計・トップの数字のカード。数は今ある計算だけを使う:
+   件数・明細・ピース = CSV 取込の合計(wvTotalsForTask。VC は PO 数を件数に数える。今日の状況の「今日の作業量」と同じ)
+   作業時間 = 作業記録の時間の合計から休憩を除いたもの(aggregateDays と同じ)。作業者 = 休憩以外の記録がある人 */
+function wvGrandTotals(wv){
+  var ids = {}, out = { primaryCount:0, lineCount:0, totalQty:0, importCount:0, setQty:0, setKnown:0 };
+  wvActiveImports(wv || emptyWorkVolume()).forEach(function(i){ ids[i.taskId] = true; });
+  Object.keys(ids).forEach(function(tid){ var t = wvTotalsForTask(wv, tid); out.primaryCount += t.primaryCount; out.lineCount += t.lineCount; out.totalQty += t.totalQty; out.importCount += t.importCount; out.setQty += t.setQty; out.setKnown += t.setKnown; });
+  // ケース・バラ: 実績の画面の「ケース」と同じ計算(shipStatsOfWorkVolume)
+  var st = shipStatsOfWorkVolume(wv);
+  out.caseCount = st.caseCount; out.splitWith = st.splitWith; out.splitTotal = st.splitTotal;
+  return out;
+}
+/* ケース数・セット(SETブロックの数量)のカード。データの無い取込が混ざるときは「一部データなし」 */
+function kpiCaseSetTiles(g){
+  var noCsv = !g.importCount;
+  var caseTile = kpiTile('ケース数', noCsv || !g.splitWith ? '—' : formatNum(g.caseCount), noCsv || !g.splitWith ? '' : 'ケース',
+    noCsv ? '' : (!g.splitWith ? 'ケース・バラのデータなし' : (g.splitWith<g.splitTotal ? '一部データなし' : 'CSVのケース・バラから')));
+  var setTile = kpiTile('セット', noCsv || !g.setKnown ? '—' : formatNum(g.setQty), noCsv || !g.setKnown ? '' : 'ピース',
+    noCsv ? '' : (!g.setKnown ? 'SETブロックのデータなし' : 'SETブロックの数量'+(g.setKnown<g.importCount ? '(一部データなし)' : '')));
+  return caseTile + setTile;
+}
+function kpiTile(label, value, unit, sub){
+  return '<div class="kpi-tile"><div class="kpi-label">'+esc(label)+'</div><div class="kpi-value">'+value+(unit ? '<span class="kpi-unit">'+esc(unit)+'</span>' : '')+'</div>'+(sub ? '<div class="kpi-sub">'+sub+'</div>' : '')+'</div>';
+}
+function reportKpiHtml(agg, wv){
+  var g = wvGrandTotals(wv), ms = 0, staff = 0;
+  Object.keys(agg.perStaff).forEach(function(sid){ var w = agg.perStaff[sid].ms - (agg.perStaff[sid].breakMs||0); if(w>0){ ms += w; staff++; } });
+  var noCsv = !g.importCount;
+  return '<div class="kpi-row">'+
+    kpiTile('出荷件数', noCsv ? '—' : formatNum(g.primaryCount), noCsv ? '' : '件', noCsv ? 'CSVの取込なし' : 'VCはPO数')+
+    kpiTile('明細数', noCsv ? '—' : formatNum(g.lineCount), noCsv ? '' : '行', '')+
+    kpiTile('ピース数', noCsv ? '—' : formatNum(g.totalQty), noCsv ? '' : 'ピース', '')+
+    kpiCaseSetTiles(g)+
+    kpiTile('作業人数', String(staff), '人', '作業の記録がある人')+
+    kpiTile('作業時間', fmtHM(ms), '', '休憩を除く')+
+  '</div>';
+}
+/* 表の中の横棒(いちばん大きい値に合わせる) */
+function hbar(v, max){ var w = max>0 ? Math.max(2, Math.round(v/max*100)) : 0; return '<div class="hbar" aria-hidden="true"><i style="width:'+w+'%"></i></div>'; }
 function renderReportSingleBody(){
   if(state.reportLoading) return '<div class="empty-note">読み込み中...</div>';
   if(state.reportError) return '<div class="empty-note">'+esc(state.reportError)+'</div>';
@@ -18642,6 +18768,7 @@ function renderReportSingleBody(){
   var staffIds = Object.keys(agg.perStaff).sort(function(a,b){
     return agg.perStaff[b].ms - agg.perStaff[a].ms;
   });
+  var maxStaffMs = staffIds.reduce(function(m, sid){ return Math.max(m, agg.perStaff[sid].ms); }, 0);
   var staffRows = staffIds.map(function(sid){
     var s = staffById(sid);
     var info = agg.perStaff[sid];
@@ -18649,17 +18776,19 @@ function renderReportSingleBody(){
       var t = taskById(tid);
       return '<span class="task-breakdown-chip"><span class="task-color-dot" style="background:'+t.color+';width:7px;height:7px;"></span>'+esc(t.name)+' '+fmtHM(info.byTask[tid].ms)+'</span>';
     }).join('');
-    return '<tr><td>'+esc(s.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td>'+chips+'</td></tr>';
+    return '<tr><td>'+esc(s.name)+'</td><td class="num">'+fmtHM(info.ms)+hbar(info.ms, maxStaffMs)+'</td><td>'+chips+'</td></tr>';
   }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">記録がありません</td></tr>';
 
   var taskIds = Object.keys(agg.perTask).sort(byTaskColor(function(tid){ return taskById(tid).color; }));
+  var maxTaskMs = taskIds.reduce(function(m, tid){ return tid==='BREAK' ? m : Math.max(m, agg.perTask[tid].ms); }, 0);
   var taskRows = taskIds.map(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
-    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+taskSubMsRows(info, t)+'</td><td class="num">'+reportCsvVolumeCell(state.reportWorkVolume, state.reportCaseLedger, tid)+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
+    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+(tid==='BREAK' ? '' : hbar(info.ms, maxTaskMs))+taskSubMsRows(info, t)+'</td><td class="num">'+reportCsvVolumeCell(state.reportWorkVolume, state.reportCaseLedger, tid)+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
   return '<div class="panel-title">'+esc(dateLabelFromStr(state.reportDate))+' の集計 <button class="csv-export-btn" id="csvExportSingle">CSVダウンロード</button></div>'+
+    reportKpiHtml(agg, state.reportWorkVolume)+
     '<div class="report-section-title">スタッフ別</div>'+
     '<table class="report-table"><thead><tr><th>名前</th><th>合計時間</th><th>作業内訳</th></tr></thead><tbody>'+staffRows+'</tbody></table>'+
     '<div class="report-section-title">作業別</div>'+
@@ -18674,6 +18803,7 @@ function renderReportRangeBody(){
 
   var agg = result.agg;
   var staffIds = Object.keys(agg.perStaff).sort(function(a,b){ return agg.perStaff[b].ms - agg.perStaff[a].ms; });
+  var maxStaffMs = staffIds.reduce(function(m, sid){ return Math.max(m, agg.perStaff[sid].ms); }, 0);
   var staffRows = staffIds.map(function(sid){
     var s = staffById(sid);
     var info = agg.perStaff[sid];
@@ -18681,19 +18811,21 @@ function renderReportRangeBody(){
       var t = taskById(tid);
       return '<span class="task-breakdown-chip"><span class="task-color-dot" style="background:'+t.color+';width:7px;height:7px;"></span>'+esc(t.name)+' '+fmtHM(info.byTask[tid].ms)+'</span>';
     }).join('');
-    return '<tr><td>'+esc(s.name)+'</td><td class="num">'+fmtHM(info.ms)+'</td><td>'+chips+'</td></tr>';
+    return '<tr><td>'+esc(s.name)+'</td><td class="num">'+fmtHM(info.ms)+hbar(info.ms, maxStaffMs)+'</td><td>'+chips+'</td></tr>';
   }).join('') || '<tr><td colspan="3" style="color:var(--slate-500);">記録がありません</td></tr>';
 
   var taskIds = Object.keys(agg.perTask).sort(byTaskColor(function(tid){ return taskById(tid).color; }));
+  var maxTaskMs = taskIds.reduce(function(m, tid){ return tid==='BREAK' ? m : Math.max(m, agg.perTask[tid].ms); }, 0);
   var taskRows = taskIds.map(function(tid){
     var t = taskById(tid);
     var info = agg.perTask[tid];
-    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+taskSubMsRows(info, t)+'</td><td class="num">'+reportCsvVolumeCell(result.workVolume, result.caseLedger, tid)+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
+    return '<tr><td><span class="task-color-dot" style="background:'+t.color+'"></span> '+esc(t.name)+'</td><td class="num">'+fmtHM(info.ms)+(tid==='BREAK' ? '' : hbar(info.ms, maxTaskMs))+taskSubMsRows(info, t)+'</td><td class="num">'+reportCsvVolumeCell(result.workVolume, result.caseLedger, tid)+'</td><td class="num">'+Object.keys(info.staff).length+'人</td></tr>';
   }).join('') || '<tr><td colspan="4" style="color:var(--slate-500);">記録がありません</td></tr>';
 
   return '<div class="panel-title">'+esc(dateLabelFromStr(result.start))+' 〜 '+esc(dateLabelFromStr(result.end))+' の合計 <button class="csv-export-btn" id="csvExportRange">CSVダウンロード</button></div>'+
     '<div class="report-range-note">対象'+result.dayCount+'日間のうち、記録があった日: '+result.daysWithData+'日'+
       ((result.volumeFailedDates && result.volumeFailedDates.length) ? '。CSV取込データを読み込めなかった日('+result.volumeFailedDates.length+'日)の数量は含めていません' : '')+'</div>'+
+    reportKpiHtml(agg, result.workVolume)+
     '<div class="report-section-title">スタッフ別合計</div>'+
     '<table class="report-table"><thead><tr><th>名前</th><th>合計時間</th><th>作業内訳</th></tr></thead><tbody>'+staffRows+'</tbody></table>'+
     '<div class="report-section-title">作業別合計</div>'+

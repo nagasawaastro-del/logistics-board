@@ -1955,6 +1955,62 @@ function suggestPlanStart(dueDate, targetQty, speedPerHour) {
   const today = todayStr();
   return { start: ds < today ? today : ds, hours, days, late: ds < today };
 }
+/* ---------- 受注から生産計画を自動で埋める(なるべく入力しないで済むように) ----------
+   ・商品: セット品(元の商品あり)はバラ、ほかは受注の商品。数量は計画の単位(セット品はバラの枚数)
+   ・目標数量 = 受注の数 − 同じ受注の計画済みの数 − 使える完成在庫
+     完成在庫は、計画の無い受注に、同じ商品で納期の早い順に当てる(計画のある受注の分は計画で作るとみなす)
+   ・ライン: その商品を前回作ったライン(無ければいちばん上のライン)
+   ・資材: 商品の資材と同じ種類のロットで、必要な長さが足りる物のうち残りのいちばん少ない物(足りる物が無ければ残りのいちばん多い物)
+   ・開始日: 納期と生産速度から提案(suggestPlanStart)。終了日 = 納期 */
+function planBaseOf(data, so) {
+  const byId = (id) => data.products.find((p) => p.id === id);
+  const sp = so.productId ? byId(so.productId) : null;
+  if (sp && sp.isSet && sp.setSourceProductId) {
+    const b = byId(sp.setSourceProductId);
+    if (b) return { product: b, productName: b.productName, qty: (Number(sp.piecesPerSet) || 0) * (Number(so.orderedQty) || 0), perSet: Number(sp.piecesPerSet) || 0 };
+  }
+  return { product: sp, productName: sp ? sp.productName : so.productName, qty: Number(so.orderedQty) || 0, perSet: 0 };
+}
+function plannedQtyFor(data, soId, excludePlanId) {
+  return data.orders.filter((o) => o.salesOrderId === soId && o.id !== excludePlanId).reduce((a, o) => a + (Number(o.targetQty) || 0), 0);
+}
+function stockAllocationForUnplanned(data) {
+  const stock = {}; data.products.forEach((p) => { stock[p.id] = Math.max(0, Number(p.finishedStock) || 0); });
+  const out = {};
+  data.salesOrders.filter((so) => !data.orders.some((o) => o.salesOrderId === so.id))
+    .sort((a, b) => String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999')))
+    .forEach((so) => {
+      const b = planBaseOf(data, so); if (!b.product) return;
+      const use = Math.min(b.qty, stock[b.product.id] || 0);
+      stock[b.product.id] -= use; out[so.id] = use;
+    });
+  return out;
+}
+function autoPlanFields(data, so, excludePlanId, stockAlloc) {
+  const b = planBaseOf(data, so), p = b.product;
+  const planned = plannedQtyFor(data, so.id, excludePlanId);
+  const stockUse = planned > 0 ? 0 : ((stockAlloc || stockAllocationForUnplanned(data))[so.id] || 0);
+  const qty = Math.max(0, b.qty - planned - stockUse);
+  let lineId = data.lines[0] ? data.lines[0].id : '';
+  if (p) {
+    const last = data.orders.filter((o) => o.productId === p.id && o.lineId && data.lines.some((l) => l.id === o.lineId))
+      .sort((x, y) => String(planStart(y) || '').localeCompare(String(planStart(x) || '')))[0];
+    if (last) lineId = last.lineId;
+  }
+  let lotId = '';
+  if (p && p.materialType) {
+    const need = qty * (Number(p.materialPerUnit) || 0);
+    const same = data.lots.filter((l) => l.materialName === p.materialType && num(l.remainingLength) > 0);
+    const enough = same.filter((l) => num(l.remainingLength) >= need).sort((x, y) => num(x.remainingLength) - num(y.remainingLength));
+    const pick = enough[0] || same.sort((x, y) => num(y.remainingLength) - num(x.remainingLength))[0];
+    if (pick) lotId = pick.id;
+  }
+  const sg = suggestPlanStart(so.dueDate, qty, p && p.speedPerHour);
+  return {
+    fields: { salesOrderId: so.id, productId: p ? p.id : '', productName: b.productName || so.productName, lineId, lotId, targetQty: qty ? String(qty) : '', startDate: sg ? sg.start : todayStr(), dueDate: so.dueDate || '' },
+    info: { orderQty: b.qty, planned, stockUse, qty, perSet: b.perSet, late: !!(sg && sg.late) },
+  };
+}
 function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, removeOrder, lineById, lotById, addLine, removeLine, salesOrderById, productById, isEditor, planPrefill, clearPlanPrefill }) {
   const blankForm = { planNo: nextPlanNo(data.orders), salesOrderId: '', productId: '', productName: '', lineId: data.lines[0]?.id || '', lotId: '', targetQty: '', startDate: todayStr(), dueDate: '' };
   const [form, setForm] = useState(blankForm);
@@ -1991,37 +2047,36 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
       addOrder({ ...form, targetQty: Number(form.targetQty) });
     }
     setForm({ ...blankForm, planNo: nextPlanNo([...data.orders, { planNo: form.planNo }]) });
+    setAutoInfo(null); setBatchMsg('');
   };
 
+  const [autoInfo, setAutoInfo] = useState(null); // 目標数量の内わけ(受注 − 計画済み − 完成在庫)
+  const [batchMsg, setBatchMsg] = useState('');
   const onPickSalesOrder = (soId) => {
     const so = salesOrderById(soId);
-    if (!so) {
-      setForm((f) => ({ ...f, salesOrderId: soId }));
-      return;
-    }
-    const soProduct = so.productId ? productById(so.productId) : null;
-    let targetProductId = so.productId || '';
-    let targetProductName = so.productName;
-    let targetQty = so.orderedQty;
-    if (soProduct && soProduct.isSet && soProduct.setSourceProductId) {
-      const baseProduct = productById(soProduct.setSourceProductId);
-      if (baseProduct) {
-        targetProductId = baseProduct.id;
-        targetProductName = baseProduct.productName;
-        targetQty = num(soProduct.piecesPerSet) * num(so.orderedQty);
-      }
-    }
-    const tp = targetProductId ? productById(targetProductId) : null;
-    const sg = suggestPlanStart(so.dueDate, targetQty, tp && tp.speedPerHour);
-    setForm((f) => ({
-      ...f,
-      salesOrderId: soId,
-      productId: targetProductId || f.productId,
-      productName: targetProductName || f.productName,
-      targetQty: targetQty ? String(targetQty) : f.targetQty,
-      dueDate: so.dueDate || f.dueDate,
-      startDate: sg ? sg.start : f.startDate,
-    }));
+    if (!so) { setForm((f) => ({ ...f, salesOrderId: soId })); setAutoInfo(null); return; }
+    const a = autoPlanFields(data, so, editingId);
+    setForm((f) => ({ ...f, ...a.fields }));
+    setAutoInfo(a.info);
+  };
+  // 未計画の受注をまとめて計画にする(上と同じ決め方。目標数量が0の受注(計画済み・完成在庫で足りる)は作らない)
+  const unplannedSOs = data.salesOrders.filter((so) => !data.orders.some((o) => o.salesOrderId === so.id))
+    .sort((a, b) => String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999')));
+  const makeAllPlans = () => {
+    if (!unplannedSOs.length) return;
+    if (!window.confirm('未計画の受注 ' + unplannedSOs.length + '件を、まとめて生産計画にします(ライン・資材・目標数量・開始日は自動)。\nよろしいですか?')) return;
+    const alloc = stockAllocationForUnplanned(data);
+    let no = nextPlanNo(data.orders), made = 0, skipped = [];
+    const lateList = [];
+    unplannedSOs.forEach((so) => {
+      const a = autoPlanFields(data, so, null, alloc);
+      if (!(Number(a.fields.targetQty) > 0) || !a.fields.productName) { skipped.push(so.orderNo); return; }
+      addOrder({ ...a.fields, planNo: no, targetQty: Number(a.fields.targetQty) });
+      if (a.info.late) lateList.push(so.orderNo);
+      no = nextPlanNo([{ planNo: no }]); made++;
+    });
+    setBatchMsg('✅ ' + made + '件の生産計画を作りました。' + (skipped.length ? ' 完成在庫で足りる・数量0の受注 ' + skipped.length + '件(' + skipped.slice(0, 5).join('・') + (skipped.length > 5 ? '…' : '') + ')は作っていません。' : '') + (lateList.length ? ' 納期ぎりぎり(今日から始めても間に合わない見込み): ' + lateList.slice(0, 5).join('・') + (lateList.length > 5 ? '…' : '') : ''));
+    setForm({ ...blankForm, planNo: no });
   };
   // ダッシュボード・受注の「計画を作る」から来たとき: その受注を選んだ状態にする
   useEffect(() => {
@@ -2076,7 +2131,13 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
       {isEditor ? (
         <Panel style={{ padding: 16, border: editingId ? `1px solid ${C.teal}` : undefined }}>
           <div className="fm-display" style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{editingId ? '生産計画を編集' : '生産計画を追加'}</div>
-          <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 12 }}>受注に対してライン・資材・目標数量・生産期間を割り当てます。受注と紐づけない在庫生産もOK。</div>
+          <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 12 }}>受注を選ぶと、ライン・資材・目標数量・開始日・終了日が自動で入ります(そのまま保存でOK。直したい所だけ書き換え)。受注と紐づけない在庫生産もOK。</div>
+          {!editingId && (unplannedSOs.length > 0 || batchMsg) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12, padding: '10px 12px', borderRadius: 8, background: C.panelAlt }}>
+              {unplannedSOs.length > 0 && <PrimaryButton onClick={makeAllPlans}><Plus size={14} /> 未計画の受注 {unplannedSOs.length}件をまとめて計画にする</PrimaryButton>}
+              <span style={{ fontSize: 12, color: batchMsg ? C.green : C.textFaint }}>{batchMsg || 'ライン・資材・目標数量・開始日は、1件ずつ選ぶときと同じ決め方で自動で入れます'}</span>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
             <Field label="紐づく受注(任意)">
               <select className="fm-input" value={form.salesOrderId} onChange={(e) => onPickSalesOrder(e.target.value)}>
@@ -2127,6 +2188,7 @@ function PlanTab({ data, orderStats, salesOrderStats, addOrder, updateOrder, rem
             </Field>
             <Field label={selectedProduct?.isSet ? '目標数量(セット)' : '目標数量(枚)'}>
               <input type="number" className="fm-input" value={form.targetQty} onChange={(e) => setForm({ ...form, targetQty: e.target.value })} placeholder={selectedProduct?.isSet ? '500' : '5000'} />
+              {autoInfo && form.salesOrderId && <div style={{ fontSize: 11, color: autoInfo.qty > 0 ? C.textFaint : C.amber, marginTop: 4 }}>受注 {fmt(autoInfo.orderQty)}{autoInfo.perSet ? `(${autoInfo.perSet}枚×セット)` : ''}{autoInfo.planned ? ` − 計画済み ${fmt(autoInfo.planned)}` : ''}{autoInfo.stockUse ? ` − 完成在庫 ${fmt(autoInfo.stockUse)}` : ''} = {fmt(autoInfo.qty)}{autoInfo.qty > 0 ? '' : '(作らなくて足ります)'}</div>}
             </Field>
             <Field label="開始日">
               <input type="date" className="fm-input" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />

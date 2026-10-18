@@ -1307,6 +1307,47 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,input[typ
 .gate-links{margin-top:6px;}
 .changelog-link{margin-top:8px !important;}
 @media (min-width:1000px){ .gate-grid{grid-template-columns:repeat(4,minmax(0,1fr)) !important;} }
+
+/* ==== サンプル(Linear/Bento)の形: 線のアイコン・ロゴ・見出しバー・角の丸み・動き(2026-10-19) ==== */
+.ll-ic{display:block;flex:none;}
+.nav-ic .ll-ic{width:18px;height:18px;}
+.brand-mark{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:#6366f1;color:#fff;font-size:14px;font-weight:800;margin-right:10px;vertical-align:middle;}
+.topbar-title{display:inline-flex;align-items:center;}
+.theme-toggle .ll-ic{width:15px;height:15px;}
+.app-header{display:none;}
+@media screen and (min-width:1100px){
+  body.with-sidebar #app{padding-left:240px;}
+  body.with-sidebar .topbar{width:240px;background:var(--ink-950);}
+  body.with-sidebar .topbar-left{padding:22px 20px 16px;}
+  body.with-sidebar .topbar-date{display:none;}
+  body.with-sidebar .topbar-nav{padding:4px 12px 16px;gap:2px;}
+  body.with-sidebar .topbar-nav-item{gap:12px;padding:9px 12px;font-size:14px;font-weight:500;border-radius:8px;color:#a1a1aa;background:transparent;transition:all .2s ease-in-out;}
+  body.with-sidebar .topbar-nav-item:hover{color:#fff;background:rgba(255,255,255,.05);}
+  body.with-sidebar .topbar-nav-item.active{background:rgba(255,255,255,.08) !important;color:#fff !important;box-shadow:inset 2px 0 0 #6366f1;}
+  body.with-sidebar .topbar-nav-item .nav-ic{width:18px;}
+  body.with-sidebar .topbar .theme-toggle{display:none;}
+  body.with-sidebar .app-header{display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:20;height:60px;padding:0 24px;border-bottom:1px solid var(--paper-line);background:rgba(249,250,251,.82);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);}
+}
+.app-crumb{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--slate-500);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.app-crumb b{color:var(--ink-text);font-weight:600;}
+.app-crumb-sep{opacity:.6;}
+.app-header-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
+.app-header-date{font-size:13px;color:var(--slate-500);}
+.app-hdr-btn{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--paper-line);background:transparent;color:var(--slate-500);font-size:13px;font-weight:600;cursor:pointer;transition:all .2s ease-in-out;}
+.app-hdr-btn:hover{color:var(--ink-text);background:rgba(127,127,127,.08);}
+.app-avatar{width:36px;height:36px;border-radius:999px;background:#334155;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;}
+/* カード: 角の丸み 16px・押せるカードは持ち上がる・押すと少し縮む */
+.panel,.gate-card,.vca-card,.todo-btn,.name-tile,.task-tile,.stf-card,.modal-card,.app-dialog{border-radius:16px;}
+.gate-card,.todo-btn,.name-tile,.task-tile,.vca-card{transition:all .2s ease-in-out;}
+.gate-card:hover,.todo-btn:hover,.name-tile:hover{transform:translateY(-2px);}
+.pill-btn,.ll-btn,.vc-manage-toggle-btn,.add-btn,.vc-tab-btn,.sub-switch-btn,.report-go-btn,.app-hdr-btn,.gate-card,.name-tile,.todo-btn,.topbar-nav-item{transition:all .2s ease-in-out;}
+.pill-btn:not(:disabled):active,.ll-btn:not(:disabled):active,.vc-manage-toggle-btn:not(:disabled):active,.add-btn:not(:disabled):active,.vc-tab-btn:active,.sub-switch-btn:active,.report-go-btn:active,.gate-card:active,.name-tile:active,.todo-btn:active,.app-hdr-btn:active{transform:scale(.97);}
+.gate-icon .ll-ic{width:22px;height:22px;}
+body{font-feature-settings:"tnum";}
+.panel{padding:24px;}
+.mgr-wrap > .panel > .panel-title:first-child,.mgr-wrap > .panel > .panel-title.no-print:first-child{font-size:22px;font-weight:700;letter-spacing:-.01em;margin-bottom:6px;}
+@media (max-width:700px){ .panel{padding:16px;} }
+@media (prefers-reduced-motion: reduce){ .gate-card,.todo-btn,.name-tile,.task-tile,.vca-card,.pill-btn,.ll-btn,.vc-manage-toggle-btn,.add-btn,.vc-tab-btn,.sub-switch-btn,.topbar-nav-item{transition:none !important;} .gate-card:hover,.todo-btn:hover,.name-tile:hover{transform:none;} }
 /* ==== DARK THEME (generated) ==== */
 /* 暗いテーマ(2026-10-19)。html に data-app-theme="dark" が付いているときだけ。画面だけで、印刷は今までどおり白。
    下の手書きの部分(色・部品)と、darkgen.py が今のスタイル・画面の色から作った置き換え(明るい背景 → 暗いカード、濃い文字 → 明るい文字、
@@ -1368,6 +1409,16 @@ html[data-app-theme="dark"] .staff-header{ background:rgba(9,9,11,.85) !importan
 html[data-app-theme="dark"] details summary{ color:var(--dk-fg2); }
 html[data-app-theme="dark"] a{ color:#a5b4fc; }
 html[data-app-theme="dark"] .topbar a, html[data-app-theme="dark"] .gate-card{ color:inherit; }
+/* サンプルの形(見出しバー・タブ・トップのアイコン) */
+html[data-app-theme="dark"] body.with-sidebar .topbar-nav-item.active{ background:rgba(255,255,255,.08) !important; color:#fff !important; box-shadow:inset 2px 0 0 #6366f1 !important; }
+html[data-app-theme="dark"] body.with-sidebar .app-header{ background:rgba(9,9,11,.8) !important; border-color:var(--dk-line) !important; }
+html[data-app-theme="dark"] body.with-sidebar .topbar{ background:#09090b !important; }
+html[data-app-theme="dark"] .gate-icon{ color:#a5b4fc !important; background:rgba(99,102,241,.12) !important; }
+html[data-app-theme="dark"] .vc-tabs:not(.hub-tabs), html[data-app-theme="dark"] .sub-switch{ display:inline-flex !important; max-width:100%; gap:2px !important; padding:4px !important; border:1px solid var(--dk-line) !important; border-radius:10px; background:var(--dk-card) !important; }
+html[data-app-theme="dark"] .vc-tabs:not(.hub-tabs) .vc-tab-btn, html[data-app-theme="dark"] .sub-switch .sub-switch-btn{ background:transparent !important; border-color:transparent !important; color:var(--dk-muted) !important; border-radius:7px; }
+html[data-app-theme="dark"] .vc-tabs:not(.hub-tabs) .vc-tab-btn.active, html[data-app-theme="dark"] .sub-switch .sub-switch-btn.active{ background:rgba(255,255,255,.1) !important; color:#fff !important; }
+html[data-app-theme="dark"] .hub-tabs{ background:var(--dk-bg) !important; border-color:var(--dk-line) !important; }
+html[data-app-theme="dark"] .card-hover-ring:hover{ border-color:rgba(99,102,241,.5) !important; }
 /* 明るい/暗いの切り替えボタン */
 .theme-toggle{ display:inline-flex; align-items:center; justify-content:center; gap:6px; }
 .gate-theme-btn{ margin-left:10px; font-size:11px; font-weight:700; letter-spacing:0; padding:3px 10px; border-radius:999px; border:1px solid var(--paper-line); background:transparent; color:var(--slate-500); cursor:pointer; }
@@ -1745,6 +1796,12 @@ html[data-app-theme="dark"] .gate-today{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .gate-section-title{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .gate-card:hover{border-color:rgba(29,93,250,0.45) !important}
 html[data-app-theme="dark"] .todo-btn:hover{border-color:rgba(29,93,250,0.45) !important;background:var(--dk-card) !important}
+html[data-app-theme="dark"] body.with-sidebar .topbar-nav-item{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] .app-crumb{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] .app-crumb b{color:var(--dk-fg) !important}
+html[data-app-theme="dark"] .app-header-date{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] .app-hdr-btn{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] .app-hdr-btn:hover{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] [style*="background:#eee" i]{background:var(--dk-elev) !important}
 html[data-app-theme="dark"] [style*="background: #eee" i]{background:var(--dk-elev) !important}
 html[data-app-theme="dark"] [style*="background:#fff" i]{background:var(--dk-card) !important}
@@ -14344,7 +14401,8 @@ function updateStickyOffsets(){
     // 上のメニューがある画面は、広い画面では左のサイドバーにする(CSS の .with-sidebar)。サイドバーのときは上の高さ 0
     document.body.classList.toggle('with-sidebar', !!tb);
     var side = tb && getComputedStyle(tb).position==='fixed';
-    root.setProperty('--topbar-h', (tb && !side ? tb.offsetHeight : 0)+'px');
+    var hdr = side ? document.querySelector('.app-header') : null;
+    root.setProperty('--topbar-h', (tb && !side ? tb.offsetHeight : (hdr ? hdr.offsetHeight : 0))+'px');
     root.setProperty('--hubtabs-h', (hub ? hub.offsetHeight : 0)+'px');
   }catch(e){}
 }
@@ -14462,6 +14520,8 @@ function renderGateDataStatus(){
 /* ---------- GATE ---------- */
 /* トップページのカード。adminTab を渡すと、管理の画面のそのタブを開く */
 function gateCard(role, bg, fg, icon, title, desc, locked, adminTab){
+  var ik = adminTab==='data' ? 'data' : role;
+  if(LL_ICONS[ik]) icon = llIcon(ik, 22);
   return '<button class="gate-card" data-role="'+role+'"'+(adminTab ? ' data-admin-tab="'+adminTab+'"' : '')+'>'+
     (locked ? '<div class="gate-lock-badge" title="管理者ログインが必要です">&#128274;</div>' : '')+
     '<div class="gate-icon" style="background:'+bg+';color:'+fg+';">'+icon+'</div>'+
@@ -14477,7 +14537,7 @@ function renderGate(){
     '<div class="gate-section-title">現場</div>'+
     '<div class="gate-grid">'+
       '<button class="gate-card" data-role="input"'+readOnlyBlockedAttrs('input')+(isRoleBlockedForAccount('input')?' title="'+READONLY_BLOCKED_TITLE+'"':'')+'>'+
-        '<div class="gate-icon" style="background:#FFFAEB;color:#4338CA;">&#9997;</div>'+
+        '<div class="gate-icon" style="background:#FFFAEB;color:#4338CA;">'+llIcon('input',22)+'</div>'+
         '<div class="gate-text"><div class="gate-card-title">作業記録</div>'+
         '<div class="gate-card-desc">'+(isRoleBlockedForAccount('input') ? '閲覧専用アカウントでは使えません' : '作業の開始・切り替え・終了')+'</div></div>'+
       '</button>'+
@@ -14498,7 +14558,7 @@ function renderGate(){
       gateCard('settingsHub', '#F4EEE4', '#8A6A3B', '&#9881;', '設定', 'スタッフ・作業・得意先と単価・勤務時間など', true)+
       '<a class="gate-card" href="factory.html" style="text-decoration:none;color:inherit;">'+
         '<div class="gate-lock-badge" title="ログインが必要です">&#128274;</div>'+
-        '<div class="gate-icon" style="background:#E7F7F5;color:#1D7A70;">&#9986;</div>'+
+        '<div class="gate-icon" style="background:#E7F7F5;color:#1D7A70;">'+llIcon('factory',22)+'</div>'+
         '<div class="gate-text"><div class="gate-card-title">生産管理</div>'+
         '<div class="gate-card-desc">不織布加工の製品・受注・生産計画・資材・生産実績・品質</div></div>'+
       '</a>'+
@@ -14622,9 +14682,32 @@ window.__usageDeviceLabel = function(){
   var it = COMMON_NAV_ITEMS.concat(ADMIN_NAV_ITEMS).filter(function(x){ return x.role===state.usageLastRole; })[0];
   return it ? it.label : 'トップ';
 };
+/* 線のアイコン(lucide の形をそのまま中に持つ。外のファイルは読まない) */
+var LL_ICONS = {
+  home:'<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  input:'<path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/>',
+  report:'<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+  monitor:'<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>',
+  calendar:'<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>',
+  shukei:'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 9v12"/>',
+  vcAlloc:'<path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><path d="m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7"/>',
+  stock:'<path d="M22 8.35V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8.35A2 2 0 0 1 3.26 6.5l8-3.2a2 2 0 0 1 1.48 0l8 3.2A2 2 0 0 1 22 8.35Z"/><path d="M6 18h12"/><path d="M6 14h12"/><rect width="12" height="12" x="6" y="10"/>',
+  adminHub:'<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
+  settingsHub:'<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>',
+  data:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
+  factory:'<path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M17 18h1"/><path d="M12 18h1"/><path d="M7 18h1"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+  moon:'<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>'
+};
+function llIcon(name, size){
+  var p = LL_ICONS[name]; if(!p) return '';
+  var z = size || 18;
+  return '<svg class="ll-ic" viewBox="0 0 24 24" width="'+z+'" height="'+z+'" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+p+'</svg>';
+}
+function themeToggleInner(dark){ return dark ? llIcon('sun',16)+'<span>明るく</span>' : llIcon('moon',16)+'<span>暗く</span>'; }
 function themeToggleBtn(cls){
   var dark = document.documentElement.getAttribute('data-app-theme')==='dark';
-  return '<button type="button" class="'+(cls||'pill-btn')+' theme-toggle" data-theme-toggle title="明るい画面と暗い画面を切り替える(この端末だけ)">'+(dark ? '☀ 明るく' : '☾ 暗く')+'</button>';
+  return '<button type="button" class="'+(cls||'pill-btn')+' theme-toggle" data-theme-toggle title="明るい画面と暗い画面を切り替える(この端末だけ)">'+themeToggleInner(dark)+'</button>';
 }
 document.addEventListener('click', function(ev){
   var b = ev.target && ev.target.closest && ev.target.closest('[data-theme-toggle]');
@@ -14632,7 +14715,7 @@ document.addEventListener('click', function(ev){
   var t = document.documentElement.getAttribute('data-app-theme')==='dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-app-theme', t);
   try{ localStorage.setItem('ll-theme', t); }catch(e){}
-  document.querySelectorAll('[data-theme-toggle]').forEach(function(x){ x.textContent = t==='dark' ? '☀ 明るく' : '☾ 暗く'; });
+  document.querySelectorAll('[data-theme-toggle]').forEach(function(x){ x.innerHTML = themeToggleInner(t==='dark'); });
 });
 function renderTopbar(){
   var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'集計表(高屋・丹南)', vcAlloc:'VC引当', stock:'在庫'}[state.role] || '';
@@ -14644,17 +14727,17 @@ function renderTopbar(){
   var navItems = COMMON_NAV_ITEMS.slice();
   if(hasManagerSession()) navItems = navItems.concat(ADMIN_NAV_ITEMS);
   var navHtml = '<div class="topbar-nav">'+
-    '<button type="button" class="topbar-nav-item'+(!state.role?' active':'')+'" data-nav-role=""><span class="nav-ic">🏠</span>ホーム</button>'+
+    '<button type="button" class="topbar-nav-item'+(!state.role?' active':'')+'" data-nav-role=""><span class="nav-ic">'+llIcon('home')+'</span>ホーム</button>'+
     navItems.map(function(item){
       return '<button type="button" class="topbar-nav-item'+(state.role===item.role?' active':'')+'" data-nav-role="'+item.role+'"'+
-        (isRoleBlockedForAccount(item.role) ? readOnlyBlockedAttrs(item.role)+' title="'+READONLY_BLOCKED_TITLE+'"' : '')+'>'+(item.ic ? '<span class="nav-ic">'+item.ic+'</span>' : '')+item.label+'</button>';
+        (isRoleBlockedForAccount(item.role) ? readOnlyBlockedAttrs(item.role)+' title="'+READONLY_BLOCKED_TITLE+'"' : '')+'>'+((LL_ICONS[item.role] || item.ic) ? '<span class="nav-ic">'+(LL_ICONS[item.role] ? llIcon(item.role) : item.ic)+'</span>' : '')+item.label+'</button>';
     }).join('')+
   '</div>';
   return ''+
   '<div class="topbar">'+
     '<div class="topbar-main-row">'+
       '<div class="topbar-left">'+
-        '<span class="topbar-title">LOGI LINK</span>'+
+        '<span class="topbar-title"><span class="brand-mark">L</span>LOGI LINK</span>'+
         '<span class="topbar-date">'+todayLabel()+' / '+roleLabel+(isReadOnlyAccount() ? '(閲覧専用)' : '')+'</span>'+
       '</div>'+
       '<div class="topbar-right">'+
@@ -14664,6 +14747,19 @@ function renderTopbar(){
       '</div>'+
     '</div>'+
     navHtml+
+  '</div>'+
+  appHeaderHtml(roleLabel);
+}
+/* 広い画面(サイドバーのとき)だけ出す上の見出しバー。狭い画面では上のバーに同じものがあるので出さない */
+function appHeaderHtml(roleLabel){
+  var email = (state.managerSession && state.managerSession.user && state.managerSession.user.email) || '';
+  return '<div class="app-header no-print">'+
+    '<div class="app-crumb"><span>LOGI LINK</span><span class="app-crumb-sep">/</span><b>'+esc(roleLabel||'ホーム')+'</b>'+(isReadOnlyAccount() ? '<span class="app-crumb-sep">(閲覧専用)</span>' : '')+'</div>'+
+    '<div class="app-header-right">'+
+      '<span class="app-header-date">'+todayLabel()+'</span>'+
+      themeToggleBtn('app-hdr-btn')+
+      (email ? '<span class="app-avatar" title="'+esc(email)+'">'+esc(email.charAt(0).toUpperCase())+'</span>' : '')+
+    '</div>'+
   '</div>';
 }
 function bindCommon(){

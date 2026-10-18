@@ -1474,6 +1474,15 @@ html[data-app-theme="dark"] .st-label.is-orange{ background:rgba(247,144,9,.15);
 html[data-app-theme="dark"] .st-label.is-red{ background:rgba(240,68,56,.15); color:#FDA29B; border-color:transparent; }
 html[data-app-theme="dark"] .st-label.is-teal{ background:rgba(21,183,158,.14); color:#5FE9D0; border-color:transparent; }
 /* 割り当て(スタッフ別の表) */
+@keyframes kpiFlash{ 0%{ box-shadow:0 0 0 0 rgba(99,102,241,.55); border-color:#6366F1; } 100%{ box-shadow:0 0 0 10px rgba(99,102,241,0); } }
+.kpi-flash{ animation:kpiFlash 1.6s ease-out 1; }
+.kpi-delta{ font-size:12px; font-weight:700; margin-left:8px; padding:2px 7px; border-radius:999px; vertical-align:middle; animation:kpiDeltaFade 6s ease-in forwards; }
+.kpi-delta.is-up{ background:#ECFDF3; color:#027A48; }
+.kpi-delta.is-down{ background:#FEF3F2; color:#B42318; }
+html[data-app-theme="dark"] .kpi-delta.is-up{ background:rgba(18,183,106,.16); color:#6CE9A6; }
+html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); color:#FDA29B; }
+@keyframes kpiDeltaFade{ 0%,70%{ opacity:1; } 100%{ opacity:0; } }
+@media (prefers-reduced-motion: reduce){ .kpi-flash{ animation:none; } .kpi-delta{ animation:none; } }
 .kpi-row{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:4px 0 18px; }
 .kpi-tile{ background:var(--paper-50); border:1px solid var(--paper-line); border-radius:12px; padding:14px 16px; min-width:0; }
 .kpi-label{ font-size:12.5px; color:var(--slate-500); font-weight:600; }
@@ -2004,6 +2013,8 @@ html[data-app-theme="dark"] .st-label.is-gray{background:rgba(77,127,203,0.13) !
 html[data-app-theme="dark"] .st-label.is-orange{background:rgba(255,197,25,0.13) !important;color:#fab893 !important;border-color:rgba(250,194,29,0.45) !important}
 html[data-app-theme="dark"] .st-label.is-red{background:rgba(238,58,41,0.13) !important;color:#f1a29b !important;border-color:rgba(247,48,33,0.45) !important}
 html[data-app-theme="dark"] .st-label.is-teal{background:rgba(52,228,173,0.13) !important;color:#9cf1e7 !important;border-color:rgba(42,238,188,0.45) !important}
+html[data-app-theme="dark"] .kpi-delta.is-up{background:rgba(47,233,123,0.13) !important;color:#90fdcf !important}
+html[data-app-theme="dark"] .kpi-delta.is-down{background:rgba(238,58,41,0.13) !important;color:#f1a29b !important}
 html[data-app-theme="dark"] .kpi-label{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .kpi-value{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] .kpi-unit{color:var(--dk-muted) !important}
@@ -14636,6 +14647,7 @@ function render(){
     restoreScroll();
     syncViewToUrl();
     updateStickyOffsets();
+    flashKpiChanges();
     startPolling(); // トップのダッシュボードも新しくする(トップでは30秒に1回だけ確かめる)
     return;
   }
@@ -14936,10 +14948,10 @@ function renderGateDashboard(){
     (state.day.logs||[]).forEach(function(l){ if(l.taskId==='BREAK') return; wsum += Math.max(0, (l.end ? new Date(l.end).getTime() : Date.now()) - new Date(l.start).getTime()); });
     var gT = wvGrandTotals(state.workVolume);
     kpiHtml = '<div class="kpi-row hd-kpi">'+
-      kpiTile('出荷件数', gT.importCount ? formatNum(sumT.totalPrimary) : '—', gT.importCount ? '件' : '', gT.importCount ? 'CSVの取込から(VCはPO数)' : 'まだCSVの取込がありません')+
-      kpiTile('ピース数', gT.importCount ? formatNum(sumT.totalQty) : '—', gT.importCount ? 'ピース' : '', '')+
+      kpiTile('出荷件数', gT.importCount ? formatNum(sumT.totalPrimary) : '—', gT.importCount ? '件' : '', gT.importCount ? 'CSVの取込から(VCはPO数)' : 'まだCSVの取込がありません', gT.importCount ? sumT.totalPrimary : undefined)+
+      kpiTile('ピース数', gT.importCount ? formatNum(sumT.totalQty) : '—', gT.importCount ? 'ピース' : '', '', gT.importCount ? sumT.totalQty : undefined)+
       kpiCaseSetTiles(gT)+
-      kpiTile('作業人数', String(sumT.presentCount), '人', '出勤している人')+
+      kpiTile('作業人数', String(sumT.presentCount), '人', '出勤している人', sumT.presentCount)+
       kpiTile('作業時間', fmtHM(wsum), '', '休憩を除く')+
     '</div>';
   }catch(e){ kpiHtml = ''; }
@@ -18721,6 +18733,23 @@ function avatarColorForStaff(s){
 /* 集計・トップの数字のカード。数は今ある計算だけを使う:
    件数・明細・ピース = CSV 取込の合計(wvTotalsForTask。VC は PO 数を件数に数える。今日の状況の「今日の作業量」と同じ)
    作業時間 = 作業記録の時間の合計から休憩を除いたもの(aggregateDays と同じ)。作業者 = 休憩以外の記録がある人 */
+/* トップの数字のカード: 前に見た値から変わった数字を一瞬光らせ、増えた分(+120 など)を出す。比べるのはこの画面を開いている間だけ */
+function flashKpiChanges(){
+  try{
+    var prev = state.kpiPrev || {}, now = {};
+    document.querySelectorAll('[data-kpi]').forEach(function(el){
+      var k = el.getAttribute('data-kpi'), v = Number(el.getAttribute('data-kpi-val'));
+      now[k] = v;
+      if(prev[k]!==undefined && prev[k]!==v){
+        var d = v - prev[k];
+        el.classList.add('kpi-flash');
+        var val = el.querySelector('.kpi-value');
+        if(val){ var b = document.createElement('span'); b.className = 'kpi-delta '+(d>0?'is-up':'is-down'); b.textContent = (d>0?'+':'')+formatNum(d); val.appendChild(b); }
+      }
+    });
+    state.kpiPrev = now;
+  }catch(e){}
+}
 function wvGrandTotals(wv){
   var ids = {}, out = { primaryCount:0, lineCount:0, totalQty:0, importCount:0, setQty:0, setKnown:0 };
   wvActiveImports(wv || emptyWorkVolume()).forEach(function(i){ ids[i.taskId] = true; });
@@ -18739,8 +18768,8 @@ function kpiCaseSetTiles(g){
     noCsv ? '' : (!g.setKnown ? 'SETブロックのデータなし' : 'SETブロックの数量'+(g.setKnown<g.importCount ? '(一部データなし)' : '')));
   return caseTile + setTile;
 }
-function kpiTile(label, value, unit, sub){
-  return '<div class="kpi-tile"><div class="kpi-label">'+esc(label)+'</div><div class="kpi-value">'+value+(unit ? '<span class="kpi-unit">'+esc(unit)+'</span>' : '')+'</div>'+(sub ? '<div class="kpi-sub">'+sub+'</div>' : '')+'</div>';
+function kpiTile(label, value, unit, sub, raw){
+  return '<div class="kpi-tile"'+(typeof raw==='number' ? ' data-kpi="'+esc(label)+'" data-kpi-val="'+raw+'"' : '')+'><div class="kpi-label">'+esc(label)+'</div><div class="kpi-value">'+value+(unit ? '<span class="kpi-unit">'+esc(unit)+'</span>' : '')+'</div>'+(sub ? '<div class="kpi-sub">'+sub+'</div>' : '')+'</div>';
 }
 function reportKpiHtml(agg, wv){
   var g = wvGrandTotals(wv), ms = 0, staff = 0;
@@ -19207,6 +19236,7 @@ function bindInput(){
       var tid = el.getAttribute('data-tap-task');
       var log = currentLog(state.activeStaffId);
       if(log && log.taskId===tid) return;
+      if(!state.taskActionBusy) taskUndoBegin(tid); // 押しまちがいを取り消せるよう、押す前を覚えておく
       requestTaskSwitch(tid);
     });
   });
@@ -20284,6 +20314,34 @@ async function loadFoldPlanList(kind){
   var list = plans ? (kind==='machine' ? plans.machinePlans : plans.plans) : null;
   return Array.isArray(list) ? list : [];
 }
+/* ---------- 計画が終わったら次の計画をすすめる(2026-10-19) ----------
+   たたみ数・機械で上がった数を記録して、その計画の残りが0になったら「計画○○が終わりました」と出し、
+   同じ種類(同じラインの機械の計画)の、残りのある次の計画を「次はこれ」としてすすめる。
+   次に同じ種類の作業を始めるときの計画の選択で、その計画をいちばん上に「おすすめ」と出し、終わった計画は出さない(この端末で今日だけ) */
+function foldPlanDoneSuggest(m, plan, qty){
+  try{
+    if(!plan || plan.remaining===undefined || plan.remaining===null || qty < plan.remaining) return;
+    var kind = m.fkind==='machine' ? 'machine' : 'fold';
+    var key = 'll-fold-done:'+todayStr();
+    var done = {}; try{ done = JSON.parse(localStorage.getItem(key)||'{}') || {}; }catch(e){ done = {}; }
+    done[plan.id] = true; try{ localStorage.setItem(key, JSON.stringify(done)); }catch(e){}
+    var next = (m.plans||[]).filter(function(p){ return p.id!==plan.id && !done[p.id] && (p.remaining===undefined || p.remaining===null || p.remaining>0) && (kind!=='machine' || !plan.lineId || p.lineId===plan.lineId); })[0] || null;
+    state.foldNextSuggest = next ? { kind: kind, planId: next.id } : null;
+    var name = (plan.planNo ? '計画'+plan.planNo+' ' : '')+(plan.productName||'');
+    showToast('🎉 '+name+' が終わりました'+(next ? '。次は '+((next.planNo ? '計画'+next.planNo+' ' : '')+(next.productName||''))+' がおすすめです' : ''), null, null, 9000);
+  }catch(e){}
+}
+function foldPlansForPick(plans, kind){
+  var done = {}; try{ done = JSON.parse(localStorage.getItem('ll-fold-done:'+todayStr())||'{}') || {}; }catch(e){ done = {}; }
+  var list = (plans||[]).filter(function(p){ return !done[p.id]; });
+  var sg = state.foldNextSuggest;
+  if(sg && sg.kind===kind){
+    var i = list.findIndex(function(p){ return p.id===sg.planId; });
+    if(i>0){ var x = list.splice(i,1)[0]; list.unshift(x); }
+    if(i>=0) list = list.map(function(p, j){ return j===0 ? Object.assign({}, p, { suggested: true }) : p; });
+  }
+  return list;
+}
 function renderFoldPlanPickModal(m){
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card" style="max-width:520px;">'+
@@ -20292,7 +20350,7 @@ function renderFoldPlanPickModal(m){
       '<div style="display:flex;flex-direction:column;gap:8px;max-height:55vh;overflow-y:auto;">'+
         m.plans.map(function(p, i){
           return '<button type="button" class="ll-btn" data-fold-pick="'+i+'" style="text-align:left;padding:14px 16px;font-size:16px;border-radius:14px;">'+
-            '<b>'+esc(p.productName||'')+'</b>'+(p.planNo ? ' <span class="muted" style="font-size:12px;">計画'+esc(p.planNo)+'</span>' : '')+(p.lineName ? ' <span class="muted" style="font-size:12px;">'+esc(p.lineName)+'</span>' : '')+
+            (p.suggested ? '<span class="st-label is-blue" style="margin-right:6px;">おすすめ</span>' : '')+'<b>'+esc(p.productName||'')+'</b>'+(p.planNo ? ' <span class="muted" style="font-size:12px;">計画'+esc(p.planNo)+'</span>' : '')+(p.lineName ? ' <span class="muted" style="font-size:12px;">'+esc(p.lineName)+'</span>' : '')+
             (p.remaining!==undefined && p.remaining!==null ? '<div class="muted" style="font-size:13px;margin-top:2px;">残り '+formatNum(p.remaining)+esc(p.unit||'')+'</div>' : '')+'</button>';
         }).join('')+
       '</div>'+
@@ -20398,6 +20456,9 @@ function bindFoldQtyModal(m){
     });
     if(!ok){ busy = false; save.textContent = '記録する'; err.textContent = '保存できませんでした。もう一度「記録する」を押すか、「入れない」を押して生産管理の担当者に伝えてください。'; return; }
     requestFoldImport();
+    if(state.taskUndo) state.taskUndo.blocked = true;
+    if(state.taskUndoLast) state.taskUndoLast.blocked = true;
+    foldPlanDoneSuggest(m, plan, qty);
     next();
   });
   if(skip) skip.addEventListener('click', async function(){
@@ -20487,6 +20548,55 @@ function startTaskWithSubcatCheck(taskId){
 }
 /* foldPick: 「たたみ」の作業で選んだ生産計画({ id, planNo, productName, unit }。選ばないで始めるときは {})。
    undefined のときは、計画の候補があれば選ぶ画面を出して、選んだあとにもう一度呼ぶ */
+/* ---------- 作業の押しまちがいの取り消し(2026-10-19) ----------
+   作業記録で作業のカードを押したとき、押す前のその人の記録(作業の記録・作業の完了の印)を覚えておき、
+   次の作業が始まったら「取り消す」付きのお知らせを出す(10秒)。押すと、押す前の状態に戻す
+   (新しく始まった記録を消し、終わらせた前の作業を作業中に戻す。前の作業の時間はそのまま続く)。
+   たたみ数・機械で上がった数を生産管理へ記録したとき・日付が変わったとき・3分たったときは出さない */
+var TASK_UNDO_MAX_MS = 3*60000;
+function taskUndoBegin(taskId){
+  var day = state.day;
+  if(!day || !state.activeStaffId) { state.taskUndo = null; return; }
+  var sid = state.activeStaffId;
+  state.taskUndo = {
+    staffId: sid, taskId: taskId, date: day.date, at: Date.now(), blocked: false,
+    logs: JSON.parse(JSON.stringify((day.logs||[]).filter(function(l){ return l.staffId===sid; }))),
+    tc: JSON.parse(JSON.stringify(day.taskCompletion||{}))
+  };
+}
+function taskUndoOffer(taskId){
+  var u = state.taskUndo;
+  state.taskUndo = null;
+  if(!u || u.blocked || u.taskId!==taskId || u.staffId!==state.activeStaffId) return;
+  if(!state.day || state.day.date!==u.date || Date.now()-u.at > TASK_UNDO_MAX_MS) return;
+  state.taskUndoLast = u;
+  showToast('「'+taskById(taskId).name+'」を始めました', '取り消す', function(){ taskUndoApply(u); }, 10000);
+}
+async function taskUndoApply(u){
+  if(state.taskActionBusy) return;
+  if(u.blocked){ showToast('生産管理へ数を記録したあとなので、取り消せません'); return; }
+  var day = state.day;
+  if(!day || day.date!==u.date){ showToast('日付が変わったため取り消せませんでした'); return; }
+  var before = {}; u.logs.forEach(function(l){ before[l.id] = l; });
+  state.taskActionBusy = true;
+  try{
+    // この人の記録: 押したあとにできた記録は消し、押す前からあった記録は押す前の中身に戻す
+    day.logs = (day.logs||[]).filter(function(l){ return !(l.staffId===u.staffId && !before[l.id]); })
+      .map(function(l){ return (l.staffId===u.staffId && before[l.id]) ? JSON.parse(JSON.stringify(before[l.id])) : l; });
+    // 作業の完了の印: この操作で付いた印は外し、外れた印は戻す
+    var tc = day.taskCompletion || (day.taskCompletion = {});
+    Object.keys(tc).forEach(function(k){ if(!(k in u.tc)) delete tc[k]; });
+    Object.keys(u.tc).forEach(function(k){ if(!(k in tc)) tc[k] = u.tc[k]; });
+    var ok = await saveDay(day);
+    if(ok===false){ showToast('⚠️ 取り消しを保存できませんでした。もう一度お試しください'); return; }
+    await appendAuditLog({ action:'作業の開始を取り消し', target: staffById(u.staffId).name, before: taskById(u.taskId).name, after: '押す前の状態' });
+  }finally{
+    state.taskActionBusy = false;
+  }
+  state.modal = null; state.suppressRender = false;
+  render();
+  showToast('取り消しました(押す前の状態に戻しました)');
+}
 async function startTask(taskId, chosenSubcat, foldPick){
   // 安全策: 1スタッフにつき進行中の実績は1件だけ。確認と追加は同期的に行うため、
   // 連打や二重呼び出しでも同じ作業の実績が2件作られることはない。
@@ -20505,7 +20615,7 @@ async function startTask(taskId, chosenSubcat, foldPick){
   // 生産たたみ: どの生産計画の分を作業するかを、始めるときに選ぶ(終わるときのたたみ数にそのまま引き継ぐ)
   if(foldPick===undefined && isFoldTask(taskId)){
     var fkind = factoryTaskKind(taskId);
-    var fplans = await loadFoldPlanList(fkind);
+    var fplans = foldPlansForPick(await loadFoldPlanList(fkind), fkind==='machine' ? 'machine' : 'fold');
     if(fplans.length){
       state.modal = { kind:'foldPlanPick', fkind: fkind, taskId: taskId, chosenSubcat: chosenSubcat, plans: fplans };
       state.suppressRender = true;
@@ -20525,13 +20635,15 @@ async function startTask(taskId, chosenSubcat, foldPick){
   }
   state.day.logs.push(entry);
   state.taskActionBusy = true;
+  var savedOk;
   try{
-    await saveDay(state.day);
+    savedOk = await saveDay(state.day);
   }finally{
     state.taskActionBusy = false;
   }
   state.suppressRender = false;
   render();
+  if(savedOk!==false) taskUndoOffer(taskId); else state.taskUndo = null;
 }
 async function checkAutoBreak(){
   if(!canAutoWrite()) return; // monitor(閲覧専用)は自動休憩の書き込みを行わない
@@ -22516,7 +22628,7 @@ function appDialog(o){
 }
 function appConfirm(msg, opt){ return appDialog(Object.assign({ msg: msg }, opt || {})); }
 function appAlert(msg){ return appDialog({ msg: msg, alert: true }); }
-function showToast(msg, actionLabel, actionFn){
+function showToast(msg, actionLabel, actionFn, durationMs){
   // 直前の操作で保存に失敗していた場合は「〜しました」を出さない(失敗の表示と矛盾させない)
   if(isSuccessToastMessage(msg) && saveFailedDuringCurrentAction()){
     console.warn('[LOGI LINK] 保存に失敗したため、完了メッセージを表示しません: '+msg);
@@ -22553,7 +22665,7 @@ function showToast(msg, actionLabel, actionFn){
   setTimeout(function(){
     el.classList.add('leaving');
     setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 200);
-  }, 5500);
+  }, durationMs || 5500);
 }
 function notifyChanges(oldRoster, oldBacklog, oldDay, newRoster, newBacklog, newDay){
   if(state.role!=='manager' && state.role!=='register') return;

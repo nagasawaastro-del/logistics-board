@@ -10635,8 +10635,9 @@ async function tpickSaveImports(dateStr, entries){
 /* 作業枠の番号の一覧。取込の順に、パート・リフトそれぞれ TPICK_BATCH_ROWS 行ずつ。番号は作業枠の中で通し番号(取込が増えても前の番号は変わらない) */
 function tpickBatchesForTask(tp, wv, taskId){
   if(!tp || !tp.imports) return [];
-  var active = {}; wvActiveImports(wv || emptyWorkVolume()).forEach(function(i){ active[i.id] = true; });
-  var ids = Object.keys(tp.imports).filter(function(id){ return tp.imports[id].taskId===taskId && active[id]; })
+  // 作業枠は取込の今の作業枠を使う(取込のあとで作業枠を付け替えても、付け替えた先の作業で出す)
+  var active = {}; wvActiveImports(wv || emptyWorkVolume()).forEach(function(i){ active[i.id] = i; });
+  var ids = Object.keys(tp.imports).filter(function(id){ return active[id] && active[id].taskId===taskId; })
     .sort(function(a,b){ return String(tp.imports[a].at).localeCompare(String(tp.imports[b].at)); });
   var out = [], no = { part: 0, lift: 0 };
   ids.forEach(function(id){

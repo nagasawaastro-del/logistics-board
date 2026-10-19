@@ -14190,10 +14190,11 @@ function arrivalSheetCanvas(st, site, dateStr, supplier, no){
   // 全部の行で同じ仕入先・発注番号は、列にせず見出しにだけ出す
   function same(k){ return rows.length>0 && rows.every(function(r){ return r[k]===rows[0][k]; }); }
   var oneSup = same('supplier'), oneNo = same('no');
-  var cols = [['確認',36,'chk','',0],['品番',112,'key','code',0],['数量',84,'keyNum','qty',0],['ケース+端数',84,'keyNum','cases',0],['入数',46,'num','pack',0],['商品名',0,'','name',0.55]];
-  if(!oneSup) cols.push(['仕入先',84,'sub','supplier',0]);
-  if(!oneNo) cols.push(['発注番号',66,'sub','no',0]);
-  cols.push(['備考',0,'note','note',0.45]);
+  // 並び(2026-10-20): 確認・品番・商品名・入数・数量・ケース数・端数(・仕入先・発注番号)・備考。品番・数量・ケース数・端数を大きく
+  var cols = [['済',34,'chk','',0],['品番',100,'key','code',0],['商品名',0,'','name',0.62],['入数',44,'num','pack',0],['数量',76,'keyNum','qty',0],['ケース数',62,'keyNum','caseN',0],['端数',56,'keyNum','rem',0]];
+  if(!oneSup) cols.push(['仕入先',80,'sub','supplier',0]);
+  if(!oneNo) cols.push(['発注番号',64,'sub','no',0]);
+  cols.push(['備考',0,'note','note',0.38]);
   var FIXED_W = 804; // 表の幅(両端の余白を除く)。商品名と備考で残りを分ける
   var used = cols.reduce(function(a,c){ return a+c[1]; }, 0), rest = FIXED_W - used;
   cols.forEach(function(c){ if(c[4]) c[1] = Math.floor(rest*c[4]); });
@@ -14230,7 +14231,7 @@ function arrivalSheetCanvas(st, site, dateStr, supplier, no){
       var t = fit(cells[i], w-10), right = !head ? (kind==='keyNum' || kind==='num') : (kind==='keyNum' || kind==='num');
       if(right){ g.textAlign = 'right'; g.fillText(t, x+w-6, y+RH/2); g.textAlign = 'left'; } else g.fillText(t, x+6, y+RH/2);
       x += w;
-      if(i===3){ g.strokeStyle = '#98A2B3'; g.lineWidth = 1; g.beginPath(); g.moveTo(x, y); g.lineTo(x, y+RH); g.stroke(); } // 大きく出す列の区切り
+      if(i===2 || i===6){ g.strokeStyle = '#98A2B3'; g.lineWidth = 1; g.beginPath(); g.moveTo(x, y); g.lineTo(x, y+RH); g.stroke(); } // 数の列(入数〜端数)の両側に区切り
     });
     g.strokeStyle = head ? '#98A2B3' : '#D0D5DD'; g.lineWidth = 1; g.beginPath(); g.moveTo(16, y+RH); g.lineTo(W-16, y+RH); g.stroke();
   }
@@ -14238,8 +14239,9 @@ function arrivalSheetCanvas(st, site, dateStr, supplier, no){
   var mixedSite = rows.some(function(r){ return r.site!==(rows[0] && rows[0].site); }); // 拠点は、高屋と丹南が混ざっているときだけ備考に出す
   rows.forEach(function(r, i){
     var note = [r.late ? '遅れ '+r.due.slice(5).replace('-','/') : '', r.site && mixedSite ? SHUKEI_SITES[r.site].name : '', r.note || ''].filter(Boolean).join(' ');
-    var cs = r.cases===null ? '' : (Math.abs(r.cases-Math.round(r.cases))<1e-9 ? formatNum(Math.round(r.cases)) : formatNum(Math.floor(r.cases))+'+'+formatNum(Math.round(r.qty - Math.floor(r.cases)*r.pack)));
-    var val = { code: r.code, qty: formatNum(r.qty), cases: cs, pack: r.pack ? formatNum(r.pack) : '', name: r.name, supplier: r.supplier, no: r.no, note: note };
+    var caseN = r.cases===null ? '' : formatNum(Math.floor(r.cases + 1e-9));
+    var rem = r.cases===null ? '' : formatNum(Math.round(r.qty - Math.floor(r.cases + 1e-9)*r.pack));
+    var val = { code: r.code, qty: formatNum(r.qty), caseN: caseN, rem: rem, pack: r.pack ? formatNum(r.pack) : '', name: r.name, supplier: r.supplier, no: r.no, note: note };
     row(TOP+RH*(i+1), cols.map(function(c){ return c[3] ? val[c[3]] : ''; }), false, r, i);
   });
   if(!rows.length){ g.fillStyle = '#475467'; g.font = '14px '+FONT; g.fillText('今日入る発注はありません', 24, TOP+RH*1.5); }

@@ -10528,45 +10528,100 @@ function tpickParseFiles(files, cb){
 }
 function tpickDayLabel(d){ var s = String(d||''); return /^\d{8}$/.test(s) ? parseInt(s.slice(4,6),10)+'/'+parseInt(s.slice(6),10) : s; }
 function tpickQualityText(q){ var s = String(q||'').trim(); return s==='' ? '' : ({ '0':'良品', '1':'良品', '01':'良品' }[s] || s); }
-/* 印刷: 見本(ロジザードのトータルピッキングリスト)と同じ並び。1ページ14行で、ページ合計・総合計・ページ番号 */
-var TPICK_ROWS_PER_PAGE = 14;
-function tpickPrint(listIdx, who){
-  var t = state.tpick; if(!t || !t.lists || !t.lists[listIdx]) return;
-  var L = t.lists[listIdx];
-  var items = L.items.filter(function(it){ return who==='part' ? it.part : !it.part; });
-  if(!items.length){ showToast('印刷する行がありません'); return; }
-  var total = items.reduce(function(a, it){ return a+it.qty; }, 0);
-  var pages = []; for(var i=0; i<items.length; i+=TPICK_ROWS_PER_PAGE) pages.push(items.slice(i, i+TPICK_ROWS_PER_PAGE));
+/* 印刷: 見本(ロジザードのトータルピッキングリスト)と同じ並び。グループ(番号・パート用など)ごとに新しいページから、1ページ15行。
+   groups: [{ label, biz, day, items:[{ block, loc, code, name, quality, qty }] }] */
+var TPICK_ROWS_PER_PAGE = 15;
+function tpickPrintGroups(groups, fileTitle){
+  groups = (groups||[]).filter(function(g){ return g.items && g.items.length; });
+  if(!groups.length){ showToast('印刷する行がありません'); return; }
   var now = new Date(), stamp = now.getFullYear()+'/'+String(now.getMonth()+1).padStart(2,'0')+'/'+String(now.getDate()).padStart(2,'0')+' '+String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
-  var whoLabel = who==='part' ? 'パートさん用(AA・SET・ZZZ・S1-1〜)' : 'リフトマン用';
-  var no = 0;
-  var html = pages.map(function(pg, pi){
-    var pageSum = pg.reduce(function(a, it){ return a+it.qty; }, 0), prevBlock = null, prevLoc = null;
-    var rows = pg.map(function(it){
-      no++;
-      var showB = it.block!==prevBlock, showL = showB || it.loc!==prevLoc; prevBlock = it.block; prevLoc = it.loc;
-      return '<tr><td rowspan="2" class="c">'+no+'</td><td rowspan="2" class="c">'+(showB ? esc(it.block) : '')+'</td><td rowspan="2">'+(showL ? esc(tpickLocText(it.loc)) : '')+'</td>'+
-        '<td class="code">'+esc(it.code)+'</td><td rowspan="2" class="c">'+esc(tpickQualityText(it.quality))+'</td><td rowspan="2" class="q">'+formatNum(it.qty)+'</td><td rowspan="2" class="chk"></td></tr>'+
-        '<tr><td class="name">'+esc(it.name)+'</td></tr>';
+  var html = groups.map(function(G){
+    var total = G.items.reduce(function(a, it){ return a+it.qty; }, 0);
+    var pages = []; for(var i=0; i<G.items.length; i+=TPICK_ROWS_PER_PAGE) pages.push(G.items.slice(i, i+TPICK_ROWS_PER_PAGE));
+    var no = 0;
+    return pages.map(function(pg, pi){
+      var pageSum = pg.reduce(function(a, it){ return a+it.qty; }, 0), prevBlock = null, prevLoc = null;
+      var rows = pg.map(function(it){
+        no++;
+        var showB = it.block!==prevBlock, showL = showB || it.loc!==prevLoc; prevBlock = it.block; prevLoc = it.loc;
+        return '<tr><td rowspan="2" class="c">'+no+'</td><td rowspan="2" class="c">'+(showB ? esc(it.block) : '')+'</td><td rowspan="2">'+(showL ? esc(tpickLocText(it.loc)) : '')+'</td>'+
+          '<td class="code">'+esc(it.code)+'</td><td rowspan="2" class="c">'+esc(tpickQualityText(it.quality))+'</td><td rowspan="2" class="q">'+formatNum(it.qty)+'</td><td rowspan="2" class="chk"></td></tr>'+
+          '<tr><td class="name">'+esc(it.name)+'</td></tr>';
+      }).join('');
+      return '<div class="pg"><div class="top"><div class="pn">'+(pi+1)+' / '+pages.length+'</div><h1>トータルピッキングリスト</h1><div class="dt">日付: '+esc(stamp)+'</div></div>'+
+        '<div class="meta"><div><div class="biz">'+esc(G.biz||'')+'</div><div class="who">'+esc(G.label)+'</div><div class="day"><span>出荷日</span><b>'+esc(G.day||'')+'</b></div></div>'+
+        '<div class="sums"><div>総合計 <b>'+formatNum(total)+'</b></div><div>ページ合計 <b>'+formatNum(pageSum)+'</b></div></div></div>'+
+        '<table><thead><tr><th>No.</th><th>ブロック</th><th>ロケーション</th><th>商品ID / 商品名</th><th>品質区分</th><th>引当数</th><th>済</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
     }).join('');
-    return '<div class="pg"><div class="top"><div class="pn">'+(pi+1)+' / '+pages.length+'</div><h1>トータルピッキングリスト</h1><div class="dt">日付: '+esc(stamp)+'</div></div>'+
-      '<div class="meta"><div><div class="biz">対象業務 '+esc(L.biz||'—')+'</div><div class="who">'+esc(whoLabel)+'</div><div class="day"><span>出荷日</span><b>'+esc(tpickDayLabel(L.day))+'</b></div></div>'+
-      '<div class="sums"><div>総合計 <b>'+formatNum(total)+'</b></div><div>ページ合計 <b>'+formatNum(pageSum)+'</b></div></div></div>'+
-      '<table><thead><tr><th>No.</th><th>ブロック</th><th>ロケーション</th><th>商品ID / 商品名</th><th>品質区分</th><th>引当数</th><th>済</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   }).join('');
   var css = '@page{size:A4 portrait;margin:10mm;} .pg{page-break-after:always;break-after:page;} .pg:last-child{page-break-after:auto;break-after:auto;}'+
     '.top{display:flex;align-items:flex-start;justify-content:space-between;} .top h1{font-size:22px;margin:4px 0 8px;letter-spacing:.1em;} .pn,.dt{font-size:12px;} .dt{margin-top:22px;}'+
     '.meta{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px;} .biz{font-size:14px;border-bottom:1px solid #000;display:inline-block;min-width:200px;margin-bottom:4px;}'+
-    '.who{font-size:16px;font-weight:700;margin:2px 0 6px;} .day{display:inline-flex;border:1.5px solid #000;} .day span{background:#ddd;padding:6px 14px;border-right:1.5px solid #000;font-size:13px;} .day b{padding:4px 18px;font-size:20px;font-weight:500;}'+
+    '.who{font-size:22px;font-weight:800;margin:2px 0 6px;} .day{display:inline-flex;border:1.5px solid #000;} .day span{background:#ddd;padding:6px 14px;border-right:1.5px solid #000;font-size:13px;} .day b{padding:4px 18px;font-size:20px;font-weight:500;}'+
     '.sums{font-size:15px;text-align:right;} .sums b{display:inline-block;min-width:110px;border-bottom:1px solid #000;text-align:right;font-weight:500;}'+
-    'table{width:100%;border-collapse:collapse;font-size:12.5px;} th{background:#ddd;font-weight:500;border:1px solid #000;padding:4px;} td{border:1px solid #000;padding:3px 6px;height:20px;}'+
+    'table{width:100%;border-collapse:collapse;font-size:12.5px;} th{background:#ddd;font-weight:500;border:1px solid #000;padding:4px;} td{border:1px solid #000;padding:3px 6px;height:19px;}'+
     'td.c{text-align:center;} td.q{text-align:right;font-size:18px;width:70px;} td.code{font-size:13px;} td.name{background:#eee;font-size:12.5px;} td.chk{width:34px;}';
-  printHtmlDoc('トータルピッキングリスト_'+(L.biz||'')+'_'+tpickDayLabel(L.day).replace('/','')+'_'+(who==='part'?'パート':'リフト'), html, css);
+  printHtmlDoc(fileTitle || 'トータルピッキングリスト', html, css);
+}
+/* CSVを選んで作ったリスト(業務区分・出荷日ごと)を、パート用/リフト用で印刷 */
+function tpickPrint(listIdx, who){
+  var t = state.tpick; if(!t || !t.lists || !t.lists[listIdx]) return;
+  var L = t.lists[listIdx];
+  var items = L.items.filter(function(it){ return who==='part' ? it.part : !it.part; });
+  tpickPrintGroups([{ label: who==='part' ? 'パートさん用(AA・SET・ZZZ・S1-1〜)' : 'リフトマン用', biz: '対象業務 '+(L.biz||'—'), day: tpickDayLabel(L.day), items: items }],
+    'トータルピッキングリスト_'+(L.biz||'')+'_'+tpickDayLabel(L.day).replace('/','')+'_'+(who==='part'?'パート':'リフト'));
+}
+/* 取り込んだCSVの分(作業記録と同じ番号)を印刷。bids: 印刷する番号の id の並び */
+function tpickPrintSaved(taskId, bids){
+  var sv = state.tpickSaved || {};
+  var bs = tpickBatchesForTask(sv.tp, sv.wv, taskId).filter(function(b){ return bids.indexOf(b.id)!==-1; });
+  var d = sv.date || todayStr();
+  tpickPrintGroups(bs.map(function(b){
+    return { label: b.label+(b.who==='part' ? '(パートさん用)' : '(リフトマン用)'), biz: taskById(taskId).name, day: parseInt(d.slice(5,7),10)+'/'+parseInt(d.slice(8),10),
+      items: b.items.map(function(it){ return { block: it.b, loc: it.l, code: it.c, name: it.n, quality: it.q, qty: it.qty }; }) };
+  }), 'トータルピッキングリスト_'+taskById(taskId).name+'_'+d);
+}
+/* 取り込んだCSVの分を読む(日付を変えたとき・タブを開いたとき) */
+function tpickSavedLoad(dateStr){
+  var sv = state.tpickSaved = { date: dateStr, loading: true };
+  Promise.all([loadKeyJson('tpick:'+dateStr, function(){ return {}; }), loadKeyJson('tpick-prog:'+dateStr, function(){ return {}; }), getWorkVolumeForDate(dateStr)]).then(function(r){
+    if(state.tpickSaved!==sv) return;
+    sv.tp = r[0] || {}; sv.prog = r[1] || {}; sv.wv = r[2] || emptyWorkVolume(); sv.loading = false; render();
+  }).catch(function(){ sv.loading = false; sv.error = '読み込めませんでした'; render(); });
+}
+function renderTotalPickSaved(){
+  var sv = state.tpickSaved;
+  if(!sv){ tpickSavedLoad(todayStr()); sv = state.tpickSaved; }
+  var head = '<div class="panel-title" style="font-size:16px;margin-top:4px;">取り込んだCSVから(作業記録と同じ番号)</div>'+
+    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0 10px;"><label style="font-size:12px;color:var(--slate-500);">出荷日 <input type="date" id="tpickSavedDate" value="'+esc(sv.date||todayStr())+'"></label>'+
+    '<button type="button" class="vc-manage-toggle-btn" id="tpickSavedReload">読み直す</button>'+
+    '<span class="pool-hint" style="margin:0;">作業量CSV取込で取り込んだ CSV の分です。番号はタブレットの「📋 トータルピッキング」と同じなので、紙とタブレットを混ぜて使えます。</span></div>';
+  if(sv.loading) return head+'<div class="empty-note">読み込み中…</div>';
+  if(sv.error) return head+'<div class="vc-import-status">'+esc(sv.error)+'</div>';
+  var taskIds = {};
+  wvActiveImports(sv.wv || emptyWorkVolume()).forEach(function(i){ if(sv.tp && sv.tp.imports && sv.tp.imports[i.id]) taskIds[i.taskId] = true; });
+  var keys = Object.keys(taskIds);
+  if(!keys.length) return head+'<div class="empty-note">この日に取り込んだCSVのトータルピッキングはありません(2026-10-19 の夕方より前に取り込んだ分は作られていません)。下の「CSVを選んで作る」で作れます。</div>';
+  var progOf = function(bid){ return ((sv.prog && sv.prog.batches) || {})[bid] || null; };
+  return head+keys.map(function(tid){
+    var bs = tpickBatchesForTask(sv.tp, sv.wv, tid);
+    var row = function(b){
+      var p = progOf(b.id), done = p && p.done ? Object.keys(p.done).length : 0;
+      var st = p ? (p.doneAt ? '<span class="st-label is-green">完了</span>' : '<span class="st-label is-orange">'+esc(p.staffName||'')+'さん '+done+'/'+b.items.length+'</span>') : '<span class="st-label is-gray">空き</span>';
+      return '<tr><td><b>'+esc(b.label)+'</b></td><td class="num">'+b.items.length+'行</td><td class="num">'+formatNum(b.qty)+'個</td><td class="sk-minor">'+esc(b.from)+' 〜 '+esc(b.to)+'</td><td>'+st+'</td>'+
+        '<td><button type="button" class="vc-manage-toggle-btn" data-tpick-sp="'+esc(tid)+'|'+esc(b.id)+'">🖨 この番号</button></td></tr>';
+    };
+    var part = bs.filter(function(b){ return b.who==='part'; }), lift = bs.filter(function(b){ return b.who==='lift'; });
+    var allBtn = function(arr, label){ return arr.length ? '<button type="button" class="add-btn" data-tpick-sp="'+esc(tid)+'|'+esc(arr.map(function(b){ return b.id; }).join(','))+'">🖨 '+label+'を全部('+arr.length+'番号)</button>' : ''; };
+    return '<div class="panel" style="margin-bottom:12px;"><div class="panel-title" style="font-size:15px;">'+esc(taskById(tid).name)+' <span class="pool-hint" style="margin:0;">パート '+part.length+'番号 ・ リフト '+lift.length+'番号</span></div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 8px;">'+allBtn(part, 'パートさん用')+allBtn(lift, 'リフトマン用')+'</div>'+
+      '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>番号</th><th class="num">行</th><th class="num">数</th><th>ロケーション</th><th>状態</th><th></th></tr></thead><tbody>'+bs.map(row).join('')+'</tbody></table></div></div>';
+  }).join('');
 }
 function renderTotalPick(){
   var t = state.tpick || {};
   var lists = t.lists || [];
-  var head = '<div class="pool-hint" style="margin:8px 0 10px;">ロジザードの<b>出荷のCSV</b>(作業量CSV取込に入れるのと同じ物)を選ぶと、品番・ロケーションごとの合計(引当数)の<b>トータルピッキングリスト</b>を作ります。'+
+  var head = renderTotalPickSaved()+'<div class="panel-title" style="font-size:16px;margin-top:18px;">CSVを選んで作る</div><div class="pool-hint" style="margin:8px 0 10px;">ロジザードの<b>出荷のCSV</b>(作業量CSV取込に入れるのと同じ物)を選ぶと、品番・ロケーションごとの合計(引当数)の<b>トータルピッキングリスト</b>を作ります。'+
     '<b>パートさん用</b>(ブロック AA・SET・ZZZ と、S の S1-1 から後ろ)と<b>リフトマン用</b>(それ以外)に分けて印刷します。業務区分・出荷作業日ごとに別のリストになります。CSV は保存しません。</div>'+
     '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;"><label class="add-btn" style="cursor:pointer;">📄 出荷のCSVを選ぶ(複数可)<input type="file" id="tpickFile" accept=".csv,text/csv" multiple style="display:none;"></label>'+
     (t.fileNames && t.fileNames.length ? '<span class="pool-hint" style="margin:0;">'+esc(t.fileNames.join('、'))+'</span>' : '')+'</div>'+
@@ -10805,6 +10860,13 @@ function bindTotalPick(){
   document.querySelectorAll('[data-tpick-print]').forEach(function(el){
     el.addEventListener('click', function(){ var p = el.getAttribute('data-tpick-print').split('|'); tpickPrint(Number(p[0]), p[1]); });
   });
+  document.querySelectorAll('[data-tpick-sp]').forEach(function(el){
+    el.addEventListener('click', function(){ var p = el.getAttribute('data-tpick-sp').split('|'); tpickPrintSaved(p[0], p[1].split(',')); });
+  });
+  var sd = document.getElementById('tpickSavedDate');
+  if(sd) sd.addEventListener('change', function(){ if(sd.value) tpickSavedLoad(sd.value); });
+  var rl = document.getElementById('tpickSavedReload');
+  if(rl) rl.addEventListener('click', function(){ tpickSavedLoad((state.tpickSaved && state.tpickSaved.date) || todayStr()); });
 }
 function bindShukei(){
   bindTotalPick();

@@ -2028,6 +2028,8 @@ html[data-app-theme="dark"] .asg-sub{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .asg-muted{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .asg-chip button{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .asg-chip button:hover{background:rgba(247,48,33,0.16) !important;color:#f1a29b !important}
+html[data-app-theme="dark"] [style*="background:#ddd" i]{background:var(--dk-elev) !important}
+html[data-app-theme="dark"] [style*="background: #ddd" i]{background:var(--dk-elev) !important}
 html[data-app-theme="dark"] [style*="background:#eee" i]{background:var(--dk-elev) !important}
 html[data-app-theme="dark"] [style*="background: #eee" i]{background:var(--dk-elev) !important}
 html[data-app-theme="dark"] [style*="background:#fff" i]{background:var(--dk-card) !important}
@@ -10298,7 +10300,7 @@ function renderShukei(){
     var st = SHUKEI_SITES[k];
     return '<button type="button" class="shukei-site-btn'+(k===siteKey?' active':'')+'" data-shukei-site="'+k+'" style="--site:'+st.color+';--site-tint:'+st.tint+';">🏭 '+esc(st.name)+'</button>';
   }).join('');
-  var tabs = [['sheet','出荷集計表'],['diff','在庫差異']].map(function(t){
+  var tabs = [['sheet','出荷集計表'],['diff','在庫差異'],['tpick','トータルピッキング']].map(function(t){
     return '<button type="button" class="vc-tab-btn'+(tab===t[0]?' active':'')+'" data-shukei-tab="'+t[0]+'">'+t[1]+'</button>';
   }).join('');
   function asOf(d){ return d && d.uploadedAt ? fmtDateTime(d.uploadedAt) : '未登録'; }
@@ -10306,11 +10308,12 @@ function renderShukei(){
     (hasManagerSession() ? ' <button type="button" class="vc-manage-toggle-btn" data-go-datahub="1" style="min-height:0;padding:3px 10px;">データ取込を開く</button>' : '')+'</div>';
   var body = '';
   if(tab==='sheet') body = renderShukeiSheet(siteKey, site, data, draft);
+  else if(tab==='tpick') body = renderTotalPick();
   else body = renderShukeiDiff(siteKey, site, data);
   return '<div class="mgr-wrap shukei-wrap"><div class="panel shukei-site-panel" style="--site:'+site.color+';--site-tint:'+site.tint+';">'+
     '<div class="panel-title no-print">出荷集計表(高屋・丹南)</div>'+
-    '<div class="shukei-site-tabs no-print">'+siteTabs+'</div>'+
-    '<div class="shukei-site-banner no-print">'+esc(site.name)+'の'+(tab==='diff'?'在庫差異':'出荷集計表')+'を表示中</div>'+
+    (tab==='tpick' ? '' : '<div class="shukei-site-tabs no-print">'+siteTabs+'</div>')+
+    (tab==='tpick' ? '' : '<div class="shukei-site-banner no-print">'+esc(site.name)+'の'+(tab==='diff'?'在庫差異':'出荷集計表')+'を表示中</div>')+
     '<div class="vc-tabs no-print sticky-tabs" style="margin-top:6px;">'+tabs+'</div>'+
     '<div class="no-print">'+status+'</div>'+
     body+
@@ -10436,7 +10439,142 @@ function renderShukeiDiff(siteKey, site, data){
     '<div style="overflow-x:auto;max-height:560px;overflow-y:auto;" data-keep-scroll="shukeiDiff"><table class="report-table shukei-table"><thead><tr><th class="no-print" title="出荷集計表へ送る商品"><input type="checkbox" id="shukeiDiffPickAll"'+(nPick && nPick===list.filter(function(r){ return r.diff!==0; }).length ? ' checked' : '')+'></th>'+dh('商品コード','code')+dh('商品名','name')+dh('弥生('+site.name+')','yayoi')+dh('ロジザード','logi')+dh('差異(弥生−ロジ)','diff')+dh('ケース数(ロジ)','cases')+dh('才数','cubic')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div class="pool-hint no-print" style="margin-top:6px;">ロジザードは'+esc(site.name)+'の区画('+esc(site.stockBlocks.join('・'))+')の在庫の合計、ケース数はロジザードの在庫 ÷ 入数 の切り上げ、才数はkintoneの商品台帳の値です。</div>';
 }
+/* ---------- トータルピッキングリスト(2026-10-19) ----------
+   ロジザードの出荷の CSV(作業量CSV取込と同じ物)から、品番・ロケーションごとの合計(引当数)を作り、
+   パートさん用(ブロック AA・SET・ZZZ と、S の棚1段1(S1-1)から後ろ)とリフトマン用(それ以外)に分けて印刷する。
+   CSV はその場で読むだけで保存しない(通信なし)。業務区分ごと・出荷作業日ごとに別のリストにする */
+var TPICK_PART_BLOCKS = ['AA','SET','ZZZ'];
+function tpickLocText(v){ var s = String(v||'').trim(); return /^\d{8}$/.test(s) ? s.slice(0,3)+'-'+s.slice(3,6)+'-'+s.slice(6) : s; }
+function tpickIsPart(block, loc){
+  var b = String(block||'').trim().toUpperCase();
+  if(TPICK_PART_BLOCKS.indexOf(b)!==-1) return true;
+  if(b==='S'){
+    var p = String(shukeiLocLabel(loc)).split('-').map(function(x){ return parseInt(x,10)||0; }); // 棚-段-位置
+    return p[0]>1 || (p[0]===1 && (p[1]||0)>=1);
+  }
+  return false;
+}
+function tpickParseFiles(files, cb){
+  var lists = {}, errors = [], left = files.length, fileNames = [];
+  if(!left){ cb({ lists: [], errors: ['CSVファイルを選んでください'] }); return; }
+  Array.prototype.forEach.call(files, function(file){
+    fileNames.push(file.name);
+    var reader = new FileReader();
+    reader.onload = function(e){
+      try{
+        var text; try{ text = new TextDecoder('shift-jis').decode(e.target.result); }catch(err){ text = new TextDecoder('utf-8').decode(e.target.result); }
+        var parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+        var hd = (parsed.meta && parsed.meta.fields) || [];
+        var need = ['ブロック略称','ロケーション','商品ID','出荷引当数'];
+        var miss = need.filter(function(c){ return hd.indexOf(c)===-1; });
+        if(miss.length){ errors.push(file.name+': 列が見つかりません('+miss.join('・')+')。ロジザードの出荷のCSVを選んでください'); }
+        else (parsed.data||[]).forEach(function(r){
+          var code = String(r['商品ID']||'').trim();
+          if(!code || isDummyProductCode(code)) return;
+          var qty = Number(String(r['出荷引当数']||'').replace(/,/g,'')) || 0;
+          if(!(qty>0)) return;
+          var biz = String(r['業務区分']||'').trim(), day = String(r['出荷作業日']||r['出荷指示日']||'').trim();
+          var lk = biz+'|'+day;
+          var L = lists[lk] || (lists[lk] = { biz: biz, day: day, items: {} });
+          var block = String(r['ブロック略称']||'').trim(), loc = String(r['ロケーション']||'').trim(), q = String(r['品質区分']||'').trim();
+          var k = block+'|'+loc+'|'+code+'|'+q;
+          var it = L.items[k] || (L.items[k] = { block: block, loc: loc, code: code, name: String(r['商品名']||'').trim(), quality: q, qty: 0, part: tpickIsPart(block, loc) });
+          it.qty += qty;
+        });
+      }catch(err){ errors.push(file.name+': 読み込めませんでした'); }
+      if(--left===0){
+        var out = Object.keys(lists).sort().map(function(k){
+          var L = lists[k];
+          var items = Object.keys(L.items).map(function(x){ return L.items[x]; }).sort(function(a,b){
+            return String(a.block).localeCompare(String(b.block)) || String(a.loc).localeCompare(String(b.loc), 'ja', { numeric:true }) || String(a.code).localeCompare(String(b.code), 'ja', { numeric:true });
+          });
+          return { biz: L.biz, day: L.day, items: items };
+        });
+        cb({ lists: out, errors: errors, fileNames: fileNames });
+      }
+    };
+    reader.onerror = function(){ errors.push(file.name+': 読み込めませんでした'); if(--left===0) cb({ lists: [], errors: errors }); };
+    reader.readAsArrayBuffer(file);
+  });
+}
+function tpickDayLabel(d){ var s = String(d||''); return /^\d{8}$/.test(s) ? parseInt(s.slice(4,6),10)+'/'+parseInt(s.slice(6),10) : s; }
+function tpickQualityText(q){ var s = String(q||'').trim(); return s==='' ? '' : ({ '0':'良品', '1':'良品', '01':'良品' }[s] || s); }
+/* 印刷: 見本(ロジザードのトータルピッキングリスト)と同じ並び。1ページ14行で、ページ合計・総合計・ページ番号 */
+var TPICK_ROWS_PER_PAGE = 14;
+function tpickPrint(listIdx, who){
+  var t = state.tpick; if(!t || !t.lists || !t.lists[listIdx]) return;
+  var L = t.lists[listIdx];
+  var items = L.items.filter(function(it){ return who==='part' ? it.part : !it.part; });
+  if(!items.length){ showToast('印刷する行がありません'); return; }
+  var total = items.reduce(function(a, it){ return a+it.qty; }, 0);
+  var pages = []; for(var i=0; i<items.length; i+=TPICK_ROWS_PER_PAGE) pages.push(items.slice(i, i+TPICK_ROWS_PER_PAGE));
+  var now = new Date(), stamp = now.getFullYear()+'/'+String(now.getMonth()+1).padStart(2,'0')+'/'+String(now.getDate()).padStart(2,'0')+' '+String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  var whoLabel = who==='part' ? 'パートさん用(AA・SET・ZZZ・S1-1〜)' : 'リフトマン用';
+  var no = 0;
+  var html = pages.map(function(pg, pi){
+    var pageSum = pg.reduce(function(a, it){ return a+it.qty; }, 0), prevBlock = null, prevLoc = null;
+    var rows = pg.map(function(it){
+      no++;
+      var showB = it.block!==prevBlock, showL = showB || it.loc!==prevLoc; prevBlock = it.block; prevLoc = it.loc;
+      return '<tr><td rowspan="2" class="c">'+no+'</td><td rowspan="2" class="c">'+(showB ? esc(it.block) : '')+'</td><td rowspan="2">'+(showL ? esc(tpickLocText(it.loc)) : '')+'</td>'+
+        '<td class="code">'+esc(it.code)+'</td><td rowspan="2" class="c">'+esc(tpickQualityText(it.quality))+'</td><td rowspan="2" class="q">'+formatNum(it.qty)+'</td><td rowspan="2" class="chk"></td></tr>'+
+        '<tr><td class="name">'+esc(it.name)+'</td></tr>';
+    }).join('');
+    return '<div class="pg"><div class="top"><div class="pn">'+(pi+1)+' / '+pages.length+'</div><h1>トータルピッキングリスト</h1><div class="dt">日付: '+esc(stamp)+'</div></div>'+
+      '<div class="meta"><div><div class="biz">対象業務 '+esc(L.biz||'—')+'</div><div class="who">'+esc(whoLabel)+'</div><div class="day"><span>出荷日</span><b>'+esc(tpickDayLabel(L.day))+'</b></div></div>'+
+      '<div class="sums"><div>総合計 <b>'+formatNum(total)+'</b></div><div>ページ合計 <b>'+formatNum(pageSum)+'</b></div></div></div>'+
+      '<table><thead><tr><th>No.</th><th>ブロック</th><th>ロケーション</th><th>商品ID / 商品名</th><th>品質区分</th><th>引当数</th><th>済</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }).join('');
+  var css = '@page{size:A4 portrait;margin:10mm;} .pg{page-break-after:always;break-after:page;} .pg:last-child{page-break-after:auto;break-after:auto;}'+
+    '.top{display:flex;align-items:flex-start;justify-content:space-between;} .top h1{font-size:22px;margin:4px 0 8px;letter-spacing:.1em;} .pn,.dt{font-size:12px;} .dt{margin-top:22px;}'+
+    '.meta{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px;} .biz{font-size:14px;border-bottom:1px solid #000;display:inline-block;min-width:200px;margin-bottom:4px;}'+
+    '.who{font-size:16px;font-weight:700;margin:2px 0 6px;} .day{display:inline-flex;border:1.5px solid #000;} .day span{background:#ddd;padding:6px 14px;border-right:1.5px solid #000;font-size:13px;} .day b{padding:4px 18px;font-size:20px;font-weight:500;}'+
+    '.sums{font-size:15px;text-align:right;} .sums b{display:inline-block;min-width:110px;border-bottom:1px solid #000;text-align:right;font-weight:500;}'+
+    'table{width:100%;border-collapse:collapse;font-size:12.5px;} th{background:#ddd;font-weight:500;border:1px solid #000;padding:4px;} td{border:1px solid #000;padding:3px 6px;height:20px;}'+
+    'td.c{text-align:center;} td.q{text-align:right;font-size:18px;width:70px;} td.code{font-size:13px;} td.name{background:#eee;font-size:12.5px;} td.chk{width:34px;}';
+  printHtmlDoc('トータルピッキングリスト_'+(L.biz||'')+'_'+tpickDayLabel(L.day).replace('/','')+'_'+(who==='part'?'パート':'リフト'), html, css);
+}
+function renderTotalPick(){
+  var t = state.tpick || {};
+  var lists = t.lists || [];
+  var head = '<div class="pool-hint" style="margin:8px 0 10px;">ロジザードの<b>出荷のCSV</b>(作業量CSV取込に入れるのと同じ物)を選ぶと、品番・ロケーションごとの合計(引当数)の<b>トータルピッキングリスト</b>を作ります。'+
+    '<b>パートさん用</b>(ブロック AA・SET・ZZZ と、S の S1-1 から後ろ)と<b>リフトマン用</b>(それ以外)に分けて印刷します。業務区分・出荷作業日ごとに別のリストになります。CSV は保存しません。</div>'+
+    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;"><label class="add-btn" style="cursor:pointer;">📄 出荷のCSVを選ぶ(複数可)<input type="file" id="tpickFile" accept=".csv,text/csv" multiple style="display:none;"></label>'+
+    (t.fileNames && t.fileNames.length ? '<span class="pool-hint" style="margin:0;">'+esc(t.fileNames.join('、'))+'</span>' : '')+'</div>'+
+    ((t.errors||[]).length ? '<div class="vc-import-status">'+t.errors.map(esc).join('<br>')+'</div>' : '');
+  if(!lists.length) return head+(t.loading ? '<div class="empty-note">読み込み中…</div>' : '');
+  var body = lists.map(function(L, i){
+    var part = L.items.filter(function(it){ return it.part; }), lift = L.items.filter(function(it){ return !it.part; });
+    var sum = function(a){ return a.reduce(function(x, it){ return x+it.qty; }, 0); };
+    var blocks = function(a){ var m = {}; a.forEach(function(it){ m[it.block||'(なし)'] = true; }); return Object.keys(m).sort().join('・'); };
+    var card = function(who, arr, label){
+      return '<div class="lm-stat" style="display:flex;flex-direction:column;gap:6px;"><div class="lm-stat-k" style="font-weight:700;color:var(--ink-text);">'+label+'</div>'+
+        '<div class="lm-stat-v">'+formatNum(arr.length)+'<small>行</small> '+formatNum(sum(arr))+'<small>個</small></div>'+
+        '<div class="lm-stat-k">ブロック: '+esc(blocks(arr)||'—')+'</div>'+
+        '<button type="button" class="add-btn" data-tpick-print="'+i+'|'+who+'"'+(arr.length ? '' : ' disabled')+'>🖨 印刷</button></div>';
+    };
+    var rows = L.items.map(function(it){
+      return '<tr><td>'+(it.part ? '<span class="st-label is-blue">パート</span>' : '<span class="st-label is-gray">リフト</span>')+'</td><td>'+esc(it.block)+'</td><td>'+esc(tpickLocText(it.loc))+'</td><td><b>'+esc(it.code)+'</b> <span class="sk-minor">'+esc(it.name)+'</span></td><td>'+esc(tpickQualityText(it.quality))+'</td><td class="num"><b>'+formatNum(it.qty)+'</b></td></tr>';
+    }).join('');
+    return '<div class="panel" style="margin-bottom:14px;"><div class="panel-title" style="font-size:17px;">対象業務 '+esc(L.biz||'—')+' ・ 出荷日 '+esc(tpickDayLabel(L.day))+' <span class="pool-hint" style="margin:0;">'+formatNum(L.items.length)+'行 ・ '+formatNum(sum(L.items))+'個</span></div>'+
+      '<div class="lm-stats" style="grid-template-columns:repeat(2,minmax(0,1fr));">'+card('part', part, '👩 パートさん用(AA・SET・ZZZ・S1-1〜)')+card('lift', lift, '🚜 リフトマン用(それ以外)')+'</div>'+
+      '<details><summary style="cursor:pointer;font-weight:700;margin:6px 0;">中身を見る('+formatNum(L.items.length)+'行)</summary><div style="overflow-x:auto;max-height:480px;overflow-y:auto;"><table class="report-table"><thead><tr><th>分け</th><th>ブロック</th><th>ロケーション</th><th>商品ID / 商品名</th><th>品質区分</th><th class="num">引当数</th></tr></thead><tbody>'+rows+'</tbody></table></div></details></div>';
+  }).join('');
+  return head+body;
+}
+function bindTotalPick(){
+  var f = document.getElementById('tpickFile');
+  if(f) f.addEventListener('change', function(){
+    var files = f.files; if(!files || !files.length) return;
+    state.tpick = { loading: true }; render();
+    tpickParseFiles(files, function(r){ state.tpick = { lists: r.lists, errors: r.errors, fileNames: r.fileNames }; render(); });
+  });
+  document.querySelectorAll('[data-tpick-print]').forEach(function(el){
+    el.addEventListener('click', function(){ var p = el.getAttribute('data-tpick-print').split('|'); tpickPrint(Number(p[0]), p[1]); });
+  });
+}
 function bindShukei(){
+  bindTotalPick();
   document.querySelectorAll('[data-shukei-site]').forEach(function(el){
     el.addEventListener('click', function(){ state.shukeiSite = el.getAttribute('data-shukei-site'); state.shukeiSheetSort = null; state.shukeiDiffSort = null; render(); });
   });

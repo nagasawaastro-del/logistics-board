@@ -10589,6 +10589,11 @@ function tpickSavedLoad(dateStr){
     sv.tp = r[0] || {}; sv.prog = r[1] || {}; sv.wv = r[2] || emptyWorkVolume(); sv.loading = false; render();
   }).catch(function(){ sv.loading = false; sv.error = '読み込めませんでした'; render(); });
 }
+/* 今日の状況の「🧾 トータルピッキング」: 取り込んだCSVの分(作業記録と同じ番号)を見て印刷(ロジザードの紙が出せないときの予備) */
+function renderTpickPanel(){
+  if(!state.tpickPanelOpen) return '';
+  return '<div class="stf-card" id="tpickPanel" style="margin:8px 0 12px;border-left-color:#6366F1;">'+renderTotalPickSaved()+'</div>';
+}
 function renderTotalPickSaved(){
   var sv = state.tpickSaved;
   if(!sv){ tpickSavedLoad(todayStr()); sv = state.tpickSaved; }
@@ -10621,7 +10626,7 @@ function renderTotalPickSaved(){
 function renderTotalPick(){
   var t = state.tpick || {};
   var lists = t.lists || [];
-  var head = renderTotalPickSaved()+'<div class="panel-title" style="font-size:16px;margin-top:18px;">CSVを選んで作る</div><div class="pool-hint" style="margin:8px 0 10px;">ロジザードの<b>出荷のCSV</b>(作業量CSV取込に入れるのと同じ物)を選ぶと、品番・ロケーションごとの合計(引当数)の<b>トータルピッキングリスト</b>を作ります。'+
+  var head = '<div class="pool-hint" style="margin:8px 0 10px;">取り込んだCSVの分(作業記録と同じ番号)は、管理 → 今日の状況の「🧾 トータルピッキング」で見て印刷できます。</div><div class="panel-title" style="font-size:16px;margin-top:10px;">CSVを選んで作る</div><div class="pool-hint" style="margin:8px 0 10px;">ロジザードの<b>出荷のCSV</b>(作業量CSV取込に入れるのと同じ物)を選ぶと、品番・ロケーションごとの合計(引当数)の<b>トータルピッキングリスト</b>を作ります。'+
     '<b>パートさん用</b>(ブロック AA・SET・ZZZ と、S の S1-1 から後ろ)と<b>リフトマン用</b>(それ以外)に分けて印刷します。業務区分・出荷作業日ごとに別のリストになります。CSV は保存しません。</div>'+
     '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;"><label class="add-btn" style="cursor:pointer;">📄 出荷のCSVを選ぶ(複数可)<input type="file" id="tpickFile" accept=".csv,text/csv" multiple style="display:none;"></label>'+
     (t.fileNames && t.fileNames.length ? '<span class="pool-hint" style="margin:0;">'+esc(t.fileNames.join('、'))+'</span>' : '')+'</div>'+
@@ -15455,6 +15460,9 @@ function bindGate(){
   var hubBtn = document.getElementById('gateGoDataHub');
   if(hubBtn) hubBtn.addEventListener('click', function(){ state.role = 'adminHub'; state.adminHubTab = 'data'; state.dataHubMsg = ''; state.vcAllocData = null; state.vcDestData = null; render(); startPolling(); });
   bindArrivalSheet();
+  bindTotalPick();
+  var tpt = document.getElementById('tpickPanelToggle');
+  if(tpt) tpt.addEventListener('click', function(){ state.tpickPanelOpen = !state.tpickPanelOpen; if(state.tpickPanelOpen) tpickSavedLoad(todayStr()); render(); });
   var openBtn = document.getElementById('changelogOpenBtn');
   if(openBtn) openBtn.addEventListener('click', function(){
     state.showChangelog = true;
@@ -17186,8 +17194,9 @@ function renderTodayStatusBoard(tasks){
   var noneNote = (!red.length && !yellow.length && !green.length) ? '<div class="empty-note">本日の作業の状況はまだありません(CSV取込・作業開始で表示されます)</div>' : '';
   var notStartedHtml = notStarted.length ? '<div class="pool-hint" style="margin-top:10px;">未着手(CSVの数量なし): '+notStarted.map(function(t){ return esc(t.name); }).join('・')+'</div>' : '';
   return '<div class="panel" style="margin-bottom:14px;" id="todayStatusBoard">'+
-    '<div class="stf-head"><div class="panel-title">📋 今日の状況</div>'+'<button type="button" class="vc-manage-toggle-btn" id="arrivalSheetPdf" title="今日入る発注(納入期日が今日・遅れ)を仕入先ごとに出し、仕入先ごとに印刷します" style="margin-left:auto;">📦 本日の入庫明細'+(state.arrivalSheet && state.arrivalSheet.open ? ' ▴' : ' ▾')+'</button>'+'<div class="stf-asof">'+esc(fmtClockMs(plan.nowMs))+'時点・自動計算'+(plan.breakHold?'・休憩中':'')+'</div></div>'+
+    '<div class="stf-head"><div class="panel-title">📋 今日の状況</div>'+'<button type="button" class="vc-manage-toggle-btn" id="arrivalSheetPdf" title="今日入る発注(納入期日が今日・遅れ)を仕入先ごとに出し、仕入先ごとに印刷します" style="margin-left:auto;">📦 本日の入庫明細'+(state.arrivalSheet && state.arrivalSheet.open ? ' ▴' : ' ▾')+'</button>'+'<button type="button" class="vc-manage-toggle-btn" id="tpickPanelToggle" title="取り込んだCSVのトータルピッキング(作業記録と同じ番号)を見て印刷します">🧾 トータルピッキング'+(state.tpickPanelOpen ? ' ▴' : ' ▾')+'</button>'+'<div class="stf-asof">'+esc(fmtClockMs(plan.nowMs))+'時点・自動計算'+(plan.breakHold?'・休憩中':'')+'</div></div>'+
     renderArrivalSheetPanel()+
+    renderTpickPanel()+
     bar+
     section('🔴 要対応', red, 'red')+
     section('🟡 進行中', yellow, 'yellow')+
@@ -17281,8 +17290,8 @@ function renderManager(){
   ) : '';
 
   var todayDashboardHtml = '<div class="panel" style="margin-bottom:14px;">'+
-    '<div style="display:flex;align-items:center;gap:8px;"><div class="panel-title">📋 今日の状況</div>'+(isToday ? '<button type="button" class="vc-manage-toggle-btn" id="arrivalSheetPdf" title="今日入る発注(納入期日が今日・遅れ)を仕入先ごとに出し、仕入先ごとに印刷します" style="margin-left:auto;">📦 本日の入庫明細'+(state.arrivalSheet && state.arrivalSheet.open ? ' ▴' : ' ▾')+'</button>' : '')+'</div>'+
-    (isToday ? renderArrivalSheetPanel() : '')+
+    '<div style="display:flex;align-items:center;gap:8px;"><div class="panel-title">📋 今日の状況</div>'+(isToday ? '<button type="button" class="vc-manage-toggle-btn" id="arrivalSheetPdf" title="今日入る発注(納入期日が今日・遅れ)を仕入先ごとに出し、仕入先ごとに印刷します" style="margin-left:auto;">📦 本日の入庫明細'+(state.arrivalSheet && state.arrivalSheet.open ? ' ▴' : ' ▾')+'</button>'+'<button type="button" class="vc-manage-toggle-btn" id="tpickPanelToggle" title="取り込んだCSVのトータルピッキング(作業記録と同じ番号)を見て印刷します">🧾 トータルピッキング'+(state.tpickPanelOpen ? ' ▴' : ' ▾')+'</button>' : '')+'</div>'+
+    (isToday ? renderArrivalSheetPanel()+renderTpickPanel() : '')+
     summaryCardsHtml+
     '<div class="panel-title" style="font-size:15px;margin-top:18px;">👥 作業者別 業務時間</div>'+
     checkAlertHtml+
@@ -17930,6 +17939,9 @@ function bindManager(){
     render();
   }
   bindArrivalSheet();
+  bindTotalPick();
+  var tpt = document.getElementById('tpickPanelToggle');
+  if(tpt) tpt.addEventListener('click', function(){ state.tpickPanelOpen = !state.tpickPanelOpen; if(state.tpickPanelOpen) tpickSavedLoad(todayStr()); render(); });
   document.querySelectorAll('[data-mgr-shift-start]').forEach(function(el){
     el.addEventListener('focusin', function(){ state.suppressRender = true; });
     el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });

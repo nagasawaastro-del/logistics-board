@@ -14263,6 +14263,10 @@ function arrivalSheetCanvas(st, site, dateStr, supplier, no){
   if(!oneSup) cols.push(['仕入先',80,'sub','supplier',0]);
   if(!oneNo) cols.push(['発注番号',64,'sub','no',0]);
   cols.push(['備考',0,'note','note',0.38]);
+  cols.push(['2か月見積',80,'num','est2m',0]); // 今日〜2か月後の見積もりの合計(将来在庫と同じ数え方。予測も含む)
+  // 品番ごとの、今日〜2か月後の見積もりの合計(将来在庫と同じ数え方: 確定・需要予測、古い版は外す)
+  var est2m = {}, est2mEnd = (function(){ var d = new Date(dateStr+'T00:00:00'); d.setMonth(d.getMonth()+2); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
+  try{ outlookEstimateLines(ol).lines.forEach(function(x){ if(x.date>=dateStr && x.date<=est2mEnd) est2m[x.code] = (est2m[x.code]||0) + (Number(x.qty)||0); }); }catch(e){}
   var FIXED_W = 804; // 表の幅(両端の余白を除く)。商品名と備考で残りを分ける
   var used = cols.reduce(function(a,c){ return a+c[1]; }, 0), rest = FIXED_W - used;
   cols.forEach(function(c){ if(c[4]) c[1] = Math.floor(rest*c[4]); });
@@ -14285,7 +14289,7 @@ function arrivalSheetCanvas(st, site, dateStr, supplier, no){
   g.fillText(fit('入庫明細 '+dateStr.replace(/-/g,'/')+(site ? ' '+SHUKEI_SITES[site].name : '')+(no ? ' 発注番号 '+no : '')+(supplier ? ' '+supplier : ''), W-32), 16, 20);
   g.font = '11px '+FONT; g.fillStyle = '#475467';
   g.fillText(fit((oneSup && rows[0].supplier ? '仕入先 '+rows[0].supplier+' ・ ' : '')+(oneNo && rows[0].no ? '発注番号 '+rows[0].no+' ・ ' : '')+'発注 '+Object.keys(orders).length+'件 ・ 明細 '+nToday+'行'+(nLate ? '(ほかに遅れ '+nLate+'行)' : '')+' ・ 数量 '+formatNum(qtyT)+' ・ 約'+formatNum(Math.round(casesT*10)/10)+'ケース'+
-    ' ・ kintone 発注履歴(949) '+(ol.syncedAt ? fmtDateTime(ol.syncedAt) : '')+'取込', W-32), 16, 42);
+    ' ・ kintone 発注履歴(949) '+(ol.syncedAt ? fmtDateTime(ol.syncedAt) : '')+'取込 ・ 2か月見積 = '+dateStr.slice(5).replace('-','/')+'〜'+est2mEnd.slice(5).replace('-','/')+'の見積もり', W-32), 16, 42);
   function row(y, cells, head, r, idx){
     var x = 16;
     g.fillStyle = head ? '#E4E7EC' : (r.late ? '#FEF3F2' : (idx%2 ? '#F9FAFB' : '#fff')); g.fillRect(16, y, W-32, RH);
@@ -14309,7 +14313,7 @@ function arrivalSheetCanvas(st, site, dateStr, supplier, no){
     var note = [r.late ? '遅れ '+r.due.slice(5).replace('-','/') : '', r.site && mixedSite ? SHUKEI_SITES[r.site].name : '', r.note || ''].filter(Boolean).join(' ');
     var caseN = r.cases===null ? '' : formatNum(Math.floor(r.cases + 1e-9));
     var rem = r.cases===null ? '' : formatNum(Math.round(r.qty - Math.floor(r.cases + 1e-9)*r.pack));
-    var val = { code: r.code, qty: formatNum(r.qty), caseN: caseN, rem: rem, pack: r.pack ? formatNum(r.pack) : '', name: r.name, supplier: r.supplier, no: r.no, note: note };
+    var val = { est2m: est2m[r.code] ? formatNum(est2m[r.code]) : '—', code: r.code, qty: formatNum(r.qty), caseN: caseN, rem: rem, pack: r.pack ? formatNum(r.pack) : '', name: r.name, supplier: r.supplier, no: r.no, note: note };
     row(TOP+RH*(i+1), cols.map(function(c){ return c[3] ? val[c[3]] : ''; }), false, r, i);
   });
   if(!rows.length){ g.fillStyle = '#475467'; g.font = '14px '+FONT; g.fillText('今日入る発注はありません', 24, TOP+RH*1.5); }

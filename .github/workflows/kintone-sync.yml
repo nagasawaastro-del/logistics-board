@@ -1,0 +1,37 @@
+# kintone の同期を毎朝1回(日本時間 8:30・月〜土)動かす
+# ・見積もり・入荷予定(Edge Function sync-stock-outlook)… 将来在庫・入庫明細・生協の入れ替えで使う
+# ・商品台帳(sync-product-master)… 入数・才数。アプリID・フィールドコードはロジリンクの設定(kintone-product-settings)を使う
+# ・作業日報(sync-work-report)… 直近7日(今日を含む)
+# 合言葉: 生産管理の定期取り込みと同じ FACTORY_CRON_KEY(GitHub の Secrets と Supabase の Secrets に同じ値)。
+#         登録していない間は、何もせずに終わる。手で動かすときは Actions →「kintone-sync」→「Run workflow」。
+name: kintone-sync
+on:
+  schedule:
+    - cron: '30 23 * * 0-5'   # UTC 23:30(日〜金)= 日本時間 8:30(月〜土)
+  workflow_dispatch: {}
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      KEY: ${{ secrets.FACTORY_CRON_KEY }}
+      BASE: https://iywmunzneirtxipnpveu.supabase.co/functions/v1
+    steps:
+      - name: 見積もり・入荷予定
+        run: |
+          if [ -z "$KEY" ]; then echo "FACTORY_CRON_KEY が登録されていないので、何もしません"; exit 0; fi
+          curl -sS --fail-with-body --max-time 240 -X POST -H "x-cron-key: $KEY" -H "Content-Type: application/json" -d '{}' "$BASE/sync-stock-outlook"
+          echo
+      - name: 商品台帳
+        if: always()
+        run: |
+          if [ -z "$KEY" ]; then exit 0; fi
+          curl -sS --fail-with-body --max-time 240 -X POST -H "x-cron-key: $KEY" -H "Content-Type: application/json" -d '{}' "$BASE/sync-product-master" | head -c 2000
+          echo
+      - name: 作業日報(直近7日)
+        if: always()
+        run: |
+          if [ -z "$KEY" ]; then exit 0; fi
+          FROM=$(TZ=Asia/Tokyo date -d '6 days ago' +%F); TO=$(TZ=Asia/Tokyo date +%F)
+          curl -sS --fail-with-body --max-time 240 -X POST -H "x-cron-key: $KEY" -H "Content-Type: application/json" -d "{\"from\":\"$FROM\",\"to\":\"$TO\"}" "$BASE/sync-work-report" | head -c 2000
+          echo

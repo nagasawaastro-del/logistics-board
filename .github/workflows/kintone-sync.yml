@@ -1,4 +1,4 @@
-# kintone の同期を毎朝1回(日本時間 7:00・月〜土)動かす
+# kintone の同期を毎朝1回(日本時間 6:43・月〜土)動かす
 # ・見積もり・入荷予定(Edge Function sync-stock-outlook)… 将来在庫・入庫明細・生協の入れ替えで使う
 # ・商品台帳(sync-product-master)… 入数・才数。アプリID・フィールドコードはロジリンクの設定(kintone-product-settings)を使う
 # ・作業日報(sync-work-report)… 直近7日(今日を含む)
@@ -7,7 +7,7 @@
 name: kintone-sync
 on:
   schedule:
-    - cron: '0 22 * * 0-5'    # UTC 22:00(日〜金)= 日本時間 7:00(月〜土)
+    - cron: '43 21 * * 0-5'   # UTC 21:43(日〜金)= 日本時間 6:43(月〜土)。毎時0分は GitHub が混んで遅れたりとばされたりするのでずらす(2026-10-21)
   workflow_dispatch: {}
 jobs:
   sync:

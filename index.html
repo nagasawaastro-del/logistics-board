@@ -3413,9 +3413,6 @@ function esc(s){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
   });
 }
-function parseSubcats(str){
-  return (str||'').split(/[,、]/).map(function(s){ return s.trim(); }).filter(function(s){ return s.length>0; });
-}
 function subcatName(sc){
   return typeof sc==='string' ? sc : ((sc && sc.name) || '');
 }
@@ -4470,13 +4467,6 @@ function isHolidayOffForStaff(staff, dateStr){
 /* ---------- 人員配置・次作業自動指示 ---------- */
 async function loadTaskPriority(dateStr){
   return loadKeyJson('task-priority:'+dateStr, function(){ return {}; });
-}
-async function saveTaskPriority(dateStr, data){
-  return persistKey('task-priority:'+dateStr, data);
-}
-function taskPriorityFor(taskId){
-  var p = state.taskPriority && state.taskPriority[taskId];
-  return p || { deadline: null, priorityLevel: 4 };
 }
 async function loadProductivityMaster(){
   var data = await loadKeyJson('productivity-master', function(){ return {}; });
@@ -6933,16 +6923,6 @@ function suggestNextTaskFor(staffId, day, workVolume, taskPriority, productivity
   });
   return scored[0] || null;
 }
-/* CSV取込で新たに増えた作業量をもとに、「次に誰をこの作業へ配置すべきか」を1件提案する。
-   完全自動配置ではなく、あくまで提案(管理者が確定するまでday.assignmentsは変更しない)。
-   既に作業中のスタッフは対象にしない(勝手に動かさない)。
-   同一人物への集中を避けるため、本日の実績作業時間が少ない人を優先する。 */
-async function loadPendingAssignmentSuggestions(dateStr){
-  return loadKeyJson('pending-assignment-suggestions:'+dateStr, function(){ return {}; });
-}
-async function savePendingAssignmentSuggestions(dateStr, data){
-  return persistKey('pending-assignment-suggestions:'+dateStr, data);
-}
 /* CSV取込確定処理から呼ばれる共通フック。取込先が「今日」の場合のみ、
    新しく増えた作業量をもとに次の配置提案を作り、保存する。
    過去日への取込は「今から誰を配置するか」の対象外のため提案を作らない。 */
@@ -6958,10 +6938,6 @@ async function refreshAssignmentSuggestionForTask(taskId, targetDate){
 async function recordNextAssignmentSuggestion(taskId, newQty, targetDate){
   onTodayStaffingInputsChanged(targetDate);
 }
-/* ---------- 配置変更候補・配置変更アラート ---------- */
-async function loadReassignmentAlerts(dateStr){
-  return loadKeyJson('reassignment-alerts:'+dateStr, function(){ return []; });
-}
 async function saveReassignmentAlerts(dateStr, alerts){
   return persistKey('reassignment-alerts:'+dateStr, alerts);
 }
@@ -6969,193 +6945,12 @@ async function saveReassignmentAlerts(dateStr, alerts){
 function activeStaffCountForTask(day, taskId){
   return (day.logs||[]).filter(function(l){ return l.taskId===taskId && l.end===null; }).length;
 }
-/* 「空きスタッフだけでは不足している作業」について、手待ち可能性のある
-   作業に従事中のスタッフを「配置変更候補」として探索する。
-   あくまで候補の提示のみで、実際の配置変更は管理者の確定操作を経て行う。 */
-/* 「次におすすめの作業」: 優先して人員を動かす必要が無い場合に、通常作業として
-   継続・着手するとよい作業を、分かりやすいルールで提案する(自動配置ではない)。
-   既に他のパネル(次の配置候補・配置変更候補)で扱われている、人員不足が
-   見込まれる作業は、ここでは重複して出さない(競合させない)。 */
-function computeNextRecommendedTasks(day, workVolume, backlog, pendingSuggestions, reassignGroups){
-  var urgentTaskIds = {};
-  Object.keys(pendingSuggestions||{}).forEach(function(tid){
-    if(pendingSuggestions[tid] && pendingSuggestions[tid].best) urgentTaskIds[tid] = true;
-  });
-  (reassignGroups||[]).forEach(function(g){ urgentTaskIds[g.taskId] = true; });
-
-  var tasks = tasksWithVolumeForDate(backlog, day.date, workVolume); // 既存: 作業量>0のものだけに既に絞られている
-  return tasks.filter(function(t){ return !urgentTaskIds[t.id]; })
-    .map(function(t){
-      var totals = wvTotalsForTask(workVolume, t.id);
-      var activeCount = activeStaffCountForTask(day, t.id);
-      return {
-        taskId: t.id, name: t.name, unit: t.unit, qty: totals.totalQty,
-        priorityLevel: t.priorityLevel || 4, deadline: t.deadline || null,
-        activeCount: activeCount, status: activeCount>0 ? '作業中' : '未着手'
-      };
-    })
-    .sort(function(a,b){
-      if(a.priorityLevel!==b.priorityLevel) return a.priorityLevel-b.priorityLevel; // 優先順位(数字が小さいほど優先)
-      if(a.deadline && b.deadline) return a.deadline.localeCompare(b.deadline); // 締切が近い順
-      if(a.deadline) return -1;
-      if(b.deadline) return 1;
-      return 0;
-    });
-}
-function computeReassignmentCandidates(day, workVolume, productivityMaster, nowDate, backlog, roster, taskPriority){
-  var tasks = tasksWithVolumeForDate(backlog, day.date, workVolume);
-  // 出勤中で、現在アクティブな作業が無い(空き)スタッフの人数。
-  // 「1人で足りるなら手待ち中の人を動かさない」ためには、まず空きスタッフで
-  // 埋まるかどうかを考慮してから、それでも足りない分だけを配置変更候補にする。
-  var idleStaffCount = roster.filter(function(s){
-    if(s.archived || !day.attendance[s.id]) return false;
-    var activeLog = (day.logs||[]).find(function(l){ return l.staffId===s.id && l.end===null; });
-    return !activeLog;
-  }).length;
-  var results = [];
-  tasks.forEach(function(task){
-    var urgency = computeTaskUrgency(task, workVolume, taskPriority, productivityMaster, nowDate);
-    if(urgency.neededPeopleCount===null) return; // 生産性・締切のどちらかが不明な場合は判定しない(推測しない)
-    var activeCount = activeStaffCountForTask(day, task.id);
-    var shortage = urgency.neededPeopleCount - activeCount - idleStaffCount;
-    if(shortage<=0) return; // 現在の配置+空きスタッフで足りている(ケース4・6の「移動不要」に対応)
-
-    // 出勤中・現在アクティブな作業があり、かつその作業が「手待ち発生可能性あり・配置変更可」の人を探す
-    var candidates = [];
-    roster.forEach(function(s){
-      if(s.archived || !day.attendance[s.id]) return;
-      var activeLog = (day.logs||[]).find(function(l){ return l.staffId===s.id && l.end===null; });
-      if(!activeLog || activeLog.taskId===task.id || activeLog.taskId==='BREAK') return;
-      var currentTask = backlog.find(function(t){ return t.id===activeLog.taskId; });
-      if(!currentTask) return;
-      if(currentTask.idleLikely!==true) return;       // 手待ち作業でなければ対象外(通常作業者は移動させない)
-
-      var prod = productivityRateFor(productivityMaster, task.id, s.id);
-      var currentUrgency = computeTaskUrgency(currentTask, workVolume, taskPriority, productivityMaster, nowDate);
-      var reasons = [
-        esc(currentTask.name)+': 手待ち作業です',
-        esc(task.name)+': 現在の配置では人員が不足しています'
-      ];
-      if(urgency.deadlineMinutes!==null) reasons.push(esc(task.name)+': 締切まで残り'+Math.round(urgency.deadlineMinutes)+'分');
-      if(urgency.priorityLevel) reasons.push(esc(task.name)+': 優先順位 '+urgency.priorityLevel);
-      if(currentUrgency.neededPeopleCount!==null && currentUrgency.neededPeopleCount<=activeStaffCountForTask(day, currentTask.id)){
-        reasons.push(esc(currentTask.name)+': こちらは現在の人数で足りる見込みです');
-      }
-      candidates.push({
-        staffId: s.id, name: staffById(s.id).name,
-        fromTaskId: currentTask.id, fromTaskName: currentTask.name,
-        rate: prod.rate, basis: prod.basis,
-        reasons: reasons
-      });
-    });
-    if(!candidates.length) return;
-    // 配置先の生産性が高い人を上位に(理由表示はそのまま、最終判断は管理者)
-    candidates.sort(function(a,b){ return (b.rate||0)-(a.rate||0); });
-    results.push({
-      taskId: task.id, taskName: task.name, unit: urgency.unit,
-      shortage: shortage, neededPeopleCount: urgency.neededPeopleCount, activeCount: activeCount,
-      deadlineMinutes: urgency.deadlineMinutes, priorityLevel: urgency.priorityLevel,
-      candidates: candidates
-    });
-  });
-  // 締切が近い(緊急度が高い)ものを上に
-  results.sort(function(a,b){
-    if(a.deadlineMinutes===null && b.deadlineMinutes===null) return a.priorityLevel-b.priorityLevel;
-    if(a.deadlineMinutes===null) return 1;
-    if(b.deadlineMinutes===null) return -1;
-    return a.deadlineMinutes-b.deadlineMinutes;
-  });
-  return results;
-}
 /* 配置変更を実際に確定する。現在の実績ログを終了し、新しい作業のログを開始する
    (履歴を書き換えない。中断・新規開始として記録が残る)。 */
 /* 廃止: 配置変更は「配置計算 → 管理者の確定(confirmTodayStaffingProposals) → 本日の作業指示」に一本化した。
    別ルートで実績ログ・配置変更指示を書き込まないよう、何も保存せずに終了する。旧処理は下の legacy 版に残す。 */
 async function confirmReassignment(staffId, fromTaskId, toTaskId){
   return { ok:false, msg:'配置変更は「人員配置」タブで配置案を確定してください(この操作は廃止されました)' };
-}
-async function legacyConfirmReassignment(staffId, fromTaskId, toTaskId){
-  var day = state.day;
-  var log = (day.logs||[]).find(function(l){ return l.staffId===staffId && l.taskId===fromTaskId && l.end===null; });
-  if(!log) return { ok:false, msg:'対象の実績が見つかりません(既に終了している可能性があります)' };
-  finalizeActiveSubTimer(log);
-  log.end = new Date().toISOString();
-  if(log.quantity==null && !log.breakdown) log.quantity = 0;
-  var reassignEntry = { id: uid(), staffId: staffId, taskId: toTaskId, start: new Date().toISOString(), end: null, quantity: null };
-  var reassignName = taskNameSnapshot(toTaskId);
-  if(reassignName) reassignEntry.taskName = reassignName;
-  day.logs.push(reassignEntry);
-  var arr = day.assignments[staffId] || [];
-  if(arr.indexOf(toTaskId)===-1) arr.push(toTaskId);
-  day.assignments[staffId] = arr;
-  await saveDay(day);
-
-  var alerts = await loadReassignmentAlerts(day.date);
-  var alert = { id: uid(), date: day.date, staffId: staffId, fromTaskId: fromTaskId, toTaskId: toTaskId,
-    createdAt: new Date().toISOString(), createdBy: state.managerSession ? (state.managerSession.user.email||'管理者') : '管理者',
-    status: 'pending', acknowledgedAt: null };
-  alerts.push(alert);
-  await saveReassignmentAlerts(day.date, alerts);
-  if(day.date===todayStr()) state.reassignmentAlerts = alerts;
-  return { ok:true, alert: alert };
-}
-function suggestNextAssignmentForNewVolume(taskId, newQty, day, productivityMaster, nowDate, backlog, roster){
-  var task = backlog.find(function(t){ return t.id===taskId; });
-  if(!task || task.archived===true || !newQty || newQty<=0) return null;
-
-  var taskRate = productivityRateFor(productivityMaster, taskId, null);
-  var neededHours = taskRate.rate ? (newQty/taskRate.rate) : null; // 生産性不明なら推測値を作らない(nullのまま)
-
-  // 既に作業中のスタッフは対象外。出勤中で、現在アクティブな作業が無い人だけを候補にする。
-  var candidateIds = roster.filter(function(s){
-    if(s.archived) return false;
-    if(!day.attendance[s.id]) return false;
-    var activeLog = (day.logs||[]).find(function(l){ return l.staffId===s.id && l.end===null; });
-    return !activeLog;
-  }).map(function(s){ return s.id; });
-  if(!candidateIds.length) return { taskId:taskId, newQty:newQty, unit:task.unit, neededHours:neededHours, taskRate:taskRate.rate, best:null, runnerUp:null, noCandidateReason:'現在、配置可能な(手待ち・未配置の)スタッフがいません' };
-
-  var agg = aggregateDays([day]);
-  var workedMinutesToday = {};
-  roster.forEach(function(s){
-    var info = agg.perStaff[s.id];
-    workedMinutesToday[s.id] = info ? Math.max(0, (info.ms - (info.breakMs||0)))/60000 : 0;
-  });
-  var STANDARD_WORKDAY_MIN = 480;
-
-  var scored = candidateIds.map(function(sid){
-    var remainMin = staffRemainingMinutes(sid, day, nowDate, state.shiftSettings);
-    var prod = productivityRateFor(productivityMaster, taskId, sid);
-    var loadPenalty = Math.min(0.5, (workedMinutesToday[sid]||0)/STANDARD_WORKDAY_MIN); // 本日既に多く働いている人ほど少し割り引く(公平性)
-    var score = (prod.rate||0) * (1 - loadPenalty);
-    return { staffId: sid, rate: prod.rate, basis: prod.basis, sampleCount: prod.sampleCount, remainMin: remainMin, workedMinutesToday: workedMinutesToday[sid]||0, score: score };
-  }).filter(function(c){ return c.remainMin>0; })
-    .sort(function(a,b){
-      // 生産性が分かる人を優先。分かる人同士は公平性込みのスコアで比較。両方不明ならより手待ち時間が長い人を優先。
-      var aKnown = a.rate!==null, bKnown = b.rate!==null;
-      if(aKnown && !bKnown) return -1;
-      if(!aKnown && bKnown) return 1;
-      if(aKnown && bKnown) return b.score - a.score;
-      return a.workedMinutesToday - b.workedMinutesToday;
-    });
-
-  var best = scored[0] || null;
-  var runnerUp = scored[1] || null;
-  function toResult(c){
-    if(!c) return null;
-    return {
-      staffId: c.staffId, name: staffById(c.staffId).name, rate: c.rate, basis: c.basis, sampleCount: c.sampleCount,
-      workedMinutesToday: Math.round(c.workedMinutesToday)
-    };
-  }
-  return { taskId:taskId, taskName: task.name, newQty:newQty, unit:task.unit, neededHours:neededHours, taskRate:taskRate.rate,
-    best: toResult(best), runnerUp: toResult(runnerUp), noCandidateReason:null };
-}
-async function loadWorkVolumeConfig(){
-  return loadKeyJson('work-volume-config', function(){ return {}; });
-}
-async function saveWorkVolumeConfig(cfg){
-  return persistKey('work-volume-config', cfg);
 }
 /* キーが無い → null、読み込み失敗(権限・通信) → 例外。 */
 async function fetchWorkVolumeRaw(dateStr){
@@ -7200,7 +6995,6 @@ async function saveWorkVolume(dateStr, data){
 }
 function emptyWorkVolume(){ return { imports:[], batches:[] }; }
 function wvActiveImports(data){ return (data.imports||[]).filter(function(i){ return !i.deletedAt; }); }
-function wvActiveBatches(data){ return (data.batches||[]).filter(function(b){ return !b.deletedAt; }); }
 
 /* ---------- CSV重複ファイル検知(全日付・全作業を対象にした軽量インデックス) ---------- */
 async function computeFileFingerprint(file){
@@ -7229,16 +7023,6 @@ async function registerFileFingerprint(fingerprint, fileSize, fileName, dateStr,
 async function loadVcImportAttempts(dateStr){
   return loadKeyJson('vc-import-attempts:'+dateStr, function(){ return { attempts: [] }; });
 }
-async function saveVcImportAttempts(dateStr, data){
-  return persistKey('vc-import-attempts:'+dateStr, data);
-}
-async function markImportAttemptStatus(dateStr, attemptId, status){
-  var data = await loadVcImportAttempts(dateStr);
-  var att = data.attempts.find(function(a){ return a.id===attemptId; });
-  if(att) att.status = status;
-  await saveVcImportAttempts(dateStr, data);
-  return data;
-}
 
 /* ---------- 日次締めチェックの確認済み状態 ---------- */
 async function loadChecklistAck(dateStr){
@@ -7248,34 +7032,6 @@ async function saveChecklistAck(dateStr, data){
   return persistKey('daily-checklist-ack:'+dateStr, data);
 }
 
-function findPreviousImportForTaskDate(workVolume, taskId, excludeImportId){
-  var imports = wvActiveImports(workVolume).filter(function(i){ return i.taskId===taskId && i.id!==excludeImportId; });
-  if(!imports.length) return null;
-  imports.sort(function(a,b){ return new Date(b.importedAt) - new Date(a.importedAt); });
-  return imports[0];
-}
-function computeAnomalyWarning(newTotals, prevImport){
-  if(!prevImport) return null;
-  var SMALL_SAMPLE_THRESHOLD = 10;
-  function pctDiff(newVal, oldVal){
-    if(oldVal===0) return newVal===0 ? 0 : 100;
-    return ((newVal-oldVal)/oldVal)*100;
-  }
-  var diffs = {
-    primaryCount: pctDiff(newTotals.primaryCount, prevImport.primaryCount),
-    lineCount: pctDiff(newTotals.lineCount, prevImport.lineCount),
-    totalQty: pctDiff(newTotals.totalQty, prevImport.totalQty)
-  };
-  var flagged = Object.keys(diffs).filter(function(k){ return Math.abs(diffs[k])>=50; });
-  if(!flagged.length) return null;
-  return { flagged: flagged, diffs: diffs, prevImport: prevImport, isSmallSample: prevImport.primaryCount < SMALL_SAMPLE_THRESHOLD };
-}
-function findShipperNoOverlap(newShipperNos, workVolume, taskId, excludeImportId){
-  var prevImports = wvActiveImports(workVolume).filter(function(i){ return i.taskId===taskId && i.id!==excludeImportId && i.shipperNos; });
-  var seen = {};
-  prevImports.forEach(function(i){ i.shipperNos.forEach(function(sn){ seen[sn]=true; }); });
-  return newShipperNos.filter(function(sn){ return seen[sn]; });
-}
 function wvTotalsForTask(data, taskId){
   if(!data) return { primaryCount:0, lineCount:0, totalQty:0, importCount:0, setQty:0, setKnown:0 };
   var imports = wvActiveImports(data).filter(function(i){ return i.taskId===taskId; });
@@ -7426,52 +7182,6 @@ function parseCsvForWorkVolume(file, columnMap, callback, errCallback){
   };
   reader.onerror = function(){ errCallback('ファイルの読み込みに失敗しました。'); };
   reader.readAsArrayBuffer(file);
-}
-function buildWvBatchName(template, criteria, taskName, seq){
-  return (template||'{作業名} バッチ{連番}')
-    .replace(/\{引当ロケーション\}/g, criteria.pickLocation || '(未指定)')
-    .replace(/\{送り状区分\}/g, criteria.invoiceType || '(未指定)')
-    .replace(/\{作業名\}/g, taskName || '')
-    .replace(/\{連番\}/g, String(seq));
-}
-function generateWorkVolumeBatches(shipperGroups, config, taskId, taskName, importId){
-  var mode = config.criteria || 'none';
-  if(mode==='none') return [];
-  var groups = {};
-  var order = [];
-  if(mode==='even_split'){
-    var max = Math.max(1, config.evenSplitMaxSlips||15);
-    for(var i=0;i<shipperGroups.length;i+=max){
-      var chunk = shipperGroups.slice(i, i+max);
-      var seq = Math.floor(i/max)+1;
-      var key = 'chunk-'+seq;
-      groups[key] = { items: chunk, criteria: {} };
-      order.push(key);
-    }
-  }else{
-    shipperGroups.forEach(function(g){
-      var loc = mode!=='invoice' ? (g.pickLocation||'') : '';
-      var inv = mode!=='location' ? (g.invoiceType||'') : '';
-      var key = loc+'|||'+inv;
-      if(!groups[key]){ groups[key] = { items:[], criteria:{ pickLocation:(mode!=='invoice'?loc:undefined), invoiceType:(mode!=='location'?inv:undefined) } }; order.push(key); }
-      groups[key].items.push(g);
-    });
-  }
-  var seqCounter = 0;
-  return order.map(function(key){
-    seqCounter++;
-    var g = groups[key];
-    return {
-      id: uid(), taskId: taskId, importId: importId,
-      name: buildWvBatchName(config.nameTemplate, g.criteria, taskName, seqCounter),
-      criteria: g.criteria,
-      primaryCount: g.items.length,
-      lineCount: g.items.reduce(function(a,x){ return a+x.lineCount; }, 0),
-      totalQty: g.items.reduce(function(a,x){ return a+x.totalQty; }, 0),
-      deletedAt:null, deletedBy:null, deleteReason:null,
-      createdAt: new Date().toISOString()
-    };
-  });
 }
 async function getWorkVolumeForDate(dateStr){
   if(dateStr===todayStr()) return state.workVolume;
@@ -8381,10 +8091,6 @@ function bindProductivityTab(){
     });
   }
 }
-function taskSummaryUnitFor(sug, taskId){
-  var ts = (sug.taskSummaries||[]).find(function(x){ return x.taskId===taskId; });
-  return ts ? ts.unit : '';
-}
 function fmtMinutesJa(min){
   if(min===null || min===undefined || !isFinite(min)) return '―';
   var m = Math.max(0, Math.round(min));
@@ -8449,31 +8155,6 @@ function staffingEtaWithProposalsText(plan, c){
   });
   var r = shiftBasedEtaMs(c.remainingQty, crew, plan.nowMs, state.breakSettings, plan.date);
   return r ? fmtClockMs(r.ms)+(r.beyondShift ? '以降' : '') : null;
-}
-/* 管理者「今日の状況」用の1行要約。詳細は人員配置タブに一本化する */
-function renderTodayPlanSummary(){
-  if(!state.staffingSuggestionLoaded){
-    loadStaffingSuggestion(todayStr()).then(function(d){ state.staffingSuggestion = d; state.staffingSuggestionLoaded = true; render(); });
-  }
-  var plan = computeTodayStaffingPlanNow();
-  if(!plan) return '';
-  var ov = staffingOverview(plan);
-  var pendingConfirmed = plan.confirmed.filter(function(it){ return it.progress==='pending'; }).length;
-  var parts = [];
-  if(!ov.shortTasks.length && !ov.needAction.length && !ov.idleProposals.length) parts.push('✅ 追加の配置は必要ありません');
-  if(ov.shortTasks.length) parts.push('<span class="stf-need">人員不足 '+ov.shortTasks.length+'作業・追加'+ov.addPeople+'人</span>');
-  else if(ov.needAction.length) parts.push('<span class="stf-need">対応が必要な作業 '+ov.needAction.length+'件</span>');
-  if(ov.idleProposals.length) parts.push('手待ち作業への配置案 '+ov.idleProposals.length+'人');
-  if(pendingConfirmed) parts.push('確定済み・未開始 '+pendingConfirmed+'人');
-  var notFollowedConfirmed = plan.confirmed.filter(function(it){ return it.progress==='notFollowed'; }).length;
-  if(notFollowedConfirmed) parts.push('<span class="stf-need">確定済み・未実施 '+notFollowedConfirmed+'人</span>');
-  var text = parts.length ? parts.join(' ・ ') : '✅ 現在、追加の配置は必要ありません';
-  return '<div class="panel" style="margin-bottom:14px;" id="todayPlanSummary">'+
-    '<div class="stf-today-line">'+
-      '<div><b>👥 人員配置</b>　'+text+'</div>'+
-      '<button type="button" class="vc-manage-toggle-btn" data-admin-hub-tab="staffing">→ 人員配置を確認</button>'+
-    '</div>'+
-  '</div>';
 }
 function staffingTierText(p){
   return STAFFING_TIER_LABELS[p.tier] || '';
@@ -9639,23 +9320,6 @@ function totalsByTaskForDay(day, staffId){
 }
 function totalsByTask(staffId){
   return totalsByTaskForDay(state.day, staffId);
-}
-function taskAggregateForDay(day, taskId){
-  var ms=0, qty=0, activeCount=0, breakdown={};
-  day.logs.forEach(function(l){
-    if(l.taskId!==taskId) return;
-    var end = l.end ? new Date(l.end).getTime() : Date.now();
-    ms += end - new Date(l.start).getTime();
-    qty += (l.quantity||0);
-    if(l.end===null) activeCount++;
-    if(l.breakdown){
-      Object.keys(l.breakdown).forEach(function(k){ breakdown[k] = (breakdown[k]||0) + (l.breakdown[k]||0); });
-    }
-  });
-  return {ms:ms, qty:qty, activeCount:activeCount, breakdown:breakdown};
-}
-function taskAggregate(taskId){
-  return taskAggregateForDay(state.day, taskId);
 }
 function dateRangeList(startStr, endStr){
   var dates = [];
@@ -13002,17 +12666,6 @@ function slotDRow(loc){ var p = String(loc).split('-'); return p.length>=2 ? p[0
 function slotSegOrder(tentFirst){
   return SLOT_RACK_SEGS.slice(); // 現場で決めた順番(D の番号順)
 }
-function slotSegOrderByAisle(tentFirst){ // (以前の決め方: 始める棟から通路ごとに上・下)
-  var out = [];
-  (tentFirst==='A' ? ['A','B'] : ['B','A']).forEach(function(t){
-    var seen = {};
-    SLOT_TENTS[t].faces.forEach(function(fs){ fs.forEach(function(a){
-      if(seen[a]) return; seen[a] = true;
-      ['上','下'].forEach(function(h){ var nm = SLOT_TENTS[t].name+' '+a+'の'+h; if(!SLOT_OPEN[t+'|'+a+'|'+h] && SLOT_RACK_SEGS.indexOf(nm)!==-1) out.push(nm); });
-    }); });
-  });
-  return out;
-}
 /* D の番号 → 通路ラックの区画。設置済みの番号は記録した区画、まだの番号は残りの区画へ順番に */
 function slotRackPlan(installed, tentFirst){
   installed = installed || {};
@@ -13347,17 +13000,6 @@ function computeSlotting(st, opt){
   return { opt:opt, ship:ship, lots:lots, dLots:dLots, stay:stayLots.length, mainFree:byZone.main.length, mainUsed:mainUsed, merges:merges, splits:splits, over:over, toAA:aaMoves.length, capSize:capSize, capMeta:capMeta, zoneLists:zoneLists, prefs:prefs, unitOf:unitOf, cu:cu, moves1:moves1, segs:segs, moves3:moves3, moves4:moves4, left:left,
     rackCap:rackCap, rackUsed:rackUsed, movingCount:moving.length, rackPlan:rackPlan, rackStay:rackStay,
     normal: rackPlan.allInstalled && !dLots.length }; // normal = D列が全部通路ラックになった(ふだんの見直し)
-}
-/* 作業の流れ(現場と決めたもの):
-   前半: 通路に面した棚(1〜3段目)を、入口(左)の列から1列ずつ適正配置にする(たまに出る物 → 通路側、あまり出ない物 → 壁側)。
-         よく出る物はこの段階では動かさない。行き先の列がまだ整理前なら仮置き場(A棟の右側の広い所)へ。
-   後半: D列を1列ずつ(1-□、2-□ …)あけながら、入口側の通路から通路ラックを置き、よく出る物(棚とD列から)を入れていく。
-         D列のほかの物と、よく出る物が出て空いた棚へ入る物は、行き先が空いていれば直接、まだなら仮置き場へ。 */
-function slotColLabel(tent, col){
-  var POS = slotPositions(), top = [], bot = [];
-  Object.keys(POS).forEach(function(n){ var p = POS[n]; if(p.tent===tent && p.col===col) (p.half==='上' ? top : bot).push(Number(n)); });
-  function rg(a){ if(!a.length) return ''; a.sort(function(x,y){ return x-y; }); return a[0]+'〜'+a[a.length-1]; }
-  return SLOT_TENTS[tent].name+' '+(col+1)+'列目('+[rg(top), rg(bot)].filter(Boolean).join('・')+')';
 }
 // 列の上半分・下半分の番号の範囲(例: 201〜208)
 function slotHalfRange(tent, col, half){
@@ -13726,14 +13368,6 @@ function slotCasesText(x){
   var c = Math.floor(x.qty/x.pack + 1e-9), rest = x.qty - c*x.pack;
   return c+(rest ? 'c+'+rest : '');
 }
-function slotTableHtml(rows, maxH){
-  if(!rows.length) return '<div class="pool-hint">ありません。</div>';
-  return '<div style="max-height:'+maxH+'px;overflow:auto;"><table class="report-table" style="font-size:12px;"><thead><tr><th>順</th><th>品番</th><th>商品名</th><th>出荷</th><th>今のロケ</th><th>今の場所</th><th class="num">数量</th><th class="num">ケース</th><th class="num">才数</th><th>行き先</th><th>行き先の場所</th></tr></thead><tbody>'+
-    rows.map(function(x){ return '<tr><td class="num">'+x.no+'</td><td><b>'+esc(x.code)+'</b>'+(x.frac ? ' <span class="slot-rank">端数</span>' : '')+'</td><td class="sk-minor">'+esc(x.name)+'</td><td>'+esc(x.rank)+'</td>'+
-      '<td><b>'+esc(x.from)+'</b></td><td class="sk-minor">'+esc(x.fromPlace)+'</td><td class="num">'+formatNum(x.qty)+'</td><td class="num">'+slotCasesText(x)+'</td><td class="num">'+(x.cube===null ? '才数不明' : stockFmtCube(x.cube))+'</td>'+
-      '<td><b>'+esc(x.to)+'</b></td><td class="sk-minor">'+esc(x.toPlace)+'</td></tr>'; }).join('')+
-  '</tbody></table></div>';
-}
 /* 元の中身(D の番号ごと)を作る。keep = そのまま残す番号(通路ラックになったと判断済みの番号) */
 function slotMakeBaseline(st, keep){
   var r0 = computeSlotting(Object.assign({}, st, { rackInstalled: {} }), Object.assign({}, SLOT_DEFAULTS, state.slotOpt||{}));
@@ -13755,115 +13389,6 @@ async function slotSaveBaseline(st, keep, reason){
   st.slotBaseline = base; st.rackInstalled = slotDetectInstalled(st.lz, base);
   await appendAuditLog({ action:'配置: D列の元の中身を記録', target:'D列', before:null, after: reason+'('+Object.keys(base.rows).length+'か所)' });
   return true;
-}
-function renderSlotting(st){
-  var ship = st.ship || {};
-  // 初めて配置を計算するとき: D の番号ごとの元の中身を残す(通路ラックになったかを、あとの在庫から判断するため)
-  if(!st.slotBaseline && !st.slotBaselineUnverified && st.lz && ship.days>=STOCK_DIAG.minShipDays && !state.slotBaselineSaving && hasManagerSession() && !isReadOnlyAccount()){
-    state.slotBaselineSaving = true;
-    setTimeout(function(){ slotSaveBaseline(st, [], '初めての計算').then(function(){ state.slotBaselineSaving = false; render(); }, function(){ state.slotBaselineSaving = false; }); }, 0);
-  }
-  if(!ship.days || ship.days<STOCK_DIAG.minShipDays) return '<div class="empty-note">配置の計算には、作業量CSVの出荷記録が '+STOCK_DIAG.minShipDays+'日分以上必要です(今 '+(ship.days||0)+'日分)。</div>';
-  var opt = Object.assign({}, SLOT_DEFAULTS, state.slotOpt||{});
-  var r = computeSlotting(st, opt), sh = slotSheetRows(r), seq = slotSequence(r, opt.tentFirst);
-  var dCube = r.dLots.reduce(function(a,l){ return a+(l.cube||0); }, 0);
-  function num(key, label, unit){ return '<label class="slot-opt">'+label+' <input type="number" min="1" step="1" data-slot-opt="'+key+'" value="'+esc(String(opt[key]))+'">'+unit+'</label>'; }
-  var useP = r.rackCap ? r.rackUsed/r.rackCap*100 : 0;
-  var instRows = SLOT_D_RACK_ROWS.filter(function(row){ return r.rackPlan.installed[row]; });
-  var cards = '<div class="vca-cards">'+
-    (r.normal
-      ? '<div class="vca-card" style="border-color:#86EFAC;"><div class="vca-card-label" style="color:#067647;">ふだんの見直し</div><div class="vca-card-val">D列なし</div><div class="vca-card-sub">D列はすべて通路ラックになりました(D の番号のまま)。出荷の動きに合わなくなった物だけを出します</div></div>'
-      : '<div class="vca-card"><div class="vca-card-label">D列の在庫(なくす)</div><div class="vca-card-val">'+stockFmtCube(dCube)+'<span style="font-size:13px;font-weight:600;"> 才</span></div><div class="vca-card-sub">'+r.dLots.length+'行(品番×ロケ)</div></div>'+
-        '<div class="vca-card"><div class="vca-card-label">通路ラックになった D(在庫から判断)</div><div class="vca-card-val">'+instRows.length+'<span style="font-size:13px;font-weight:600;"> / '+SLOT_D_RACK_ROWS.length+' 区画</span></div><div class="vca-card-sub">D の番号のまま通路ラックとして使う。元の中身(D列から出す物)が全部出た番号を、通路ラックになったと判断します</div></div>')+
-    '<div class="vca-card"><div class="vca-card-label">通路ラック</div><div class="vca-card-val">'+r.rackUsed+'<span style="font-size:13px;font-weight:600;"> / '+r.rackCap+' パレット</span></div>'+
-      '<div class="st-meter"><i class="'+(useP>=STOCK_DIAG.useDanger?'hi':(useP>=STOCK_DIAG.useWarn?'mid':''))+'" style="width:'+Math.min(100,useP).toFixed(1)+'%;"></i></div>'+
-      '<div class="vca-card-sub">'+r.segs.length+'区画 × '+opt.segRacks+'台 × 2段</div></div>'+
-    '<div class="vca-card"><div class="vca-card-label">作業</div><div class="vca-card-val">'+seq.steps.length+'<span style="font-size:13px;font-weight:600;"> 手順</span></div><div class="vca-card-sub">動かす物 '+(sh.p1.length+sh.p3.length+sh.p4.length)+'行(今の場所のままでよい物 '+r.stay+'行・同じ品番と合算 '+r.merges+'行・何か所かに分けて置く物 '+r.splits+'・AA へ '+r.toAA+'行・母屋 C の空き '+r.mainUsed+'/'+r.mainFree+'か所を使う)</div></div>'+
-    (r.over ? '<div class="vca-card" style="border-color:#FEC84B;"><div class="vca-card-label" style="color:#B54708;">容量を超えている場所</div><div class="vca-card-val">'+r.over+'<span style="font-size:13px;font-weight:600;"> ロケ</span></div><div class="vca-card-sub">今の在庫のまま残る物が、ロケの容量より多い所(容量の数字を確かめてください)</div></div>' : '')+
-    '<div class="vca-card"><div class="vca-card-label">仮置き場(いちばん多いとき)</div><div class="vca-card-val">'+stockFmtCube(seq.peakBuffer)+'<span style="font-size:13px;font-weight:600;"> 才</span></div><div class="vca-card-sub">約'+Math.ceil(seq.peakBuffer/opt.palletSai)+'パレット分(A棟の右側の広い所)</div></div>'+
-    (seq.mixed.length ? '<div class="vca-card" style="border-color:#FDA29B;"><div class="vca-card-label" style="color:#B42318;">違う品番が入ったままのロケに入れる指示</div><div class="vca-card-val">'+seq.mixed.length+'<span style="font-size:13px;font-weight:600;"> 件</span></div><div class="vca-card-sub">'+esc(seq.mixed.slice(0,5).join('、'))+'(指示書の不具合です。知らせてください)</div></div>' : '')+
-    (sh.left.length ? '<div class="vca-card" style="border-color:#FDA29B;"><div class="vca-card-label" style="color:#B42318;">入りきらない</div><div class="vca-card-val">'+sh.left.length+'<span style="font-size:13px;font-weight:600;"> 行</span></div><div class="vca-card-sub">通路ラックの台数か、棚1ロケの才数を見直してください</div></div>' : '')+
-  '</div>';
-  var settings = '<details class="slot-settings"'+(state.slotSettingsOpen ? ' open' : '')+'><summary>計算の条件 ▾</summary><div class="slot-opts">'+
-      '<label class="slot-opt">順番 <select data-slot-order="1"><option value="swap"'+(opt.order==='swap'?' selected':'')+'>通路ごとに入れ替え(ラックを載せたまま通路へ)</option><option value="dFirst"'+(opt.order==='dFirst'?' selected':'')+'>D列を先にあける(整理はあと)</option><option value="aisle"'+(opt.order==='aisle'?' selected':'')+'>通路ごとに整理してからD列</option></select></label>'+
-      '<label class="slot-opt">始める棟 <select data-slot-tent="1"><option value="B"'+(opt.tentFirst!=='A'?' selected':'')+'>B棟から(201の列)</option><option value="A"'+(opt.tentFirst==='A'?' selected':'')+'>A棟から</option></select></label>'+
-      num('segRacks','通路1区画に置く','台')+num('capA','棚1ロケ 1段目','才')+num('capB','2段目','才')+num('capC','3段目','才')+num('palletSai','通路ラック1段','才')+num('fastPct','よく出る = 上位','%')+num('midPct','たまに出る = 次の','%')+num('mergeCases','合算する = ','ケース以下')+
-    '</div>'+(st.slotBaseline ? '<div class="pool-hint" style="margin:6px 0 0;">D列の元の中身の記録: '+esc(fmtDateTime(st.slotBaseline.at))+(st.slotBaseline.stockAt ? '(ロジザード '+esc(fmtDateTime(st.slotBaseline.stockAt))+' の在庫)' : '')+' <button type="button" class="vc-manage-toggle-btn" id="slotRebase" style="padding:1px 8px;font-size:11px;">今の在庫で記録し直す</button>(通路ラックになったと判断した番号はそのまま)</div>' : '')+
-    '<div class="pool-hint" style="margin:6px 0 0;">変えるとすぐ計算し直します(この画面だけ。保存はしません)。棚1ロケ = パレット1枚分の場所。才数 = 幅(cm)×奥行(cm)×高さ(cm)÷27,826(例: 110×110×150cm ≒ 65才)。</div></details>';
-  var head = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
-    '<button type="button" class="vc-manage-toggle-btn" id="slotPrint">🖨 指示書を印刷(どこから → どこへ)</button>'+
-    '<button type="button" class="vc-manage-toggle-btn" id="slotPrintFull">くわしい指示書を印刷</button>'+
-    '<span class="pool-hint" style="margin:0;">CSVは右上の「CSV出力 ▾ → 配置の指示」。ロジザードの在庫を取り込み直すと、動かした分を反映して計算し直します。</span></div>';
-  var segTable = '<table class="report-table" style="font-size:12px;"><thead><tr><th>区画</th><th class="num">パレット</th><th class="num">使う</th></tr></thead><tbody>'+
-    r.segs.map(function(sg){ return '<tr><td><b>'+esc(sg.name)+'</b></td><td class="num">'+sg.slots.length+'</td><td class="num">'+sg.slots.filter(function(x){ return x.count>0; }).length+'</td></tr>'; }).join('')+'</tbody></table>';
-  var instList = instRows.length ? '<div class="pool-hint" style="margin:0 0 8px;">通路ラックになったと判断した番号: '+instRows.map(function(row){ var x = r.rackPlan.installed[row]; return 'D:'+esc(row)+'→'+esc(r.rackPlan.rowToSeg[row]||'')+'('+esc(x.why||'')+')'; }).join('・')+'</div>' : '';
-  var swapHint = (!r.normal && opt.order==='swap') ? '<div class="pool-hint" style="margin:0 0 8px;"><b>通路ごとに入れ替え</b>: '+(opt.tentFirst==='A' ? 'A棟' : 'B棟の201の通路')+'から、D のラック(D:1-1 から順)を<b>在庫を載せたまま</b>通路の区画(上半分・下半分)に置き、その区画に面した棚と入れ替えます。D列のよく出る物はラックに残し、面した棚のよく出る物をラックへ、D列の残りの物を面した棚の空いた所へ(1台ずつ: ラックの物を降ろす → 棚の物をラックへ → 降ろした物をその棚へ)。面した棚に入らない物はほかの棚へ。棚の並べ替え(たまに出る物を通路側・あまり出ない物を壁側)は、全部の入れ替えが終わってから「整理(D列のあと)」で行います。</div>' : '';
-  var body = instList + swapHint + (r.normal ? '<div class="pool-hint" style="margin:0 0 8px;"><b>ふだんの見直し</b>: 直近の出荷の記録でランクを計算し直し、置き場所が合わなくなった物だけを出します。①通路ラックの見直し(出なくなった物を棚へ・棚にあるよく出る物を通路ラックへ)→ ②棚の見直し(通路ごとに、たまに出る物を通路側へ・あまり出ない物を壁側へ)。ロジザードの在庫を取り込み直すと、動かした分を反映して計算し直します。月に1回など、決まった時に見直すのがおすすめです。</div>' : '') + (r.normal || opt.order==='swap' ? '' : opt.order!=='aisle' ? '<div class="pool-hint" style="margin:0 0 8px;"><b>D列を先にあける</b>: '+(opt.tentFirst==='A' ? 'A棟' : 'B棟の201の通路')+'から、D列を 1-1 から1ロケずつあけ、空いたラックを通路の区画(上半分・下半分)に置いて、D列の物とよく出る物を入れます。D列の物で通路ラックに入らない物は、棚の空いている所(合う場所)へ。棚の整理(たまに出る物を通路側へ・あまり出ない物を壁側へ)は、D列が全部空いてから、同じ通路の順番で行います。行き先に空きがあれば直接動かし、仮置き場はなるべく使いません。</div>' : '<div class="pool-hint" style="margin:0 0 8px;"><b>通路ごとに</b>: '+(opt.tentFirst==='A' ? 'A棟' : 'B棟の201の通路')+'から、通路の上半分・下半分ごとに(例: 201〜208 と 209〜216)、①面した棚を適正配置(よく出る物はまだ動かさない)→ ②D列を 1-1 から1ロケあけて、空いたラックをその区画に置き、よく出る物を入れる、をくり返します。行き先に空きがあれば直接動かし、仮置き場はなるべく使いません。<b>後半</b>: D列を1列ずつあけながら、入口側の通路から通路ラックを置き、よく出る物を入れていきます。行き先がまだ空いていない物は仮置き場(A棟の右側の広い所)へ。</div>')+
-    seq.steps.map(function(stp, i){
-      var n = stp.groups.reduce(function(a,g){ return a+g[1].length; }, 0);
-      var head = '';
-      return head+'<details class="slot-settings slot-step"'+(i===0 ? ' open' : '')+' style="border:1px solid #EAECF0;border-radius:10px;padding:8px 10px;margin:0 0 8px;"><summary style="font-size:14px;">'+(i+1)+'. '+esc(stp.title)+' <span class="sk-minor">'+n+'件'+(stp.racks.length ? '・ラック'+stp.racks.length+'区画' : '')+'</span></summary>'+
-        (stp.racks.length ? '<div class="stf-section-title" style="margin-top:8px;">通路ラックを置く: '+esc(stp.racks.join('、'))+'</div>' : '')+
-        (stp.dRow ? '<div style="margin:8px 0;padding:8px 10px;background:#ECFDF3;border:1px solid #ABEFC6;border-radius:8px;font-size:12px;">ラックを '+esc(stp.segName)+' に置いたら、ロジザードでは <b>D:'+esc(stp.dRow)+' のまま</b>、よく出る物を入れてください。在庫を取り込み直すと、D:'+esc(stp.dRow)+' の元の物(D列から出す物)が全部無くなったことから、通路ラックになったと自動で判断します。</div>' : '')+
-        stp.groups.map(function(g){ return g[1].length ? '<div class="stf-section-title" style="margin-top:8px;">'+esc(g[0])+'('+g[1].length+')</div>'+slotTableHtml(g[1].map(function(x, j){ return Object.assign({ no:j+1 }, x); }), 360) : ''; }).join('')+
-      '</details>';
-    }).join('')+
-    (sh.left.length ? '<div class="stf-section-title" style="margin-top:12px;color:#B42318;">入りきらない('+sh.left.length+'行)</div>'+slotTableHtml(sh.left, 300) : '');
-  var rules = '<details class="slot-settings" style="margin-top:12px;"><summary>配置のルール ▾</summary><div class="pool-hint" style="line-height:1.8;margin:6px 0 0;">'+
-    '出荷のランク: '+ship.days+'日分の出荷記録('+esc(ship.from)+'〜'+esc(ship.to)+')の1日あたりケース数で、出荷のある'+r.movingCount+'品番の上位'+opt.fastPct+'% = よく出る、次の'+opt.midPct+'% = たまに出る、残り = あまり出ない。<br>'+
-    '作業の流れ: '+(opt.order!=='aisle' ? '(D列を先にあける)'+(opt.tentFirst==='A' ? 'A棟' : 'B棟の201の通路')+'から、D列を1ロケあけて空いたラックを通路に置き、D列の物とよく出る物を入れる、をくり返す。D列が全部空いたら、同じ順番で通路ごとに面した列を適正配置する。' : (opt.tentFirst==='A' ? 'A棟' : 'B棟の201の通路')+'から通路ごとに、面した列を適正配置(よく出る物はそのまま)→ D列を1ロケあけて、空いたラックをその通路に置く、をくり返す。')+'行き先に今入る空きがあれば直接動かし、無ければ行き先から出ていく物を先に動かして空け、仮置き場はなるべく使わない。A の端数で全在庫が1ケース未満の物は AA へ。後半 = D列をロケ1つずつ(1-1 から)あけ、空いたラック(D の1つの番号 = 1区画 '+opt.segRacks+'台)を入口側の通路から置き、よく出る物を入れる。入数1の物は1段目(A)に置かない。'+opt.mergeCases+'ケース以下のパレットは、同じ品番のある場所へなるべく合算する。'+(opt.tentFirst==='B' ? 'B棟 → A棟' : 'A棟 → B棟')+'。整理中の物は仮置き場(A棟の右側の広い所)へ。<br>'+
-    '行き先: よく出る → 通路ラック(端数は下段)→ 入らなければ母屋の C の空いている所/ たまに出る → 棚の通路側(あけておく通路の前を先に)/ あまり出ない・出荷なし → 棚の壁側(端数は1段目の通路側 → 壁側)。棚1ロケの容量は 1段目'+opt.capA+'才・2段目'+opt.capB+'才・3段目'+opt.capC+'才で、入らない物はケース単位で分けて置く。違う品番は入れない(1ロケ1品番。何か入っているロケには同じ品番だけ足す)。<br>'+
-    '在庫数: ロジザードの在庫数から引当数を差し引いた数(引当分はピッキング済みとみなす)。<br>'+
-    'ロケ番号: 2段目(B)・3段目(C)の 201〜374 = B棟、375〜470 = A棟。1段目(A)は B の番号 − 200。A223以降(B423〜470 の下)は1段目の A ロケを使わず、B ロケ = 1段目と2段目('+(opt.capA+opt.capB)+'才)、C = 3段目。今 A223以降にある物は動かします。母屋(B・C の 200以下)・A0・AA・S・E は今の使い方のままです。'+
-  '</div></details>';
-  return settings+cards+head+body+rules;
-}
-/* 指示書を印刷用の画面で開く */
-/* simple = true: 「どこから → どこへ」だけの指示書(品番と、一部だけ動かすときのケース数を小さく添える) */
-function printSlotting(simple){
-  var st = state.stockData; if(!st || !st.calc) return;
-  var opt = Object.assign({}, SLOT_DEFAULTS, state.slotOpt||{});
-  var r = computeSlotting(st, opt), sh = slotSheetRows(r), seq = slotSequence(r, opt.tentFirst);
-  function tbl(title, rows){
-    if(!rows.length) return '';
-    if(simple === true && /^このラックに残す物/.test(title)){ // 動かさない物は1行にまとめる(品番ごとに段の番号)
-      var byCode = {}, order = [];
-      rows.forEach(function(x){ var m = /([\d・]+)台目 (下段|上段)/.exec(x.toPlace||''); if(!byCode[x.code]){ byCode[x.code] = []; order.push(x.code); } if(m) byCode[x.code].push(m[1]+'台目'+m[2]); });
-      return '<h3>'+esc(title)+'('+rows.length+'件)</h3><div style="border:1px solid #999;padding:6px 8px;font-size:12px;">□ <b>'+esc(rows[0].to.replace(/ のまま$/, ''))+'</b> に載せたまま: '+
-        order.map(function(c){ return esc(c)+(byCode[c].length ? '('+esc(byCode[c].filter(function(v, i, a){ return a.indexOf(v)===i; }).join('・'))+')' : ''); }).join('、')+'</div>';
-    }
-    if(simple === true){
-      return '<h3>'+esc(title)+'('+rows.length+'件)</h3><table class="sp"><thead><tr><th>済</th><th>順</th><th>どこから</th><th></th><th>どこへ</th><th>品番</th></tr></thead><tbody>'+
-        rows.map(function(x, i){
-          var part = (x.pack && !x.frac && x.toPlace && /分けて置く/.test(x.toPlace)) ? ' '+slotCasesText(x)+'だけ' : '';
-          return '<tr><td class="ck">□</td><td class="no">'+(i+1)+'</td><td class="loc">'+esc(x.from)+(x.fromPlace ? '<div class="pl">'+esc(x.fromPlace)+'</div>' : '')+'</td><td class="ar">→</td>'+
-            '<td class="loc">'+esc(x.to)+(x.toPlace ? '<div class="pl">'+esc(x.toPlace)+'</div>' : '')+'</td><td class="cd">'+esc(x.code)+(x.frac?'(端数)':'')+esc(part)+'</td></tr>';
-        }).join('')+'</tbody></table>';
-    }
-    return '<h3>'+esc(title)+'('+rows.length+'件)</h3><table><thead><tr><th>済</th><th>順</th><th>品番</th><th>商品名</th><th>出荷</th><th>どこから</th><th>数量</th><th>ケース</th><th>どこへ</th><th>行き先の場所</th></tr></thead><tbody>'+
-      rows.map(function(x, i){ return '<tr><td class="ck">□</td><td>'+(i+1)+'</td><td><b>'+esc(x.code)+'</b>'+(x.frac?'(端数)':'')+'</td><td>'+esc(x.name)+'</td><td>'+esc(x.rank)+'</td><td><b>'+esc(x.from)+'</b></td><td>'+formatNum(x.qty)+'</td><td>'+slotCasesText(x)+'</td><td><b>'+esc(x.to)+'</b></td><td>'+esc(x.toPlace)+'</td></tr>'; }).join('')+'</tbody></table>';
-  }
-  var html = '<!doctype html><html><head><meta charset="utf-8"><title>配置の指示書</title><style>'+
-    'body{font-family:"Yu Gothic UI","Meiryo",sans-serif;font-size:11px;margin:12mm;color:#111;}h1{font-size:16px;margin:0 0 4px;}h2{font-size:14px;margin:0 0 4px;}h3{font-size:12px;margin:10px 0 4px;}'+
-    'table{border-collapse:collapse;width:100%;}th,td{border:1px solid #999;padding:3px 4px;text-align:left;}th{background:#eee;}.ck{width:16px;text-align:center;font-size:14px;}tr{page-break-inside:avoid;}'+
-    '.step{page-break-before:always;}'+
-    'table.sp td{padding:6px 8px;}table.sp td.loc{font-size:17px;font-weight:800;white-space:nowrap;}table.sp td.ar{font-size:17px;text-align:center;width:24px;border-left:none;border-right:none;}table.sp td.no{width:28px;color:#555;}table.sp td.cd{font-size:10px;color:#555;}table.sp .pl{font-size:10px;font-weight:400;color:#444;white-space:normal;margin-top:2px;}'+
-    '</style></head><body><h1>配置の指示書(テント倉庫の配置がえ・D列の廃止)</h1><div>ロジザード在庫 '+esc(fmtDateTime(st.lz.uploadedAt))+' ・ 出荷記録 '+r.ship.days+'日分 ・ 作成 '+esc(fmtDateTime(new Date().toISOString()))+
-    ' ・ '+(opt.tentFirst==='B' ? 'B棟 → A棟' : 'A棟 → B棟')+' ・ 仮置き場(A棟の右側の広い所)はいちばん多いとき約'+Math.ceil(seq.peakBuffer/opt.palletSai)+'パレット</div>'+
-    '<div style="margin-top:6px;">'+(opt.order==='swap'
-      ? 'D のラックを在庫を載せたまま通路に置き、面した棚と入れ替えます(1台ずつ: ラックの物を降ろす → 棚の物をラックへ → 降ろした物をその棚へ)。'
-      : (opt.order==='aisle' ? '通路ごとに、その通路に面した列を適正配置(出す物 → 列の中 → 入れる物)→ D列を1ロケあけて、空いたラックをその通路に置き、よく出る物を入れる、をくり返します。' : 'D列を1ロケずつあけ、空いたラックを通路に置いて、D列の物とよく出る物を入れます。棚の整理はD列のあと。'))+
-      '<b>どこへ</b> の大きい字がロジザードのロケです(通路ラックは D の番号のまま)。下の小さい字が場所です。□にチェックしてください。</div>'+
-    seq.steps.map(function(stp, i){
-      return '<div class="step"><h2>'+(i+1)+'. '+esc(stp.title)+'</h2>'+
-        (stp.racks.length ? '<h3>通路ラックを置く: '+esc(stp.racks.join('、'))+'</h3>' : '')+
-        stp.groups.map(function(g){ return tbl(g[0], g[1]); }).join('')+'</div>';
-    }).join('')+
-    (sh.left.length ? '<div class="step">'+tbl('入りきらない', sh.left)+'</div>' : '')+
-    '<script>window.onload=function(){ window.print(); };<\/script></body></html>';
-  var w = window.open('', '_blank');
-  if(!w){ showToast('印刷の画面を開けませんでした(ポップアップを許可してください)'); return; }
-  w.document.open(); w.document.write(html); w.document.close();
 }
 function renderStockTab(){
   var st = state.stockData;
@@ -14876,10 +14401,6 @@ function bindStockTab(){
   if(sor) sor.addEventListener('change', function(){ state.slotOpt = Object.assign({}, state.slotOpt||{}, { order: sor.value }); state.slotSettingsOpen = true; render(); });
   var stn = document.querySelector('[data-slot-tent]');
   if(stn) stn.addEventListener('change', function(){ state.slotOpt = Object.assign({}, state.slotOpt||{}, { tentFirst: stn.value }); state.slotSettingsOpen = true; render(); });
-  var sp = document.getElementById('slotPrint');
-  if(sp) sp.addEventListener('click', function(){ printSlotting(true); });
-  var spf = document.getElementById('slotPrintFull');
-  if(spf) spf.addEventListener('click', function(){ printSlotting(false); });
   document.querySelectorAll('[data-slot-opt]').forEach(function(el){
     el.addEventListener('change', function(){
       var v = Number(el.value);
@@ -15296,18 +14817,6 @@ function renderGateDataStatus(){
       usageTile(st.usage)+
     '</div>'+
   '</div>';
-}
-/* ---------- GATE ---------- */
-/* トップページのカード。adminTab を渡すと、管理の画面のそのタブを開く */
-function gateCard(role, bg, fg, icon, title, desc, locked, adminTab){
-  var ik = adminTab==='data' ? 'data' : role;
-  if(LL_ICONS[ik]) icon = llIcon(ik, 22);
-  return '<button class="gate-card" data-role="'+role+'"'+(adminTab ? ' data-admin-tab="'+adminTab+'"' : '')+'>'+
-    (locked ? '<div class="gate-lock-badge" title="管理者ログインが必要です">&#128274;</div>' : '')+
-    '<div class="gate-icon" style="background:'+bg+';color:'+fg+';">'+icon+'</div>'+
-    '<div class="gate-text"><div class="gate-card-title">'+esc(title)+'</div>'+
-    '<div class="gate-card-desc">'+esc(desc)+'</div></div>'+
-  '</button>';
 }
 function renderGate(){
   return ''+
@@ -17321,9 +16830,8 @@ function renderManager(){
   ) : '';
 
   var todayDashboardHtml = '<div class="panel" style="margin-bottom:14px;">'+
-    '<div style="display:flex;align-items:center;gap:8px;"><div class="panel-title">📋 今日の状況</div>'+(isToday ? '<button type="button" class="vc-manage-toggle-btn" id="arrivalSheetPdf" title="今日入る発注(納入期日が今日・遅れ)を仕入先ごとに出し、仕入先ごとに印刷します" style="margin-left:auto;">📦 本日の入庫明細'+(state.arrivalSheet && state.arrivalSheet.open ? ' ▴' : ' ▾')+'</button>'+'<button type="button" class="vc-manage-toggle-btn" id="tpickPanelToggle" title="取り込んだCSVのトータルピッキング(作業記録と同じ番号)を見て印刷します">🧾 トータルピッキング'+(state.tpickPanelOpen ? ' ▴' : ' ▾')+'</button>' : '')+'</div>'+
-    (isToday ? renderArrivalSheetPanel()+renderTpickPanel() : '')+
-    summaryCardsHtml+
+    '<div style="display:flex;align-items:center;gap:8px;"><div class="panel-title">📋 今日の状況</div></div>'+ /* 入庫明細・トータルピッキングのボタンは上の「今日の状況」にだけ置く(同じボタンが2つあると下のは動かなかった。2026-10-20) */
+    (isToday ? '' : summaryCardsHtml)+ /* 今日の数はトップの数字のカード・上の今日の状況と重なるので、前の日を見るときだけ出す */
     '<div class="panel-title" style="font-size:15px;margin-top:18px;">👥 作業者別 業務時間</div>'+
     checkAlertHtml+
     '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>作業者</th><th>作業</th><th>開始</th><th>終了</th><th>作業時間</th><th>状態</th></tr></thead><tbody>'+workTimeTableRows+'</tbody></table></div>'+
@@ -20418,28 +19926,6 @@ var WORK_PRICE_CALC_UNITS = ['ピース','ケース','件','明細','才'];
 // 計算単位の説明(選択欄・一覧の補足)。才 = ケースで出荷した数 × 商品台帳の才数(バラ・ピースは含まない)
 var WORK_PRICE_CALC_UNIT_LABELS = { '才':'才(ケース数×商品台帳の才数)' };
 function workPriceCalcUnitLabel(u){ return WORK_PRICE_CALC_UNIT_LABELS[u] || u; }
-/* CSV取込の商品別内訳から、得意先ごとの才(ケース数 × 商品台帳の才数)を集計する(収支計算の「才」単位用)。
-   才数が無い商品のケースは推測で0才にせず、casesWithoutCubic として数えて返す(金額計算側で「才数なし」を知らせるため)。
-   戻り値: { 得意先名: { cubic, cases, casesWithoutCubic, productsWithoutCubic[] } } */
-function workVolumeCubicByCustomer(wv){
-  var out = {};
-  wvActiveImports(wv||emptyWorkVolume()).forEach(function(imp){
-    Object.keys(imp.byProduct||{}).forEach(function(code){
-      var p = imp.byProduct[code];
-      var cust = p.customerName || '';
-      var o = out[cust] || (out[cust] = { cubic:0, cases:0, casesWithoutCubic:0, productsWithoutCubic:[] });
-      var cc = (typeof p.caseCount==='number') ? p.caseCount : 0;
-      o.cases += cc;
-      if(!cc) return;
-      if(typeof p.cubicVolume==='number') o.cubic += cc*p.cubicVolume;
-      else{
-        o.casesWithoutCubic += cc;
-        if(o.productsWithoutCubic.indexOf(code)===-1) o.productsWithoutCubic.push(code);
-      }
-    });
-  });
-  return out;
-}
 function canEditWorkPriceAssignments(){ return hasManagerSession() && state.authRole==='admin'; }
 /* 戻り値: { ok, reason, missingTable, byRecordId: { recordId: { allCustomers, customerNames[], calcUnit, updatedAt } } } */
 async function fetchWorkPriceAssignments(){
@@ -20486,25 +19972,6 @@ async function loadWorkPriceCustomerNames(){
 function workPriceAssignmentText(a){
   if(!a) return { customers:'未設定', unit:'未設定' };
   return { customers: a.allCustomers ? '全得意先共通' : (a.customerNames.length ? a.customerNames.join('・') : '未設定'), unit: a.calcUnit ? workPriceCalcUnitLabel(a.calcUnit) : '未設定' };
-}
-/* 将来の収支計算用: 出庫荷役料 = ケース数 × 才数 × ケース出庫単価 + ピース数 × ピース出庫単価。
-   line: { caseCount, pieceCount, cubicVolume } / prices: { casePrice, piecePrice }。
-   足りない値がある部分は null にして理由を返す(0円として扱わない)。 */
-function computeOutboundHandlingFee(line, prices){
-  var reasons = [];
-  var caseFee = null, pieceFee = null;
-  var casePrice = prices && typeof prices.casePrice==='number' ? prices.casePrice : null;
-  var piecePrice = prices && typeof prices.piecePrice==='number' ? prices.piecePrice : null;
-  if(!line || line.caseCount===null || line.caseCount===undefined) reasons.push('ケース数がありません(入数未登録)');
-  else if(line.caseCount===0) caseFee = 0;
-  else if(typeof line.cubicVolume!=='number') reasons.push('才数がありません');
-  else if(casePrice===null) reasons.push('ケース出庫単価がありません');
-  else caseFee = line.caseCount * line.cubicVolume * casePrice;
-  if(!line || line.pieceCount===null || line.pieceCount===undefined) reasons.push('ピース数がありません(入数未登録)');
-  else if(line.pieceCount===0) pieceFee = 0;
-  else if(piecePrice===null) reasons.push('ピース出庫単価がありません');
-  else pieceFee = line.pieceCount * piecePrice;
-  return { caseFee: caseFee, pieceFee: pieceFee, total: (caseFee!==null && pieceFee!==null) ? caseFee+pieceFee : null, reasons: reasons };
 }
 /* ---------- kintone商品マスタ同期(第1段階: 取得して保存するところまで) ----------
    設定は管理者がUIから入力(アプリID・フィールドコード)。
@@ -21903,7 +21370,6 @@ function renderModal(){
   if(m.kind==='foldQty') return renderFoldQtyModal(m);
   if(m.kind==='qtyBreakdown') return renderQtyBreakdownModal(m);
   if(m.kind==='addLog') return renderAddLogModal(m);
-  if(m.kind==='vcPreview') return renderVcPreviewModal(m);
   if(m.kind==='assignStaffPicker') return renderAssignStaffPickerModal(m);
   if(m.kind==='assignTaskPicker') return renderAssignTaskPickerModal(m);
   if(m.kind==='tpickList') return renderTpickListModal(m);
@@ -22052,9 +21518,6 @@ function bindAddLogModal(m){
   });
   var saveBtn = document.getElementById('addLogSaveBtn');
   if(saveBtn) saveBtn.addEventListener('click', saveAddLog);
-}
-function criteriaLabel(c){
-  return { none:'バッチ化しない', location:'引当ロケーションごと', invoice:'送り状区分ごと', location_invoice:'引当ロケーション×送り状区分', even_split:'件数で均等分割' }[c] || c;
 }
 function renderPickSubcatModal(m){
   var buttons = m.subcategories.map(function(sc){
@@ -22591,138 +22054,6 @@ function bindAssignStaffPickerModal(m){
     });
   }
 }
-function renderVcPreviewModal(m){
-  var vp = state.vcPreview;
-  if(!vp) return '';
-  var taskName = taskById(vp.taskId).name;
-  var primaryLabel = vp.cfg.taskKind==='vc' ? 'PO数' : '件数';
-  var warningsHtml = '';
-  if(vp.missingColumns && vp.missingColumns.length){
-    warningsHtml += '<div class="vc-warning-box">⚠️ 必須列が見つかりません: '+vp.missingColumns.map(esc).join('、')+'。列名の設定をご確認ください。</div>';
-  }
-  if(vp.anomaly){
-    var a = vp.anomaly;
-    var labelMap = { primaryCount: primaryLabel, lineCount:'明細数', totalQty:'ピース数' };
-    var lines = a.flagged.map(function(k){
-      var sign = a.diffs[k]>=0 ? '+' : '';
-      return labelMap[k]+'が前回取込('+esc(a.prevImport.fileName)+')から'+sign+a.diffs[k].toFixed(0)+'%';
-    }).join('、');
-    warningsHtml += '<div class="vc-warning-box">⚠️ 前回取込との差が大きいです: '+lines+'。'+(a.isSmallSample?'(前回の件数が少ないため参考値です)':'')+'</div>';
-  }
-  if(vp.overlap && vp.overlap.length){
-    warningsHtml += '<div class="vc-warning-box">⚠️ 前回までの取込と重複する可能性がある荷主出荷NOが'+vp.overlap.length+'件あります('+vp.overlap.slice(0,5).map(esc).join('、')+(vp.overlap.length>5?' 他':'')+')。二重計上でないかご確認ください。</div>';
-  }
-  var skippedHtml = '';
-  if(vp.skippedShipperNos && vp.skippedShipperNos.length){
-    skippedHtml = '<div class="vc-import-status" style="background:var(--paper-100);color:var(--slate-500);border-color:var(--paper-line);">'+
-      '取込: '+vp.primaryCount+primaryLabel+' / スキップ: '+vp.skippedShipperNos.length+'件'+
-      '<br><span style="font-size:11px;">スキップ理由: 既に取り込み済みの荷主出荷番号('+vp.skippedShipperNos.slice(0,5).map(esc).join('、')+(vp.skippedShipperNos.length>5?' 他':'')+')</span>'+
-    '</div>';
-  }
-  var body;
-  if(vp.cfg.enabled && vp.batches.length){
-    var rows = vp.batches.map(function(b){
-      var excluded = !!b._excluded;
-      return '<div class="vc-preview-row'+(excluded?' vc-preview-excluded':'')+'">'+
-        '<input type="text" class="vc-preview-name-input" data-vc-preview-name="'+b.id+'" value="'+esc(b.name)+'" '+(excluded?'disabled':'')+'>'+
-        '<span class="vc-preview-meta">'+b.primaryCount+primaryLabel+' ・ '+b.lineCount+'明細 ・ '+formatNum(b.totalQty)+'ピース'+(b.criteria.pickLocation?' ・ '+esc(b.criteria.pickLocation):'')+(b.criteria.invoiceType?' ・ '+esc(b.criteria.invoiceType):'')+'</span>'+
-        '<button type="button" class="vc-manage-toggle-btn" data-vc-preview-exclude="'+b.id+'">'+(excluded?'含める':'除外')+'</button>'+
-      '</div>';
-    }).join('');
-    body = '<div class="pool-hint" style="margin-bottom:10px;">バッチ化基準: '+esc(criteriaLabel(vp.cfg.criteria))+' → '+vp.batches.length+'バッチ作成予定</div>'+
-      '<div class="vc-slip-list" style="max-height:320px;">'+rows+'</div>';
-  }else{
-    body = '<div class="pool-hint">この作業はバッチ分類を使わないため、取込全体の合計値のみ保存されます。</div>';
-  }
-  return '<div class="modal-overlay" id="modalOverlay">'+
-    '<div class="modal-card" style="max-width:520px;text-align:left;">'+
-      '<div class="modal-task-name" style="text-align:center;margin-bottom:6px;">プレビュー: '+esc(taskName)+' の取込結果</div>'+
-      '<div class="pool-hint" style="text-align:center;margin-bottom:6px;">対象日付: '+esc(dateLabelFromStr(vp.targetDate))+'</div>'+
-      '<div class="pool-hint" style="text-align:center;margin-bottom:14px;">'+vp.primaryCount+primaryLabel+' / '+vp.lineCount+'明細 / 合計'+formatNum(vp.totalQty)+'ピース</div>'+
-      warningsHtml+
-      skippedHtml+
-      body+
-      '<div class="modal-actions" style="margin-top:14px;">'+
-        '<button class="modal-cancel" id="vcPreviewCancelBtn">キャンセル</button>'+
-        '<button class="modal-confirm" id="vcPreviewConfirmBtn">この内容で確定する</button>'+
-      '</div>'+
-    '</div>'+
-  '</div>';
-}
-function bindVcPreviewModal(m){
-  var cancelBtn = document.getElementById('vcPreviewCancelBtn');
-  if(cancelBtn) cancelBtn.addEventListener('click', async function(){
-    var vp = state.vcPreview;
-    if(vp && vp.attemptId) await markImportAttemptStatus(vp.targetDate, vp.attemptId, 'cancelled');
-    state.vcPreview = null;
-    state.modal = null;
-    render();
-  });
-  document.querySelectorAll('[data-vc-preview-name]').forEach(function(el){
-    el.addEventListener('focusin', function(){ state.suppressRender = true; });
-    el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
-    el.addEventListener('change', function(){
-      var id = el.getAttribute('data-vc-preview-name');
-      var b = state.vcPreview.batches.find(function(x){ return x.id===id; });
-      if(b) b.name = el.value;
-    });
-  });
-  document.querySelectorAll('[data-vc-preview-exclude]').forEach(function(el){
-    el.addEventListener('click', function(){
-      var id = el.getAttribute('data-vc-preview-exclude');
-      var b = state.vcPreview.batches.find(function(x){ return x.id===id; });
-      if(b) b._excluded = !b._excluded;
-      render();
-    });
-  });
-  var confirmBtn = document.getElementById('vcPreviewConfirmBtn');
-  if(confirmBtn){
-    confirmBtn.addEventListener('click', async function(){
-      var vp = state.vcPreview;
-      var primaryLabel = (vp.cfg.taskKind==='vc') ? 'PO数' : '件数';
-      var skippedCount = (vp.skippedShipperNos||[]).length;
-      if(vp.primaryCount===0){
-        // 全件が既に取込済み(荷主出荷番号がすべて重複)だった場合は、空の取込を作成しない
-        await markImportAttemptStatus(vp.targetDate, vp.attemptId, 'cancelled');
-        await appendAuditLog({ action:'CSV作業量取込(全件スキップ)', target: taskById(vp.taskId).name+' / '+vp.fileName, before:null, after: '既に取込済みの荷主出荷番号のみのため、新規取込なし('+skippedCount+'件スキップ)' });
-        state.vcPreview = null;
-        state.modal = null;
-        showToast('すべての荷主出荷番号が取込済みのため、新規の取込は行いませんでした('+skippedCount+'件スキップ)');
-        render();
-        return;
-      }
-      var finalBatches = vp.batches.filter(function(b){ return !b._excluded; });
-      finalBatches.forEach(function(b){ delete b._excluded; });
-      var targetData = await getWorkVolumeForDate(vp.targetDate);
-      targetData.imports.push({
-        id: vp.importId, importedAt: new Date().toISOString(), fileName: vp.fileName, taskId: vp.taskId,
-        taskKind: vp.cfg.taskKind||'normal',
-        primaryCount: vp.primaryCount, lineCount: vp.lineCount, totalQty: vp.totalQty,
-        fileFingerprint: vp.fingerprint, fileSize: vp.fileSize, shipperNos: vp.shipperNos,
-        byCustomer: vp.byCustomer||{}, byProduct: vp.byProduct||{},
-        deletedAt: null, deletedBy: null, deleteReason: null
-      });
-      targetData.batches = targetData.batches.concat(finalBatches);
-      var saveOk = await saveWorkVolume(vp.targetDate, targetData);
-      if(vp.targetDate===todayStr()) state.workVolume = targetData;
-      if(state.wvTargetDate===vp.targetDate) state.wvViewData = targetData;
-      await markImportAttemptStatus(vp.targetDate, vp.attemptId, saveOk ? 'done' : 'failed');
-      if(saveOk){
-        await registerFileFingerprint(vp.fingerprint, vp.fileSize, vp.fileName, vp.targetDate, vp.taskId, vp.importId);
-        await registerShipperNos(vp.shipperNos, vp.targetDate, vp.taskId);
-      }
-      await appendAuditLog({ action:'CSV作業量取込確定', target: taskById(vp.taskId).name+' / '+vp.fileName, before:null, after: vp.primaryCount+primaryLabel+'、'+finalBatches.length+'件のバッチ('+vp.targetDate+')'+(skippedCount?'、'+skippedCount+'件スキップ(既取込)':'') });
-      if(saveOk && vp.totalQty>0) await recordNextAssignmentSuggestion(vp.taskId, vp.totalQty, vp.targetDate);
-      var msg = saveOk
-        ? '取込を確定しました('+vp.primaryCount+primaryLabel+' / '+vp.lineCount+'明細 / '+formatNum(vp.totalQty)+'ピース)'+(skippedCount?'。'+skippedCount+'件は既に取込済みのためスキップしました':'')+(finalBatches.length?'。'+finalBatches.length+'件のバッチを作成しました':'')
-        : '保存に失敗した可能性があります。本日の確認事項をご確認ください。';
-      state.vcPreview = null;
-      state.modal = null;
-      showToast(msg);
-      render();
-    });
-  }
-}
 function editFieldSwatches(colorState, dataAttr){
   return TASK_COLORS.map(function(c){
     return '<div class="swatch '+(colorState===c.hex?'sel':'')+'" style="background:'+c.hex+'" data-'+dataAttr+'="'+c.hex+'"></div>';
@@ -22878,7 +22209,6 @@ function bindModal(){
   if(m.kind==='foldQty'){ bindFoldQtyModal(m); return; }
   if(m.kind==='qtyBreakdown'){ bindQtyBreakdownModal(m); return; }
   if(m.kind==='addLog'){ bindAddLogModal(m); return; }
-  if(m.kind==='vcPreview'){ bindVcPreviewModal(m); return; }
   if(m.kind==='assignStaffPicker'){ bindAssignStaffPickerModal(m); return; }
   if(m.kind==='assignTaskPicker'){ bindAssignTaskPickerModal(m); return; }
   if(m.kind==='tpickList' || m.kind==='tpickBatch'){ bindTpickModals(m); return; }

@@ -1478,7 +1478,7 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .tpick-row{ display:grid; grid-template-columns:90px 1fr auto auto; gap:12px; align-items:center; padding:12px; border:1px solid var(--paper-line); border-radius:12px; margin-bottom:8px; background:var(--paper-50); }
 .tpick-row.is-mine{ border-color:#6366F1; box-shadow:0 0 0 1px #6366F1; }
 .tpick-no{ font-size:20px; font-weight:800; }
-.tpick-claim{ min-width:110px; }
+.tpick-claim{ min-width:110px; border:1px solid transparent; border-radius:8px; padding:6px 14px; font-size:14px; font-weight:700; cursor:pointer; box-shadow:none; } /* 「見る」と同じ形(色だけ目立つ。2026-10-20) */
 .tpick-items{ display:flex; flex-direction:column; gap:6px; }
 .tpick-item{ display:grid; grid-template-columns:40px 150px 1fr 80px; gap:10px; align-items:center; text-align:left; padding:12px 12px; border:1px solid var(--paper-line); border-radius:12px; background:var(--paper-50); font-size:16px; cursor:pointer; color:var(--ink-text); }
 .tpick-item:disabled{ cursor:default; }
@@ -1645,7 +1645,7 @@ html[data-app-theme="dark"] .changelog-date{color:#a5b4fc !important}
 html[data-app-theme="dark"] .changelog-items{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] .changelog-close{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .topbar-date{color:var(--dk-muted) !important}
-html[data-app-theme="dark"] html[data-app-theme="dark"] html[data-app-theme="dark"] html[data-app-theme="dark"] .sub-switch-btn{border-color:rgba(77,125,203,0.45) !important;background:var(--dk-card) !important;color:#a5bee8 !important}
+html[data-app-theme="dark"] .sub-switch-btn{border-color:rgba(77,125,203,0.45) !important;background:var(--dk-card) !important;color:#a5bee8 !important}
 html[data-app-theme="dark"] .sk-pf{border-color:rgba(77,125,203,0.45) !important;background:var(--dk-card) !important}
 html[data-app-theme="dark"] .sk-pf span{background:var(--dk-card) !important}
 html[data-app-theme="dark"] .sk-pf .sk-pf-ck{color:#99baf3 !important}
@@ -1983,7 +1983,7 @@ html[data-app-theme="dark"] .gate-hello{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] .gate-today{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .gate-section-title{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .gate-card:hover{border-color:rgba(29,93,250,0.45) !important}
-html[data-app-theme="dark"] html[data-app-theme="dark"] body.with-sidebar .topbar-nav-item{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] body.with-sidebar .topbar-nav-item{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .app-crumb{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .app-crumb b{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] .app-header-date{color:var(--dk-muted) !important}
@@ -9099,14 +9099,53 @@ function tpickPrint(listIdx, who){
     'トータルピッキングリスト_'+(L.biz||'')+'_'+tpickDayLabel(L.day).replace('/','')+'_'+(who==='part'?'パート':'リフト'));
 }
 /* 取り込んだCSVの分(作業記録と同じ番号)を印刷。bids: 印刷する番号の id の並び */
-function tpickPrintSaved(taskId, bids){
-  var sv = state.tpickSaved || {};
+function tpickPrintSaved(taskId, bids, src){
+  var sv = src || state.tpickSaved || {}; // src: 取込のすぐあとの印刷のときの { tp, wv, date }
   var bs = tpickBatchesForTask(sv.tp, sv.wv, taskId).filter(function(b){ return bids.indexOf(b.id)!==-1; });
   var d = sv.date || todayStr();
   tpickPrintGroups(bs.map(function(b){
     return { label: b.label+(b.who==='part' ? '(パートさん用)' : b.who==='office' ? '(事務所用 SET・ZZZ)' : '(リフトマン用)'), biz: taskById(taskId).name, day: parseInt(d.slice(5,7),10)+'/'+parseInt(d.slice(8),10),
       items: b.items.map(function(it){ return { block: it.b, loc: it.l, code: it.c, name: it.n, quality: it.q, qty: it.qty }; }) };
   }), 'トータルピッキングリスト_'+taskById(taskId).name+'_'+d);
+}
+/* 作業量CSV取込を確定したすぐあと: 取り込んだ分のトータルピッキングを、作業ごとにリフトマン用・事務所用(SET・ZZZ)・パートさん用で印刷する。
+   番号は作業記録・今日の状況と同じ(その作業の前の取込から続く番号) */
+function tpickAfterImportGroups(m){
+  var mine = {}; (m.importIds||[]).forEach(function(id){ mine[id] = true; });
+  var tids = [];
+  (m.importIds||[]).forEach(function(id){ var imp = m.tp && m.tp.imports && m.tp.imports[id]; if(imp && tids.indexOf(imp.taskId)===-1) tids.push(imp.taskId); });
+  return tids.map(function(tid){
+    var bs = tpickBatchesForTask(m.tp, m.wv, tid).filter(function(b){ return mine[b.id.split(':')[0]]; });
+    return { taskId: tid, office: bs.filter(function(b){ return b.who==='office'; }), lift: bs.filter(function(b){ return b.who==='lift'; }), part: bs.filter(function(b){ return b.who==='part'; }) };
+  }).filter(function(g){ return g.office.length || g.lift.length || g.part.length; });
+}
+function renderTpickAfterImportModal(m){
+  var groups = tpickAfterImportGroups(m);
+  var btn = function(tid, arr, label, primary){
+    if(!arr.length) return '';
+    var rows = arr.reduce(function(a, b){ return a+b.items.length; }, 0);
+    return '<button type="button" class="'+(primary ? 'add-btn' : 'll-btn')+'" data-tpaf="'+esc(tid)+'|'+esc(arr.map(function(b){ return b.id; }).join(','))+'">🖨 '+label+'('+(arr.length>1 ? esc(arr[0].label)+'〜'+esc(arr[arr.length-1].label) : esc(arr[0].label))+' ・ '+rows+'行)</button>';
+  };
+  var body = groups.map(function(g){
+    return '<div class="panel" style="margin:0 0 10px;padding:12px 14px;"><div class="panel-title" style="font-size:15px;margin:0 0 8px;">'+esc(taskById(g.taskId).name)+'</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+btn(g.taskId, g.lift, 'リフトマン用', true)+btn(g.taskId, g.office, '事務所用 SET・ZZZ', true)+btn(g.taskId, g.part, 'パートさん用', false)+'</div></div>';
+  }).join('') || '<div class="empty-note">この取込には、トータルピッキングの行がありません</div>';
+  return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card" style="max-width:640px;">'+
+    '<div class="modal-task-name">✅ 取り込みました ・ トータルピッキングを印刷</div>'+
+    '<div class="pool-hint" style="margin:4px 0 12px;">'+esc(m.fileName||'')+' の分です。番号は作業記録(タブレット)・今日の状況と同じです。パートさん用はふだんタブレットで取ります。あとからでも、管理 → 今日の状況の「🧾 トータルピッキング」で印刷できます。</div>'+
+    body+
+    '<div class="modal-actions" style="margin-top:12px;"><button type="button" class="modal-cancel" id="tpafClose">閉じる</button></div>'+
+  '</div></div>';
+}
+function bindTpickAfterImportModal(m){
+  var close = document.getElementById('tpafClose');
+  if(close) close.addEventListener('click', function(){ state.modal = null; render(); });
+  document.querySelectorAll('[data-tpaf]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var p = el.getAttribute('data-tpaf').split('|');
+      tpickPrintSaved(p[0], p[1].split(','), { tp: m.tp, wv: m.wv, date: m.date });
+    });
+  });
 }
 /* 取り込んだCSVの分を読む(日付を変えたとき・タブを開いたとき) */
 function tpickSavedLoad(dateStr){
@@ -9189,7 +9228,7 @@ async function tpickSaveImports(dateStr, entries){
     entries.forEach(function(e){ cur.imports[e.importId] = { taskId: e.taskId, fileName: e.fileName, at: e.at, items: e.items }; });
     return cur;
   });
-  return r.ok;
+  return r.ok ? r.value : null; // 保存できたら、保存した内容(取込のあとの印刷で使う)
 }
 /* 作業枠の番号の一覧。取込の順に、パート・リフトそれぞれ TPICK_BATCH_ROWS 行ずつ。番号は作業枠の中で通し番号(取込が増えても前の番号は変わらない) */
 function tpickBatchesForTask(tp, wv, taskId){
@@ -20128,6 +20167,7 @@ function renderModal(){
   if(m.kind==='assignStaffPicker') return renderAssignStaffPickerModal(m);
   if(m.kind==='assignTaskPicker') return renderAssignTaskPickerModal(m);
   if(m.kind==='tpickList') return renderTpickListModal(m);
+  if(m.kind==='tpickAfterImport') return renderTpickAfterImportModal(m);
   if(m.kind==='tpickBatch') return renderTpickBatchModal(m);
   if(m.kind==='reassignConfirm') return renderReassignConfirmModal(m);
   if(m.kind==='wvImportEdit') return renderWvImportEditModal(m);
@@ -20498,10 +20538,13 @@ function bindAutoMapPreviewModal(m){
           deletedAt: null, deletedBy: null, deleteReason: null
         });
       }
-      var saveOk = (await wvUpdate(d.targetDate, function(data){ data.imports = data.imports.concat(newImports); })).ok;
+      var wvRes = await wvUpdate(d.targetDate, function(data){ data.imports = data.imports.concat(newImports); });
+      var saveOk = wvRes.ok;
       state.gateDataStatus = null; // トップページの「データの更新状況」を読み直す
+      var tpSaved = null;
       if(saveOk && tpEntries.length){
-        if(!(await tpickSaveImports(d.targetDate, tpEntries))) showToast('⚠️ 取込は保存しましたが、トータルピッキングを保存できませんでした');
+        tpSaved = await tpickSaveImports(d.targetDate, tpEntries);
+        if(!tpSaved) showToast('⚠️ 取込は保存しましたが、トータルピッキングを保存できませんでした');
       }
       if(saveOk){
         await registerFileFingerprint(d.fingerprint, d.fileSize, d.fileName, d.targetDate, '(自動振り分け・複数作業枠)', groupImportId);
@@ -20521,6 +20564,8 @@ function bindAutoMapPreviewModal(m){
         : '保存に失敗した可能性があります。本日の確認事項をご確認ください。';
       state.autoMapPreviewData = null;
       state.modal = null;
+      // そのまま、取り込んだ分のトータルピッキング(リフトマン用・事務所用 SET・ZZZ)を印刷できるように(2026-10-20)
+      if(saveOk && tpSaved) state.modal = { kind:'tpickAfterImport', date: d.targetDate, tp: tpSaved, wv: wvRes.data, importIds: tpEntries.map(function(e){ return e.importId; }), fileName: d.fileName };
       showToast(msg);
       render();
     });
@@ -20966,6 +21011,7 @@ function bindModal(){
   if(m.kind==='assignStaffPicker'){ bindAssignStaffPickerModal(m); return; }
   if(m.kind==='assignTaskPicker'){ bindAssignTaskPickerModal(m); return; }
   if(m.kind==='tpickList' || m.kind==='tpickBatch'){ bindTpickModals(m); return; }
+  if(m.kind==='tpickAfterImport'){ bindTpickAfterImportModal(m); return; }
   if(m.kind==='reassignConfirm'){ bindReassignConfirmModal(m); return; }
   if(m.kind==='wvImportEdit'){ bindWvImportEditModal(m); return; }
   if(m.kind==='autoMapPreview'){ bindAutoMapPreviewModal(m); return; }

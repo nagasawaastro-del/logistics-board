@@ -144,11 +144,6 @@ input,select{font-family:inherit;}
 .topbar-left{display:flex;align-items:baseline;gap:12px;}
 .topbar-title{font-family:var(--font-display);font-weight:600;font-size:15px;letter-spacing:-.01em;}
 .topbar-date{font-family:var(--font-mono);font-size:12px;color:#9AA4B8;}
-.todo-sec{margin:14px 0 0;}
-.todo-sec-title{font-size:13px;font-weight:800;color:#475467;margin:0 0 6px;letter-spacing:.04em;}
-.todo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;}
-.todo-btn{text-align:left;padding:12px 14px;border:1px solid #D0D5DD;border-radius:10px;background:#fff;font-size:14px;font-weight:700;color:#101828;cursor:pointer;}
-.todo-btn:hover{background:#F9FAFB;border-color:#98A2B3;}
 .sub-switch{display:flex;gap:6px;margin:-6px 0 12px;}
 .input-sound-hint{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:60;background:#3B2F12;color:#FEDF89;border:1px solid #B54708;border-radius:999px;padding:8px 16px;font-size:13px;font-weight:700;}
 .sub-switch-btn{border:1px solid #D0D5DD;background:#fff;border-radius:999px;padding:5px 14px;font-size:13px;font-weight:700;color:#344054;cursor:pointer;}
@@ -1277,10 +1272,6 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,input[typ
 .gate-card > .gate-card-title{margin-bottom:0;}
 .gate-card .gate-text{display:flex;flex-direction:column;}
 .gate-lock-badge{top:8px !important;right:10px !important;}
-/* 管理: やること */
-.todo-btn{border-radius:14px !important;border-color:var(--paper-line) !important;box-shadow:0 1px 2px rgba(16,24,40,.05);transition:transform .1s ease,box-shadow .15s ease,border-color .15s ease;}
-.todo-btn:hover{transform:translateY(-1px);box-shadow:0 10px 20px -12px rgba(16,24,40,.25);border-color:#C7D7FE !important;background:#fff !important;}
-.todo-btn:active{transform:scale(.98);}
 .sub-switch-btn{transition:background .12s ease,color .12s ease;}
 
 /* ---------- トップページをスクロールせずに1画面に(2026-10-18) ----------
@@ -1337,17 +1328,17 @@ input[type=text]:focus,input[type=number]:focus,input[type=date]:focus,input[typ
 .app-hdr-btn:hover{color:var(--ink-text);background:rgba(127,127,127,.08);}
 .app-avatar{width:36px;height:36px;border-radius:999px;background:#334155;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;}
 /* カード: 角の丸み 16px・押せるカードは持ち上がる・押すと少し縮む */
-.panel,.gate-card,.vca-card,.todo-btn,.name-tile,.task-tile,.stf-card,.modal-card,.app-dialog{border-radius:16px;}
-.gate-card,.todo-btn,.name-tile,.task-tile,.vca-card{transition:all .2s ease-in-out;}
-.gate-card:hover,.todo-btn:hover,.name-tile:hover{transform:translateY(-2px);}
-.pill-btn,.ll-btn,.vc-manage-toggle-btn,.add-btn,.vc-tab-btn,.sub-switch-btn,.report-go-btn,.app-hdr-btn,.gate-card,.name-tile,.todo-btn,.topbar-nav-item{transition:all .2s ease-in-out;}
-.pill-btn:not(:disabled):active,.ll-btn:not(:disabled):active,.vc-manage-toggle-btn:not(:disabled):active,.add-btn:not(:disabled):active,.vc-tab-btn:active,.sub-switch-btn:active,.report-go-btn:active,.gate-card:active,.name-tile:active,.todo-btn:active,.app-hdr-btn:active{transform:scale(.97);}
+.panel,.gate-card,.vca-card,.name-tile,.task-tile,.stf-card,.modal-card,.app-dialog{border-radius:16px;}
+.gate-card,.name-tile,.task-tile,.vca-card{transition:all .2s ease-in-out;}
+.gate-card:hover,.name-tile:hover{transform:translateY(-2px);}
+.pill-btn,.ll-btn,.vc-manage-toggle-btn,.add-btn,.vc-tab-btn,.sub-switch-btn,.report-go-btn,.app-hdr-btn,.gate-card,.name-tile,.topbar-nav-item{transition:all .2s ease-in-out;}
+.pill-btn:not(:disabled):active,.ll-btn:not(:disabled):active,.vc-manage-toggle-btn:not(:disabled):active,.add-btn:not(:disabled):active,.vc-tab-btn:active,.sub-switch-btn:active,.report-go-btn:active,.gate-card:active,.name-tile:active,.app-hdr-btn:active{transform:scale(.97);}
 .gate-icon .ll-ic{width:22px;height:22px;}
 body{font-feature-settings:"tnum";}
 .panel{padding:24px;}
 .mgr-wrap > .panel > .panel-title:first-child,.mgr-wrap > .panel > .panel-title.no-print:first-child{font-size:22px;font-weight:700;letter-spacing:-.01em;margin-bottom:6px;}
 @media (max-width:700px){ .panel{padding:16px;} }
-@media (prefers-reduced-motion: reduce){ .gate-card,.todo-btn,.name-tile,.task-tile,.vca-card,.pill-btn,.ll-btn,.vc-manage-toggle-btn,.add-btn,.vc-tab-btn,.sub-switch-btn,.topbar-nav-item{transition:none !important;} .gate-card:hover,.todo-btn:hover,.name-tile:hover{transform:none;} }
+@media (prefers-reduced-motion: reduce){ .gate-card,.name-tile,.task-tile,.vca-card,.pill-btn,.ll-btn,.vc-manage-toggle-btn,.add-btn,.vc-tab-btn,.sub-switch-btn,.topbar-nav-item{transition:none !important;} .gate-card:hover,.name-tile:hover{transform:none;} }
 
 /* ==== トップのダッシュボードとサイドバーのまとまり(2026-10-19) ==== */
 :root{ --dash-acc:#6366f1; --dash-ok:#22c55e; --dash-bad:#ef4444; --dash-warn:#f59e0b; --dash-mute:rgba(127,127,127,.35); }
@@ -1578,9 +1569,9 @@ html[data-app-theme="dark"] .gate-icon{ background:rgba(255,255,255,.06) !import
 html[data-app-theme="dark"] [style*="--site-tint"]{ --site-tint:color-mix(in srgb, var(--site) 20%, transparent) !important; }
 /* カード・パネル */
 html[data-app-theme="dark"] .panel, html[data-app-theme="dark"] .vca-card, html[data-app-theme="dark"] .ll-card, html[data-app-theme="dark"] .gate-card,
-html[data-app-theme="dark"] .task-tile, html[data-app-theme="dark"] .name-tile, html[data-app-theme="dark"] .todo-btn, html[data-app-theme="dark"] .stf-card{
+html[data-app-theme="dark"] .task-tile, html[data-app-theme="dark"] .name-tile, html[data-app-theme="dark"] .stf-card{
   background:var(--dk-card) !important; border-color:var(--dk-line) !important; color:var(--dk-fg); box-shadow:none !important; }
-html[data-app-theme="dark"] .vca-card:hover, html[data-app-theme="dark"] .gate-card:hover, html[data-app-theme="dark"] .todo-btn:hover,
+html[data-app-theme="dark"] .vca-card:hover, html[data-app-theme="dark"] .gate-card:hover,
 html[data-app-theme="dark"] .name-tile:hover, html[data-app-theme="dark"] .task-tile:hover{ border-color:rgba(99,102,241,.5) !important; }
 html[data-app-theme="dark"] .task-tile.active-task{ background:linear-gradient(180deg,rgba(0,240,255,.07) 0%,var(--dk-card) 60%) !important; border-color:rgba(0,240,255,.45) !important; }
 html[data-app-theme="dark"] .gate{ background:radial-gradient(1200px 500px at 50% -120px,rgba(99,102,241,.18) 0%,rgba(9,9,11,0) 70%),var(--dk-bg) !important; }
@@ -1654,10 +1645,7 @@ html[data-app-theme="dark"] .changelog-date{color:#a5b4fc !important}
 html[data-app-theme="dark"] .changelog-items{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] .changelog-close{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .topbar-date{color:var(--dk-muted) !important}
-html[data-app-theme="dark"] .todo-sec-title{color:#a5c0e8 !important}
-html[data-app-theme="dark"] .todo-btn{border-color:rgba(77,125,203,0.45) !important;background:var(--dk-card) !important;color:#a5bbe8 !important}
-html[data-app-theme="dark"] .todo-btn:hover{background:rgba(77,140,203,0.13) !important}
-html[data-app-theme="dark"] .sub-switch-btn{border-color:rgba(77,125,203,0.45) !important;background:var(--dk-card) !important;color:#a5bee8 !important}
+html[data-app-theme="dark"] html[data-app-theme="dark"] html[data-app-theme="dark"] html[data-app-theme="dark"] .sub-switch-btn{border-color:rgba(77,125,203,0.45) !important;background:var(--dk-card) !important;color:#a5bee8 !important}
 html[data-app-theme="dark"] .sk-pf{border-color:rgba(77,125,203,0.45) !important;background:var(--dk-card) !important}
 html[data-app-theme="dark"] .sk-pf span{background:var(--dk-card) !important}
 html[data-app-theme="dark"] .sk-pf .sk-pf-ck{color:#99baf3 !important}
@@ -1995,8 +1983,7 @@ html[data-app-theme="dark"] .gate-hello{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] .gate-today{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .gate-section-title{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .gate-card:hover{border-color:rgba(29,93,250,0.45) !important}
-html[data-app-theme="dark"] .todo-btn:hover{border-color:rgba(29,93,250,0.45) !important;background:var(--dk-card) !important}
-html[data-app-theme="dark"] body.with-sidebar .topbar-nav-item{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] html[data-app-theme="dark"] body.with-sidebar .topbar-nav-item{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .app-crumb{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .app-crumb b{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] .app-header-date{color:var(--dk-muted) !important}
@@ -2508,9 +2495,6 @@ var state = {
   showTodayDetail: false,
   achievementsLoading: false,
   achievementsError: null,
-  calendarMonth: null,
-  calendarData: null,
-  calendarLoading: false,
   jpHolidays: { fetchedAt:0, data:{} },
   workVolume: null,
   workVolumeConfig: null,
@@ -6610,156 +6594,6 @@ async function switchManagerDate(dateStr){
   render();
 }
 
-/* ---------- CALENDAR (登録内容・出勤予定の月表示) ---------- */
-function daysInMonth(monthKey){
-  var p = monthKey.split('-').map(Number);
-  return new Date(p[0], p[1], 0).getDate();
-}
-function firstWeekdayOfMonth(monthKey){
-  var p = monthKey.split('-').map(Number);
-  return new Date(p[0], p[1]-1, 1).getDay();
-}
-function shiftMonthKey(monthKey, delta){
-  var p = monthKey.split('-').map(Number);
-  var d = new Date(p[0], p[1]-1+delta, 1);
-  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
-}
-function monthKeyLabel(monthKey){
-  var p = monthKey.split('-');
-  return p[0]+'年'+parseInt(p[1],10)+'月';
-}
-function predictedAttendanceCount(dateStr){
-  var wd = new Date(dateStr+'T00:00:00').getDay();
-  return activeRoster().filter(function(s){
-    var pattern = s.pattern || defaultPattern();
-    if(!pattern[wd]) return false;
-    if(isHolidayOffForStaff(s, dateStr)) return false;
-    return true;
-  }).length;
-}
-function actualAttendanceCount(day){
-  var roster = activeRoster();
-  return roster.filter(function(s){ return !!day.attendance[s.id]; }).length;
-}
-async function runCalendarMonth(monthKey){
-  state.calendarLoading = true;
-  render();
-  var n = daysInMonth(monthKey);
-  var data = {};
-  for(var d=1; d<=n; d++){
-    var dateStr = monthKey+'-'+String(d).padStart(2,'0');
-    var day = await loadDayByDate(dateStr);
-    data[dateStr] = {
-      taskCount: tasksForDate(dateStr).length,
-      presentCount: day ? actualAttendanceCount(day) : predictedAttendanceCount(dateStr),
-      isActual: !!day
-    };
-  }
-  if(state.calendarMonth===monthKey){
-    state.calendarData = data;
-  }
-  state.calendarLoading = false;
-  render();
-}
-function renderCalendar(){
-  if(!state.calendarMonth) state.calendarMonth = todayStr().slice(0,7);
-  var monthKey = state.calendarMonth;
-
-  var nav = '<div class="date-nav">'+
-    '<button class="date-nav-btn" id="calPrevBtn" title="前の月">&#8592;</button>'+
-    '<div class="cal-month-label">'+monthKeyLabel(monthKey)+'</div>'+
-    '<button class="date-nav-btn" id="calNextBtn" title="次の月">&#8594;</button>'+
-    '<button class="date-nav-today-btn" id="calTodayBtn">今月</button>'+
-    '<button class="report-go-btn" id="calRefreshBtn">'+(state.calendarData?'更新する':'この月を読み込む')+'</button>'+
-  '</div>';
-
-  var body;
-  if(state.calendarLoading){
-    body = '<div class="empty-note">この月の作業件数・出勤予定人数を読み込み中です...</div>';
-  }else if(!state.calendarData){
-    body = '<div class="empty-note">「この月を読み込む」を押すと、日ごとの登録作業件数・出勤予定人数を表示します。</div>';
-  }else{
-    var WD = ['日','月','火','水','木','金','土'];
-    var firstWd = firstWeekdayOfMonth(monthKey);
-    var totalDays = daysInMonth(monthKey);
-    var cells = '';
-    for(var i=0;i<firstWd;i++){ cells += '<div class="cal-cell cal-cell-empty"></div>'; }
-    for(var d=1; d<=totalDays; d++){
-      var dateStr = monthKey+'-'+String(d).padStart(2,'0');
-      var info = state.calendarData[dateStr] || {taskCount:0, presentCount:0, isActual:false};
-      var isToday = dateStr===todayStr();
-      var wd = (firstWd + d - 1) % 7;
-      var holiday = holidayName(dateStr);
-      var cellClass = 'cal-cell';
-      if(isReadOnlyAccount()) cellClass += ' cal-cell-readonly'; // 閲覧専用: 日付から編集画面へ移動しない
-      if(isToday) cellClass += ' cal-cell-today';
-      if(holiday) cellClass += ' cal-cell-holiday';
-      else if(wd===0) cellClass += ' cal-cell-sun';
-      else if(wd===6) cellClass += ' cal-cell-sat';
-      cells += '<div class="'+cellClass+'" data-cal-date="'+dateStr+'">'+
-        '<div class="cal-cell-day">'+d+'</div>'+
-        (holiday ? '<div class="cal-cell-holiday-name" title="'+esc(holiday)+'">'+esc(holiday)+'</div>' : '')+
-        '<div class="cal-cell-stat">📋 '+info.taskCount+'件</div>'+
-        '<div class="cal-cell-stat">'+(info.isActual?'👤 ':'👤予定 ')+info.presentCount+'人</div>'+
-      '</div>';
-    }
-    var headerRow = WD.map(function(w,i){
-      var cls = i===0 ? 'cal-weekday cal-weekday-sun' : (i===6 ? 'cal-weekday cal-weekday-sat' : 'cal-weekday');
-      return '<div class="'+cls+'">'+w+'</div>';
-    }).join('');
-    body = '<div class="cal-grid-header">'+headerRow+'</div>'+
-      '<div class="cal-grid">'+cells+'</div>'+
-      '<div class="pool-hint" style="margin-top:12px;">'+
-        (isReadOnlyAccount()
-          ? 'モニター用(閲覧専用)アカウントのため、日付からの編集・追加はできません。'
-          : '日付をタップすると、その日の管理者画面(出勤・作業割り当て)に移動して編集・追加できます。')+
-        '「👤予定」は曜日パターンからの見込み人数、「👤」は実際に出勤登録された人数です。</div>';
-  }
-
-  return '<div class="mgr-wrap"><div style="max-width:900px;margin:0 auto;">'+
-    '<div class="panel-title" style="margin-bottom:14px;">📅 カレンダー</div>'+
-    nav+
-    '<div class="panel">'+body+'</div>'+
-  '</div></div>';
-}
-function bindCalendar(){
-  var prevBtn = document.getElementById('calPrevBtn');
-  if(prevBtn) prevBtn.addEventListener('click', function(){
-    state.calendarMonth = shiftMonthKey(state.calendarMonth, -1);
-    state.calendarData = null;
-    render();
-  });
-  var nextBtn = document.getElementById('calNextBtn');
-  if(nextBtn) nextBtn.addEventListener('click', function(){
-    state.calendarMonth = shiftMonthKey(state.calendarMonth, 1);
-    state.calendarData = null;
-    render();
-  });
-  var todayBtn = document.getElementById('calTodayBtn');
-  if(todayBtn) todayBtn.addEventListener('click', function(){
-    state.calendarMonth = todayStr().slice(0,7);
-    state.calendarData = null;
-    render();
-  });
-  var refreshBtn = document.getElementById('calRefreshBtn');
-  if(refreshBtn) refreshBtn.addEventListener('click', function(){
-    runCalendarMonth(state.calendarMonth);
-  });
-  document.querySelectorAll('[data-cal-date]').forEach(function(el){
-    el.addEventListener('click', function(){
-      if(isReadOnlyAccount()) return; // 閲覧専用アカウントは管理者画面(編集)へ移動しない
-      var dateStr = el.getAttribute('data-cal-date');
-      state.role = 'adminHub';
-      state.adminHubTab = 'today';
-      if(!hasManagerSession()){
-        state.pendingCalendarDate = dateStr;
-        render();
-        return;
-      }
-      switchManagerDate(dateStr);
-    });
-  });
-}
 function getFilteredLogMgmtEntries(){
   if(!state.logMgmtEntries) return [];
   return state.logMgmtEntries.filter(function(e){
@@ -13557,7 +13391,7 @@ function isUserBusy(){
 /* ---------- 開いている画面をアドレス(#のあと)に残す ----------
    再読み込みしてもトップ画面に戻らず、同じ画面(と画面内のタブ・作業記録で選んでいる人)を開き直すため。
    例: #role=adminHub&tab=financial / #role=input&staff=<スタッフID> / #role=shukei&site=tannan&tab=diff */
-var VIEW_URL_ROLES = ['input','report','monitor','achievements','calendar','history','adminHub','settingsHub','shukei','vcAlloc','dataHub','billing','stock'];
+var VIEW_URL_ROLES = ['input','report','monitor','achievements','history','adminHub','settingsHub','shukei','vcAlloc','dataHub','billing','stock'];
 function viewStateToHash(){
   if(!state.role) return '';
   var q = { role: state.role };
@@ -13646,7 +13480,6 @@ function render(){
   else if(state.role==='input') html += isRoleBlockedForAccount('input') ? renderReadOnlyBlockedScreen('作業記録') : renderInput();
   else if(state.role==='monitor') html += renderMonitor();
   else if(state.role==='achievements'){ state.role = 'report'; state.reportMode = 'month'; html += renderReport(); }
-  else if(state.role==='calendar') html += renderCalendar();
   else if(state.role==='history') html += renderHistory();
   else if(state.role==='adminHub') html += renderAdminHub();
   else if(state.role==='settingsHub') html += renderSettingsHub();
@@ -13665,7 +13498,6 @@ function render(){
   if(state.role==='input' && !isRoleBlockedForAccount('input')) bindInput();
   if(state.role==='monitor') bindMonitor();
   if(state.role==='achievements') bindAchievements();
-  if(state.role==='calendar') bindCalendar();
   if(state.role==='history') bindHistory();
   if(state.role==='adminHub') bindAdminHub();
   if(state.role==='settingsHub') bindSettingsHub();
@@ -13773,7 +13605,7 @@ function renderGateDataStatus(){
     state.gateStatusLoading = true;
     loadGateDataStatus().then(function(st){
       state.gateDataStatus = st; state.gateDataStatusAt = Date.now(); state.gateStatusLoading = false;
-      if(!state.role || (state.role==='adminHub' && state.adminHubTab==='todo')) render();
+      if(!state.role) render();
     }).catch(function(){ state.gateStatusLoading = false; state.gateDataStatusAt = Date.now(); });
   }
   var st = state.gateDataStatus;
@@ -14000,7 +13832,6 @@ var COMMON_NAV_ITEMS = [
   { role:'input', label:'作業記録', ic:'📝' },
   { role:'report', label:'集計', ic:'📊' },
   { role:'monitor', label:'モニター', ic:'📡' },
-  { role:'calendar', label:'カレンダー', ic:'📅' },
   { role:'shukei', label:'出荷集計表', ic:'🧾' },
   { role:'vcAlloc', label:'VC引当', ic:'📦' },
   { role:'stock', label:'在庫', ic:'🏢' }
@@ -14008,7 +13839,7 @@ var COMMON_NAV_ITEMS = [
 /* サイドバーのまとまり(トップのカードの並びと同じ)。管理の項目は鍵の印(ログインしていないとき) */
 var NAV_GROUPS = [
   { label:'現場', items:[ { role:'input' }, { role:'monitor' } ] },
-  { label:'事務所', items:[ { role:'report' }, { role:'calendar' }, { role:'shukei' }, { role:'vcAlloc' }, { role:'stock' } ] },
+  { label:'事務所', items:[ { role:'report' }, { role:'shukei' }, { role:'vcAlloc' }, { role:'stock' } ] },
   { label:'管理', items:[ { role:'adminHub', tab:'data', label:'作業量CSV取込', ic:'data', lock:true }, { role:'adminHub', lock:true }, { role:'settingsHub', lock:true }, { href:'factory.html', label:'生産管理', ic:'factory', lock:true } ] }
 ];
 var ADMIN_NAV_ITEMS = [
@@ -14065,7 +13896,7 @@ document.addEventListener('click', function(ev){
   document.querySelectorAll('[data-theme-toggle]').forEach(function(x){ x.innerHTML = themeToggleInner(t==='dark'); });
 });
 function renderTopbar(){
-  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', calendar:'カレンダー', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'出荷集計表(高屋・丹南)', vcAlloc:'VC引当', stock:'在庫'}[state.role] || (state.role ? '' : 'ホーム');
+  var roleLabel = {manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'出荷集計表(高屋・丹南)', vcAlloc:'VC引当', stock:'在庫'}[state.role] || (state.role ? '' : 'ホーム');
   var lockBtn = (hasManagerSession() && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="ログアウトする">🔓 ログアウト</button>' : '';
   // 共通ナビゲーション: どのページからでも他の主要ページへ直接移動できるようにする。
   // 管理者専用項目(管理者/設定)は、実際にログイン済みの場合のみ表示する
@@ -14129,7 +13960,7 @@ function bindCommon(){
       if(isRoleBlockedForAccount(role)) return; // 閲覧専用アカウントでは開かない
       var navTab = el.getAttribute('data-nav-admin-tab');
       if(navTab) state.adminHubTab = navTab;
-      else if(role==='adminHub' && state.adminHubTab==='data') state.adminHubTab = 'todo'; // 「管理」は、やることから
+      else if(role==='adminHub' && state.adminHubTab==='data') state.adminHubTab = 'today'; // 「管理」は、今日の状況から
       if(role==='monitor') state.monitorEntryRole = state.role || '';
       state.role = role || null;
       state.activeStaffId = null;
@@ -14238,84 +14069,18 @@ function renderDailyChecklist(){
 }
 // 管理のタブ。subs があるタブは、画面の中で切り替える(今日の状況・人員配置 / 作業記録・生産性)
 var ADMIN_HUB_TABS = [
-  { key:'todo', label:'やること' },
   { key:'today', label:'今日・人員配置', subs:[['today','今日の状況'],['staffing','人員配置']] },
   { key:'logMgmt', label:'実績・生産性', subs:[['logMgmt','作業記録'],['productivity','生産性']] },
   { key:'financial', label:'収支' },
   { key:'billing', label:'請求' },
   { key:'data', label:'データ取込' }
 ];
-/* 管理の「やること」: やることから、その画面のそのタブを1回で開く */
-var ADMIN_TODO = [
-  ['毎朝', [
-    ['📥 作業量CSVを取り込む', 'adminHub', 'data'],
-    ['📦 ロジザード・弥生の在庫を取り込む', 'adminHub', 'data'],
-    ['👥 今日の人員配置', 'adminHub', 'staffing'],
-    ['📋 今日の状況', 'adminHub', 'today']
-  ]],
-  ['日中', [
-    ['🚚 VC引当', 'vcAlloc', ''],
-    ['🧾 出荷集計表を作る', 'shukei', 'sheet'],
-    ['🔁 生協の入れ替え', 'stock', 'coop'],
-    ['✏️ 作業記録の確認・修正', 'adminHub', 'logMgmt']
-  ]],
-  ['夕方', [
-    ['📈 今日の生産性', 'adminHub', 'productivity'],
-    ['💴 今日の収支', 'adminHub', 'financial', 'today']
-  ]],
-  ['毎月', [
-    ['🧮 請求データを作る', 'adminHub', 'billing'],
-    ['💴 先月の収支', 'adminHub', 'financial', 'lastMonth'],
-    ['🔄 kintone の作業日報・作業単価を取得', 'adminHub', 'data']
-  ]],
-  ['ときどき', [
-    ['🧑 スタッフ・時給・区分', 'settingsHub', 'staff'],
-    ['🗂 作業・内訳', 'settingsHub', 'task'],
-    ['🏢 得意先・単価', 'settingsHub', 'master'],
-    ['⏰ 基本・勤務時間', 'settingsHub', 'basic'],
-    ['🔑 アカウント', 'settingsHub', 'accounts'],
-    ['⚙️ システム・通信量・操作履歴', 'settingsHub', 'system'],
-    ['✂️ 生産管理', 'factory', '']
-  ]]
-];
-function renderAdminTodo(){
-  return '<div class="mgr-wrap">'+
-    '<div class="panel">'+
-      '<div class="panel-title">やること</div>'+
-      '<div class="pool-hint" style="margin:0 0 10px;">やることのボタンを押すと、その画面が開きます。迷ったら、上の「やること」に戻ってください。データの更新状況はトップにあります。</div>'+
-      ADMIN_TODO.map(function(sec){
-        return '<div class="todo-sec"><div class="todo-sec-title">'+esc(sec[0])+'</div><div class="todo-grid">'+
-          sec[1].filter(function(b){ return b[2]!=='accounts' || state.authRole==='admin'; }).map(function(b){
-            return '<button type="button" class="todo-btn" data-todo-go="'+esc(b[1]+'|'+b[2]+'|'+(b[3]||''))+'">'+esc(b[0])+'</button>';
-          }).join('')+'</div></div>';
-      }).join('')+
-    '</div>'+
-  '</div>';
-}
-function goAdminTodo(spec){
-  var p = spec.split('|'), role = p[0], tab = p[1], extra = p[2];
-  if(role==='factory'){ location.href = 'factory.html'; return; }
-  state.role = role;
-  if(role==='adminHub') state.adminHubTab = tab;
-  else if(role==='settingsHub') state.settingsHubTab = tab;
-  else if(role==='stock') state.stockTab = tab;
-  else if(role==='shukei' && tab) state.shukeiTab = tab;
-  if(role==='adminHub' && tab==='financial' && extra){
-    var r = finPresetRange(extra);
-    state.finPreset = extra; state.finStartDate = r[0]; state.finEndDate = r[1];
-    render(); window.scrollTo(0, 0);
-    runFinancialPeriod();
-    return;
-  }
-  render(); window.scrollTo(0, 0);
-  if(role==='adminHub' && (tab==='today' || tab==='staffing')) requestFreshTodayData();
-}
 function renderAdminHub(){
   ensureManagerSessionChecked();
   if(!hasManagerSession()){
     return renderManagerLoginForm('管理', '管理者アカウントでログインしてください。');
   }
-  if(!state.adminHubTab || state.adminHubTab==='csvImport') state.adminHubTab = state.adminHubTab==='csvImport' ? 'data' : 'todo';
+  if(!state.adminHubTab || state.adminHubTab==='csvImport' || state.adminHubTab==='todo') state.adminHubTab = state.adminHubTab==='csvImport' ? 'data' : 'today'; // やることは 2026-10-20 にやめた
   var cur = ADMIN_HUB_TABS.filter(function(t){ return t.key===state.adminHubTab || (t.subs && t.subs.some(function(x){ return x[0]===state.adminHubTab; })); })[0];
   var tabsHtml = '<div class="vc-tabs hub-tabs" style="margin:0 0 14px;">'+
     ADMIN_HUB_TABS.map(function(t){
@@ -14324,8 +14089,7 @@ function renderAdminHub(){
   '</div>'+
   (cur && cur.subs ? '<div class="sub-switch">'+cur.subs.map(function(x){ return '<button type="button" class="sub-switch-btn'+(state.adminHubTab===x[0]?' active':'')+'" data-admin-hub-tab="'+x[0]+'">'+esc(x[1])+'</button>'; }).join('')+'</div>' : '');
   var body;
-  if(state.adminHubTab==='todo') body = renderAdminTodo();
-  else if(state.adminHubTab==='staffing') body = renderStaffing();
+  if(state.adminHubTab==='staffing') body = renderStaffing();
   else if(state.adminHubTab==='productivity') body = renderProductivityTab();
   else if(state.adminHubTab==='financial') body = renderFinancial();
   else if(state.adminHubTab==='logMgmt') body = renderLogManagementTab();
@@ -14444,11 +14208,6 @@ function bindAdminHub(){
       // 「今日の状況」「人員配置」を開いたら、最新データを読み直して再計算する
       if(state.adminHubTab==='today' || state.adminHubTab==='staffing') requestFreshTodayData();
     });
-  });
-  var gdh = document.getElementById('gateGoDataHub');
-  if(gdh && state.adminHubTab==='todo') gdh.addEventListener('click', function(){ state.adminHubTab = 'data'; render(); window.scrollTo(0, 0); });
-  document.querySelectorAll('[data-todo-go]').forEach(function(el){
-    el.addEventListener('click', function(){ goAdminTodo(el.getAttribute('data-todo-go')); });
   });
   if(state.adminHubTab==='staffing') bindStaffing();
   else if(state.adminHubTab==='productivity') bindProductivityTab();

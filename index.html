@@ -14263,7 +14263,7 @@ function arrivalSheetCanvas(st, site, dateStr, supplier, no){
   if(!oneSup) cols.push(['仕入先',80,'sub','supplier',0]);
   if(!oneNo) cols.push(['発注番号',64,'sub','no',0]);
   cols.push(['備考',0,'note','note',0.38]);
-  cols.push(['2か月見積',80,'num','est2m',0]); // 今日〜2か月後の見積もりの合計(将来在庫と同じ数え方。予測も含む)
+  cols.push(['2か月見積',112,'est','est2m',0]); // 外部倉庫の目安つき // 今日〜2か月後の見積もりの合計(将来在庫と同じ数え方。予測も含む)
   // 品番ごとの、今日〜2か月後の見積もりの合計(将来在庫と同じ数え方: 確定・需要予測、古い版は外す)
   var est2m = {}, est2mEnd = (function(){ var d = new Date(dateStr+'T00:00:00'); d.setMonth(d.getMonth()+2); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
   try{ outlookEstimateLines(ol).lines.forEach(function(x){ if(x.date>=dateStr && x.date<=est2mEnd) est2m[x.code] = (est2m[x.code]||0) + (Number(x.qty)||0); }); }catch(e){}
@@ -14289,13 +14289,19 @@ function arrivalSheetCanvas(st, site, dateStr, supplier, no){
   g.fillText(fit('入庫明細 '+dateStr.replace(/-/g,'/')+(site ? ' '+SHUKEI_SITES[site].name : '')+(no ? ' 発注番号 '+no : '')+(supplier ? ' '+supplier : ''), W-32), 16, 20);
   g.font = '11px '+FONT; g.fillStyle = '#475467';
   g.fillText(fit((oneSup && rows[0].supplier ? '仕入先 '+rows[0].supplier+' ・ ' : '')+(oneNo && rows[0].no ? '発注番号 '+rows[0].no+' ・ ' : '')+'発注 '+Object.keys(orders).length+'件 ・ 明細 '+nToday+'行'+(nLate ? '(ほかに遅れ '+nLate+'行)' : '')+' ・ 数量 '+formatNum(qtyT)+' ・ 約'+formatNum(Math.round(casesT*10)/10)+'ケース'+
-    ' ・ kintone 発注履歴(949) '+(ol.syncedAt ? fmtDateTime(ol.syncedAt) : '')+'取込 ・ 2か月見積 = '+dateStr.slice(5).replace('-','/')+'〜'+est2mEnd.slice(5).replace('-','/')+'の見積もり', W-32), 16, 42);
+    ' ・ kintone 発注履歴(949) '+(ol.syncedAt ? fmtDateTime(ol.syncedAt) : '')+'取込 ・ 2か月見積 = '+dateStr.slice(5).replace('-','/')+'〜'+est2mEnd.slice(5).replace('-','/')+'の見積もり'+(st.stockFree ? '(外部OK = 今の在庫+この入荷が2か月の見積より多い分)' : ''), W-32), 16, 42);
   function row(y, cells, head, r, idx){
     var x = 16;
     g.fillStyle = head ? '#E4E7EC' : (r.late ? '#FEF3F2' : (idx%2 ? '#F9FAFB' : '#fff')); g.fillRect(16, y, W-32, RH);
     cols.forEach(function(col, i){
       var kind = col[2], w = col[1];
       if(!head && (kind==='key' || kind==='keyNum') && !r.late){ g.fillStyle = idx%2 ? 'rgba(46,144,250,.10)' : 'rgba(46,144,250,.06)'; g.fillRect(x, y, w, RH); }
+      if(!head && kind==='est'){ // 2か月見積: 右に数、左に外部倉庫の目安(緑)
+        var ev = cells[i] || {};
+        g.font = FS+'px '+FONT; g.fillStyle = '#344054'; g.textAlign = 'right'; g.fillText(String(ev.n||''), x+w-6, y+RH/2); g.textAlign = 'left';
+        if(ev.ext){ g.font = '700 '+Math.max(9, FS-2)+'px '+FONT; g.fillStyle = '#027A48'; g.fillText(ev.ext, x+4, y+RH/2); }
+        x += w; return;
+      }
       if(!head && kind==='chk'){ var b = Math.min(16, RH-6); g.strokeStyle = '#667085'; g.lineWidth = 1.2; g.strokeRect(x+w/2-b/2, y+RH/2-b/2, b, b); x += w; return; }
       var big = !head && (kind==='key' || kind==='keyNum');
       g.font = (head || big || (kind==='note' && !head) ? '700 ' : '')+(big ? KFS : (kind==='sub' && !head ? FS-1 : FS))+'px '+FONT;
@@ -14313,7 +14319,14 @@ function arrivalSheetCanvas(st, site, dateStr, supplier, no){
     var note = [r.late ? '遅れ '+r.due.slice(5).replace('-','/') : '', r.site && mixedSite ? SHUKEI_SITES[r.site].name : '', r.note || ''].filter(Boolean).join(' ');
     var caseN = r.cases===null ? '' : formatNum(Math.floor(r.cases + 1e-9));
     var rem = r.cases===null ? '' : formatNum(Math.round(r.qty - Math.floor(r.cases + 1e-9)*r.pack));
-    var val = { est2m: est2m[r.code] ? formatNum(est2m[r.code]) : '—', code: r.code, qty: formatNum(r.qty), caseN: caseN, rem: rem, pack: r.pack ? formatNum(r.pack) : '', name: r.name, supplier: r.supplier, no: r.no, note: note };
+    // 外部倉庫の目安: 今の在庫(引当を除く)+この入荷 − 2か月の見積 が残る分。在庫だけで2か月の見積が足りるなら全部(全量)、足りなければ残る分のケース
+    var ext = '';
+    if(st.stockFree){
+      var e2 = est2m[r.code] || 0, stk = st.stockFree[r.code] || 0, left = stk + r.qty - e2;
+      if(e2 <= stk) ext = '外部OK 全量';
+      else if(left > 0 && r.pack){ var lc = Math.min(Math.floor(left / r.pack), Math.floor(r.qty / r.pack)); if(lc>0) ext = '外部OK '+formatNum(lc)+'c'; }
+    }
+    var val = { est2m: { n: est2m[r.code] ? formatNum(est2m[r.code]) : '—', ext: ext }, code: r.code, qty: formatNum(r.qty), caseN: caseN, rem: rem, pack: r.pack ? formatNum(r.pack) : '', name: r.name, supplier: r.supplier, no: r.no, note: note };
     row(TOP+RH*(i+1), cols.map(function(c){ return c[3] ? val[c[3]] : ''; }), false, r, i);
   });
   if(!rows.length){ g.fillStyle = '#475467'; g.font = '14px '+FONT; g.fillText('今日入る発注はありません', 24, TOP+RH*1.5); }
@@ -14339,7 +14352,21 @@ async function arrivalSheetToggle(){
     var codes = {}; (ol.arrivals||[]).forEach(function(x){ if(x.date <= dateStr) codes[x.code] = true; });
     var pm = Object.keys(codes).length ? await getProductMasterInfoBatch(Object.keys(codes)) : {};
     if(!pm || pm.__error) pm = {};
-    a.st = { outlook: ol, pm: pm }; a.date = dateStr;
+    // 今の在庫(ロジザード、引当を除く。全拠点)。外部倉庫に持っていってよいかの目安に使う
+    var stockFree = null;
+    try{
+      var sd = await loadShukeiData('takaya'), lzP = sd && sd.logizard && sd.logizard.products;
+      if(lzP){
+        stockFree = {};
+        Object.keys(codes).forEach(function(code){
+          var P = lzP[code]; if(!P) return;
+          var q = 0;
+          Object.keys(P.blocks||{}).forEach(function(b){ var x = P.blocks[b]; q += Number(x.qty)||0; if(x.locAlloc) Object.keys(x.locAlloc).forEach(function(l){ q -= Number(x.locAlloc[l])||0; }); });
+          stockFree[code] = Math.max(0, q);
+        });
+      }
+    }catch(e){ stockFree = null; }
+    a.st = { outlook: ol, pm: pm, stockFree: stockFree }; a.date = dateStr;
   }catch(e){ a.st = null; a.msg = '⚠️ 入荷予定を読めませんでした'; }
   finally{ a.loading = false; render(); }
 }

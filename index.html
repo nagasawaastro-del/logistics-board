@@ -1486,6 +1486,16 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .tpick-item.is-done .tpick-code b, .tpick-item.is-done .tpick-qty{ text-decoration:line-through; }
 .tpick-chk{ width:30px; height:30px; border-radius:8px; border:2px solid #98A2B3; display:inline-flex; align-items:center; justify-content:center; font-weight:900; color:#027A48; }
 .tpick-item.is-done .tpick-chk{ border-color:#12B76A; background:#D1FADF; }
+/* 欠品(2026-10-20) */
+.tpick-line{ display:grid; grid-template-columns:1fr auto; gap:6px; align-items:stretch; }
+.tpick-short-btn{ border:1px solid #FDA29B; background:#fff; color:#B42318; border-radius:10px; padding:0 12px; font-size:14px; font-weight:700; cursor:pointer; min-width:64px; }
+.tpick-item.is-short{ background:#FEF3F2; border-color:#FECDCA; }
+.tpick-item.is-short .tpick-chk{ border-color:#F04438; background:#FEE4E2; color:#B42318; }
+.tpick-item.is-short .tpick-qty{ color:#B42318; font-size:18px; }
+.tpick-short-box{ border:2px solid #F04438; background:#FEF3F2; border-radius:12px; padding:12px 14px; margin:0 0 10px; font-size:15px; color:#101828; }
+html[data-app-theme="dark"] .tpick-item.is-short{ background:rgba(240,68,56,.12); border-color:rgba(240,68,56,.45); }
+html[data-app-theme="dark"] .tpick-short-btn{ background:transparent; }
+html[data-app-theme="dark"] .tpick-short-box{ background:rgba(240,68,56,.12); color:var(--dk-fg); }
 .tpick-loc{ font-size:15px; }
 .tpick-code{ display:flex; flex-direction:column; min-width:0; }
 .tpick-code b{ font-size:18px; }
@@ -2025,6 +2035,11 @@ html[data-app-theme="dark"] .tpick-item{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] .tpick-item.is-done{background:rgba(47,233,123,0.13) !important;border-color:rgba(50,229,121,0.45) !important;color:#a5c0e8 !important}
 html[data-app-theme="dark"] .tpick-chk{color:#90fdcf !important}
 html[data-app-theme="dark"] .tpick-item.is-done .tpick-chk{background:rgba(48,232,111,0.13) !important}
+html[data-app-theme="dark"] .tpick-short-btn{background:var(--dk-card) !important;color:#f1a29b !important}
+html[data-app-theme="dark"] .tpick-item.is-short{background:rgba(238,58,41,0.13) !important;border-color:rgba(250,42,29,0.45) !important}
+html[data-app-theme="dark"] .tpick-item.is-short .tpick-chk{background:rgba(247,48,33,0.16) !important;color:#f1a29b !important}
+html[data-app-theme="dark"] .tpick-item.is-short .tpick-qty{color:#f1a29b !important}
+html[data-app-theme="dark"] .tpick-short-box{background:rgba(238,58,41,0.13) !important;color:#a5bbe8 !important}
 html[data-app-theme="dark"] .kpi-label{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .kpi-value{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] .kpi-unit{color:var(--dk-muted) !important}
@@ -9177,16 +9192,22 @@ function renderTotalPickSaved(){
   return head+keys.map(function(tid){
     var bs = tpickBatchesForTask(sv.tp, sv.wv, tid);
     var row = function(b){
-      var p = progOf(b.id), done = p && p.done ? Object.keys(p.done).length : 0;
+      var p = progOf(b.id), done = tpickHandledCount(p);
       var st = b.who==='office' ? '<span class="st-label is-blue">事務所で印刷</span>' : p ? (p.doneAt ? '<span class="st-label is-green">完了</span>' : '<span class="st-label is-orange">'+esc(p.staffName||'')+'さん '+done+'/'+b.items.length+'</span>') : '<span class="st-label is-gray">空き</span>';
       return '<tr><td><b>'+esc(b.label)+'</b></td><td class="num">'+b.items.length+'行</td><td class="num">'+formatNum(b.qty)+'個</td><td class="sk-minor">'+esc(b.from)+' 〜 '+esc(b.to)+'</td><td>'+st+'</td>'+
         '<td><button type="button" class="vc-manage-toggle-btn" data-tpick-sp="'+esc(tid)+'|'+esc(b.id)+'">🖨 この番号</button></td></tr>';
     };
     var part = bs.filter(function(b){ return b.who==='part'; }), lift = bs.filter(function(b){ return b.who==='lift'; }), office = bs.filter(function(b){ return b.who==='office'; });
+    // 欠品(タブレットで「欠品」にした行。2026-10-20)
+    var shorts = [];
+    bs.forEach(function(b){ var p = progOf(b.id); if(!p || !p.short) return; Object.keys(p.short).forEach(function(k){ var it = b.items[Number(k)]; if(it) shorts.push({ b: b, it: it, s: p.short[k], who: p.staffName||'' }); }); });
+    var shortHtml = shorts.length ? '<div style="margin:10px 0 0;"><div class="panel-title" style="font-size:14px;color:#B42318;margin:0 0 6px;">⚠️ 欠品 '+shorts.length+'行</div><div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>番号</th><th>ロケーション</th><th>品番</th><th>商品名</th><th class="num">指示数</th><th class="num">取れた数</th><th class="num">足りない</th><th>だれが</th></tr></thead><tbody>'+
+      shorts.map(function(x){ return '<tr><td>'+esc(x.b.label)+'</td><td>'+esc(x.it.b)+' '+esc(tpickLocText(x.it.l))+'</td><td><b>'+esc(x.it.c)+'</b></td><td class="sk-minor">'+esc(x.it.n||'')+'</td><td class="num">'+formatNum(x.it.qty)+'</td><td class="num">'+formatNum(x.s.got)+'</td><td class="num" style="color:#B42318;font-weight:700;">'+formatNum(x.it.qty - x.s.got)+'</td><td>'+esc(x.s.by || x.who)+'</td></tr>'; }).join('')+
+      '</tbody></table></div></div>' : '';
     var allBtn = function(arr, label){ return arr.length ? '<button type="button" class="add-btn" data-tpick-sp="'+esc(tid)+'|'+esc(arr.map(function(b){ return b.id; }).join(','))+'">🖨 '+label+'を全部('+arr.length+'番号)</button>' : ''; };
     return '<div class="panel" style="margin-bottom:12px;"><div class="panel-title" style="font-size:15px;">'+esc(taskById(tid).name)+' <span class="pool-hint" style="margin:0;">パート '+part.length+'番号 ・ リフト '+lift.length+'番号'+(office.length ? ' ・ 事務所(SET・ZZZ) '+office.length+'枚' : '')+'</span></div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 8px;">'+allBtn(office, '事務所用(SET・ZZZ)')+allBtn(part, 'パートさん用')+allBtn(lift, 'リフトマン用')+'</div>'+
-      '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>番号</th><th class="num">行</th><th class="num">数</th><th>ロケーション</th><th>状態</th><th></th></tr></thead><tbody>'+bs.map(row).join('')+'</tbody></table></div></div>';
+      '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>番号</th><th class="num">行</th><th class="num">数</th><th>ロケーション</th><th>状態</th><th></th></tr></thead><tbody>'+bs.map(row).join('')+'</tbody></table></div>'+shortHtml+'</div>';
   }).join('');
 }
 /* ---------- トータルピッキング(作業量CSV取込から・作業記録で番号ごとに受け持つ。2026-10-19) ----------
@@ -9270,10 +9291,16 @@ function tpickEnsureLoaded(force){
 }
 function tpickProgOf(bid){ var p = (state.tpk && state.tpk.prog && state.tpk.prog.batches) || {}; return p[bid] || null; }
 function tpickBatchState(b){
-  var p = tpickProgOf(b.id), done = p && p.done ? Object.keys(p.done).length : 0;
+  var p = tpickProgOf(b.id), done = tpickHandledCount(p);
   if(p && p.doneAt) return { cls:'is-green', label:'完了', p:p, done:done };
   if(p && p.staffId) return { cls: p.staffId===state.activeStaffId ? 'is-blue' : 'is-orange', label: (p.staffId===state.activeStaffId ? 'あなた' : (p.staffName||'')+'さん')+' 作業中 '+done+'/'+b.items.length, p:p, done:done };
   return { cls:'is-gray', label:'空き', p:null, done:0 };
+}
+/* 片付いた行の数(済と欠品。2026-10-20 に欠品を足した) */
+function tpickHandledCount(p){
+  if(!p) return 0;
+  var m = {}; Object.keys(p.done||{}).forEach(function(k){ m[k] = 1; }); Object.keys(p.short||{}).forEach(function(k){ m[k] = 1; });
+  return Object.keys(m).length;
 }
 /* 作業カードのボタン(作業中の作業で、その作業にトータルピッキングがあるとき) */
 function tpickTileButton(tid, isActive){
@@ -9317,21 +9344,31 @@ function renderTpickBatchModal(m){
   var t = state.tpk || {};
   var b = tpickBatchesForTask(t.tp, state.workVolume, m.taskId).filter(function(x){ return x.id===m.batchId; })[0];
   if(!b) return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card"><div class="empty-note">この番号は見つかりませんでした(取込が削除された可能性があります)</div><div class="modal-actions"><button type="button" class="modal-cancel" id="tpickBack">戻る</button></div></div></div>';
-  var st = tpickBatchState(b), p = st.p || {}, mine = p.staffId===state.activeStaffId, done = p.done || {};
+  var st = tpickBatchState(b), p = st.p || {}, mine = p.staffId===state.activeStaffId, done = p.done || {}, short = p.short || {};
+  var canEdit = mine && !p.doneAt;
   var prevB = null, prevL = null;
   var rows = b.items.map(function(it, i){
     var showL = it.b!==prevB || it.l!==prevL; prevB = it.b; prevL = it.l;
-    var isDone = !!done[i];
-    return '<button type="button" class="tpick-item'+(isDone ? ' is-done' : '')+'"'+(mine && !p.doneAt ? ' data-tpick-check="'+i+'"' : ' disabled')+'>'+
-      '<span class="tpick-chk">'+(isDone ? '✓' : '')+'</span>'+
+    var sh = short[i];
+    var isDone = !!done[i] && !sh;
+    var item = '<button type="button" class="tpick-item'+(isDone ? ' is-done' : '')+(sh ? ' is-short' : '')+'"'+(canEdit ? ' data-tpick-check="'+i+'"' : ' disabled')+'>'+
+      '<span class="tpick-chk">'+(isDone ? '✓' : sh ? '!' : '')+'</span>'+
       '<span class="tpick-loc">'+(showL ? '<b>'+esc(it.b)+'</b> '+esc(tpickLocText(it.l)) : '')+'</span>'+
       '<span class="tpick-code"><b>'+esc(it.c)+'</b><span class="muted">'+esc(it.n)+'</span></span>'+
-      '<span class="tpick-qty">'+formatNum(it.qty)+'</span></button>';
+      '<span class="tpick-qty">'+(sh ? '欠品 '+formatNum(sh.got)+'/'+formatNum(it.qty) : formatNum(it.qty))+'</span></button>';
+    return canEdit ? '<div class="tpick-line">'+item+'<button type="button" class="tpick-short-btn" data-tpick-short="'+i+'">'+(sh ? '戻す' : '欠品')+'</button></div>' : item;
   }).join('');
-  var nDone = Object.keys(done).length;
+  var nDone = tpickHandledCount(p);
+  var sIt = (canEdit && m.shortIdx!=null) ? b.items[m.shortIdx] : null;
+  var shortHtml = sIt ? '<div class="tpick-short-box"><div><b style="color:#B42318;">欠品</b> ・ '+esc(sIt.b)+' '+esc(tpickLocText(sIt.l))+' ・ <b>'+esc(sIt.c)+'</b> '+esc(sIt.n)+'</div>'+
+    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px;">指示数 <b style="font-size:20px;">'+formatNum(sIt.qty)+'</b> → 取れた数 '+
+    '<input type="number" id="tpickShortGot" inputmode="numeric" min="0" max="'+Math.max(0, sIt.qty-1)+'" value="0" style="width:96px;font-size:20px;padding:6px 8px;">'+
+    '<button type="button" class="modal-confirm tpick-claim" id="tpickShortOk">欠品にする</button><button type="button" class="ll-btn" id="tpickShortCancel">やめる</button></div>'+
+    '<div class="muted" style="margin-top:6px;font-size:12px;">全く無いときは 0。事務所の「今日の状況 → トータルピッキング」に欠品として出ます。</div></div>' : '';
   return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card tpick-modal">'+
     '<div class="modal-task-name">'+esc(b.label)+' ・ '+b.items.length+'行 ・ '+formatNum(b.qty)+'個</div>'+
-    '<div class="pool-hint" style="margin:4px 0 8px;">'+(mine ? (p.doneAt ? '完了しました' : '取った行を押すと「済」になります(もう一度押すと戻ります)') : (p.staffId ? esc(p.staffName||'')+'さんが受け持っています(見るだけ)' : '受け持っていません(見るだけ)'))+' ・ 済 '+nDone+'/'+b.items.length+'</div>'+
+    '<div class="pool-hint" style="margin:4px 0 8px;">'+(mine ? (p.doneAt ? '完了しました' : '取った行を押すと「済」になります(もう一度押すと戻ります)。足りないときは右の「欠品」') : (p.staffId ? esc(p.staffName||'')+'さんが受け持っています(見るだけ)' : '受け持っていません(見るだけ)'))+' ・ 済 '+nDone+'/'+b.items.length+'</div>'+
+    shortHtml+
     '<div class="tpick-items">'+rows+'</div>'+
     '<div class="modal-actions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">'+
       '<button type="button" class="modal-cancel" id="tpickBack">一覧に戻る</button>'+
@@ -9368,15 +9405,60 @@ function bindTpickModals(m){
       if(busy) return; busy = true;
       var i = el.getAttribute('data-tpick-check'), me = state.activeStaffId;
       el.classList.toggle('is-done'); // 先に見た目だけ変える(保存できなければ戻す)
-      var r = await tpickProg(m.batchId, function(cur){ if(!cur || cur.staffId!==me) return false; var d = Object.assign({}, cur.done||{}); if(d[i]) delete d[i]; else d[i] = 1; return Object.assign({}, cur, { done: d }); });
+      var r = await tpickProg(m.batchId, function(cur){
+        if(!cur || cur.staffId!==me) return false;
+        var d = Object.assign({}, cur.done||{}), sh = Object.assign({}, cur.short||{});
+        if(sh[i]){ delete sh[i]; delete d[i]; } // 欠品の行を押したら、未に戻す
+        else if(d[i]) delete d[i]; else d[i] = 1;
+        return Object.assign({}, cur, { done: d, short: sh });
+      });
       busy = false;
       if(!r.ok) showToast(r.aborted ? 'この番号はあなたの受け持ちではなくなっています' : '⚠️ 保存できませんでした。もう一度押してください');
       render();
     });
   });
+  document.querySelectorAll('[data-tpick-short]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      if(busy) return;
+      var i = el.getAttribute('data-tpick-short'), me = state.activeStaffId;
+      var cur = tpickProgOf(m.batchId);
+      if(cur && cur.short && cur.short[i]){ // 欠品を戻す
+        busy = true;
+        var r0 = await tpickProg(m.batchId, function(c){ if(!c || c.staffId!==me) return false; var sh = Object.assign({}, c.short||{}); delete sh[i]; return Object.assign({}, c, { short: sh }); });
+        busy = false;
+        if(!r0.ok) showToast('⚠️ 保存できませんでした。もう一度押してください');
+        render(); return;
+      }
+      state.modal = Object.assign({}, m, { shortIdx: Number(i) }); render();
+      var box = document.querySelector('.tpick-short-box'); if(box && box.scrollIntoView) box.scrollIntoView({ block:'nearest' });
+      var g = document.getElementById('tpickShortGot'); if(g){ g.focus(); g.select(); }
+    });
+  });
+  var sCancel = document.getElementById('tpickShortCancel');
+  if(sCancel) sCancel.addEventListener('click', function(){ state.modal = Object.assign({}, m, { shortIdx: null }); render(); });
+  var sOk = document.getElementById('tpickShortOk');
+  if(sOk) sOk.addEventListener('click', async function(){
+    if(busy) return;
+    var b = tpickBatchesForTask(state.tpk.tp, state.workVolume, m.taskId).filter(function(x){ return x.id===m.batchId; })[0];
+    var it = b && b.items[m.shortIdx]; if(!it) return;
+    var got = Number(document.getElementById('tpickShortGot').value);
+    if(!(got>=0) || Math.floor(got)!==got || got>=it.qty){ showToast('取れた数は 0〜'+formatNum(it.qty-1)+' で入れてください'); return; }
+    busy = true; sOk.disabled = true;
+    var i = String(m.shortIdx), me = state.activeStaffId, name = staffById(me).name;
+    var r = await tpickProg(m.batchId, function(c){
+      if(!c || c.staffId!==me) return false;
+      var d = Object.assign({}, c.done||{}), sh = Object.assign({}, c.short||{});
+      delete d[i]; sh[i] = { got: got, at: new Date().toISOString(), by: name };
+      return Object.assign({}, c, { done: d, short: sh });
+    });
+    busy = false;
+    if(!r.ok){ showToast(r.aborted ? 'この番号はあなたの受け持ちではなくなっています' : '⚠️ 保存できませんでした。もう一度押してください'); sOk.disabled = false; return; }
+    showToast('欠品にしました('+it.c+' '+got+'/'+it.qty+')');
+    state.modal = Object.assign({}, m, { shortIdx: null }); render();
+  });
   var rel = document.getElementById('tpickRelease');
   if(rel) rel.addEventListener('click', async function(){
-    if(!await appConfirm('この番号の受け持ちをやめて、ほかの人が選べるようにしますか?(済にした行の印も消えます)')) return;
+    if(!await appConfirm('この番号の受け持ちをやめて、ほかの人が選べるようにしますか?(済・欠品にした行の印も消えます)')) return;
     var me = state.activeStaffId;
     var r = await tpickProg(m.batchId, function(cur){ if(!cur || cur.staffId!==me) return false; return null; });
     if(!r.ok && !r.aborted){ showToast('⚠️ 保存できませんでした'); return; }

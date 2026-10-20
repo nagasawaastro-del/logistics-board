@@ -8989,9 +8989,17 @@ function renderShukeiDiff(siteKey, site, data){
 }
 /* ---------- トータルピッキングリスト(2026-10-19) ----------
    ロジザードの出荷の CSV(作業量CSV取込と同じ物)から、品番・ロケーションごとの合計(引当数)を作り、
-   パートさん用(ブロック AA・SET・ZZZ と、S の棚1段1(S1-1)から後ろ)とリフトマン用(それ以外)に分けて印刷する。
+   パートさん用(ブロック AA と、S の棚1段1(S1-1)から後ろ)・事務所用(SET・ZZZ。2026-10-20 にパートさん用から分けた)・リフトマン用(それ以外)に分けて印刷する。
    CSV はその場で読むだけで保存しない(通信なし)。業務区分ごと・出荷作業日ごとに別のリストにする */
-var TPICK_PART_BLOCKS = ['AA','SET','ZZZ'];
+var TPICK_PART_BLOCKS = ['AA'];
+// SET・ZZZ は、パートさん用から抜いて事務所で印刷する(タブレットの番号には出さない。2026-10-20)
+var TPICK_OFFICE_BLOCKS = ['SET','ZZZ'];
+/* その行がだれの分か: office(事務所で印刷)・part(パートさん)・lift(リフトマン)。保存済みの分もブロックで分け直す */
+function tpickWhoOf(it){
+  var b = String(it.b||'').trim().toUpperCase();
+  if(TPICK_OFFICE_BLOCKS.indexOf(b)!==-1) return 'office';
+  return it.part && b!=='SET' && b!=='ZZZ' ? 'part' : 'lift';
+}
 function tpickLocText(v){ var s = String(v||'').trim(); return /^\d{8}$/.test(s) ? s.slice(0,3)+'-'+s.slice(3,6)+'-'+s.slice(6) : s; }
 function tpickIsPart(block, loc){
   var b = String(block||'').trim().toUpperCase();
@@ -9086,8 +9094,8 @@ function tpickPrintGroups(groups, fileTitle){
 function tpickPrint(listIdx, who){
   var t = state.tpick; if(!t || !t.lists || !t.lists[listIdx]) return;
   var L = t.lists[listIdx];
-  var items = L.items.filter(function(it){ return who==='part' ? it.part : !it.part; });
-  tpickPrintGroups([{ label: who==='part' ? 'パートさん用(AA・SET・ZZZ・S1-1〜)' : 'リフトマン用', biz: '対象業務 '+(L.biz||'—'), day: tpickDayLabel(L.day), items: items }],
+  var items = L.items.filter(function(it){ return tpickWhoOf(it)===who; });
+  tpickPrintGroups([{ label: who==='part' ? 'パートさん用(AA・S1-1〜)' : who==='office' ? '事務所用(SET・ZZZ)' : 'リフトマン用', biz: '対象業務 '+(L.biz||'—'), day: tpickDayLabel(L.day), items: items }],
     'トータルピッキングリスト_'+(L.biz||'')+'_'+tpickDayLabel(L.day).replace('/','')+'_'+(who==='part'?'パート':'リフト'));
 }
 /* 取り込んだCSVの分(作業記録と同じ番号)を印刷。bids: 印刷する番号の id の並び */
@@ -9096,7 +9104,7 @@ function tpickPrintSaved(taskId, bids){
   var bs = tpickBatchesForTask(sv.tp, sv.wv, taskId).filter(function(b){ return bids.indexOf(b.id)!==-1; });
   var d = sv.date || todayStr();
   tpickPrintGroups(bs.map(function(b){
-    return { label: b.label+(b.who==='part' ? '(パートさん用)' : '(リフトマン用)'), biz: taskById(taskId).name, day: parseInt(d.slice(5,7),10)+'/'+parseInt(d.slice(8),10),
+    return { label: b.label+(b.who==='part' ? '(パートさん用)' : b.who==='office' ? '(事務所用 SET・ZZZ)' : '(リフトマン用)'), biz: taskById(taskId).name, day: parseInt(d.slice(5,7),10)+'/'+parseInt(d.slice(8),10),
       items: b.items.map(function(it){ return { block: it.b, loc: it.l, code: it.c, name: it.n, quality: it.q, qty: it.qty }; }) };
   }), 'トータルピッキングリスト_'+taskById(taskId).name+'_'+d);
 }
@@ -9131,14 +9139,14 @@ function renderTotalPickSaved(){
     var bs = tpickBatchesForTask(sv.tp, sv.wv, tid);
     var row = function(b){
       var p = progOf(b.id), done = p && p.done ? Object.keys(p.done).length : 0;
-      var st = p ? (p.doneAt ? '<span class="st-label is-green">完了</span>' : '<span class="st-label is-orange">'+esc(p.staffName||'')+'さん '+done+'/'+b.items.length+'</span>') : '<span class="st-label is-gray">空き</span>';
+      var st = b.who==='office' ? '<span class="st-label is-blue">事務所で印刷</span>' : p ? (p.doneAt ? '<span class="st-label is-green">完了</span>' : '<span class="st-label is-orange">'+esc(p.staffName||'')+'さん '+done+'/'+b.items.length+'</span>') : '<span class="st-label is-gray">空き</span>';
       return '<tr><td><b>'+esc(b.label)+'</b></td><td class="num">'+b.items.length+'行</td><td class="num">'+formatNum(b.qty)+'個</td><td class="sk-minor">'+esc(b.from)+' 〜 '+esc(b.to)+'</td><td>'+st+'</td>'+
         '<td><button type="button" class="vc-manage-toggle-btn" data-tpick-sp="'+esc(tid)+'|'+esc(b.id)+'">🖨 この番号</button></td></tr>';
     };
-    var part = bs.filter(function(b){ return b.who==='part'; }), lift = bs.filter(function(b){ return b.who==='lift'; });
+    var part = bs.filter(function(b){ return b.who==='part'; }), lift = bs.filter(function(b){ return b.who==='lift'; }), office = bs.filter(function(b){ return b.who==='office'; });
     var allBtn = function(arr, label){ return arr.length ? '<button type="button" class="add-btn" data-tpick-sp="'+esc(tid)+'|'+esc(arr.map(function(b){ return b.id; }).join(','))+'">🖨 '+label+'を全部('+arr.length+'番号)</button>' : ''; };
-    return '<div class="panel" style="margin-bottom:12px;"><div class="panel-title" style="font-size:15px;">'+esc(taskById(tid).name)+' <span class="pool-hint" style="margin:0;">パート '+part.length+'番号 ・ リフト '+lift.length+'番号</span></div>'+
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 8px;">'+allBtn(part, 'パートさん用')+allBtn(lift, 'リフトマン用')+'</div>'+
+    return '<div class="panel" style="margin-bottom:12px;"><div class="panel-title" style="font-size:15px;">'+esc(taskById(tid).name)+' <span class="pool-hint" style="margin:0;">パート '+part.length+'番号 ・ リフト '+lift.length+'番号'+(office.length ? ' ・ 事務所(SET・ZZZ) '+office.length+'枚' : '')+'</span></div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 8px;">'+allBtn(office, '事務所用(SET・ZZZ)')+allBtn(part, 'パートさん用')+allBtn(lift, 'リフトマン用')+'</div>'+
       '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>番号</th><th class="num">行</th><th class="num">数</th><th>ロケーション</th><th>状態</th><th></th></tr></thead><tbody>'+bs.map(row).join('')+'</tbody></table></div></div>';
   }).join('');
 }
@@ -9190,15 +9198,16 @@ function tpickBatchesForTask(tp, wv, taskId){
   var active = {}; wvActiveImports(wv || emptyWorkVolume()).forEach(function(i){ active[i.id] = i; });
   var ids = Object.keys(tp.imports).filter(function(id){ return active[id] && active[id].taskId===taskId; })
     .sort(function(a,b){ return String(tp.imports[a].at).localeCompare(String(tp.imports[b].at)); });
-  var out = [], no = { part: 0, lift: 0 };
+  var out = [], no = { part: 0, lift: 0, office: 0 };
   ids.forEach(function(id){
     var imp = tp.imports[id];
-    ['part','lift'].forEach(function(who){
-      var items = (imp.items||[]).filter(function(it){ return who==='part' ? it.part : !it.part; });
-      for(var i=0; i<items.length; i+=TPICK_BATCH_ROWS){
+    ['part','lift','office'].forEach(function(who){
+      var items = (imp.items||[]).filter(function(it){ return tpickWhoOf(it)===who; });
+      var size = who==='office' ? Math.max(items.length, 1) : TPICK_BATCH_ROWS; // 事務所の分は取込ごとに1枚
+      for(var i=0; i<items.length; i+=size){
         no[who]++;
-        var chunk = items.slice(i, i+TPICK_BATCH_ROWS);
-        out.push({ id: id+':'+who+':'+(i/TPICK_BATCH_ROWS), who: who, no: no[who], label: (who==='part' ? 'パート' : 'リフト')+no[who],
+        var chunk = items.slice(i, i+size);
+        out.push({ id: id+':'+who+':'+(i/size), who: who, no: no[who], label: (who==='part' ? 'パート' : who==='office' ? '事務所' : 'リフト')+no[who],
           items: chunk, fileName: imp.fileName, qty: chunk.reduce(function(a, x){ return a+x.qty; }, 0),
           from: (chunk[0].b ? chunk[0].b+' ' : '')+tpickLocText(chunk[0].l), to: (chunk[chunk.length-1].b ? chunk[chunk.length-1].b+' ' : '')+tpickLocText(chunk[chunk.length-1].l) });
       }
@@ -9233,7 +9242,7 @@ function tpickTileButton(tid, isActive){
   tpickEnsureLoaded(false);
   var t = state.tpk || {};
   if(!t.tp || t.date!==todayStr()) return '';
-  var bs = tpickBatchesForTask(t.tp, state.workVolume, tid);
+  var bs = tpickBatchesForTask(t.tp, state.workVolume, tid).filter(function(b){ return b.who!=='office'; }); // 事務所の分は事務所で印刷
   if(!bs.length) return '';
   var mine = bs.filter(function(b){ var p = tpickProgOf(b.id); return p && p.staffId===state.activeStaffId && !p.doneAt; });
   var free = bs.filter(function(b){ return !tpickProgOf(b.id); }).length;
@@ -13411,6 +13420,33 @@ function syncViewToUrl(){
   }catch(e){}
 }
 /* 起動時: アドレスの画面を開き直す。知らない画面・閲覧専用で開けない画面・いなくなったスタッフは無視する */
+/* ---------- 新しい版を出したら、開きっぱなしの端末も自動で開き直す(2026-10-20) ----------
+   古い版のまま保存すると、直したはずのこと(取込が消える など)が起きるため。
+   15分ごとに、このページの版の印(GitHub Pages の ETag)だけを確かめる(中身は読まない。Supabase の通信は使わない)。
+   変わっていたら、さわっていないとき(2分以上さわっていない・確認画面や入力中でない・保存中でない)に開き直す。開いていた画面はアドレスから戻る */
+(function(){
+  var base = null, changed = false, lastTouch = Date.now();
+  ['pointerdown','keydown','touchstart'].forEach(function(ev){ document.addEventListener(ev, function(){ lastTouch = Date.now(); }, true); });
+  function check(){
+    if(!/^https:/.test(location.protocol) || changed) return;
+    fetch(location.pathname, { method:'HEAD', cache:'no-store' }).then(function(r){
+      var tag = r.ok ? (r.headers.get('etag') || '') : '';
+      if(!tag) return;
+      if(base===null){ base = tag; return; }
+      if(tag!==base) changed = true;
+    }).catch(function(){});
+  }
+  function tryReload(){
+    if(!changed || Date.now()-lastTouch < 120000) return;
+    if(state.modal || pendingSaves>0) return;
+    var a = document.activeElement;
+    if(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+    location.reload();
+  }
+  setTimeout(check, 5000);
+  setInterval(check, 15*60000);
+  setInterval(tryReload, 30000);
+})();
 function restoreViewFromUrl(){
   try{
     var h = String(location.hash||'').replace(/^#/, '');

@@ -8762,7 +8762,7 @@ function renderStaffing(){
       '<div class="stf-head"><div class="panel-title">👥 人員配置</div><div class="stf-asof">'+esc(nowText)+'時点・自動計算'+(plan.breakHold?'・休憩中(配置案は休憩終了後)':'')+'</div></div>'+
       '<label class="pool-hint" style="display:flex;align-items:center;gap:6px;margin:0 0 10px;cursor:pointer;">'+
         '<input type="checkbox" id="staffingAutoConfirm"'+((state.staffingSettings && state.staffingSettings.autoConfirm===false) ? '' : ' checked')+' style="margin:0;">'+
-        '空いている人・手待ち作業の人への配置案を自動で確定する(作業中の人を動かす案・作業完了後の配置予定は、管理者が確定します)'+
+        '配置案を自動で確定する(空いている人・手待ち作業の人・余力のある作業の人を動かす案・作業完了後の配置予定まで、すべて)'+
       '</label>'+
       summaryHtml+
       renderStaffingDiagnostics(plan)+
@@ -21160,7 +21160,7 @@ async function checkAutoBreak(){
 /* 配置案の自動確定。管理者が常に画面を見ているわけではないため、空いている人・手待ち作業の人への配置案は
    管理者の確定を待たずに確定し、作業者画面の「📋 本日の作業指示」に出す。
    通常の作業中の人を動かす案(余力のある作業の人から)と、作業完了後の配置予定は、これまでどおり管理者が確定する。 */
-var AUTO_CONFIRM_TIERS = { 1:true, pend:true, 2:true, next:true, noprod:true };
+var AUTO_CONFIRM_TIERS = { 1:true, pend:true, 2:true, 3:true, next:true, noprod:true }; // 3(余力のある作業の人の配置変更)も自動で(2026-10-20。現場にいて手で確定できないため)
 var AUTO_CONFIRM_MIN_INTERVAL_MS = 20000; // 同じ端末で読み直し・確定を行う最短間隔(定期更新のたびに通信しないため)
 var AUTO_CONFIRM_MIN_WORK_MIN = 15;         // 勤務終了までの実働がこれより短い人には、自動で新しい作業を指示しない
 var AUTO_CONFIRM_IGNORED_HOLD_MS = 30*60000; // 自動確定の指示を実施しなかった人には、この間は別の指示を自動で出さない(指示が次々に変わらないように)
@@ -21188,12 +21188,27 @@ function autoConfirmTargets(plan){
     });
   });
 }
+/* 作業完了後の配置予定(今の作業が終わったら別の作業へ)も自動で確定する(2026-10-20)。
+   その人にまだ始めていない指示がある・同じ作業の指示を実施しなかったときは、出さない(指示が重なったり次々に変わったりしないように) */
+function autoConfirmReservations(plan){
+  return (plan.reservations||[]).filter(function(r){
+    if(!r.taskId || !r.staffId) return false;
+    if(!(r.availMin>=AUTO_CONFIRM_MIN_WORK_MIN)) return false;
+    return !plan.confirmed.some(function(it){
+      if(it.staffId!==r.staffId) return false;
+      if(it.progress==='pending') return true;
+      if(it.progress!=='notFollowed') return false;
+      if(it.taskId===r.taskId) return true;
+      return !!(it.auto || it.tier==='manual') && plan.nowMs-new Date(it.confirmedAt).getTime() < AUTO_CONFIRM_IGNORED_HOLD_MS;
+    });
+  });
+}
 async function checkAutoConfirmStaffing(){
   if(autoConfirmBusy || !canAutoWrite()) return;
   if(!state.staffingSettings || state.staffingSettings.autoConfirm===false) return;
   if(!state.day || state.day.date!==todayStr() || isUnverified(state.day)) return;
   var plan = computeTodayStaffingPlanNow();
-  if(!plan || !autoConfirmTargets(plan).length) return;
+  if(!plan || !(autoConfirmTargets(plan).length || autoConfirmReservations(plan).length)) return;
   if(Date.now()-autoConfirmLastAt < AUTO_CONFIRM_MIN_INTERVAL_MS) return;
   autoConfirmBusy = true;
   autoConfirmLastAt = Date.now();
@@ -21206,12 +21221,18 @@ async function checkAutoConfirmStaffing(){
     state.staffingSuggestionLoaded = true;
     plan = computeTodayStaffingPlanNow();
     var targets = plan ? autoConfirmTargets(plan) : [];
-    if(!targets.length) return;
+    var resv = plan ? autoConfirmReservations(plan).filter(function(r){ return !targets.some(function(p){ return p.staffId===r.staffId; }); }) : [];
+    if(!targets.length && !resv.length) return;
     var nowIso = new Date().toISOString();
     var items = normalizeConfirmedInstructions(prev);
     targets.forEach(function(p){
       items.push({ id: uid(), staffId: p.staffId, taskId: p.taskId, tier: p.tier, fromTaskId: p.fromTaskId||null,
         expectedQty: p.capQty!==null && p.capQty!==undefined ? Math.round(p.capQty) : null, reason: p.reason||'', confirmedAt: nowIso, auto: true });
+    });
+    // 作業完了後の配置予定: 「今の作業が終わったら開始する」指示として(手で確定したときと同じ形)
+    resv.forEach(function(r){
+      items.push({ id: uid(), staffId: r.staffId, taskId: r.taskId, tier: 'after', fromTaskId: r.afterTaskId, startAfterTaskId: r.afterTaskId,
+        expectedQty: Math.round(r.capQty||0), reason: r.reason||'', confirmedAt: nowIso, auto: true });
     });
     var sug = Object.assign({}, prev, {
       version: 2, date: dateStr, status: 'confirmed', confirmedAt: nowIso,
@@ -21222,7 +21243,7 @@ async function checkAutoConfirmStaffing(){
       unassignedStaffIds: []
     });
     var day = state.day;
-    targets.forEach(function(p){
+    targets.concat(resv).forEach(function(p){
       var arr = day.assignments[p.staffId] || [];
       if(arr.indexOf(p.taskId)===-1) arr.push(p.taskId);
       day.assignments[p.staffId] = arr;
@@ -21231,7 +21252,7 @@ async function checkAutoConfirmStaffing(){
     if((await saveStaffingSuggestion(dateStr, sug))===false) return;
     state.staffingSuggestion = sug;
     await appendAuditLog({ action:'配置案を自動確定', target: dateStr, before: null,
-      after: targets.map(function(p){ return staffById(p.staffId).name+'→'+taskById(p.taskId).name; }).join('、')+'(確定済み合計'+items.length+'件)' });
+      after: targets.map(function(p){ return staffById(p.staffId).name+'→'+taskById(p.taskId).name; }).concat(resv.map(function(r){ return staffById(r.staffId).name+'→(今の作業のあと)'+taskById(r.taskId).name; })).join('、')+'(確定済み合計'+items.length+'件)' });
     state.forceRenderAfterResync = true;
   }finally{
     autoConfirmBusy = false;

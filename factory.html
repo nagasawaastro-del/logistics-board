@@ -3391,7 +3391,6 @@ function CalendarTab({ data, lineById, orderById, orderStats, productById }) {
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const [selected, setSelected] = useState(todayStr());
-  const [view, setView] = useState('gantt'); // 'gantt' ガントチャート / 'month' 月のカレンダー
   const [, setHolidaysReady] = useState(!!jpHolidays);
   useEffect(() => { if (!jpHolidays) loadJpHolidaysOnce().then(() => setHolidaysReady(true)); }, []); // 土日祝(休み)の判定に使う
 
@@ -3487,117 +3486,13 @@ function CalendarTab({ data, lineById, orderById, orderStats, productById }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
           <div className="fm-display" style={{ fontSize: 18, fontWeight: 700 }}>{year}年 {month + 1}月</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ display: 'inline-flex', gap: 2, padding: 3, border: `1px solid ${C.border}`, borderRadius: 8, background: C.panelAlt, marginRight: 6 }}>
-              {[['gantt', 'ガントチャート'], ['month', '月のカレンダー']].map(([k, l]) => (
-                <button key={k} type="button" className="fm-btn" onClick={() => setView(k)}
-                  style={{ border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                    background: view === k ? C.tealDim : 'transparent', color: view === k ? C.teal : C.textDim }}>{l}</button>
-              ))}
-            </span>
             <PrimaryButton onClick={prevMonth} style={{ background: C.panelAlt2, color: C.text }}>‹ 前月</PrimaryButton>
             <PrimaryButton onClick={goToday} style={{ background: C.panelAlt2, color: C.text }}>今日</PrimaryButton>
             <PrimaryButton onClick={nextMonth} style={{ background: C.panelAlt2, color: C.text }}>次月 ›</PrimaryButton>
           </div>
         </div>
-        {view === 'gantt' ? (
           <GanttMonth data={data} year={year} month={month} selected={selected} setSelected={setSelected} lineById={lineById} productById={productById} />
-        ) : (<>
-        <div style={{ display: 'flex', gap: 14, marginBottom: 10, fontSize: 11, color: C.textFaint, alignItems: 'center' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 999, background: C.green }} /> 実績あり</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>🏁 この日が納期の計画あり</span>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 4 }}>
-          {weekdays.map((w) => <div key={w} style={{ textAlign: 'center', fontSize: 11, color: C.textFaint, padding: '4px 0' }}>{w}</div>)}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
-          {cells.map((d, i) => {
-            if (d === null) return <div key={i} />;
-            const dateStr = toDateStr(year, month, d);
-            const t = dayTotals(dateStr);
-            const isSelected = dateStr === selected;
-            const isToday = dateStr === todayStr();
-            const dRate = t.machineUp > 0 ? (t.defect / t.machineUp) * 100 : 0;
-            const hasActivity = t.count > 0;
-            const duePlansCount = data.orders.filter((o) => o.dueDate === dateStr).length;
-            return (
-              <button
-                key={i}
-                onClick={() => setSelected(dateStr)}
-                className="fm-btn"
-                style={{
-                  textAlign: 'left',
-                  border: isSelected ? `1.5px solid ${C.teal}` : duePlansCount > 0 ? `1px solid ${C.amberDim}` : `1px solid ${C.border}`,
-                  background: isSelected ? C.tealDim : C.panelAlt,
-                  borderRadius: 8, padding: '6px 8px', minHeight: 56,
-                  cursor: 'pointer', color: C.text,
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span className="fm-mono" style={{ fontSize: 12, color: isToday ? C.teal : C.textDim, fontWeight: isToday ? 700 : 400 }}>{d}</span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    {duePlansCount > 0 && <span style={{ fontSize: 10 }} title="この日が納期の計画あり">🏁</span>}
-                    {hasActivity && <span style={{ width: 6, height: 6, borderRadius: 999, background: dRate > 5 ? C.red : C.green }} />}
-                  </span>
-                </div>
-                {hasActivity && (
-                  <div className="fm-mono" style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
-                    完成 <span style={{ color: C.green }}>{fmt(t.folded)}</span>
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-        </>)}
       </Panel>
-
-      {view === 'month' && <Panel style={{ padding: 16, overflowX: 'auto' }}>
-        <div className="fm-display" style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>生産計画スケジュール({year}年{month + 1}月)</div>
-        <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 12 }}>バーが計画の生産期間(開始日〜終了日)、オレンジの縦線がその日に実績が入力されたことを示します。</div>
-        {ganttPlans.length === 0 ? (
-          <div style={{ fontSize: 13, color: C.textFaint }}>この月に該当する生産計画はありません。</div>
-        ) : (
-          <div style={{ minWidth: 640 }}>
-            <div style={{ display: 'flex', marginBottom: 6 }}>
-              <div style={{ width: 170, flexShrink: 0 }} />
-              <div style={{ position: 'relative', flex: 1, height: 14 }}>
-                {Array.from({ length: daysInMonth }, (_, i) => i + 1)
-                  .filter((d) => d === 1 || d % (daysInMonth > 20 ? 5 : 2) === 0)
-                  .map((d) => (
-                    <span key={d} className="fm-mono" style={{ position: 'absolute', left: `${((d - 1) / daysInMonth) * 100}%`, fontSize: 9, color: C.textFaint }}>{d}</span>
-                  ))}
-              </div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {ganttPlans.map(({ o, s, e, done, recDays, st }) => (
-                <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 170, flexShrink: 0, fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`${o.planNo} ${o.productName}`}>
-                    <span style={{ fontWeight: 600 }}>{o.planNo}</span> <span style={{ color: C.textFaint }}>{o.productName}</span>
-                  </div>
-                  <div style={{ position: 'relative', flex: 1, height: 18, background: C.bg, borderRadius: 4, border: `1px solid ${C.border}` }}>
-                    <div
-                      style={{
-                        position: 'absolute', top: 2, bottom: 2,
-                        left: `${((s - 1) / daysInMonth) * 100}%`,
-                        width: `${((e - s + 1) / daysInMonth) * 100}%`,
-                        borderRadius: 3, background: done ? C.green : C.teal, opacity: 0.85,
-                      }}
-                      title={`${planStart(o)} 〜 ${planEnd(o)} / 実績 ${fmt(st.folded)}枚`}
-                    />
-                    {recDays.map((d) => (
-                      <div
-                        key={d}
-                        style={{ position: 'absolute', top: -2, bottom: -2, left: `${((d - 0.5) / daysInMonth) * 100}%`, width: 2, background: C.amber }}
-                        title={`${toDateStr(year, month, d)} に実績あり`}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </Panel>}
 
       <Panel style={{ padding: 16 }}>
         <div className="fm-display" style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>{selected} の実績詳細</div>

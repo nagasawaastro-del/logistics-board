@@ -1490,6 +1490,15 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 @keyframes tpickLeave{ 0%{ opacity:1; transform:none; max-height:120px; } 60%{ opacity:0; transform:translateX(60px); max-height:120px; } 100%{ opacity:0; transform:translateX(60px); max-height:0; margin:0; padding:0; } }
 .tpick-line.is-leaving, .tpick-item.is-leaving{ animation:tpickLeave .38s ease forwards; overflow:hidden; pointer-events:none; }
 @keyframes tpickFlash{ 0%{ background:#D1FADF; } 100%{ background:transparent; } }
+.sb-pat{ border:1px dashed var(--paper-line); border-radius:10px; padding:8px 10px; margin-top:8px; }
+.sb-pat-head{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px; font-weight:700; }
+.sb-pat-head input{ flex:1; min-width:160px; font-size:14px; padding:4px 8px; }
+.sb-row{ display:grid; grid-template-columns:minmax(120px,1.2fr) 110px 1.6fr 40px; gap:6px; align-items:center; margin:3px 0; }
+.sb-row input{ font-size:16px; padding:6px 8px; width:100%; box-sizing:border-box; }
+.sb-row-head{ font-size:11px; color:#667085; margin:0; }
+.sb-name{ font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sb-del{ padding:4px 0; }
+@media (max-width:600px){ .sb-row{ grid-template-columns:1fr 80px 34px; } .sb-name{ grid-column:1 / 4; order:3; } .sb-row-head span:nth-child(3){ display:none; } }
 @keyframes tpickTabFlash{ 0%{ box-shadow:0 0 0 0 rgba(18,183,106,.9); } 40%{ box-shadow:0 0 0 6px rgba(18,183,106,.45); } 100%{ box-shadow:0 0 0 0 rgba(18,183,106,0); } }
 .tpick-tabs .sub-switch-btn.is-flash{ animation:tpickTabFlash 1.2s ease; } /* 文字が読めるように、背景ではなく輪で光らせる */
 @media (prefers-reduced-motion: reduce){ .tpick-line.is-leaving, .tpick-item.is-leaving, .tpick-tabs .sub-switch-btn.is-flash{ animation:none; } }
@@ -2043,6 +2052,7 @@ html[data-app-theme="dark"] .tpick-item{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] .tpick-item.is-done{background:rgba(47,233,123,0.13) !important;border-color:rgba(50,229,121,0.45) !important;color:#a5c0e8 !important}
 html[data-app-theme="dark"] .tpick-chk{color:#90fdcf !important}
 html[data-app-theme="dark"] .tpick-item.is-done .tpick-chk{background:rgba(48,232,111,0.13) !important}
+html[data-app-theme="dark"] .sb-row-head{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .tpick-short-btn{background:var(--dk-card) !important;color:#f1a29b !important}
 html[data-app-theme="dark"] .tpick-item.is-short{background:rgba(238,58,41,0.13) !important;border-color:rgba(250,42,29,0.45) !important}
 html[data-app-theme="dark"] .tpick-item.is-short .tpick-chk{background:rgba(247,48,33,0.16) !important;color:#f1a29b !important}
@@ -9454,18 +9464,38 @@ function renderSetBomModal(m){
   var sets = (state.setBom && state.setBom.sets) || {};
   var codes = (m.codes||[]).slice();
   Object.keys(sets).sort().forEach(function(c){ if(m.showAll && codes.indexOf(c)===-1) codes.push(c); });
+  // 入力中の内容(m.draft: SET品番 → パターンの並び [{ name, items:[{code, qty}] }])。はじめは登録済みの内容(無ければ空の1パターン・3行)
+  if(!m.draft) m.draft = {};
+  codes.forEach(function(code){
+    if(m.draft[code]) return;
+    var pats = setBomPatterns(sets[code]);
+    m.draft[code] = pats.length ? pats.map(function(pt){ return { name: pt.name||'', items: pt.items.map(function(c){ return { code: c.code, qty: String(c.qty) }; }) }; })
+      : [{ name:'', items:[{ code:'', qty:'' }, { code:'', qty:'' }, { code:'', qty:'' }] }];
+  });
   var rows = codes.map(function(code){
-    var cur = sets[code], pats = setBomPatterns(cur);
-    var txt = pats.map(function(pt){ return (pt.name ? '#'+pt.name+'\n' : '')+pt.items.map(function(c){ return c.code+' '+c.qty; }).join('\n'); }).join('\n\n');
-    var nLines = txt ? txt.split('\n').length : 0;
-    var st = logiStockOf(code);
+    var pats = setBomPatterns(sets[code]), st = logiStockOf(code), dr = m.draft[code];
+    var patHtml = dr.map(function(pt, pi){
+      var lines = pt.items.map(function(it, ri){
+        var ps = it.code ? logiStockOf(it.code) : null;
+        return '<div class="sb-row"><input type="text" data-sb="'+esc(code)+'|'+pi+'|'+ri+'|code" value="'+esc(it.code)+'" placeholder="部品の品番" autocomplete="off">'+
+          '<input type="number" inputmode="numeric" min="1" data-sb="'+esc(code)+'|'+pi+'|'+ri+'|qty" value="'+esc(it.qty)+'" placeholder="数">'+
+          '<span class="sk-minor sb-name">'+(it.code ? (ps ? esc(ps.name)+' ・ 在庫 '+formatNum(ps.qty) : '<span style="color:#B42318;">ロジザードの在庫にない品番</span>') : '')+'</span>'+
+          '<button type="button" class="ll-btn sb-del" data-sb-delrow="'+esc(code)+'|'+pi+'|'+ri+'" title="この行を消す">×</button></div>';
+      }).join('');
+      return '<div class="sb-pat">'+
+        (dr.length>1 || pt.name ? '<div class="sb-pat-head"><span>パターン'+(pi+1)+'</span><input type="text" data-sb-name="'+esc(code)+'|'+pi+'" value="'+esc(pt.name)+'" placeholder="名前(例: 在庫が少ないとき)">'+
+          (dr.length>1 ? '<button type="button" class="ll-btn" data-sb-delpat="'+esc(code)+'|'+pi+'">このパターンを消す</button>' : '')+'</div>' : '')+
+        '<div class="sb-row sb-row-head"><span>品番</span><span>数量(1セットに使う数)</span><span></span><span></span></div>'+lines+
+        '<button type="button" class="ll-btn" data-sb-addrow="'+esc(code)+'|'+pi+'" style="margin-top:4px;">＋ 行を足す</button></div>';
+    }).join('');
     return '<div class="panel" style="margin:0 0 10px;padding:10px 12px;"><div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;"><b>'+esc(code)+'</b><span class="sk-minor">'+esc((st && st.name) || (m.names && m.names[code]) || '')+'</span>'+
       (pats.length ? '<span class="st-label is-green">登録済み'+(pats.length>1 ? ' ・ '+pats.length+'パターン' : '')+'</span>' : '<span class="st-label is-orange">未登録</span>')+'</div>'+
-      '<textarea data-setbom-code="'+esc(code)+'" rows="'+Math.max(3, nLines+1)+'" style="width:100%;margin-top:6px;font-size:15px;font-family:inherit;" placeholder="部品品番 数(1行に1つ。例: 830-07 2)&#10;&#10;別のパターンは、空の行のあとに続けて書く(1行目に #名前 で名前を付けられます)">'+esc(txt)+'</textarea></div>';
+      patHtml+
+      '<button type="button" class="vc-manage-toggle-btn" data-sb-addpat="'+esc(code)+'" style="margin-top:8px;">＋ 別のパターンを足す</button></div>';
   }).join('') || '<div class="empty-note">SET の品番がありません</div>';
   return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card" style="max-width:680px;">'+
     '<div class="modal-task-name">🧩 セット構成の登録</div>'+
-    '<div class="pool-hint" style="margin:4px 0 10px;">SET の品番ごとに、構成部品を「部品品番 数」で1行ずつ入れます(Excel から2列を貼り付けても大丈夫です)。<b>構成のパターンが複数あるときは、空の行で区切って続けて書きます</b>(1行目に「#名前」で名前。例: #在庫が少ないとき)。使うのは、上から順に部品の在庫が全部足りるパターンです。空にすると登録を消します。一度登録すると、次からトータルピッキングの事務所用に部品が自動で出ます。</div>'+
+    '<div class="pool-hint" style="margin:4px 0 10px;">SET の品番ごとに、構成部品の<b>品番</b>と<b>数量</b>(1セットに使う数)を入れます。品番の欄に Excel の2列(品番・数量)を貼り付けると、下の行にまとめて入ります。構成が何通りかあるときは「＋ 別のパターンを足す」。使うのは、上から順に部品の在庫が全部足りるパターンです。全部の行を空にすると登録を消します。一度登録すると、次からトータルピッキングの事務所用に部品が自動で出ます。</div>'+
     rows+
     (m.showAll ? '' : '<button type="button" class="ll-btn" id="setBomShowAll" style="margin-bottom:8px;">登録済みの SET も全部出す</button>')+
     '<details style="margin:6px 0;"><summary style="cursor:pointer;font-weight:700;">まとめて貼り付ける(SET品番・部品品番・数・パターン名 の3〜4列)</summary><textarea id="setBomBulk" rows="5" style="width:100%;margin-top:6px;font-size:14px;" placeholder="SET品番 部品品番 数 (パターン名)"></textarea></details>'+
@@ -9474,11 +9504,54 @@ function renderSetBomModal(m){
 }
 function bindSetBomModal(m){
   var c = document.getElementById('setBomCancel'); if(c) c.addEventListener('click', function(){ state.modal = null; render(); });
+  var dr = m.draft || {};
+  var at = function(spec){ var a = spec.split('|'); return { code: a[0], pi: Number(a[1]), ri: Number(a[2]), f: a[3] }; };
+  // 入力は、その場で下書き(m.draft)に入れる(行を足したときに消えないように)
+  document.querySelectorAll('[data-sb]').forEach(function(el){
+    el.addEventListener('input', function(){ var k = at(el.getAttribute('data-sb')); dr[k.code][k.pi].items[k.ri][k.f] = el.value; });
+    // 品番の欄に Excel の2列(品番・数量)を貼ったら、下の行にまとめて入れる
+    if(el.getAttribute('data-sb').slice(-5)==='|code') el.addEventListener('paste', function(ev){
+      var text = (ev.clipboardData || window.clipboardData).getData('text');
+      if(!/[\t\n]/.test(text)) return;
+      ev.preventDefault();
+      var k = at(el.getAttribute('data-sb')), items = dr[k.code][k.pi].items;
+      var lines = text.replace(/\r/g,'').split('\n').map(function(l){ return l.split(/\t|,/).map(function(x){ return x.trim(); }); }).filter(function(a){ return a[0]; });
+      lines.forEach(function(a, n){ var row = items[k.ri+n] || (items[k.ri+n] = { code:'', qty:'' }); row.code = a[0]; if(a[1]) row.qty = String(a[1]).replace(/[^0-9.]/g,''); });
+      render();
+    });
+  });
+  document.querySelectorAll('[data-sb-name]').forEach(function(el){
+    el.addEventListener('input', function(){ var a = el.getAttribute('data-sb-name').split('|'); dr[a[0]][Number(a[1])].name = el.value; });
+  });
+  document.querySelectorAll('[data-sb-addrow]').forEach(function(el){
+    el.addEventListener('click', function(){ var a = el.getAttribute('data-sb-addrow').split('|'); dr[a[0]][Number(a[1])].items.push({ code:'', qty:'' }); render(); });
+  });
+  document.querySelectorAll('[data-sb-delrow]').forEach(function(el){
+    el.addEventListener('click', function(){ var k = at(el.getAttribute('data-sb-delrow')); var items = dr[k.code][k.pi].items; items.splice(k.ri, 1); if(!items.length) items.push({ code:'', qty:'' }); render(); });
+  });
+  document.querySelectorAll('[data-sb-addpat]').forEach(function(el){
+    el.addEventListener('click', function(){ var code = el.getAttribute('data-sb-addpat'); dr[code].push({ name:'', items:[{ code:'', qty:'' }, { code:'', qty:'' }, { code:'', qty:'' }] }); render(); });
+  });
+  document.querySelectorAll('[data-sb-delpat]').forEach(function(el){
+    el.addEventListener('click', function(){ var a = el.getAttribute('data-sb-delpat').split('|'); dr[a[0]].splice(Number(a[1]), 1); render(); });
+  });
   var all = document.getElementById('setBomShowAll'); if(all) all.addEventListener('click', function(){ state.modal = Object.assign({}, m, { showAll: true }); render(); });
   var sv = document.getElementById('setBomSave');
   if(sv) sv.addEventListener('click', async function(){
     var edits = {}, bad = [];
-    document.querySelectorAll('[data-setbom-code]').forEach(function(t){ var r = setBomParsePatterns(t.value); edits[t.getAttribute('data-setbom-code')] = r.patterns; bad = bad.concat(r.bad); });
+    Object.keys(dr).forEach(function(code){
+      edits[code] = dr[code].map(function(pt){
+        var items = [];
+        pt.items.forEach(function(it){
+          var c = String(it.code||'').trim(), q = String(it.qty||'').trim();
+          if(!c && !q) return;
+          var n = Number(q.replace(/[^0-9.]/g,''));
+          if(!c || !(n>0)){ bad.push(code+' の '+(c || '(品番なし)')+' '+(q || '(数量なし)')); return; }
+          items.push({ code: c, qty: n });
+        });
+        return { name: String(pt.name||'').trim(), items: items };
+      }).filter(function(pt){ return pt.items.length; });
+    });
     var bulk = document.getElementById('setBomBulk');
     if(bulk && bulk.value.trim()){
       var bulkSets = {}; // SET品番 → { パターン名 → items }(貼り付けた SET は、貼り付けの内容に置き換える)
@@ -9495,7 +9568,7 @@ function bindSetBomModal(m){
       });
       Object.keys(bulkSets).forEach(function(code){ var bs = bulkSets[code]; edits[code] = bs.order.map(function(pn){ return { name: pn, items: bs.by[pn] }; }); });
     }
-    if(bad.length){ showToast('読めない行があります: '+bad.slice(0,3).join(' / ')); return; }
+    if(bad.length){ showToast('品番と数量(1以上)を両方入れてください: '+bad.slice(0,3).join(' / ')); return; }
     sv.disabled = true;
     var who = (state.managerSession && state.managerSession.user && state.managerSession.user.email) || '';
     var r = await tpickKvUpdate(SET_BOM_KEY, function(cur){
@@ -14609,7 +14682,7 @@ function renderAdminHub(){
   return body.replace(/^(<div[^>]*>)/, '$1'+tabsHtml);
 }
 /* ---------- kintone の自動取得の設定(2026-10-21) ----------
-   kv「kintone-auto-sync」に 時刻・曜日・項目 を保存する。GitHub Actions が日本時間 5〜21時台に15分ごとにこれを見て、
+   kv「kintone-auto-sync」に 時刻・曜日・項目 を保存する。Supabase の定期実行(pg_cron → 関数 scheduled-jobs。2026-10-21 に GitHub Actions から移した)が15分ごとにこれを見て、
    設定の時刻を過ぎていて今日まだ取っていない項目だけを取る(.github/scripts/kintone_sync.py)。 */
 var KINTONE_AUTO_SYNC_KEY = 'kintone-auto-sync';
 var KINTONE_AUTO_DEFAULT = { enabled: true, time: '06:43', days: [1,2,3,4,5,6], items: { outlook: true, product: true, report: true, price: false }, reportDays: 7 };
@@ -14631,19 +14704,26 @@ function renderKintoneAutoSync(){
   var form = !open ? '' :
     '<div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">'+
       '<label style="font-size:14px;"><input type="checkbox" id="kAutoEnabled"'+(c.enabled ? ' checked' : '')+'> 自動で取得する</label>'+
-      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">取得する時刻 <input type="time" id="kAutoTime" value="'+esc(c.time)+'" min="05:00" max="21:45" step="300" style="font-size:16px;">'+
-        '<span class="sk-minor">5:00〜21:45 の間。15分ごとに確かめるので、時刻から15分くらい(GitHub が混むともっと)遅れることがあります</span></div>'+
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">取得する時刻 <input type="time" id="kAutoTime" value="'+esc(c.time)+'" step="300" style="font-size:16px;">'+
+        '<span class="sk-minor">15分ごとに確かめるので、時刻から15分くらいまでに取ります</span></div>'+
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">曜日 '+WD.map(function(w, d){ return '<label style="font-size:14px;margin-right:6px;"><input type="checkbox" data-kauto-day="'+d+'"'+(c.days.indexOf(d)!==-1 ? ' checked' : '')+'> '+w+'</label>'; }).join('')+'</div>'+
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">項目 '+KINTONE_AUTO_ITEMS.map(function(x){
         return '<label style="font-size:14px;margin-right:10px;"><input type="checkbox" data-kauto-item="'+x[0]+'"'+(c.items[x[0]] ? ' checked' : '')+'> '+esc(x[1])+'</label>';
       }).join('')+'</div>'+
       '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">作業日報は 直近 <input type="number" id="kAutoReportDays" min="1" max="31" value="'+c.reportDays+'" style="width:70px;font-size:16px;"> 日(今日を含む)</div>'+
       '<div style="display:flex;gap:8px;"><button type="button" class="add-btn" id="kAutoSave">保存する</button><button type="button" class="ll-btn" id="kAutoCancel">やめる</button></div>'+
-      '<div class="pool-hint" style="margin:0;">設定の時刻より後に手で取った項目は、その日はもう取りません。失敗したときは15分ごとにやり直します(時刻から3時間まで)。GitHub の Actions →「kintone-sync」→「Run workflow」で手で動かすと、時刻に関係なくオンの項目を全部取ります。</div>'+
+      '<div class="pool-hint" style="margin:0;">設定の時刻より後に手で取った項目は、その日はもう取りません。失敗したときは15分ごとにやり直します(時刻から3時間まで)。今すぐ取りたいときは、下の「🔄 全部まとめて取得」を押してください。</div>'+
     '</div>';
+  // 定期実行が最後に確かめた時刻と結果(15分ごとに新しくなる。止まっていたら赤)
+  var ss = state.schedStatus, lastHtml = '';
+  if(ss && ss.at){
+    var age = (Date.now() - new Date(ss.at).getTime())/60000;
+    var kr = ss.kintone && ss.kintone.results ? Object.keys(ss.kintone.results).map(function(k){ return k+': '+ss.kintone.results[k]; }).join(' ・ ') : (ss.kintone && (ss.kintone.skipped || ss.kintone.error)) || '';
+    lastHtml = '<div class="sk-minor" style="margin-top:4px;'+(age>40 ? 'color:#B42318;' : '')+'">最後の確認 '+esc(fmtDateTime(ss.at))+(age>40 ? '(40分以上止まっています)' : '')+(kr ? ' ・ '+esc(kr) : '')+'</div>';
+  }else lastHtml = '<div class="sk-minor" style="margin-top:4px;">定期実行の記録はまだありません</div>';
   return '<div class="stf-card" style="margin:4px 0 10px;border-left-color:#6366F1;">'+
     '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><b>⏰ 自動取得</b><span style="font-size:13px;">'+esc(kintoneAutoSummary())+'</span>'+
-    (open ? '' : '<button type="button" class="vc-manage-toggle-btn" id="kAutoOpen" style="margin-left:auto;">設定を変える</button>')+'</div>'+form+'</div>';
+    (open ? '' : '<button type="button" class="vc-manage-toggle-btn" id="kAutoOpen" style="margin-left:auto;">設定を変える</button>')+'</div>'+lastHtml+form+'</div>';
 }
 function bindKintoneAutoSync(){
   var op = document.getElementById('kAutoOpen');
@@ -14653,7 +14733,7 @@ function bindKintoneAutoSync(){
   var sv = document.getElementById('kAutoSave');
   if(sv) sv.addEventListener('click', async function(){
     var time = (document.getElementById('kAutoTime').value || '').slice(0,5);
-    if(!/^\d{2}:\d{2}$/.test(time) || time<'05:00' || time>'21:45'){ showToast('時刻は 5:00〜21:45 で入れてください'); return; }
+    if(!/^\d{2}:\d{2}$/.test(time)){ showToast('時刻を入れてください'); return; }
     var days = [].slice.call(document.querySelectorAll('[data-kauto-day]')).filter(function(x){ return x.checked; }).map(function(x){ return Number(x.getAttribute('data-kauto-day')); });
     var items = {}; [].slice.call(document.querySelectorAll('[data-kauto-item]')).forEach(function(x){ items[x.getAttribute('data-kauto-item')] = x.checked; });
     var rd = Math.max(1, Math.min(31, Math.floor(Number(document.getElementById('kAutoReportDays').value) || 7)));
@@ -14673,8 +14753,8 @@ function bindKintoneAutoSync(){
 function renderKintoneSyncPanel(){
   if(!state.kSyncLoaded && !state.kSyncLoading){
     state.kSyncLoading = true;
-    Promise.all([loadKintoneProductSettings(), loadKintoneSyncStatus(), fetchWorkPriceMaster(), loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; }), loadKeyJson(STOCK_OUTLOOK_STATUS_KEY, function(){ return null; }), loadKeyJson(KINTONE_AUTO_SYNC_KEY, function(){ return null; })])
-      .then(function(r){ state.kintoneProductSettings = r[0]; state.kintoneSyncStatus = r[1]; state.workPriceMaster = r[2]; state.workReportStatus = r[3]; if(r[4] && !isUnverified(r[4])) state.outlookStatus = r[4]; if(r[5] && !isUnverified(r[5])) state.kAutoSync = r[5]; })
+    Promise.all([loadKintoneProductSettings(), loadKintoneSyncStatus(), fetchWorkPriceMaster(), loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; }), loadKeyJson(STOCK_OUTLOOK_STATUS_KEY, function(){ return null; }), loadKeyJson(KINTONE_AUTO_SYNC_KEY, function(){ return null; }), loadKeyJson('scheduled-jobs-status', function(){ return null; })])
+      .then(function(r){ if(r[6] && !isUnverified(r[6])) state.schedStatus = r[6]; state.kintoneProductSettings = r[0]; state.kintoneSyncStatus = r[1]; state.workPriceMaster = r[2]; state.workReportStatus = r[3]; if(r[4] && !isUnverified(r[4])) state.outlookStatus = r[4]; if(r[5] && !isUnverified(r[5])) state.kAutoSync = r[5]; })
       .catch(function(){})
       .then(function(){ state.kSyncLoaded = true; state.kSyncLoading = false; render(); });
   }

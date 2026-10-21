@@ -1487,6 +1487,16 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .tpick-chk{ width:30px; height:30px; border-radius:8px; border:2px solid #98A2B3; display:inline-flex; align-items:center; justify-content:center; font-weight:900; color:#027A48; }
 .tpick-item.is-done .tpick-chk{ border-color:#12B76A; background:#D1FADF; }
 /* 欠品(2026-10-20) */
+@keyframes tpickLeave{ 0%{ opacity:1; transform:none; max-height:120px; } 60%{ opacity:0; transform:translateX(60px); max-height:120px; } 100%{ opacity:0; transform:translateX(60px); max-height:0; margin:0; padding:0; } }
+.tpick-line.is-leaving, .tpick-item.is-leaving{ animation:tpickLeave .38s ease forwards; overflow:hidden; pointer-events:none; }
+@keyframes tpickFlash{ 0%{ background:#D1FADF; } 100%{ background:transparent; } }
+.tpick-done-sec.is-flash > summary{ animation:tpickFlash 1.2s ease; border-radius:8px; }
+@media (prefers-reduced-motion: reduce){ .tpick-line.is-leaving, .tpick-item.is-leaving, .tpick-done-sec.is-flash > summary{ animation:none; } }
+#tpickFinish:disabled{ opacity:.4; cursor:default; } /* 全部済になるまで押せない(押せないのが分かるように) */
+.tpick-done-sec{ margin-top:12px; border-top:1px dashed var(--paper-line); padding-top:10px; }
+.tpick-done-sec > summary{ cursor:pointer; font-weight:700; font-size:15px; color:#067647; padding:6px 2px; }
+.tpick-done-sec .muted{ font-weight:400; font-size:12px; }
+
 .tpick-line{ display:grid; grid-template-columns:1fr auto; gap:6px; align-items:stretch; }
 .tpick-short-btn{ border:1px solid #FDA29B; background:#fff; color:#B42318; border-radius:10px; padding:0 12px; font-size:14px; font-weight:700; cursor:pointer; min-width:64px; }
 .tpick-item.is-short{ background:#FEF3F2; border-color:#FECDCA; }
@@ -2035,6 +2045,7 @@ html[data-app-theme="dark"] .tpick-item{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] .tpick-item.is-done{background:rgba(47,233,123,0.13) !important;border-color:rgba(50,229,121,0.45) !important;color:#a5c0e8 !important}
 html[data-app-theme="dark"] .tpick-chk{color:#90fdcf !important}
 html[data-app-theme="dark"] .tpick-item.is-done .tpick-chk{background:rgba(48,232,111,0.13) !important}
+html[data-app-theme="dark"] .tpick-done-sec > summary{color:#94f9cf !important}
 html[data-app-theme="dark"] .tpick-short-btn{background:var(--dk-card) !important;color:#f1a29b !important}
 html[data-app-theme="dark"] .tpick-item.is-short{background:rgba(238,58,41,0.13) !important;border-color:rgba(250,42,29,0.45) !important}
 html[data-app-theme="dark"] .tpick-item.is-short .tpick-chk{background:rgba(247,48,33,0.16) !important;color:#f1a29b !important}
@@ -9447,8 +9458,10 @@ function renderTpickBatchModal(m){
   if(!b) return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card"><div class="empty-note">この番号は見つかりませんでした(取込が削除された可能性があります)</div><div class="modal-actions"><button type="button" class="modal-cancel" id="tpickBack">戻る</button></div></div></div>';
   var st = tpickBatchState(b), p = st.p || {}, mine = p.staffId===state.activeStaffId, done = p.done || {}, short = p.short || {};
   var canEdit = mine && !p.doneAt;
+  // 済・欠品にした行は、下の「ピッキング済み」へ移す(上には、まだ取っていない行だけ。2026-10-21)
   var prevB = null, prevL = null;
-  var rows = b.items.map(function(it, i){
+  var rowHtml = function(i){
+    var it = b.items[i];
     var showL = it.b!==prevB || it.l!==prevL; prevB = it.b; prevL = it.l;
     var sh = short[i];
     var isDone = !!done[i] && !sh;
@@ -9458,7 +9471,16 @@ function renderTpickBatchModal(m){
       '<span class="tpick-code"><b>'+esc(it.c)+'</b><span class="muted">'+esc(it.n)+'</span></span>'+
       '<span class="tpick-qty">'+(sh ? '欠品 '+formatNum(sh.got)+'/'+formatNum(it.qty) : formatNum(it.qty))+'</span></button>';
     return canEdit ? '<div class="tpick-line">'+item+'<button type="button" class="tpick-short-btn" data-tpick-short="'+i+'">'+(sh ? '戻す' : '欠品')+'</button></div>' : item;
-  }).join('');
+  };
+  var todoIdx = [], doneIdx = [];
+  b.items.forEach(function(it, i){ (done[i] || short[i] ? doneIdx : todoIdx).push(i); });
+  var rows = todoIdx.map(rowHtml).join('') || '<div class="empty-note" style="margin:4px 0;">'+(b.items.length ? '全部ピッキング済みです' : '')+(canEdit ? '。下の「✅ この番号を完了」を押してください' : '')+'</div>';
+  prevB = null; prevL = null;
+  var doneRows = doneIdx.map(rowHtml).join('');
+  var nShort = doneIdx.filter(function(i){ return short[i]; }).length;
+  var flash = state.tpickDoneFlash && Date.now()-state.tpickDoneFlash < 1500; // 移ったばかり: 欄を光らせる
+  var doneSec = doneIdx.length ? '<details class="tpick-done-sec'+(flash ? ' is-flash' : '')+'" id="tpickDoneSec"'+(state.tpickDoneOpen ? ' open' : '')+'><summary>✓ ピッキング済み '+doneIdx.length+'行'+(nShort ? '(うち欠品 '+nShort+'行)' : '')+' <span class="muted">押すと見られます'+(canEdit ? '・行を押すと戻せます' : '')+'</span></summary>'+
+    '<div class="tpick-items" style="margin-top:8px;">'+doneRows+'</div></details>' : '';
   var nDone = tpickHandledCount(p);
   var sIt = (canEdit && m.shortIdx!=null) ? b.items[m.shortIdx] : null;
   var shortHtml = sIt ? '<div class="tpick-short-box"><div><b style="color:#B42318;">欠品</b> ・ '+esc(sIt.b)+' '+esc(tpickLocText(sIt.l))+' ・ <b>'+esc(sIt.c)+'</b> '+esc(sIt.n)+'</div>'+
@@ -9471,6 +9493,7 @@ function renderTpickBatchModal(m){
     '<div class="pool-hint" style="margin:4px 0 8px;">'+(mine ? (p.doneAt ? '完了しました' : '取った行を押すと「済」になります(もう一度押すと戻ります)。足りないときは右の「欠品」') : (p.staffId ? esc(p.staffName||'')+'さんが受け持っています(見るだけ)' : '受け持っていません(見るだけ)'))+' ・ 済 '+nDone+'/'+b.items.length+'</div>'+
     shortHtml+
     '<div class="tpick-items">'+rows+'</div>'+
+    doneSec+
     '<div class="modal-actions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">'+
       '<button type="button" class="modal-cancel" id="tpickBack">一覧に戻る</button>'+
       (mine && !p.doneAt ? '<button type="button" class="modal-cancel" id="tpickRelease">受け持ちをやめる</button><button type="button" class="modal-confirm" id="tpickFinish"'+(nDone===b.items.length ? '' : ' disabled')+'>✅ この番号を完了</button>' : '')+
@@ -9487,6 +9510,8 @@ function bindTpickModals(m){
   if(close) close.addEventListener('click', function(){ state.modal = null; state.suppressRender = false; render(); });
   var back = document.getElementById('tpickBack');
   if(back) back.addEventListener('click', function(){ state.modal = { kind:'tpickList', taskId: m.taskId, who: m.who }; render(); });
+  var ds = document.getElementById('tpickDoneSec');
+  if(ds) ds.addEventListener('toggle', function(){ state.tpickDoneOpen = ds.open; });
   document.querySelectorAll('[data-tpick-who]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = Object.assign({}, m, { who: el.getAttribute('data-tpick-who'), whoPicked: true }); render(); }); });
   document.querySelectorAll('[data-tpick-batch]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = { kind:'tpickBatch', taskId: m.taskId, who: m.who, batchId: el.getAttribute('data-tpick-batch') }; render(); }); });
   var busy = false;
@@ -9510,6 +9535,11 @@ function bindTpickModals(m){
       if(busy) return; busy = true;
       var i = el.getAttribute('data-tpick-check'), me = state.activeStaffId;
       el.classList.toggle('is-done'); // 先に見た目だけ変える(保存できなければ戻す)
+      // まだ取っていない行を済にしたときは、右へすべって消える動きを見せてから「ピッキング済み」へ移す(2026-10-21)
+      var leaving = el.classList.contains('is-done') && !el.closest('.tpick-done-sec');
+      var line = el.closest('.tpick-line') || el;
+      if(leaving) line.classList.add('is-leaving');
+      var wait = new Promise(function(res){ setTimeout(res, leaving ? 380 : 0); });
       var r = await tpickProg(m.batchId, function(cur){
         if(!cur || cur.staffId!==me) return false;
         var d = Object.assign({}, cur.done||{}), sh = Object.assign({}, cur.short||{});
@@ -9517,8 +9547,10 @@ function bindTpickModals(m){
         else if(d[i]) delete d[i]; else d[i] = 1;
         return Object.assign({}, cur, { done: d, short: sh });
       });
+      await wait;
       busy = false;
       if(!r.ok) showToast(r.aborted ? 'この番号はあなたの受け持ちではなくなっています' : '⚠️ 保存できませんでした。もう一度押してください');
+      if(r.ok && leaving) state.tpickDoneFlash = Date.now();
       render();
     });
   });

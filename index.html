@@ -9188,9 +9188,21 @@ function tpickPrint(listIdx, who){
     'トータルピッキングリスト_'+(L.biz||'')+'_'+tpickDayLabel(L.day).replace('/','')+'_'+(who==='part'?'パート':'リフト'));
 }
 /* 取り込んだCSVの分(作業記録と同じ番号)を印刷。bids: 印刷する番号の id の並び */
-async function tpickPrintSaved(taskId, bids, src){
+async function tpickPrintSaved(taskId, bids, src, skipBomCheck){
   var sv = src || state.tpickSaved || {}; // src: 取込のすぐあとの印刷のときの { tp, wv, date }
   await Promise.all([setBomLoad(), logiStockLoad()]); // SET の構成部品(事務所用に付ける)
+  // 事務所用に、構成が未登録の SET があれば、先に登録画面を出す(保存して印刷/登録しないで印刷)
+  if(!skipBomCheck){
+    var offItems = [];
+    tpickBatchesForTask(sv.tp, sv.wv, taskId).forEach(function(b){ if(b.who==='office' && bids.indexOf(b.id)!==-1) offItems = offItems.concat(b.items); });
+    var exp0 = setBomExpand(offItems);
+    if(exp0.missing.length){
+      var names = {}; exp0.sets.forEach(function(S){ names[S.code] = S.name; });
+      state.modal = { kind:'setBomEdit', codes: exp0.missing, names: names, then: { taskId: taskId, bids: bids, src: src }, prev: state.modal };
+      render();
+      return;
+    }
+  }
   var bs = tpickBatchesForTask(sv.tp, sv.wv, taskId).filter(function(b){ return bids.indexOf(b.id)!==-1; });
   var d = sv.date || todayStr();
   tpickPrintGroups(bs.map(function(b){
@@ -9436,6 +9448,58 @@ function setBomTablesHtml(exp, print){
   return '<table class="'+(print ? '' : 'report-table')+'"><thead><tr><th>SET の品番 / 商品名</th><th class="num">SET の数</th><th>部品の品番 / 商品名</th><th class="num">構成数</th><th class="num">必要数</th><th class="num">ロジザード在庫</th><th>ロケーション(在庫)</th>'+(print ? '<th>済</th>' : '')+'</tr></thead><tbody>'+perSet+'</tbody></table>'+
     (exp.totals.length ? '<div style="font-weight:700;margin:12px 0 4px;">部品ごとの合計</div>'+tot : '');
 }
+/* 管理 →「セット構成」: 登録済みの SET の一覧(探す・直す・消す)と、新しい SET 品番の登録(2026-10-22) */
+function renderSetBomAdmin(){
+  if(!state.setBom || !state.logiStock){ Promise.all([setBomLoad(true), logiStockLoad()]).then(function(){ render(); }); return '<div class="panel"><div class="empty-note">読み込み中…</div></div>'; }
+  var sets = state.setBom.sets || {}, q = String(state.setBomQuery||'').trim().toLowerCase();
+  var codes = Object.keys(sets).sort();
+  var nameOf = function(code){ var st = logiStockOf(code); return st ? st.name : ''; };
+  var list = codes.filter(function(code){
+    if(!q) return true;
+    var hay = [code, nameOf(code)].concat(setBomPatterns(sets[code]).reduce(function(a, pt){ return a.concat(pt.items.map(function(c){ return c.code; })); }, [])).join(' ').toLowerCase();
+    return hay.indexOf(q)!==-1;
+  });
+  var rows = list.map(function(code){
+    var pats = setBomPatterns(sets[code]), e = sets[code];
+    var summary = pats.map(function(pt, i){ return (pats.length>1 ? '<b>'+esc(pt.name || ('パターン'+(i+1)))+'</b>: ' : '')+pt.items.map(function(c){ return esc(c.code)+'×'+formatNum(c.qty); }).join('、'); }).join('<br>');
+    return '<tr><td><b>'+esc(code)+'</b><div class="sk-minor">'+esc(nameOf(code))+'</div></td><td style="font-size:13px;">'+summary+'</td><td class="sk-minor">'+(e && e.at ? esc(fmtDateTime(e.at)) : '')+'</td>'+
+      '<td style="white-space:nowrap;"><button type="button" class="vc-manage-toggle-btn" data-sbadm-edit="'+esc(code)+'">直す</button> <button type="button" class="log-stop-btn" data-sbadm-del="'+esc(code)+'">消す</button></td></tr>';
+  }).join('') || '<tr><td colspan="4" class="empty-note">'+(codes.length ? '見つかりません' : 'まだ登録がありません')+'</td></tr>';
+  return '<div class="panel">'+
+    '<div class="panel-title">🧩 セット構成</div>'+
+    '<div class="pool-hint" style="margin:0 0 10px;">SET の品番ごとに、構成部品(品番と1セットに使う数)を登録します。登録すると、トータルピッキングの事務所用(SET・ZZZ)に、部品・必要な数・ロジザードの在庫とロケーションが自動で出ます。印刷するときに未登録の SET があれば、その場でも登録できます。</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">'+
+      '<input type="text" id="sbAdmNew" placeholder="新しい SET の品番" style="font-size:15px;padding:6px 8px;min-width:180px;"><button type="button" class="add-btn" id="sbAdmAdd">＋ 登録する</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="sbAdmBulk">まとめて貼り付ける</button>'+
+      '<input type="search" id="sbAdmQuery" value="'+esc(state.setBomQuery||'')+'" placeholder="探す(SET・部品の品番、商品名)" style="font-size:14px;padding:6px 8px;margin-left:auto;min-width:220px;">'+
+    '</div>'+
+    '<div class="sk-minor" style="margin-bottom:6px;">登録 '+codes.length+' 件'+(q ? ' ・ 見つかった '+list.length+' 件' : '')+'</div>'+
+    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>SET の品番 / 商品名</th><th>部品 × 1セットに使う数</th><th>更新</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+  '</div>';
+}
+function bindSetBomAdmin(){
+  var open = function(codes){ var names = {}; codes.forEach(function(c){ var st = logiStockOf(c); names[c] = st ? st.name : ''; }); state.modal = { kind:'setBomEdit', codes: codes, names: names }; render(); };
+  var add = document.getElementById('sbAdmAdd'), nw = document.getElementById('sbAdmNew');
+  var doAdd = function(){ var c = (nw.value||'').trim(); if(!c){ showToast('SET の品番を入れてください'); return; } open([c]); };
+  if(add) add.addEventListener('click', doAdd);
+  if(nw) nw.addEventListener('keydown', function(ev){ if(ev.key==='Enter') doAdd(); });
+  var bulk = document.getElementById('sbAdmBulk');
+  if(bulk) bulk.addEventListener('click', function(){ state.modal = { kind:'setBomEdit', codes: [], names: {}, bulkOpen: true }; render(); });
+  var qq = document.getElementById('sbAdmQuery');
+  if(qq) qq.addEventListener('input', function(){ state.setBomQuery = qq.value; var pos = qq.selectionStart; render(); var q2 = document.getElementById('sbAdmQuery'); if(q2){ q2.focus(); try{ q2.setSelectionRange(pos, pos); }catch(e){} } });
+  document.querySelectorAll('[data-sbadm-edit]').forEach(function(el){ el.addEventListener('click', function(){ open([el.getAttribute('data-sbadm-edit')]); }); });
+  document.querySelectorAll('[data-sbadm-del]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var code = el.getAttribute('data-sbadm-del');
+      if(!await appConfirm('「'+code+'」のセット構成の登録を消しますか?')) return;
+      var r = await tpickKvUpdate(SET_BOM_KEY, function(cur){ cur.sets = cur.sets || {}; delete cur.sets[code]; return cur; });
+      if(!r.ok){ showToast('⚠️ 保存できませんでした'); return; }
+      state.setBom = r.value;
+      await appendAuditLog({ action:'セット構成の登録を消す', target: code, before:'登録あり', after:'なし' });
+      showToast('消しました'); render();
+    });
+  });
+}
 /* 構成の登録・直し(SET の品番ごとに「部品品番 数」を1行ずつ) */
 /* 1つの SET の入力(空行でパターンを区切る。#名前 でパターンの名前) → [{ name, items }] */
 function setBomParsePatterns(text){
@@ -9498,12 +9562,18 @@ function renderSetBomModal(m){
     '<div class="pool-hint" style="margin:4px 0 10px;">SET の品番ごとに、構成部品の<b>品番</b>と<b>数量</b>(1セットに使う数)を入れます。品番の欄に Excel の2列(品番・数量)を貼り付けると、下の行にまとめて入ります。構成が何通りかあるときは「＋ 別のパターンを足す」。使うのは、上から順に部品の在庫が全部足りるパターンです。全部の行を空にすると登録を消します。一度登録すると、次からトータルピッキングの事務所用に部品が自動で出ます。</div>'+
     rows+
     (m.showAll ? '' : '<button type="button" class="ll-btn" id="setBomShowAll" style="margin-bottom:8px;">登録済みの SET も全部出す</button>')+
-    '<details style="margin:6px 0;"><summary style="cursor:pointer;font-weight:700;">まとめて貼り付ける(SET品番・部品品番・数・パターン名 の3〜4列)</summary><textarea id="setBomBulk" rows="5" style="width:100%;margin-top:6px;font-size:14px;" placeholder="SET品番 部品品番 数 (パターン名)"></textarea></details>'+
-    '<div class="modal-actions" style="margin-top:12px;"><button type="button" class="modal-cancel" id="setBomCancel">閉じる</button><button type="button" class="modal-confirm" id="setBomSave">保存する</button></div>'+
+    '<details style="margin:6px 0;"'+(m.bulkOpen ? ' open' : '')+'><summary style="cursor:pointer;font-weight:700;">まとめて貼り付ける(SET品番・部品品番・数・パターン名 の3〜4列)</summary><textarea id="setBomBulk" rows="5" style="width:100%;margin-top:6px;font-size:14px;" placeholder="SET品番 部品品番 数 (パターン名)"></textarea></details>'+
+    (m.then ? '<div class="pool-hint" style="margin:8px 0 0;color:#B54708;">印刷の前に、構成が未登録の SET を登録できます。登録しないで印刷すると、その SET は「構成が未登録です」と出ます。</div>' : '')+
+    '<div class="modal-actions" style="margin-top:12px;"><button type="button" class="modal-cancel" id="setBomCancel">'+(m.then ? '登録しないで印刷' : '閉じる')+'</button><button type="button" class="modal-confirm" id="setBomSave">'+(m.then ? '保存して印刷' : '保存する')+'</button></div>'+
   '</div></div>';
 }
 function bindSetBomModal(m){
-  var c = document.getElementById('setBomCancel'); if(c) c.addEventListener('click', function(){ state.modal = null; render(); });
+  // 閉じたら、開く前の画面(取込のあとの印刷など)に戻る。印刷の途中なら印刷を続ける
+  var finish = function(){
+    state.modal = m.prev || null; render();
+    if(m.then) tpickPrintSaved(m.then.taskId, m.then.bids, m.then.src, true);
+  };
+  var c = document.getElementById('setBomCancel'); if(c) c.addEventListener('click', finish);
   var dr = m.draft || {};
   var at = function(spec){ var a = spec.split('|'); return { code: a[0], pi: Number(a[1]), ri: Number(a[2]), f: a[3] }; };
   // 入力は、その場で下書き(m.draft)に入れる(行を足したときに消えないように)
@@ -9584,7 +9654,7 @@ function bindSetBomModal(m){
     state.setBom = r.value;
     await appendAuditLog({ action:'セット構成の登録', target: Object.keys(edits).join('、'), before:null, after:'保存' });
     showToast('セット構成を保存しました');
-    state.modal = null; render();
+    finish();
   });
 }
 /* ---------- トータルピッキング(作業量CSV取込から・作業記録で番号ごとに受け持つ。2026-10-19) ----------
@@ -14422,7 +14492,7 @@ var COMMON_NAV_ITEMS = [
 var NAV_GROUPS = [
   { label:'現場', items:[ { role:'input' }, { role:'monitor' } ] },
   { label:'事務所', items:[ { role:'report' }, { role:'shukei' }, { role:'vcAlloc' }, { role:'stock' } ] },
-  { label:'管理', items:[ { role:'adminHub', tab:'data', label:'作業量CSV取込', ic:'data', lock:true }, { role:'adminHub', lock:true }, { role:'settingsHub', lock:true }, { href:'factory.html', label:'生産管理', ic:'factory', lock:true } ] }
+  { label:'管理', items:[ { role:'adminHub', tab:'data', label:'作業量CSV取込', ic:'data', lock:true }, { role:'adminHub', lock:true }, { role:'adminHub', tab:'setBom', label:'セット構成', ic:'listChecks', lock:true }, { role:'settingsHub', lock:true }, { href:'factory.html', label:'生産管理', ic:'factory', lock:true } ] }
 ];
 var ADMIN_NAV_ITEMS = [
   { role:'adminHub', label:'管理', ic:'👤' },
@@ -14491,7 +14561,7 @@ function renderTopbar(){
     if(item.href){
       return '<a class="topbar-nav-item" href="'+item.href+'"><span class="nav-ic">'+llIcon(item.ic)+'</span>'+esc(item.label)+(item.lock && locked ? '<span class="nav-lock" title="ログインが必要です">'+llIcon('lock',13)+'</span>' : '')+'</a>';
     }
-    var on = state.role===item.role && (item.tab ? state.adminHubTab===item.tab : !(item.role==='adminHub' && state.adminHubTab==='data'));
+    var on = state.role===item.role && (item.tab ? state.adminHubTab===item.tab : !(item.role==='adminHub' && (state.adminHubTab==='data' || state.adminHubTab==='setBom')));
     return '<button type="button" class="topbar-nav-item'+(on?' active':'')+'" data-nav-role="'+item.role+'"'+(item.tab ? ' data-nav-admin-tab="'+item.tab+'"' : '')+
       (isRoleBlockedForAccount(item.role) ? readOnlyBlockedAttrs(item.role)+' title="'+READONLY_BLOCKED_TITLE+'"' : '')+'>'+
       '<span class="nav-ic">'+llIcon(item.ic || item.role)+'</span>'+esc(item.label || labelOf[item.role] || '')+
@@ -14542,7 +14612,7 @@ function bindCommon(){
       if(isRoleBlockedForAccount(role)) return; // 閲覧専用アカウントでは開かない
       var navTab = el.getAttribute('data-nav-admin-tab');
       if(navTab) state.adminHubTab = navTab;
-      else if(role==='adminHub' && state.adminHubTab==='data') state.adminHubTab = 'today'; // 「管理」は、今日の状況から
+      else if(role==='adminHub' && (state.adminHubTab==='data' || state.adminHubTab==='setBom')) state.adminHubTab = 'today'; // 「管理」は、今日の状況から
       if(role==='monitor') state.monitorEntryRole = state.role || '';
       state.role = role || null;
       state.activeStaffId = null;
@@ -14655,7 +14725,8 @@ var ADMIN_HUB_TABS = [
   { key:'logMgmt', label:'実績・生産性', subs:[['logMgmt','作業記録'],['productivity','生産性']] },
   { key:'financial', label:'収支' },
   { key:'billing', label:'請求' },
-  { key:'data', label:'データ取込' }
+  { key:'data', label:'データ取込' },
+  { key:'setBom', label:'セット構成' }
 ];
 function renderAdminHub(){
   ensureManagerSessionChecked();
@@ -14677,6 +14748,7 @@ function renderAdminHub(){
   else if(state.adminHubTab==='logMgmt') body = renderLogManagementTab();
   else if(state.adminHubTab==='billing') body = renderBilling();
   else if(state.adminHubTab==='data') body = '<div class="mgr-wrap">'+renderCsvImportPanel()+renderDataHub()+renderKintoneSyncPanel()+'</div>';
+  else if(state.adminHubTab==='setBom') body = '<div class="mgr-wrap">'+renderSetBomAdmin()+'</div>';
   else body = renderManager();
   // 各画面は自前の外枠(mgr-wrap等)を持っているため、タブバーをその内側の先頭に差し込む
   return body.replace(/^(<div[^>]*>)/, '$1'+tabsHtml);
@@ -14860,6 +14932,7 @@ function bindAdminHub(){
       if(state.adminHubTab==='today' || state.adminHubTab==='staffing') requestFreshTodayData();
     });
   });
+  if(state.adminHubTab==='setBom') bindSetBomAdmin();
   if(state.adminHubTab==='staffing') bindStaffing();
   else if(state.adminHubTab==='productivity') bindProductivityTab();
   else if(state.adminHubTab==='financial') bindFinancial();

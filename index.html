@@ -14371,12 +14371,73 @@ function renderAdminHub(){
   // 各画面は自前の外枠(mgr-wrap等)を持っているため、タブバーをその内側の先頭に差し込む
   return body.replace(/^(<div[^>]*>)/, '$1'+tabsHtml);
 }
+/* ---------- kintone の自動取得の設定(2026-10-21) ----------
+   kv「kintone-auto-sync」に 時刻・曜日・項目 を保存する。GitHub Actions が日本時間 5〜21時台に15分ごとにこれを見て、
+   設定の時刻を過ぎていて今日まだ取っていない項目だけを取る(.github/scripts/kintone_sync.py)。 */
+var KINTONE_AUTO_SYNC_KEY = 'kintone-auto-sync';
+var KINTONE_AUTO_DEFAULT = { enabled: true, time: '06:43', days: [1,2,3,4,5,6], items: { outlook: true, product: true, report: true, price: false }, reportDays: 7 };
+var KINTONE_AUTO_ITEMS = [['outlook','見積もり・入荷予定'], ['product','商品台帳(入数・才数)'], ['report','作業日報'], ['price','作業単価']];
+function kintoneAutoCfg(){
+  var c = state.kAutoSync || {};
+  return { enabled: c.enabled!==false, time: c.time || KINTONE_AUTO_DEFAULT.time, days: Array.isArray(c.days) ? c.days : KINTONE_AUTO_DEFAULT.days,
+    items: Object.assign({}, KINTONE_AUTO_DEFAULT.items, c.items || {}), reportDays: c.reportDays || KINTONE_AUTO_DEFAULT.reportDays };
+}
+function kintoneAutoSummary(){
+  var c = kintoneAutoCfg(), WD = ['日','月','火','水','木','金','土'];
+  if(!c.enabled) return '自動取得はオフです';
+  var names = KINTONE_AUTO_ITEMS.filter(function(x){ return c.items[x[0]]; }).map(function(x){ return x[0]==='report' ? '作業日報(直近'+c.reportDays+'日)' : x[1].replace('(入数・才数)',''); });
+  return c.time+' ごろ('+(c.days.length===7 ? '毎日' : c.days.slice().sort().map(function(d){ return WD[d]; }).join('・'))+')に '+(names.join('・') || '(項目なし)')+' を自動で取得';
+}
+function renderKintoneAutoSync(){
+  var c = kintoneAutoCfg(), WD = ['日','月','火','水','木','金','土'];
+  var open = !!state.kAutoOpen;
+  var form = !open ? '' :
+    '<div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">'+
+      '<label style="font-size:14px;"><input type="checkbox" id="kAutoEnabled"'+(c.enabled ? ' checked' : '')+'> 自動で取得する</label>'+
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">取得する時刻 <input type="time" id="kAutoTime" value="'+esc(c.time)+'" min="05:00" max="21:45" step="300" style="font-size:16px;">'+
+        '<span class="sk-minor">5:00〜21:45 の間。15分ごとに確かめるので、時刻から15分くらい(GitHub が混むともっと)遅れることがあります</span></div>'+
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">曜日 '+WD.map(function(w, d){ return '<label style="font-size:14px;margin-right:6px;"><input type="checkbox" data-kauto-day="'+d+'"'+(c.days.indexOf(d)!==-1 ? ' checked' : '')+'> '+w+'</label>'; }).join('')+'</div>'+
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">項目 '+KINTONE_AUTO_ITEMS.map(function(x){
+        return '<label style="font-size:14px;margin-right:10px;"><input type="checkbox" data-kauto-item="'+x[0]+'"'+(c.items[x[0]] ? ' checked' : '')+'> '+esc(x[1])+'</label>';
+      }).join('')+'</div>'+
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">作業日報は 直近 <input type="number" id="kAutoReportDays" min="1" max="31" value="'+c.reportDays+'" style="width:70px;font-size:16px;"> 日(今日を含む)</div>'+
+      '<div style="display:flex;gap:8px;"><button type="button" class="add-btn" id="kAutoSave">保存する</button><button type="button" class="ll-btn" id="kAutoCancel">やめる</button></div>'+
+      '<div class="pool-hint" style="margin:0;">設定の時刻より後に手で取った項目は、その日はもう取りません。失敗したときは15分ごとにやり直します(時刻から3時間まで)。GitHub の Actions →「kintone-sync」→「Run workflow」で手で動かすと、時刻に関係なくオンの項目を全部取ります。</div>'+
+    '</div>';
+  return '<div class="stf-card" style="margin:4px 0 10px;border-left-color:#6366F1;">'+
+    '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><b>⏰ 自動取得</b><span style="font-size:13px;">'+esc(kintoneAutoSummary())+'</span>'+
+    (open ? '' : '<button type="button" class="vc-manage-toggle-btn" id="kAutoOpen" style="margin-left:auto;">設定を変える</button>')+'</div>'+form+'</div>';
+}
+function bindKintoneAutoSync(){
+  var op = document.getElementById('kAutoOpen');
+  if(op) op.addEventListener('click', function(){ state.kAutoOpen = true; render(); });
+  var cc = document.getElementById('kAutoCancel');
+  if(cc) cc.addEventListener('click', function(){ state.kAutoOpen = false; render(); });
+  var sv = document.getElementById('kAutoSave');
+  if(sv) sv.addEventListener('click', async function(){
+    var time = (document.getElementById('kAutoTime').value || '').slice(0,5);
+    if(!/^\d{2}:\d{2}$/.test(time) || time<'05:00' || time>'21:45'){ showToast('時刻は 5:00〜21:45 で入れてください'); return; }
+    var days = [].slice.call(document.querySelectorAll('[data-kauto-day]')).filter(function(x){ return x.checked; }).map(function(x){ return Number(x.getAttribute('data-kauto-day')); });
+    var items = {}; [].slice.call(document.querySelectorAll('[data-kauto-item]')).forEach(function(x){ items[x.getAttribute('data-kauto-item')] = x.checked; });
+    var rd = Math.max(1, Math.min(31, Math.floor(Number(document.getElementById('kAutoReportDays').value) || 7)));
+    var cfg = { enabled: document.getElementById('kAutoEnabled').checked, time: time, days: days, items: items, reportDays: rd, savedAt: new Date().toISOString(), savedBy: (state.managerSession && state.managerSession.user && state.managerSession.user.email) || '' };
+    sv.disabled = true;
+    var before = kintoneAutoSummary();
+    var ok = await persistKey(KINTONE_AUTO_SYNC_KEY, cfg);
+    sv.disabled = false;
+    if(!ok){ showToast('⚠️ 保存できませんでした'); return; }
+    state.kAutoSync = cfg; state.kAutoOpen = false;
+    await appendAuditLog({ action:'kintone自動取得の設定', target:'kintone', before: before, after: kintoneAutoSummary() });
+    showToast('保存しました。次の確認(15分ごと)から、この設定で取ります');
+    render();
+  });
+}
 /* ---------- データ取込の中の「kintoneの同期」(商品台帳・作業単価・作業日報) ---------- */
 function renderKintoneSyncPanel(){
   if(!state.kSyncLoaded && !state.kSyncLoading){
     state.kSyncLoading = true;
-    Promise.all([loadKintoneProductSettings(), loadKintoneSyncStatus(), fetchWorkPriceMaster(), loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; }), loadKeyJson(STOCK_OUTLOOK_STATUS_KEY, function(){ return null; })])
-      .then(function(r){ state.kintoneProductSettings = r[0]; state.kintoneSyncStatus = r[1]; state.workPriceMaster = r[2]; state.workReportStatus = r[3]; if(r[4] && !isUnverified(r[4])) state.outlookStatus = r[4]; })
+    Promise.all([loadKintoneProductSettings(), loadKintoneSyncStatus(), fetchWorkPriceMaster(), loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; }), loadKeyJson(STOCK_OUTLOOK_STATUS_KEY, function(){ return null; }), loadKeyJson(KINTONE_AUTO_SYNC_KEY, function(){ return null; })])
+      .then(function(r){ state.kintoneProductSettings = r[0]; state.kintoneSyncStatus = r[1]; state.workPriceMaster = r[2]; state.workReportStatus = r[3]; if(r[4] && !isUnverified(r[4])) state.outlookStatus = r[4]; if(r[5] && !isUnverified(r[5])) state.kAutoSync = r[5]; })
       .catch(function(){})
       .then(function(){ state.kSyncLoaded = true; state.kSyncLoading = false; render(); });
   }
@@ -14391,7 +14452,7 @@ function renderKintoneSyncPanel(){
     '<div class="panel-title" style="display:flex;align-items:center;gap:8px;">kintoneの同期'+
       '<button type="button" class="add-btn" id="kSyncAll"'+(busy?' disabled':'')+' style="margin-left:auto;font-size:13px;">'+(busy==='kSyncAll' ? '取得中…' : '🔄 全部まとめて取得')+'</button></div>'+
     (state.kSyncMsg ? '<div class="vc-import-status" style="white-space:pre-line;">'+esc(state.kSyncMsg)+'</div>' : '')+
-    '<div class="pool-hint" style="margin:4px 0 8px;">見積もり・入荷予定、商品台帳、作業日報(直近7日)は、<b>毎朝6:43ごろ(月〜土)に自動で取得</b>します。手で取るのは、すぐ新しくしたいときと作業単価だけです。</div>'+
+    renderKintoneAutoSync()+
     // 個別のボタンは折りたたむ(2026-10-20。自動になったため)
     '<details'+(state.kSyncDetailsOpen ? ' open' : '')+' id="kSyncDetails"><summary style="cursor:pointer;font-weight:700;margin:4px 0;">個別に取得する・最終同期</summary>'+
     '<table class="report-table"><thead><tr><th>データ</th><th>最終同期</th><th></th></tr></thead><tbody>'+
@@ -14405,6 +14466,7 @@ function renderKintoneSyncPanel(){
   '</div>';
 }
 function bindKintoneSyncPanel(){
+  bindKintoneAutoSync();
   var kd = document.getElementById('kSyncDetails');
   if(kd) kd.addEventListener('toggle', function(){ state.kSyncDetailsOpen = kd.open; });
   var fromEl = document.getElementById('kSyncFrom'), toEl = document.getElementById('kSyncTo');

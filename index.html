@@ -15493,7 +15493,7 @@ function bindStaffEditModal(m){
     if(beforeExcluded!==d.autoAssignExcluded){ if(d.autoAssignExcluded) s.autoAssignExcluded = true; else delete s.autoAssignExcluded; rosterChanged = true; }
     var beforeType = s.workerType==='lift' ? 'lift' : 'part';
     if(d.workerType && beforeType!==d.workerType){ if(d.workerType==='lift') s.workerType = 'lift'; else delete s.workerType; rosterChanged = true; }
-    if(beforeAtt!==d.attendance){ day.attendance[s.id] = d.attendance; dayChanged = true; }
+    if(beforeAtt!==d.attendance){ day.attendance[s.id] = d.attendance; markManualAttendance(day, s.id); dayChanged = true; }
     var beforeTodayEnd = (day.shiftEndOverrides && day.shiftEndOverrides[s.id]) || '', todayEndChanged = false;
     if(state.shiftSettings && state.shiftSettings.enabled){
       var curEnd = (day.shiftEndOverrides && day.shiftEndOverrides[s.id]) || '';
@@ -15616,6 +15616,7 @@ function bindStaffSettingsPanel(){
       var day = state.day;
       var before = !!day.attendance[id];
       day.attendance[id] = !day.attendance[id];
+      markManualAttendance(day, id);
       await saveDay(day);
       await appendAuditLog({ action:'出勤状態変更', target: staffById(id).name, before: (before?'出勤中':'欠勤'), after: (day.attendance[id]?'出勤中':'欠勤') });
       render();
@@ -16546,6 +16547,7 @@ function bindManager(){
       var day = state.day;
       var before = !!day.attendance[id];
       day.attendance[id] = !before;
+      markManualAttendance(day, id);
       var saved = await saveDay(day);
       if(saved!==false) await appendAuditLog({ action:'出勤状態変更', target: staffById(id).name, before: (before?'出勤中':'欠勤'), after: (day.attendance[id]?'出勤中':'欠勤') });
       render();
@@ -19853,6 +19855,11 @@ async function checkAutoConfirmStaffing(){
     autoConfirmBusy = false;
   }
 }
+/* 手で出勤/欠勤を切り替えた時刻(day.attendanceManualAt)。自動退勤のあとに手で出勤にした人(残業など)は、自動で退勤に戻さない */
+function markManualAttendance(day, id){
+  if(!day.attendanceManualAt) day.attendanceManualAt = {};
+  day.attendanceManualAt[id] = new Date().toISOString();
+}
 async function checkAutoShift(){
   if(!canAutoWrite()) return; // monitor(閲覧専用)は自動出退勤の書き込みを行わない
   if(!state.shiftSettings || !state.shiftSettings.enabled) return;
@@ -19865,19 +19872,28 @@ async function checkAutoShift(){
   if(!day.autoShiftStarted) day.autoShiftStarted = {};
   if(!day.autoShiftEnded) day.autoShiftEnded = {};
   if(!day.shiftEndOverrides) day.shiftEndOverrides = {};
-  var changed = false;
+  var changed = false, reEnded = [];
   activeRoster().forEach(function(s){
     var pattern = s.pattern || defaultPattern();
     if(!pattern[wd]) return;
     var endTime = staffShiftEndStr(s.id, day, state.shiftSettings, s); // 本日の勤務終了 → 退勤時間 → 終業
     var isOn = !!day.attendance[s.id];
+    // 自動退勤のあとに、手で出勤にしていないのに「出勤」に戻っていたら(古い内容の端末の保存など)、もう一度退勤にする(2026-10-21)
+    var manualAt = day.attendanceManualAt && day.attendanceManualAt[s.id];
+    var manualAfterEnd = manualAt && new Date(manualAt).getTime() >= new Date(day.date+'T'+endTime+':00').getTime(); // 終わりの時刻のあとに手で出勤にした(残業など)
+    if(isOn && day.autoShiftEnded[s.id] && nowStr >= endTime && !manualAfterEnd && !openLogsForStaff(day, s.id).length){
+      day.attendance[s.id] = false;
+      changed = true;
+      reEnded.push(s.name);
+      return;
+    }
     // 「祝日も休みにする」がONのスタッフは、曜日パターン上は出勤日でも、
     // 自動出退勤処理によって勝手に出勤中(true)へ変更しない。ただし、
     // 管理者が手動で祝日出勤にした場合の自動退勤処理までは妨げない。
     var holidayOff = isHolidayOffForStaff(s, day.date);
 
     var startTime = (day.shiftStartOverrides && isClockStr(day.shiftStartOverrides[s.id]) && day.shiftStartOverrides[s.id]) || state.shiftSettings.start; // 本日の勤務開始 → 始業
-    if(!isOn && !holidayOff && !day.autoShiftStarted[s.id] && nowStr >= startTime && nowStr < endTime){
+    if(!isOn && !holidayOff && !day.autoShiftStarted[s.id] && !day.autoShiftEnded[s.id] && nowStr >= startTime && nowStr < endTime){
       day.attendance[s.id] = true;
       day.autoShiftStarted[s.id] = true;
       changed = true;
@@ -19901,7 +19917,8 @@ async function checkAutoShift(){
     }
   });
   if(changed){
-    await saveDay(day);
+    var ok = await saveDay(day);
+    if(ok!==false && reEnded.length) await appendAuditLog({ action:'自動退勤(出勤に戻っていたのを直す)', target: reEnded.join('、'), before:'出勤中', after:'退勤' });
   }
 }
 async function closeLogAndProceed(qty, breakdown){

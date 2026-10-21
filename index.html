@@ -1490,12 +1490,10 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 @keyframes tpickLeave{ 0%{ opacity:1; transform:none; max-height:120px; } 60%{ opacity:0; transform:translateX(60px); max-height:120px; } 100%{ opacity:0; transform:translateX(60px); max-height:0; margin:0; padding:0; } }
 .tpick-line.is-leaving, .tpick-item.is-leaving{ animation:tpickLeave .38s ease forwards; overflow:hidden; pointer-events:none; }
 @keyframes tpickFlash{ 0%{ background:#D1FADF; } 100%{ background:transparent; } }
-.tpick-done-sec.is-flash > summary{ animation:tpickFlash 1.2s ease; border-radius:8px; }
-@media (prefers-reduced-motion: reduce){ .tpick-line.is-leaving, .tpick-item.is-leaving, .tpick-done-sec.is-flash > summary{ animation:none; } }
+@keyframes tpickTabFlash{ 0%{ box-shadow:0 0 0 0 rgba(18,183,106,.9); } 40%{ box-shadow:0 0 0 6px rgba(18,183,106,.45); } 100%{ box-shadow:0 0 0 0 rgba(18,183,106,0); } }
+.tpick-tabs .sub-switch-btn.is-flash{ animation:tpickTabFlash 1.2s ease; } /* 文字が読めるように、背景ではなく輪で光らせる */
+@media (prefers-reduced-motion: reduce){ .tpick-line.is-leaving, .tpick-item.is-leaving, .tpick-tabs .sub-switch-btn.is-flash{ animation:none; } }
 #tpickFinish:disabled{ opacity:.4; cursor:default; } /* 全部済になるまで押せない(押せないのが分かるように) */
-.tpick-done-sec{ margin-top:12px; border-top:1px dashed var(--paper-line); padding-top:10px; }
-.tpick-done-sec > summary{ cursor:pointer; font-weight:700; font-size:15px; color:#067647; padding:6px 2px; }
-.tpick-done-sec .muted{ font-weight:400; font-size:12px; }
 
 .tpick-line{ display:grid; grid-template-columns:1fr auto; gap:6px; align-items:stretch; }
 .tpick-short-btn{ border:1px solid #FDA29B; background:#fff; color:#B42318; border-radius:10px; padding:0 12px; font-size:14px; font-weight:700; cursor:pointer; min-width:64px; }
@@ -2045,7 +2043,6 @@ html[data-app-theme="dark"] .tpick-item{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] .tpick-item.is-done{background:rgba(47,233,123,0.13) !important;border-color:rgba(50,229,121,0.45) !important;color:#a5c0e8 !important}
 html[data-app-theme="dark"] .tpick-chk{color:#90fdcf !important}
 html[data-app-theme="dark"] .tpick-item.is-done .tpick-chk{background:rgba(48,232,111,0.13) !important}
-html[data-app-theme="dark"] .tpick-done-sec > summary{color:#94f9cf !important}
 html[data-app-theme="dark"] .tpick-short-btn{background:var(--dk-card) !important;color:#f1a29b !important}
 html[data-app-theme="dark"] .tpick-item.is-short{background:rgba(238,58,41,0.13) !important;border-color:rgba(250,42,29,0.45) !important}
 html[data-app-theme="dark"] .tpick-item.is-short .tpick-chk{background:rgba(247,48,33,0.16) !important;color:#f1a29b !important}
@@ -9161,7 +9158,7 @@ function tpickPrintGroups(groups, fileTitle){
         '<div class="meta"><div><div class="biz">'+esc(G.biz||'')+'</div><div class="who">'+esc(G.label)+'</div><div class="day"><span>出荷日</span><b>'+esc(G.day||'')+'</b></div></div>'+
         '<div class="sums"><div>総合計 <b>'+formatNum(total)+'</b></div><div>ページ合計 <b>'+formatNum(pageSum)+'</b></div></div></div>'+
         '<table><thead><tr><th>No.</th><th>ブロック</th><th>ロケーション</th><th>商品ID / 商品名</th><th>品質区分</th><th>引当数</th><th>済</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
-    }).join('');
+    }).join('')+(G.extraHtml ? '<div class="pg"><div class="top"><h1>セット構成部品</h1><div class="dt">日付: '+esc(stamp)+'</div></div><div class="meta"><div><div class="biz">'+esc(G.biz||'')+'</div><div class="who">'+esc(G.label)+'</div></div></div>'+G.extraHtml+'</div>' : '');
   }).join('');
   var css = '@page{size:A4 portrait;margin:10mm;} .pg{page-break-after:always;break-after:page;} .pg:last-child{page-break-after:auto;break-after:auto;}'+
     '.top{display:flex;align-items:flex-start;justify-content:space-between;} .top h1{font-size:22px;margin:4px 0 8px;letter-spacing:.1em;} .pn,.dt{font-size:12px;} .dt{margin-top:22px;}'+
@@ -9169,7 +9166,7 @@ function tpickPrintGroups(groups, fileTitle){
     '.who{font-size:22px;font-weight:800;margin:2px 0 6px;} .day{display:inline-flex;border:1.5px solid #000;} .day span{background:#ddd;padding:6px 14px;border-right:1.5px solid #000;font-size:13px;} .day b{padding:4px 18px;font-size:20px;font-weight:500;}'+
     '.sums{font-size:15px;text-align:right;} .sums b{display:inline-block;min-width:110px;border-bottom:1px solid #000;text-align:right;font-weight:500;}'+
     'table{width:100%;border-collapse:collapse;font-size:12.5px;} th{background:#ddd;font-weight:500;border:1px solid #000;padding:4px;} td{border:1px solid #000;padding:3px 6px;height:19px;}'+
-    'td.c{text-align:center;} td.q{text-align:right;font-size:18px;width:70px;} td.code{font-size:13px;} td.name{background:#eee;font-size:12.5px;} td.chk{width:34px;}';
+    'td.c{text-align:center;} td.q{text-align:right;font-size:18px;width:70px;} td.code{font-size:13px;} td.name{background:#eee;font-size:12.5px;} td.chk{width:34px;} td.num,th.num{text-align:right;}';
   printHtmlDoc(fileTitle || 'トータルピッキングリスト', html, css);
 }
 /* CSVを選んで作ったリスト(業務区分・出荷日ごと)を、パート用/リフト用で印刷 */
@@ -9181,13 +9178,15 @@ function tpickPrint(listIdx, who){
     'トータルピッキングリスト_'+(L.biz||'')+'_'+tpickDayLabel(L.day).replace('/','')+'_'+(who==='part'?'パート':'リフト'));
 }
 /* 取り込んだCSVの分(作業記録と同じ番号)を印刷。bids: 印刷する番号の id の並び */
-function tpickPrintSaved(taskId, bids, src){
+async function tpickPrintSaved(taskId, bids, src){
   var sv = src || state.tpickSaved || {}; // src: 取込のすぐあとの印刷のときの { tp, wv, date }
+  await Promise.all([setBomLoad(), logiStockLoad()]); // SET の構成部品(事務所用に付ける)
   var bs = tpickBatchesForTask(sv.tp, sv.wv, taskId).filter(function(b){ return bids.indexOf(b.id)!==-1; });
   var d = sv.date || todayStr();
   tpickPrintGroups(bs.map(function(b){
     return { label: b.label+'('+(TPICK_WHO_TITLE[b.who] || 'リフトマン用')+')', biz: taskById(taskId).name, day: parseInt(d.slice(5,7),10)+'/'+parseInt(d.slice(8),10),
-      items: b.items.map(function(it){ return { block: it.b, loc: it.l, code: it.c, name: it.n, quality: it.q, qty: it.qty }; }) };
+      items: b.items.map(function(it){ return { block: it.b, loc: it.l, code: it.c, name: it.n, quality: it.q, qty: it.qty }; }),
+      extraHtml: b.who==='office' ? setBomTablesHtml(setBomExpand(b.items), true) : '' };
   }), 'トータルピッキングリスト_'+taskById(taskId).name+'_'+d);
 }
 /* 取込ごとに、トータルピッキングを「使わない」にする/戻す(VC で使わないときなど。2026-10-21)。
@@ -9271,6 +9270,18 @@ function renderTpickPanel(){
   if(!state.tpickPanelOpen) return '';
   return '<div class="stf-card" id="tpickPanel" style="margin:8px 0 12px;border-left-color:#6366F1;">'+renderTotalPickSaved()+'</div>';
 }
+/* 今日の状況: 事務所の分(SET)の構成部品 */
+function setBomPanelHtml(officeBatches){
+  var items = []; (officeBatches||[]).forEach(function(b){ items = items.concat(b.items); });
+  if(!items.some(function(it){ return String(it.b||'').toUpperCase()==='SET'; })) return '';
+  if(!state.setBom || !state.logiStock){ Promise.all([setBomLoad(), logiStockLoad()]).then(function(){ render(); }); return '<div class="empty-note">セット構成を読み込み中…</div>'; }
+  var exp = setBomExpand(items), names = {};
+  exp.sets.forEach(function(S){ names[S.code] = S.name; });
+  return '<details class="stf-card" style="margin:8px 0;border-left-color:#7A5AF8;"'+(state.setBomOpen ? ' open' : '')+' id="setBomDetails"><summary style="cursor:pointer;font-weight:700;">🧩 セット構成部品(SET '+exp.sets.length+'品番'+(exp.missing.length ? ' ・ <span style="color:#B42318;">未登録 '+exp.missing.length+'</span>' : '')+')</summary>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;"><button type="button" class="vc-manage-toggle-btn" data-setbom-edit="'+esc(JSON.stringify({ codes: exp.sets.map(function(S){ return S.code; }), names: names }))+'">🧩 構成を登録・直す</button>'+
+    '<span class="pool-hint" style="margin:0;">印刷の「事務所用(SET・ZZZ)」にも、この表が付きます。必要数 = SET の数 × 構成数。在庫はロジザードの在庫(引当込み)。</span></div>'+
+    '<div style="overflow-x:auto;">'+setBomTablesHtml(exp, false)+'</div></details>';
+}
 function renderTotalPickSaved(){
   var sv = state.tpickSaved;
   if(!sv){ tpickSavedLoad(todayStr()); sv = state.tpickSaved; }
@@ -9315,8 +9326,193 @@ function renderTotalPickSaved(){
     return '<div class="panel" style="margin-bottom:12px;"><div class="panel-title" style="font-size:15px;">'+esc(taskById(tid).name)+' <span class="pool-hint" style="margin:0;">パート '+part.length+'番号 ・ リフトA '+liftA.length+'番号 ・ リフトA以外 '+lift.length+'番号'+(office.length ? ' ・ 事務所(SET・ZZZ) '+office.length+'枚' : '')+'</span></div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 8px;">'+allBtn(office, '事務所用(SET・ZZZ)')+allBtn(part, 'パートさん用')+allBtn(liftA, 'リフトマン用(A)')+allBtn(lift, 'リフトマン用(A以外)')+'</div>'+
       offRows(tid)+(bs.length ? '' : '<div class="empty-note" style="margin:6px 0 0;">この作業の取込は、全部「使わない」にしています</div>')+
+      setBomPanelHtml(office)+
       '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>番号</th><th class="num">行</th><th class="num">数</th><th>ロケーション</th><th>状態</th><th></th></tr></thead><tbody>'+bs.map(row).join('')+'</tbody></table></div>'+shortHtml+'</div>';
   }).join('');
+}
+/* ---------- セット構成(2026-10-21) ----------
+   SET の品番ごとに、構成部品(品番と1セットに使う数)を登録しておく台帳。kv「set-bom」= { sets: { SET品番: { items:[{code, qty}], at, by } } }。
+   トータルピッキングの事務所用(SET・ZZZ)で、SET の行から部品と必要な数(SET の数 × 構成数)・ロジザードの在庫とロケーションを自動で出す。
+   商品台帳(kintone)には構成部品が無いため、ロジリンクで登録する(一度登録すれば次から自動)。
+   1つの SET に構成のパターンをいくつも登録できる(sets[品番].patterns = [{ name, items }]。前の形の items は1つ目のパターン)。
+   使うパターンは、上から順に「部品の在庫が全部足りる」最初のパターン(どれも足りなければ1つ目)。ほかのパターンも並べる */
+function setBomPatterns(entry){
+  if(!entry) return [];
+  if(Array.isArray(entry.patterns) && entry.patterns.length) return entry.patterns.filter(function(pt){ return pt && pt.items && pt.items.length; });
+  return entry.items && entry.items.length ? [{ name:'', items: entry.items }] : [];
+}
+var SET_BOM_KEY = 'set-bom';
+function setBomLoad(force){
+  if(state.setBom && !force) return Promise.resolve(state.setBom);
+  return loadKeyJson(SET_BOM_KEY, function(){ return { sets:{} }; }).then(function(v){
+    state.setBom = (v && !isUnverified(v) && v.sets) ? v : { sets:{} }; return state.setBom;
+  }).catch(function(){ return state.setBom || { sets:{} }; });
+}
+function logiStockLoad(){
+  if(state.logiStock) return Promise.resolve(state.logiStock);
+  return loadKeyJson(SHUKEI_KEYS.logizard, function(){ return null; }).then(function(v){
+    state.logiStock = (v && !isUnverified(v) && v.products) ? v : { products:{} }; return state.logiStock;
+  }).catch(function(){ return { products:{} }; });
+}
+/* ロジザードの在庫(引当込み)・引当・ロケーションごとの在庫 */
+function logiStockOf(code){
+  var p = state.logiStock && state.logiStock.products && state.logiStock.products[code];
+  if(!p) return null;
+  var qty = 0, alloc = 0, locs = [];
+  Object.keys(p.blocks||{}).forEach(function(blk){
+    var b = p.blocks[blk]; qty += b.qty||0;
+    Object.keys(b.locQty||{}).forEach(function(l){ locs.push({ blk: blk, loc: l, qty: b.locQty[l], alloc: b.locAlloc ? (b.locAlloc[l]||0) : 0 }); alloc += b.locAlloc ? (b.locAlloc[l]||0) : 0; });
+  });
+  locs.sort(function(a, b){ return b.qty - a.qty; });
+  return { name: p.name||'', qty: qty, alloc: alloc, locs: locs };
+}
+/* SET の行から構成部品を広げる。items: トータルピッキングの行(b=ブロック, c=品番, n=商品名, qty) */
+function setBomExpand(items){
+  var sets = (state.setBom && state.setBom.sets) || {};
+  var bySet = {}, order = [];
+  (items||[]).forEach(function(it){
+    if(String(it.b||'').trim().toUpperCase()!=='SET') return;
+    if(!bySet[it.c]){ bySet[it.c] = { code: it.c, name: it.n||'', qty: 0 }; order.push(it.c); }
+    bySet[it.c].qty += it.qty;
+  });
+  var totals = {}, tOrder = [];
+  var list = order.map(function(code){
+    var S = bySet[code], pats = setBomPatterns(sets[code]);
+    if(!pats.length){ S.comps = null; return S; }
+    var built = pats.map(function(pt, pi){
+      var comps = pt.items.map(function(c){ return { code: c.code, per: Number(c.qty)||0, need: S.qty * (Number(c.qty)||0) }; });
+      var ok = comps.every(function(c){ var st = logiStockOf(c.code); return st && st.qty >= c.need; });
+      return { name: pt.name || ('パターン'+(pi+1)), comps: comps, ok: ok };
+    });
+    var pick = built.filter(function(b){ return b.ok; })[0] || built[0];
+    S.comps = pick.comps; S.patternName = built.length>1 ? pick.name : ''; S.patternOk = pick.ok;
+    S.alts = built.filter(function(b){ return b!==pick; });
+    S.comps.forEach(function(c){
+      if(!totals[c.code]){ totals[c.code] = { code: c.code, need: 0, sets: [] }; tOrder.push(c.code); }
+      totals[c.code].need += c.need; if(totals[c.code].sets.indexOf(code)===-1) totals[c.code].sets.push(code);
+    });
+    return S;
+  });
+  return { sets: list, totals: tOrder.map(function(k){ return totals[k]; }), missing: list.filter(function(S){ return !S.comps; }).map(function(S){ return S.code; }) };
+}
+function setBomLocText(st, max){
+  if(!st || !st.locs.length) return '';
+  return st.locs.slice(0, max||3).map(function(l){ return l.blk+' '+tpickLocText(l.loc)+'('+formatNum(l.qty)+')'; }).join(' ')+(st.locs.length>(max||3) ? ' ほか'+(st.locs.length-(max||3)) : '');
+}
+/* 部品の表(画面と印刷で同じ形)。print=true なら印刷用(済の欄つき) */
+function setBomTablesHtml(exp, print){
+  if(!exp.sets.length) return '';
+  var nameOf = function(code){ var st = logiStockOf(code); return st ? st.name : ''; };
+  var stockCell = function(code, need){
+    var st = logiStockOf(code);
+    if(!st) return '<td class="num"'+(print ? '' : ' style="color:#B42318;"')+'>在庫なし</td><td></td>';
+    var short = st.qty < need;
+    return '<td class="num"'+(short ? ' style="color:#B42318;font-weight:700;"' : '')+'>'+formatNum(st.qty)+(short ? ' 不足' : '')+'</td><td'+(print ? '' : ' class="sk-minor"')+'>'+esc(setBomLocText(st, 3))+'</td>';
+  };
+  var perSet = exp.sets.map(function(S){
+    if(!S.comps) return '<tr><td><b>'+esc(S.code)+'</b><div'+(print ? '' : ' class="sk-minor"')+'>'+esc(S.name)+'</div></td><td class="num">'+formatNum(S.qty)+'</td><td colspan="'+(print ? 6 : 5)+'" style="color:#B42318;">構成が未登録です</td></tr>';
+    var altText = (S.alts||[]).map(function(a){
+      return a.name+': '+a.comps.map(function(c){ var st = logiStockOf(c.code); return c.code+'×'+formatNum(c.per)+'(必要'+formatNum(c.need)+'・在庫'+(st ? formatNum(st.qty) : 'なし')+')'; }).join(' ')+(a.ok ? '' : ' 不足あり');
+    }).join(' / ');
+    var head = '<b>'+esc(S.code)+'</b><div'+(print ? '' : ' class="sk-minor"')+'>'+esc(S.name)+'</div>'+
+      (S.patternName ? '<div style="font-size:11px;'+(S.patternOk ? '' : 'color:#B42318;')+'">使う構成: '+esc(S.patternName)+(S.patternOk ? '' : '(どのパターンも在庫が足りません)')+'</div>' : '');
+    return S.comps.map(function(c, i){
+      return '<tr>'+(i===0 ? '<td rowspan="'+S.comps.length+'">'+head+'</td><td rowspan="'+S.comps.length+'" class="num">'+formatNum(S.qty)+'</td>' : '')+
+        '<td><b>'+esc(c.code)+'</b><div'+(print ? '' : ' class="sk-minor"')+'>'+esc(nameOf(c.code))+'</div></td><td class="num">×'+formatNum(c.per)+'</td><td class="num"><b>'+formatNum(c.need)+'</b></td>'+stockCell(c.code, c.need)+(print ? '<td class="chk"></td>' : '')+'</tr>';
+    }).join('')+(altText ? '<tr><td colspan="'+(print ? 8 : 7)+'" style="font-size:11px;color:#475467;">ほかの構成 ・ '+esc(altText)+'</td></tr>' : '');
+  }).join('');
+  var tot = exp.totals.length ? '<table class="'+(print ? '' : 'report-table')+'" style="margin-top:10px;"><thead><tr><th>部品の品番 / 商品名</th><th>使うSET</th><th class="num">必要数の合計</th><th class="num">ロジザード在庫</th><th>ロケーション(在庫)</th>'+(print ? '<th>済</th>' : '')+'</tr></thead><tbody>'+
+    exp.totals.map(function(t){ return '<tr><td><b>'+esc(t.code)+'</b><div'+(print ? '' : ' class="sk-minor"')+'>'+esc(nameOf(t.code))+'</div></td><td>'+esc(t.sets.join('・'))+'</td><td class="num"><b>'+formatNum(t.need)+'</b></td>'+stockCell(t.code, t.need)+(print ? '<td class="chk"></td>' : '')+'</tr>'; }).join('')+'</tbody></table>' : '';
+  return '<table class="'+(print ? '' : 'report-table')+'"><thead><tr><th>SET の品番 / 商品名</th><th class="num">SET の数</th><th>部品の品番 / 商品名</th><th class="num">構成数</th><th class="num">必要数</th><th class="num">ロジザード在庫</th><th>ロケーション(在庫)</th>'+(print ? '<th>済</th>' : '')+'</tr></thead><tbody>'+perSet+'</tbody></table>'+
+    (exp.totals.length ? '<div style="font-weight:700;margin:12px 0 4px;">部品ごとの合計</div>'+tot : '');
+}
+/* 構成の登録・直し(SET の品番ごとに「部品品番 数」を1行ずつ) */
+/* 1つの SET の入力(空行でパターンを区切る。#名前 でパターンの名前) → [{ name, items }] */
+function setBomParsePatterns(text){
+  var pats = [], bad = [];
+  String(text||'').replace(/\r/g,'').split(/\n\s*\n/).forEach(function(block){
+    var name = '', lines = block.split('\n').filter(function(l){ return l.trim(); });
+    if(lines.length && /^[#＃]/.test(lines[0].trim())){ name = lines.shift().trim().replace(/^[#＃]\s*/, ''); }
+    var r = setBomParseLines(lines.join('\n'));
+    bad = bad.concat(r.bad);
+    if(r.items.length) pats.push({ name: name, items: r.items });
+  });
+  return { patterns: pats, bad: bad };
+}
+function setBomParseLines(text){
+  var out = [], bad = [];
+  String(text||'').split(/\r?\n/).forEach(function(line){
+    var t = line.trim(); if(!t) return;
+    var a = t.split(/[\t,、\s]+/).filter(Boolean);
+    var q = a.length>=2 ? Number(String(a[1]).replace(/[^0-9.]/g,'')) : 1;
+    if(!a[0] || !(q>0)) { bad.push(t); return; }
+    out.push({ code: a[0], qty: q });
+  });
+  return { items: out, bad: bad };
+}
+function renderSetBomModal(m){
+  var sets = (state.setBom && state.setBom.sets) || {};
+  var codes = (m.codes||[]).slice();
+  Object.keys(sets).sort().forEach(function(c){ if(m.showAll && codes.indexOf(c)===-1) codes.push(c); });
+  var rows = codes.map(function(code){
+    var cur = sets[code], pats = setBomPatterns(cur);
+    var txt = pats.map(function(pt){ return (pt.name ? '#'+pt.name+'\n' : '')+pt.items.map(function(c){ return c.code+' '+c.qty; }).join('\n'); }).join('\n\n');
+    var nLines = txt ? txt.split('\n').length : 0;
+    var st = logiStockOf(code);
+    return '<div class="panel" style="margin:0 0 10px;padding:10px 12px;"><div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;"><b>'+esc(code)+'</b><span class="sk-minor">'+esc((st && st.name) || (m.names && m.names[code]) || '')+'</span>'+
+      (pats.length ? '<span class="st-label is-green">登録済み'+(pats.length>1 ? ' ・ '+pats.length+'パターン' : '')+'</span>' : '<span class="st-label is-orange">未登録</span>')+'</div>'+
+      '<textarea data-setbom-code="'+esc(code)+'" rows="'+Math.max(3, nLines+1)+'" style="width:100%;margin-top:6px;font-size:15px;font-family:inherit;" placeholder="部品品番 数(1行に1つ。例: 830-07 2)&#10;&#10;別のパターンは、空の行のあとに続けて書く(1行目に #名前 で名前を付けられます)">'+esc(txt)+'</textarea></div>';
+  }).join('') || '<div class="empty-note">SET の品番がありません</div>';
+  return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card" style="max-width:680px;">'+
+    '<div class="modal-task-name">🧩 セット構成の登録</div>'+
+    '<div class="pool-hint" style="margin:4px 0 10px;">SET の品番ごとに、構成部品を「部品品番 数」で1行ずつ入れます(Excel から2列を貼り付けても大丈夫です)。<b>構成のパターンが複数あるときは、空の行で区切って続けて書きます</b>(1行目に「#名前」で名前。例: #在庫が少ないとき)。使うのは、上から順に部品の在庫が全部足りるパターンです。空にすると登録を消します。一度登録すると、次からトータルピッキングの事務所用に部品が自動で出ます。</div>'+
+    rows+
+    (m.showAll ? '' : '<button type="button" class="ll-btn" id="setBomShowAll" style="margin-bottom:8px;">登録済みの SET も全部出す</button>')+
+    '<details style="margin:6px 0;"><summary style="cursor:pointer;font-weight:700;">まとめて貼り付ける(SET品番・部品品番・数・パターン名 の3〜4列)</summary><textarea id="setBomBulk" rows="5" style="width:100%;margin-top:6px;font-size:14px;" placeholder="SET品番 部品品番 数 (パターン名)"></textarea></details>'+
+    '<div class="modal-actions" style="margin-top:12px;"><button type="button" class="modal-cancel" id="setBomCancel">閉じる</button><button type="button" class="modal-confirm" id="setBomSave">保存する</button></div>'+
+  '</div></div>';
+}
+function bindSetBomModal(m){
+  var c = document.getElementById('setBomCancel'); if(c) c.addEventListener('click', function(){ state.modal = null; render(); });
+  var all = document.getElementById('setBomShowAll'); if(all) all.addEventListener('click', function(){ state.modal = Object.assign({}, m, { showAll: true }); render(); });
+  var sv = document.getElementById('setBomSave');
+  if(sv) sv.addEventListener('click', async function(){
+    var edits = {}, bad = [];
+    document.querySelectorAll('[data-setbom-code]').forEach(function(t){ var r = setBomParsePatterns(t.value); edits[t.getAttribute('data-setbom-code')] = r.patterns; bad = bad.concat(r.bad); });
+    var bulk = document.getElementById('setBomBulk');
+    if(bulk && bulk.value.trim()){
+      var bulkSets = {}; // SET品番 → { パターン名 → items }(貼り付けた SET は、貼り付けの内容に置き換える)
+      bulk.value.split(/\r?\n/).forEach(function(line){
+        var a = line.trim().split(/\t|,|、/).map(function(x){ return x.trim(); }).filter(Boolean);
+        if(a.length===1) a = line.trim().split(/\s+/);
+        if(!a.length || !a[0]) return;
+        var q = a.length>=3 ? Number(String(a[2]).replace(/[^0-9.]/g,'')) : 1;
+        if(a.length<2 || !(q>0)){ bad.push(line.trim()); return; }
+        var pn = a[3] || '';
+        var bs = bulkSets[a[0]] || (bulkSets[a[0]] = { order: [], by: {} });
+        if(!bs.by[pn]){ bs.by[pn] = []; bs.order.push(pn); }
+        bs.by[pn].push({ code: a[1], qty: q });
+      });
+      Object.keys(bulkSets).forEach(function(code){ var bs = bulkSets[code]; edits[code] = bs.order.map(function(pn){ return { name: pn, items: bs.by[pn] }; }); });
+    }
+    if(bad.length){ showToast('読めない行があります: '+bad.slice(0,3).join(' / ')); return; }
+    sv.disabled = true;
+    var who = (state.managerSession && state.managerSession.user && state.managerSession.user.email) || '';
+    var r = await tpickKvUpdate(SET_BOM_KEY, function(cur){
+      cur.sets = cur.sets || {};
+      Object.keys(edits).forEach(function(code){
+        if(!edits[code].length) delete cur.sets[code];
+        else cur.sets[code] = { patterns: edits[code], items: edits[code][0].items, at: new Date().toISOString(), by: who }; // items: 前の形(1つ目のパターン)
+      });
+      return cur;
+    });
+    sv.disabled = false;
+    if(!r.ok){ showToast('⚠️ 保存できませんでした'); return; }
+    state.setBom = r.value;
+    await appendAuditLog({ action:'セット構成の登録', target: Object.keys(edits).join('、'), before:null, after:'保存' });
+    showToast('セット構成を保存しました');
+    state.modal = null; render();
+  });
 }
 /* ---------- トータルピッキング(作業量CSV取込から・作業記録で番号ごとに受け持つ。2026-10-19) ----------
    取込を確定したとき、作業枠ごとに 品番・ロケーションごとの合計(引当数)を kv「tpick:日付」に保存する(取込ごと)。
@@ -9474,13 +9670,17 @@ function renderTpickBatchModal(m){
   };
   var todoIdx = [], doneIdx = [];
   b.items.forEach(function(it, i){ (done[i] || short[i] ? doneIdx : todoIdx).push(i); });
-  var rows = todoIdx.map(rowHtml).join('') || '<div class="empty-note" style="margin:4px 0;">'+(b.items.length ? '全部ピッキング済みです' : '')+(canEdit ? '。下の「✅ この番号を完了」を押してください' : '')+'</div>';
-  prevB = null; prevL = null;
-  var doneRows = doneIdx.map(rowHtml).join('');
+  // 「未ピッキング」「ピッキング済み」のタブ(2026-10-21。前は下の折りたたみ)
+  var tab = m.tab==='done' ? 'done' : 'todo';
   var nShort = doneIdx.filter(function(i){ return short[i]; }).length;
-  var flash = state.tpickDoneFlash && Date.now()-state.tpickDoneFlash < 1500; // 移ったばかり: 欄を光らせる
-  var doneSec = doneIdx.length ? '<details class="tpick-done-sec'+(flash ? ' is-flash' : '')+'" id="tpickDoneSec"'+(state.tpickDoneOpen ? ' open' : '')+'><summary>✓ ピッキング済み '+doneIdx.length+'行'+(nShort ? '(うち欠品 '+nShort+'行)' : '')+' <span class="muted">押すと見られます'+(canEdit ? '・行を押すと戻せます' : '')+'</span></summary>'+
-    '<div class="tpick-items" style="margin-top:8px;">'+doneRows+'</div></details>' : '';
+  var rows = tab==='todo'
+    ? (todoIdx.map(rowHtml).join('') || '<div class="empty-note" style="margin:4px 0;">'+(b.items.length ? '全部ピッキング済みです' : '')+(canEdit ? '。下の「✅ この番号を完了」を押してください' : '')+'</div>')
+    : (doneIdx.map(rowHtml).join('') || '<div class="empty-note" style="margin:4px 0;">まだありません</div>');
+  var flash = state.tpickDoneFlash && Date.now()-state.tpickDoneFlash.at < 1500 ? state.tpickDoneFlash.to : ''; // 移ったばかり: 移った先のタブを光らせる
+  var tabsHtml = '<div class="sub-switch tpick-tabs" style="margin:0 0 10px;">'+
+    '<button type="button" class="sub-switch-btn'+(tab==='todo' ? ' active' : '')+(flash==='todo' ? ' is-flash' : '')+'" data-tpick-tab="todo">📋 未ピッキング '+todoIdx.length+'</button>'+
+    '<button type="button" class="sub-switch-btn'+(tab==='done' ? ' active' : '')+(flash==='done' ? ' is-flash' : '')+'" data-tpick-tab="done">✓ ピッキング済み '+doneIdx.length+(nShort ? '(欠品 '+nShort+')' : '')+'</button></div>'+
+    (tab==='done' && canEdit ? '<div class="pool-hint" style="margin:-4px 0 8px;">まちがえた行は押すと「未ピッキング」に戻ります</div>' : '');
   var nDone = tpickHandledCount(p);
   var sIt = (canEdit && m.shortIdx!=null) ? b.items[m.shortIdx] : null;
   var shortHtml = sIt ? '<div class="tpick-short-box"><div><b style="color:#B42318;">欠品</b> ・ '+esc(sIt.b)+' '+esc(tpickLocText(sIt.l))+' ・ <b>'+esc(sIt.c)+'</b> '+esc(sIt.n)+'</div>'+
@@ -9492,8 +9692,8 @@ function renderTpickBatchModal(m){
     '<div class="modal-task-name">'+esc(b.label)+' ・ '+b.items.length+'行 ・ '+formatNum(b.qty)+'個</div>'+
     '<div class="pool-hint" style="margin:4px 0 8px;">'+(mine ? (p.doneAt ? '完了しました' : '取った行を押すと「済」になります(もう一度押すと戻ります)。足りないときは右の「欠品」') : (p.staffId ? esc(p.staffName||'')+'さんが受け持っています(見るだけ)' : '受け持っていません(見るだけ)'))+' ・ 済 '+nDone+'/'+b.items.length+'</div>'+
     shortHtml+
+    tabsHtml+
     '<div class="tpick-items">'+rows+'</div>'+
-    doneSec+
     '<div class="modal-actions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">'+
       '<button type="button" class="modal-cancel" id="tpickBack">一覧に戻る</button>'+
       (mine && !p.doneAt ? '<button type="button" class="modal-cancel" id="tpickRelease">受け持ちをやめる</button><button type="button" class="modal-confirm" id="tpickFinish"'+(nDone===b.items.length ? '' : ' disabled')+'>✅ この番号を完了</button>' : '')+
@@ -9510,8 +9710,7 @@ function bindTpickModals(m){
   if(close) close.addEventListener('click', function(){ state.modal = null; state.suppressRender = false; render(); });
   var back = document.getElementById('tpickBack');
   if(back) back.addEventListener('click', function(){ state.modal = { kind:'tpickList', taskId: m.taskId, who: m.who }; render(); });
-  var ds = document.getElementById('tpickDoneSec');
-  if(ds) ds.addEventListener('toggle', function(){ state.tpickDoneOpen = ds.open; });
+  document.querySelectorAll('[data-tpick-tab]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = Object.assign({}, m, { tab: el.getAttribute('data-tpick-tab'), shortIdx: null }); render(); }); });
   document.querySelectorAll('[data-tpick-who]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = Object.assign({}, m, { who: el.getAttribute('data-tpick-who'), whoPicked: true }); render(); }); });
   document.querySelectorAll('[data-tpick-batch]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = { kind:'tpickBatch', taskId: m.taskId, who: m.who, batchId: el.getAttribute('data-tpick-batch') }; render(); }); });
   var busy = false;
@@ -9536,7 +9735,7 @@ function bindTpickModals(m){
       var i = el.getAttribute('data-tpick-check'), me = state.activeStaffId;
       el.classList.toggle('is-done'); // 先に見た目だけ変える(保存できなければ戻す)
       // まだ取っていない行を済にしたときは、右へすべって消える動きを見せてから「ピッキング済み」へ移す(2026-10-21)
-      var leaving = el.classList.contains('is-done') && !el.closest('.tpick-done-sec');
+      var leaving = true; // 押した行は、今のタブから出ていく(未ピッキング → 済み、済み → 未ピッキング)
       var line = el.closest('.tpick-line') || el;
       if(leaving) line.classList.add('is-leaving');
       var wait = new Promise(function(res){ setTimeout(res, leaving ? 380 : 0); });
@@ -9550,7 +9749,7 @@ function bindTpickModals(m){
       await wait;
       busy = false;
       if(!r.ok) showToast(r.aborted ? 'この番号はあなたの受け持ちではなくなっています' : '⚠️ 保存できませんでした。もう一度押してください');
-      if(r.ok && leaving) state.tpickDoneFlash = Date.now();
+      if(r.ok) state.tpickDoneFlash = { at: Date.now(), to: m.tab==='done' ? 'todo' : 'done' };
       render();
     });
   });
@@ -9591,6 +9790,7 @@ function bindTpickModals(m){
     busy = false;
     if(!r.ok){ showToast(r.aborted ? 'この番号はあなたの受け持ちではなくなっています' : '⚠️ 保存できませんでした。もう一度押してください'); sOk.disabled = false; return; }
     showToast('欠品にしました('+it.c+' '+got+'/'+it.qty+')');
+    state.tpickDoneFlash = { at: Date.now(), to: 'done' };
     state.modal = Object.assign({}, m, { shortIdx: null }); render();
   });
   var rel = document.getElementById('tpickRelease');
@@ -9625,6 +9825,11 @@ function bindTotalPick(){
   });
   document.querySelectorAll('[data-tpick-sp]').forEach(function(el){
     el.addEventListener('click', function(){ var p = el.getAttribute('data-tpick-sp').split('|'); tpickPrintSaved(p[0], p[1].split(',')); });
+  });
+  var sbd = document.getElementById('setBomDetails');
+  if(sbd) sbd.addEventListener('toggle', function(){ state.setBomOpen = sbd.open; });
+  document.querySelectorAll('[data-setbom-edit]').forEach(function(el){
+    el.addEventListener('click', function(){ var d = JSON.parse(el.getAttribute('data-setbom-edit')); state.modal = { kind:'setBomEdit', codes: d.codes, names: d.names }; render(); });
   });
   document.querySelectorAll('[data-tpick-off]').forEach(function(el){
     el.addEventListener('click', async function(){
@@ -20492,6 +20697,7 @@ function renderModal(){
   if(m.kind==='assignTaskPicker') return renderAssignTaskPickerModal(m);
   if(m.kind==='tpickList') return renderTpickListModal(m);
   if(m.kind==='tpickAfterImport') return renderTpickAfterImportModal(m);
+  if(m.kind==='setBomEdit') return renderSetBomModal(m);
   if(m.kind==='tpickBatch') return renderTpickBatchModal(m);
   if(m.kind==='reassignConfirm') return renderReassignConfirmModal(m);
   if(m.kind==='wvImportEdit') return renderWvImportEditModal(m);
@@ -21336,6 +21542,7 @@ function bindModal(){
   if(m.kind==='assignTaskPicker'){ bindAssignTaskPickerModal(m); return; }
   if(m.kind==='tpickList' || m.kind==='tpickBatch'){ bindTpickModals(m); return; }
   if(m.kind==='tpickAfterImport'){ bindTpickAfterImportModal(m); return; }
+  if(m.kind==='setBomEdit'){ bindSetBomModal(m); return; }
   if(m.kind==='reassignConfirm'){ bindReassignConfirmModal(m); return; }
   if(m.kind==='wvImportEdit'){ bindWvImportEditModal(m); return; }
   if(m.kind==='autoMapPreview'){ bindAutoMapPreviewModal(m); return; }

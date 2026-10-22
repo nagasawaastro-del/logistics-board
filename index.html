@@ -9134,50 +9134,6 @@ function tpickIsPart(block, loc){
   }
   return false;
 }
-function tpickParseFiles(files, cb){
-  var lists = {}, errors = [], left = files.length, fileNames = [];
-  if(!left){ cb({ lists: [], errors: ['CSVファイルを選んでください'] }); return; }
-  Array.prototype.forEach.call(files, function(file){
-    fileNames.push(file.name);
-    var reader = new FileReader();
-    reader.onload = function(e){
-      try{
-        var text; try{ text = new TextDecoder('shift-jis').decode(e.target.result); }catch(err){ text = new TextDecoder('utf-8').decode(e.target.result); }
-        var parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
-        var hd = (parsed.meta && parsed.meta.fields) || [];
-        var need = ['ブロック略称','ロケーション','商品ID','出荷引当数'];
-        var miss = need.filter(function(c){ return hd.indexOf(c)===-1; });
-        if(miss.length){ errors.push(file.name+': 列が見つかりません('+miss.join('・')+')。ロジザードの出荷のCSVを選んでください'); }
-        else (parsed.data||[]).forEach(function(r){
-          var code = String(r['商品ID']||'').trim();
-          if(!code || isDummyProductCode(code)) return;
-          var qty = Number(String(r['出荷引当数']||'').replace(/,/g,'')) || 0;
-          if(!(qty>0)) return;
-          var biz = String(r['業務区分']||'').trim(), day = String(r['出荷作業日']||r['出荷指示日']||'').trim();
-          var lk = biz+'|'+day;
-          var L = lists[lk] || (lists[lk] = { biz: biz, day: day, items: {} });
-          var block = String(r['ブロック略称']||'').trim(), loc = String(r['ロケーション']||'').trim(), q = String(r['品質区分']||'').trim();
-          var k = block+'|'+loc+'|'+code+'|'+q;
-          var it = L.items[k] || (L.items[k] = { block: block, loc: loc, code: code, name: String(r['商品名']||'').trim(), quality: q, qty: 0, part: tpickIsPart(block, loc) });
-          it.qty += qty;
-        });
-      }catch(err){ errors.push(file.name+': 読み込めませんでした'); }
-      if(--left===0){
-        var out = Object.keys(lists).sort().map(function(k){
-          var L = lists[k];
-          var items = Object.keys(L.items).map(function(x){ return L.items[x]; }).sort(function(a,b){
-            return String(a.block).localeCompare(String(b.block)) || String(a.loc).localeCompare(String(b.loc), 'ja', { numeric:true }) || String(a.code).localeCompare(String(b.code), 'ja', { numeric:true });
-          });
-          return { biz: L.biz, day: L.day, items: items };
-        });
-        cb({ lists: out, errors: errors, fileNames: fileNames });
-      }
-    };
-    reader.onerror = function(){ errors.push(file.name+': 読み込めませんでした'); if(--left===0) cb({ lists: [], errors: errors }); };
-    reader.readAsArrayBuffer(file);
-  });
-}
-function tpickDayLabel(d){ var s = String(d||''); return /^\d{8}$/.test(s) ? parseInt(s.slice(4,6),10)+'/'+parseInt(s.slice(6),10) : s; }
 function tpickQualityText(q){ var s = String(q||'').trim(); return s==='' ? '' : ({ '0':'良品', '1':'良品', '01':'良品' }[s] || s); }
 /* 印刷: 見本(ロジザードのトータルピッキングリスト)と同じ並び。グループ(番号・パート用など)ごとに新しいページから、1ページ15行。
    groups: [{ label, biz, day, items:[{ block, loc, code, name, quality, qty }] }] */
@@ -9213,14 +9169,6 @@ function tpickPrintGroups(groups, fileTitle){
     'table{width:100%;border-collapse:collapse;font-size:12.5px;} th{background:#ddd;font-weight:500;border:1px solid #000;padding:4px;} td{border:1px solid #000;padding:3px 6px;height:19px;}'+
     'td.c{text-align:center;} td.q{text-align:right;font-size:18px;width:70px;} td.code{font-size:13px;} td.name{background:#eee;font-size:12.5px;} td.chk{width:34px;} td.num,th.num{text-align:right;}';
   printHtmlDoc(fileTitle || 'トータルピッキングリスト', html, css);
-}
-/* CSVを選んで作ったリスト(業務区分・出荷日ごと)を、パート用/リフト用で印刷 */
-function tpickPrint(listIdx, who){
-  var t = state.tpick; if(!t || !t.lists || !t.lists[listIdx]) return;
-  var L = t.lists[listIdx];
-  var items = L.items.filter(function(it){ return tpickWhoOf(it)===who; });
-  tpickPrintGroups([{ label: who==='part' ? 'パートさん用(AA・S1-1〜)' : TPICK_WHO_TITLE[who] || 'リフトマン用', biz: '対象業務 '+(L.biz||'—'), day: tpickDayLabel(L.day), items: items }],
-    'トータルピッキングリスト_'+(L.biz||'')+'_'+tpickDayLabel(L.day).replace('/','')+'_'+(who==='part'?'パート':'リフト'));
 }
 /* 取り込んだCSVの分(作業記録と同じ番号)を印刷。bids: 印刷する番号の id の並び */
 async function tpickPrintSaved(taskId, bids, src, skipBomCheck){
@@ -9552,30 +9500,6 @@ function bindSetBomAdmin(){
       showToast('消しました'); render();
     });
   });
-}
-/* 構成の登録・直し(SET の品番ごとに「部品品番 数」を1行ずつ) */
-/* 1つの SET の入力(空行でパターンを区切る。#名前 でパターンの名前) → [{ name, items }] */
-function setBomParsePatterns(text){
-  var pats = [], bad = [];
-  String(text||'').replace(/\r/g,'').split(/\n\s*\n/).forEach(function(block){
-    var name = '', lines = block.split('\n').filter(function(l){ return l.trim(); });
-    if(lines.length && /^[#＃]/.test(lines[0].trim())){ name = lines.shift().trim().replace(/^[#＃]\s*/, ''); }
-    var r = setBomParseLines(lines.join('\n'));
-    bad = bad.concat(r.bad);
-    if(r.items.length) pats.push({ name: name, items: r.items });
-  });
-  return { patterns: pats, bad: bad };
-}
-function setBomParseLines(text){
-  var out = [], bad = [];
-  String(text||'').split(/\r?\n/).forEach(function(line){
-    var t = line.trim(); if(!t) return;
-    var a = t.split(/[\t,、\s]+/).filter(Boolean);
-    var q = a.length>=2 ? Number(String(a[1]).replace(/[^0-9.]/g,'')) : 1;
-    if(!a[0] || !(q>0)) { bad.push(t); return; }
-    out.push({ code: a[0], qty: q });
-  });
-  return { items: out, bad: bad };
 }
 function renderSetBomModal(m){
   var sets = (state.setBom && state.setBom.sets) || {};
@@ -10139,15 +10063,6 @@ function bindTpickModals(m){
   });
 }
 function bindTotalPick(){
-  var f = document.getElementById('tpickFile');
-  if(f) f.addEventListener('change', function(){
-    var files = f.files; if(!files || !files.length) return;
-    state.tpick = { loading: true }; render();
-    tpickParseFiles(files, function(r){ state.tpick = { lists: r.lists, errors: r.errors, fileNames: r.fileNames }; render(); });
-  });
-  document.querySelectorAll('[data-tpick-print]').forEach(function(el){
-    el.addEventListener('click', function(){ var p = el.getAttribute('data-tpick-print').split('|'); tpickPrint(Number(p[0]), p[1]); });
-  });
   document.querySelectorAll('[data-tpick-sp]').forEach(function(el){
     el.addEventListener('click', function(){ var p = el.getAttribute('data-tpick-sp').split('|'); tpickPrintSaved(p[0], p[1].split(',')); });
   });

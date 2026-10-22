@@ -1161,7 +1161,7 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .mon-empty{color:var(--slate-500);text-align:center;padding:60px 0;font-size:14px;grid-column:1/-1;}
 
 
-.mon-footer{flex:none;display:grid;grid-template-columns:1fr;gap:0;border-top:2px solid var(--ink-700);}
+.mon-footer{flex:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:0;border-top:2px solid var(--ink-700);}
 @media (max-width:900px){.mon-footer{grid-template-columns:1fr;}}
 .mon-footer-col{padding:12px 26px;}
 .mon-footer-title{font-family:var(--font-display);font-weight:700;font-size:13px;color:#fff;margin-bottom:8px;}
@@ -1504,6 +1504,13 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .tpick-cam-bar{ display:flex; gap:10px; align-items:center; padding:8px 10px; color:#fff; font-size:14px; }
 .tpick-cam-bar .tpick-cam-msg{ flex:1; color:#D0D5DD; font-size:12px; }
 .tpick-cam-bar .ll-btn{ background:#fff; }
+.mon-tp{ display:flex; flex-direction:column; gap:6px; }
+.mon-tp-row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:15px; }
+.mon-tp-task{ font-weight:800; min-width:9em; }
+.mon-tp-chip{ border:1px solid rgba(148,163,184,.5); border-radius:999px; padding:2px 10px; font-size:14px; }
+.mon-tp-chip.is-done{ border-color:#12B76A; color:#12B76A; }
+.mon-tp-note{ font-size:13px; opacity:.85; }
+.mon-tp-note.is-short{ color:#F04438; font-weight:700; opacity:1; }
 @keyframes tpickTabFlash{ 0%{ box-shadow:0 0 0 0 rgba(18,183,106,.9); } 40%{ box-shadow:0 0 0 6px rgba(18,183,106,.45); } 100%{ box-shadow:0 0 0 0 rgba(18,183,106,0); } }
 .tpick-tabs .sub-switch-btn.is-flash{ animation:tpickTabFlash 1.2s ease; } /* 文字が読めるように、背景ではなく輪で光らせる */
 @media (prefers-reduced-motion: reduce){ .tpick-line.is-leaving, .tpick-item.is-leaving, .tpick-tabs .sub-switch-btn.is-flash{ animation:none; } }
@@ -2059,6 +2066,8 @@ html[data-app-theme="dark"] .tpick-chk{color:#90fdcf !important}
 html[data-app-theme="dark"] .tpick-item.is-done .tpick-chk{background:rgba(48,232,111,0.13) !important}
 html[data-app-theme="dark"] .sb-row-head{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .tpick-cam-bar .ll-btn{background:var(--dk-card) !important}
+html[data-app-theme="dark"] .mon-tp-chip.is-done{color:#98f4c9 !important}
+html[data-app-theme="dark"] .mon-tp-note.is-short{color:#f79c96 !important}
 html[data-app-theme="dark"] .tpick-short-btn{background:var(--dk-card) !important;color:#f1a29b !important}
 html[data-app-theme="dark"] .tpick-item.is-short{background:rgba(238,58,41,0.13) !important;border-color:rgba(250,42,29,0.45) !important}
 html[data-app-theme="dark"] .tpick-item.is-short .tpick-chk{background:rgba(247,48,33,0.16) !important;color:#f1a29b !important}
@@ -8796,6 +8805,24 @@ function shukeiParseYayoi(text, site){
   });
   return { products: products, rowCount: Object.keys(products).length };
 }
+/* 弥生の在庫のCSV(全外部倉庫など)から、高屋・丹南以外の倉庫の在庫を倉庫ごとに読む(外部倉庫から戻す品番の案内に使う。2026-10-22)。
+   在庫が 0 より多い行だけ。戻り値 { products: { 品番: { name, packQty, wh: { 倉庫コード: 数 } } }, warehouses: { 倉庫コード: { items, total } } } */
+var YAYOI_WH_KEY = 'yayoi-wh-stock';
+function shukeiParseYayoiWarehouses(text){
+  var rows = shukeiParseTable(text);
+  var exported = rows.length && rows.every(function(r){ return r.length>=8 && r[0]==='' && r[1]===''; });
+  if(!exported) return null;
+  var siteWh = {}; Object.keys(SHUKEI_SITES).forEach(function(k){ siteWh[SHUKEI_SITES[k].yayoiWarehouse] = true; });
+  var products = {}, warehouses = {}, n = 0;
+  rows.forEach(function(r){
+    var code = r[2], wh = r[6], q = shukeiNum(r[7]);
+    if(!code || siteWh[wh] || !(q>0)) return;
+    var p = products[code] || (products[code] = { name: r[3]||'', packQty: shukeiNum(r[5]) || null, wh: {} });
+    p.wh[wh] = (p.wh[wh]||0) + q;
+    var w = warehouses[wh] || (warehouses[wh] = { items: 0, total: 0 }); w.items++; w.total += q; n++;
+  });
+  return { products: products, warehouses: warehouses, rowCount: n };
+}
 /* 出荷集計表の1行分の計算。data: { logizard, yayoi } / pm: 商品台帳 { 品番: { packQty, cubicVolume } } */
 function shukeiComputeRow(siteKey, row, data, pm){
   var site = SHUKEI_SITES[siteKey];
@@ -9245,8 +9272,22 @@ function tpickAfterImportGroups(m){
     return { taskId: tid, importIds: ids, office: bs.filter(function(b){ return b.who==='office'; }), liftA: bs.filter(function(b){ return b.who==='liftA'; }), lift: bs.filter(function(b){ return b.who==='lift'; }), part: bs.filter(function(b){ return b.who==='part'; }) };
   }).filter(function(g){ return g.office.length || g.liftA.length || g.lift.length || g.part.length; });
 }
+/* SET の部品の不足と未登録(取込のすぐあとの画面で知らせる。2026-10-22)。items: 事務所用の行 */
+function setBomWarnHtml(items){
+  if(!(items||[]).some(function(it){ return String(it.b||'').toUpperCase()==='SET'; })) return '';
+  if(!state.setBom || !state.logiStock){ Promise.all([setBomLoad(), logiStockLoad()]).then(function(){ render(); }); return '<div class="pool-hint" style="margin:0 0 10px;">SET の部品を確かめています…</div>'; }
+  var exp = setBomExpand(items);
+  var shorts = exp.totals.filter(function(t){ var st = logiStockOf(t.code); return !st || st.qty < t.need; });
+  if(!shorts.length && !exp.missing.length) return '<div class="pool-hint" style="margin:0 0 10px;color:#067647;">✓ SET の部品は、ロジザードの在庫で足りています</div>';
+  var names = {}; exp.sets.forEach(function(S){ names[S.code] = S.name; });
+  return '<div class="tpick-short-box" style="margin:0 0 10px;text-align:left;">'+
+    (shorts.length ? '<div><b style="color:#B42318;">⚠️ SET の部品が足りません</b></div><div style="font-size:13px;margin-top:4px;">'+shorts.map(function(t){ var st = logiStockOf(t.code); return '<b>'+esc(t.code)+'</b> 必要 '+formatNum(t.need)+' ・ 在庫 '+(st ? formatNum(st.qty) : 'なし')+'(SET '+esc(t.sets.join('・'))+')'; }).join('<br>')+'</div>' : '')+
+    (exp.missing.length ? '<div style="margin-top:6px;font-size:13px;"><b>構成が未登録の SET</b>: '+esc(exp.missing.join('・'))+' <button type="button" class="vc-manage-toggle-btn" data-setbom-edit="'+esc(JSON.stringify({ codes: exp.missing, names: names }))+'">🧩 登録する</button></div>' : '')+
+    '<div class="muted" style="font-size:11px;margin-top:4px;">在庫は最後に取り込んだロジザードの在庫です(引当込み)</div></div>';
+}
 function renderTpickAfterImportModal(m){
   var groups = tpickAfterImportGroups(m);
+  var offItems = []; groups.forEach(function(g){ g.office.forEach(function(b){ offItems = offItems.concat(b.items); }); });
   var btn = function(tid, arr, label, primary){
     if(!arr.length) return '';
     var rows = arr.reduce(function(a, b){ return a+b.items.length; }, 0);
@@ -9260,6 +9301,7 @@ function renderTpickAfterImportModal(m){
   return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card" style="max-width:640px;">'+
     '<div class="modal-task-name">✅ 取り込みました ・ トータルピッキングを印刷</div>'+
     '<div class="pool-hint" style="margin:4px 0 12px;">'+esc(m.fileName||'')+' の分です。番号は作業記録(タブレット)・今日の状況と同じです。パートさん用はふだんタブレットで取ります。あとからでも、管理 → 今日の状況の「🧾 トータルピッキング」で印刷できます。</div>'+
+    setBomWarnHtml(offItems)+
     body+
     '<div class="modal-actions" style="margin-top:12px;"><button type="button" class="modal-cancel" id="tpafClose">閉じる</button></div>'+
   '</div></div>';
@@ -9267,6 +9309,9 @@ function renderTpickAfterImportModal(m){
 function bindTpickAfterImportModal(m){
   var close = document.getElementById('tpafClose');
   if(close) close.addEventListener('click', function(){ state.modal = null; render(); });
+  document.querySelectorAll('[data-setbom-edit]').forEach(function(el){
+    el.addEventListener('click', function(){ var d = JSON.parse(el.getAttribute('data-setbom-edit')); state.modal = { kind:'setBomEdit', codes: d.codes, names: d.names, prev: m }; render(); });
+  });
   document.querySelectorAll('[data-tpaf-off]').forEach(function(el){
     el.addEventListener('click', async function(){
       var ids = el.getAttribute('data-tpaf-off').split(',').filter(Boolean);
@@ -11009,7 +11054,11 @@ async function importSharedDataFiles(files){
     var kind = sharedDataKindOf(text);
     var targets = []; // { key, label, parsed, unit }
     if(kind==='logizard') targets.push({ key: SHUKEI_KEYS.logizard, label: 'ロジザードの在庫', parsed: shukeiParseLogizard(text), unit:'行' });
-    else if(kind==='yayoi') shukeiYayoiSitesIn(text).forEach(function(k){ targets.push({ key: SHUKEI_KEYS.yayoi(k), label: '弥生('+SHUKEI_SITES[k].name+')の在庫', parsed: shukeiParseYayoi(text, SHUKEI_SITES[k]), unit:'商品' }); });
+    else if(kind==='yayoi'){
+      shukeiYayoiSitesIn(text).forEach(function(k){ targets.push({ key: SHUKEI_KEYS.yayoi(k), label: '弥生('+SHUKEI_SITES[k].name+')の在庫', parsed: shukeiParseYayoi(text, SHUKEI_SITES[k]), unit:'商品' }); });
+      var whp = shukeiParseYayoiWarehouses(text); // 高屋・丹南以外の倉庫(外部倉庫)の在庫
+      if(whp && whp.rowCount) targets.push({ key: YAYOI_WH_KEY, label: '弥生(外部倉庫など)の在庫', parsed: whp, unit:'行' });
+    }
     else if(kind==='vcOrder'){
       var p = vcAllocParseOrder(text);
       if(!p.error){
@@ -12994,7 +13043,7 @@ function renderStockTab(){
   var tab = state.stockTab || 'summary';
   if(tab==='blocks' || tab==='missing') tab = 'summary'; // 概要にまとめた
   if(tab==='slot') tab = 'coop'; // 配置(D ロケの整理)は終わったので、生協の入れ替えに替えた(2026-10-16)
-  var tabs = [['summary','概要'],['outlook','将来在庫'],['storage','保管料の試算'],['locs','ロケーション'],['coop','生協の入れ替え']].map(function(t){
+  var tabs = [['summary','概要'],['outlook','将来在庫'],['back','外部から戻す'],['storage','保管料の試算'],['locs','ロケーション'],['coop','生協の入れ替え']].map(function(t){
     return '<button type="button" class="vc-tab-btn'+(tab===t[0]?' active':'')+'" data-stock-tab="'+t[0]+'">'+t[1]+'</button>';
   }).join('');
   var prev = null; // 7日前(なければいちばん古い)の記録と比べる
@@ -13054,6 +13103,8 @@ function renderStockTab(){
       '40ft換算は 40ftドライコンテナの内容積 '+STOCK_FT40_M3+'m³(約'+formatNum(Math.round(STOCK_FT40_SAI))+'才)で割った本数です(実際に積めるのはその8〜9割)。※ = 入数か才数の分からない商品を含む(その分は才数に入っていません)。</div>';
   }else if(tab==='outlook'){
     body = renderStockOutlook(st);
+  }else if(tab==='back'){
+    body = renderStockBack(st);
   }else if(tab==='storage'){
     body = renderStorageSim(st);
   }else if(tab==='locs'){
@@ -13920,7 +13971,82 @@ function renderStockOutlook(st){
     '<div class="pool-hint" style="margin-top:10px;">今の在庫 = ロジザードの在庫('+esc(fmtDateTime(st.lz.uploadedAt))+'取込)から引当数を除いた数(ピース)。見積もり = kintone の見積もりアプリ(956)の明細の数量(スタンプは見ない。明細の日付が今日以降の行を、その日に在庫から出ていくとみなす。明細に日付が無ければ見積日)。アマゾン・楽天の需要予測も数えます(同じ品番は最新の予測だけ)。入荷予定 = 発注履歴アプリ(949)の、仕入番号の入っていない(まだ入荷していない)発注の数量。高屋・丹南(発送先・倉庫コード 0018・0000)以外の明細と、98・99で始まる品番(作業費・送料など)は数えません。納入期日に入荷するとみなし、納入期日を過ぎた物は「遅れ」として今日に数えます(60日より前は除く)。'+
     '拠点は明細の倉庫コード(高屋 0018・丹南 0000)で分けます(倉庫コードの無い明細は「全部」のときだけ数えます)。1日の出荷は、作業量CSVの出荷記録('+((st.ship||{}).days||0)+'日分)からの目安です。</div>';
 }
+/* 在庫 →「外部から戻す」(2026-10-22): ロジザードの在庫では今日〜2か月の見積に足りず、外部倉庫(弥生の高屋・丹南以外の倉庫)にある品番。
+   足りない数 = 2か月の見積 − ロジザードの在庫(引当を除く)− 2か月以内の入荷予定。戻す目安 = 足りない数と外部の在庫の少ないほう(ケースに切り上げ)。
+   外部倉庫にする倉庫コードは選べる(kv「external-warehouses」) */
+var EXTERNAL_WH_KEY = 'external-warehouses';
+function stockBackCompute(st){
+  var wh = state.yayoiWh, ol = st.outlook, lzP = st.lz && st.lz.products;
+  if(!wh || !wh.products || !ol || !lzP) return null;
+  var sel = state.externalWh && state.externalWh.list ? state.externalWh.list : Object.keys(wh.warehouses||{});
+  var today = todayStr(), end = (function(){ var d = new Date(today+'T00:00:00'); d.setMonth(d.getMonth()+2); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
+  var est = {}, arr = {};
+  try{ outlookEstimateLines(ol).lines.forEach(function(x){ if(x.date>=today && x.date<=end) est[x.code] = (est[x.code]||0) + (Number(x.qty)||0); }); }catch(e){}
+  (ol.arrivals||[]).forEach(function(x){ if(x.date<=end) arr[x.code] = (arr[x.code]||0) + (Number(x.qty)||0); });
+  var rows = [];
+  Object.keys(wh.products).forEach(function(code){
+    var P = wh.products[code], ext = 0, byWh = {};
+    sel.forEach(function(w){ if(P.wh[w]){ ext += P.wh[w]; byWh[w] = P.wh[w]; } });
+    if(!(ext>0) || !(est[code]>0)) return;
+    var L = lzP[code], free = 0;
+    if(L) Object.keys(L.blocks||{}).forEach(function(b){ var x = L.blocks[b]; free += Number(x.qty)||0; if(x.locAlloc) Object.keys(x.locAlloc).forEach(function(l){ free -= Number(x.locAlloc[l])||0; }); });
+    free = Math.max(0, free);
+    var short = est[code] - free - (arr[code]||0);
+    if(short <= 0) return;
+    var pack = P.packQty || (st.pm && st.pm[code] && st.pm[code].packQty) || null;
+    var back = Math.min(short, ext), backCases = pack ? Math.ceil(back / pack) : null;
+    rows.push({ code: code, name: (L && L.name) || P.name, est: est[code], free: free, arr: arr[code]||0, short: short, ext: ext, byWh: byWh, pack: pack, back: back, backCases: backCases, allOut: back>=ext });
+  });
+  rows.sort(function(a, b){ return (b.short/b.est) - (a.short/a.est) || b.short - a.short; });
+  return { rows: rows, end: end, sel: sel, all: Object.keys(wh.warehouses||{}).sort() };
+}
+function renderStockBack(st){
+  if(!state.yayoiWh && !state.yayoiWhLoading){
+    state.yayoiWhLoading = true;
+    Promise.all([loadKeyJson(YAYOI_WH_KEY, function(){ return null; }), loadKeyJson(EXTERNAL_WH_KEY, function(){ return null; })]).then(function(r){
+      state.yayoiWh = (r[0] && !isUnverified(r[0])) ? r[0] : { products:{}, warehouses:{} };
+      if(r[1] && !isUnverified(r[1]) && Array.isArray(r[1].list)) state.externalWh = r[1];
+    }).catch(function(){ state.yayoiWh = { products:{}, warehouses:{} }; }).then(function(){ state.yayoiWhLoading = false; render(); });
+  }
+  if(!state.yayoiWh) return '<div class="empty-note">読み込み中…</div>';
+  if(!Object.keys(state.yayoiWh.warehouses||{}).length) return '<div class="empty-note">外部倉庫の在庫がまだありません。管理 → データ取込 で、弥生の在庫のCSV(全外部倉庫)を取り込み直してください(高屋・丹南以外の倉庫の在庫も残すようにしました)。</div>';
+  if(!st.outlook) return '<div class="empty-note">見積もり・入荷予定がまだありません(管理 → データ取込 → kintoneの同期)。</div>';
+  var R = stockBackCompute(st);
+  if(!R) return '<div class="empty-note">読み込み中…</div>';
+  var whInfo = state.yayoiWh.warehouses;
+  var whPick = '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 8px;">外部倉庫にする倉庫コード '+R.all.map(function(w){
+    return '<label style="font-size:13px;margin-right:8px;"><input type="checkbox" data-ext-wh="'+esc(w)+'"'+(R.sel.indexOf(w)!==-1 ? ' checked' : '')+'> '+esc(w)+' <span class="sk-minor">('+formatNum(whInfo[w].items)+'品番)</span></label>';
+  }).join('')+'</div>';
+  var rows = R.rows.map(function(r){
+    return '<tr><td><b>'+esc(r.code)+'</b><div class="sk-minor">'+esc(r.name)+'</div></td><td class="num">'+formatNum(r.est)+'</td><td class="num">'+formatNum(r.free)+'</td><td class="num">'+(r.arr ? formatNum(r.arr) : '')+'</td>'+
+      '<td class="num" style="color:#B42318;font-weight:700;">'+formatNum(r.short)+'</td><td class="num">'+formatNum(r.ext)+'<div class="sk-minor">'+Object.keys(r.byWh).map(function(w){ return esc(w)+': '+formatNum(r.byWh[w]); }).join(' ')+'</div></td>'+
+      '<td class="num"><b>'+formatNum(r.back)+'</b>'+(r.backCases!==null ? '<div class="sk-minor">'+formatNum(r.backCases)+'ケース(入数'+formatNum(r.pack)+')</div>' : '')+(r.allOut ? '<div class="sk-minor" style="color:#B54708;">外部の全部</div>' : '')+'</td></tr>';
+  }).join('') || '<tr><td colspan="7" class="empty-note">戻したほうがよい品番はありません</td></tr>';
+  return '<div class="panel-title" style="font-size:16px;">外部倉庫から戻す品番</div>'+
+    '<div class="pool-hint" style="margin:0 0 8px;">ロジザードの在庫(引当を除く)と2か月以内の入荷予定では、今日〜'+esc(R.end.slice(5).replace('-','/'))+'の見積もり(将来在庫と同じ数え方)に足りず、外部倉庫にある品番です。<b>足りない数</b> = 見積 − 在庫 − 入荷予定。<b>戻す目安</b> = 足りない数と外部の在庫の少ないほう。外部倉庫の在庫は、最後に取り込んだ弥生の在庫(全外部倉庫)'+(state.yayoiWh.uploadedAt ? '・'+esc(fmtDateTime(state.yayoiWh.uploadedAt)) : '')+'。</div>'+
+    whPick+
+    '<div style="display:flex;gap:8px;margin:0 0 8px;"><button type="button" class="vc-manage-toggle-btn" id="stockBackCsv">CSVで保存</button><span class="sk-minor" style="align-self:center;">'+R.rows.length+'品番</span></div>'+
+    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>品番 / 商品名</th><th class="num">2か月の見積</th><th class="num">ロジザード在庫</th><th class="num">入荷予定</th><th class="num">足りない</th><th class="num">外部の在庫</th><th class="num">戻す目安</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+function bindStockBack(){
+  document.querySelectorAll('[data-ext-wh]').forEach(function(el){
+    el.addEventListener('change', async function(){
+      var list = [].slice.call(document.querySelectorAll('[data-ext-wh]')).filter(function(x){ return x.checked; }).map(function(x){ return x.getAttribute('data-ext-wh'); });
+      state.externalWh = { list: list };
+      render();
+      if(hasManagerSession()) await persistKey(EXTERNAL_WH_KEY, { list: list, at: new Date().toISOString() });
+    });
+  });
+  var csv = document.getElementById('stockBackCsv');
+  if(csv) csv.addEventListener('click', function(){
+    var R = stockBackCompute(state.stockData || {}); if(!R) return;
+    var rows = [['品番','商品名','2か月の見積','ロジザード在庫(引当除く)','入荷予定','足りない','外部の在庫','倉庫ごと','戻す目安','戻す目安(ケース)','入数']];
+    R.rows.forEach(function(r){ rows.push([r.code, r.name, r.est, r.free, r.arr, r.short, r.ext, Object.keys(r.byWh).map(function(w){ return w+':'+r.byWh[w]; }).join(' '), r.back, r.backCases===null ? '' : r.backCases, r.pack||'']); });
+    downloadCSV(todayStr()+'_外部倉庫から戻す品番.csv', rows);
+  });
+}
 function bindStockTab(){
+  bindStockBack();
   var dg = document.getElementById('stockDiag');
   if(dg) dg.addEventListener('toggle', function(e){ if(e.target===dg) state.stockDiagOpen = dg.open; });
   document.querySelectorAll('[data-sd-key]').forEach(function(el){
@@ -16228,6 +16354,59 @@ function bindStaffSettingsPanel(){
 }
 /* 今日の状況(確認する画面)。人員配置の共通計算(computeTodayStaffingPlanNow)の結果を表示するだけで、計算はしない。
    上部に全体状況、その下に作業カードを「要対応 → 進行中 → 完了」の順に並べる。 */
+/* 夕方(終業の1時間前から): トータルピッキングの番号が全部は完了していない取込を出し、まとめて次の作業日へ繰り越す(2026-10-22) */
+function tpickUnfinishedImports(){
+  var t = state.tpk || {};
+  if(!t.tp || !t.tp.imports || t.date!==todayStr()) return [];
+  var out = [];
+  wvActiveImports(state.workVolume || emptyWorkVolume()).forEach(function(imp){
+    var e = t.tp.imports[imp.id];
+    if(!e || e.off) return;
+    var bs = tpickBatchesForTask(t.tp, state.workVolume, imp.taskId).filter(function(b){ return b.who!=='office' && b.id.split(':')[0]===imp.id; });
+    if(!bs.length) return;
+    var done = bs.filter(function(b){ var p = tpickProgOf(b.id); return p && p.doneAt; }).length;
+    if(done < bs.length) out.push({ imp: imp, total: bs.length, done: done, left: bs.filter(function(b){ var p = tpickProgOf(b.id); return !(p && p.doneAt); }).map(function(b){ return b.label; }) });
+  });
+  return out;
+}
+function renderCarryEod(){
+  var end = (state.shiftSettings && state.shiftSettings.end) || '17:00';
+  var now = new Date(), nowMin = now.getHours()*60 + now.getMinutes();
+  var endMin = Number(end.slice(0,2))*60 + Number(end.slice(3,5));
+  if(!state.carryEodForce && nowMin < endMin - 60) return '';
+  tpickEnsureLoaded(false);
+  var list = tpickUnfinishedImports();
+  if(!list.length) return '';
+  var to = nextWorkDateStr(todayStr());
+  return '<div class="tpick-short-box" style="border-color:#F79009;background:#FFFAEB;margin:8px 0 12px;text-align:left;">'+
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><b>🌙 終わっていない取込 '+list.length+'件</b><span class="sk-minor">トータルピッキングの番号が全部は完了していない取込です。明日も続けるなら繰り越してください(番号に枝番が付き、済の印は引き継ぎます)</span></div>'+
+    '<div style="margin:8px 0;">'+list.map(function(x){
+      return '<label style="display:flex;gap:8px;align-items:center;margin:4px 0;font-size:14px;"><input type="checkbox" data-carry-eod="'+esc(x.imp.id)+'" checked> <b>'+esc(taskById(x.imp.taskId).name)+'</b> <span class="sk-minor">'+esc(x.imp.fileName||'')+' '+fmtClock(x.imp.importedAt)+'</span> <span>完了 '+x.done+'/'+x.total+'</span> <span class="sk-minor">残り '+esc(x.left.slice(0,6).join('・'))+(x.left.length>6 ? ' ほか' : '')+'</span></label>';
+    }).join('')+'</div>'+
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">繰越先 <input type="date" id="carryEodDate" value="'+esc(to)+'"><button type="button" class="add-btn" id="carryEodBtn">選んだ取込を繰り越す</button></div></div>';
+}
+function bindCarryEod(){
+  var btn = document.getElementById('carryEodBtn');
+  if(!btn) return;
+  btn.addEventListener('click', async function(){
+    var ids = [].slice.call(document.querySelectorAll('[data-carry-eod]')).filter(function(x){ return x.checked; }).map(function(x){ return x.getAttribute('data-carry-eod'); });
+    var to = (document.getElementById('carryEodDate').value || '').trim();
+    if(!ids.length){ showToast('繰り越す取込を選んでください'); return; }
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(to) || to<=todayStr()){ showToast('繰越先は明日以降の日付にしてください'); return; }
+    if(!await appConfirm(ids.length+'件の取込を '+to+' へ繰り越しますか?')) return;
+    btn.disabled = true;
+    var okN = 0, msgs = [];
+    for(var i=0; i<ids.length; i++){
+      var r = await carryWvImport(todayStr(), to, ids[i]);
+      if(r.ok){ okN++; await appendAuditLog({ action:'作業量取込の繰越(夕方にまとめて)', target: taskById(r.imp.taskId).name+' / '+r.imp.fileName, before: todayStr(), after: to+'(枝番'+r.carryNo+')' }); if(r.warn) msgs.push(r.warn); }
+      else msgs.push(r.msg);
+    }
+    btn.disabled = false;
+    if(state.tpk) state.tpk.at = 0;
+    showToast(okN+'件を繰り越しました'+(msgs.length ? '。'+msgs.slice(0,2).join(' / ') : ''));
+    render();
+  });
+}
 function renderTodayStatusBoard(tasks){
   if(!state.staffingSuggestionLoaded){
     loadStaffingSuggestion(todayStr()).then(function(d){ state.staffingSuggestion = d; state.staffingSuggestionLoaded = true; render(); });
@@ -16336,6 +16515,7 @@ function renderTodayStatusBoard(tasks){
   return '<div class="panel" style="margin-bottom:14px;" id="todayStatusBoard">'+
     '<div class="stf-head"><div class="panel-title">📋 今日の状況</div>'+'<button type="button" class="vc-manage-toggle-btn" id="tpickPanelToggle" style="margin-left:auto;" title="取り込んだCSVのトータルピッキング(作業記録と同じ番号)を見て印刷します">🧾 トータルピッキング'+(state.tpickPanelOpen ? ' ▴' : ' ▾')+'</button>'+'<div class="stf-asof">'+esc(fmtClockMs(plan.nowMs))+'時点・自動計算'+(plan.breakHold?'・休憩中':'')+'</div></div>'+
     renderTpickPanel()+
+    renderCarryEod()+
     bar+
     section('🔴 要対応', red, 'red')+
     section('🟡 進行中', yellow, 'yellow')+
@@ -17081,6 +17261,7 @@ function bindManager(){
   bindTotalPick();
   var tpt = document.getElementById('tpickPanelToggle');
   if(tpt) tpt.addEventListener('click', function(){ state.tpickPanelOpen = !state.tpickPanelOpen; if(state.tpickPanelOpen) tpickSavedLoad(todayStr()); render(); });
+  bindCarryEod();
   document.querySelectorAll('[data-mgr-shift-start]').forEach(function(el){
     el.addEventListener('focusin', function(){ state.suppressRender = true; });
     el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
@@ -21955,6 +22136,30 @@ function renderMonitorStaffCard(s, plan, afterBreakPlan){
     '<div class="mon-bar-total">本日計 '+fmtHM(totalMs)+'</div>'+
   '</div>';
 }
+/* モニター: トータルピッキングの進み具合(作業ごとに、パート・リフトA・リフトの 完了した番号/番号、受け持ち中、欠品。2026-10-22) */
+function renderMonitorTpick(){
+  tpickEnsureLoaded(false);
+  var t = state.tpk || {};
+  if(!t.tp || !t.tp.imports || t.date!==todayStr()) return '';
+  var tids = [];
+  wvActiveImports(state.workVolume || emptyWorkVolume()).forEach(function(i){ if(t.tp.imports[i.id] && !t.tp.imports[i.id].off && tids.indexOf(i.taskId)===-1) tids.push(i.taskId); });
+  var rows = tids.map(function(tid){
+    var bs = tpickBatchesForTask(t.tp, state.workVolume, tid).filter(function(b){ return b.who!=='office'; });
+    if(!bs.length) return '';
+    var nShort = 0, working = 0;
+    var part = function(who, label){
+      var list = bs.filter(function(b){ return b.who===who; });
+      if(!list.length) return '';
+      var done = list.filter(function(b){ var p = tpickProgOf(b.id); return p && p.doneAt; }).length;
+      return '<span class="mon-tp-chip'+(done===list.length ? ' is-done' : '')+'">'+label+' <b>'+done+'/'+list.length+'</b></span>';
+    };
+    bs.forEach(function(b){ var p = tpickProgOf(b.id); if(p && p.short) nShort += Object.keys(p.short).length; if(p && p.staffId && !p.doneAt) working++; });
+    return '<div class="mon-tp-row"><span class="mon-tp-task">'+esc(taskById(tid).name)+'</span>'+part('part','パート')+part('liftA','リフトA')+part('lift','リフト')+
+      (working ? '<span class="mon-tp-note">作業中 '+working+'</span>' : '')+(nShort ? '<span class="mon-tp-note is-short">欠品 '+nShort+'行</span>' : '')+'</div>';
+  }).join('');
+  if(!rows) return '';
+  return '<div class="mon-footer-col"><div class="mon-footer-title">📋 トータルピッキング(完了した番号 / 番号)</div><div class="mon-tp">'+rows+'</div></div>';
+}
 function renderMonitor(){
   var present = presentStaff();
   var monPlan = null;
@@ -22007,6 +22212,7 @@ function renderMonitor(){
           '<div><span>バラ</span><b>'+(shipToday.splitWith ? formatNum(shipToday.baraCount)+'ピース'+(shipToday.splitWith<shipToday.splitTotal?'※':'') : 'データなし')+'</b></div>'+
         '</div>'+
       '</div>'+
+      renderMonitorTpick()+
     '</div>'+
   '</div></div>';
 }

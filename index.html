@@ -11933,6 +11933,7 @@ async function loadStockSnapshots(){
 }
 /* 在庫の計算に要る商品台帳(入数・才数)を全品番ぶん読み込む */
 async function loadStockAnalysis(){
+  await arrivalReceivedLoad(true); // 入荷済みの印(将来在庫で数えない)
   var r = await Promise.all([loadShukeiData('takaya'), loadKeyJson(STOCK_CAPACITY_KEY, function(){ return {}; }), loadStockSnapshots(), loadKeyJson(SLOT_BASELINE_KEY, function(){ return null; }), loadKeyJson(STOCK_OUTLOOK_KEY, function(){ return null; })]);
   var stock = r[0], lz = stock && stock.logizard;
   // ダミー品番(DUMMY_PRODUCT_CODES。ロジザードの仮の品番)は、在庫タブのどこにも入れない(概要・ロケーション・配置・将来在庫)
@@ -13158,6 +13159,33 @@ function outlookSiteOfWarehouse(code){
 }
 /* 将来在庫に数える明細か: 高屋・丹南(倉庫コード 0018・0000)の物だけ(ほかの倉庫に入る発注・出す見積もりは、この在庫と関係ない。倉庫コードの無い明細は数える)。
    品物ではない品番(98・99で始まる作業費・送料など、数字3桁だけの品番)とダミー品番は外す */
+/* 入荷済みの印(2026-10-23): kintone ではまだ計上されていない(仕入番号が空)けれど、もう入った発注書に、ロジリンクで付ける。
+   印を付けた発注書(レコード番号)の入荷予定は、入庫明細・将来在庫・外部から戻す で数えない。kv「arrival-received」= { marks: { レコード番号: { no, at, by } } } */
+var ARRIVAL_RECEIVED_KEY = 'arrival-received';
+function arrivalReceivedLoad(force){
+  if(state.arrivalReceived && !force) return Promise.resolve(state.arrivalReceived);
+  return loadKeyJson(ARRIVAL_RECEIVED_KEY, function(){ return { marks:{} }; }).then(function(v){
+    state.arrivalReceived = (v && !isUnverified(v) && v.marks) ? v : { marks:{} }; return state.arrivalReceived;
+  }).catch(function(){ return state.arrivalReceived || { marks:{} }; });
+}
+/* 入荷予定(入荷済みの印を付けた発注書を除く) */
+function outlookArrivals(ol){
+  var marks = (state.arrivalReceived && state.arrivalReceived.marks) || {};
+  return ((ol && ol.arrivals) || []).filter(function(x){ return !marks[String(x.recordId)]; });
+}
+async function arrivalReceivedSet(recordId, no, on){
+  var who = (state.managerSession && state.managerSession.user && state.managerSession.user.email) || '';
+  var r = await tpickKvUpdate(ARRIVAL_RECEIVED_KEY, function(cur){
+    cur.marks = cur.marks || {};
+    if(on) cur.marks[recordId] = { no: no, at: new Date().toISOString(), by: who }; else delete cur.marks[recordId];
+    // 60日より前の印は消す(kintone で計上されれば、もともと出ない)
+    var lim = Date.now() - 60*86400000;
+    Object.keys(cur.marks).forEach(function(k){ if(Date.parse(cur.marks[k].at||'') < lim) delete cur.marks[k]; });
+    return cur;
+  });
+  if(r.ok){ state.arrivalReceived = r.value; state.stockData = null; }
+  return r;
+}
 function outlookCountable(x){
   var code = String(x.code||'').trim();
   if(!code || isDummyProductCode(code) || /^9[89]/.test(code) || billingIsBareCode(code)) return false;
@@ -13215,7 +13243,7 @@ function computeStockOutlook(st, site){
     if(q>0) stock[code] = q;
   });
   var ef = outlookEstimateLines(ol);
-  var lines = ef.lines.map(function(x){ return Object.assign({ sign:-1 }, x); }).concat((ol.arrivals||[]).filter(outlookCountable).map(function(x){ return Object.assign({ sign:1 }, x); }))
+  var lines = ef.lines.map(function(x){ return Object.assign({ sign:-1 }, x); }).concat(outlookArrivals(ol).filter(outlookCountable).map(function(x){ return Object.assign({ sign:1 }, x); }))
     .filter(function(x){ return !site || outlookSiteOfWarehouse(x.warehouse)===site; })
     .sort(function(a,b){ return String(a.date).localeCompare(String(b.date)) || b.sign-a.sign; }); // 同じ日は入荷を先に
   var by = {};
@@ -13322,13 +13350,13 @@ function renderStorageSim(st){
    入荷したかどうかは取り込んだときの状態なので、出す前に取り込み直すとよい。 */
 function arrivalSheetRows(st, site, dateStr){
   var ol = st.outlook || {}, pm = st.pm || {};
-  return (ol.arrivals||[]).filter(function(x){
+  return outlookArrivals(ol).filter(function(x){
     if(!outlookCountable(x) || (site && outlookSiteOfWarehouse(x.warehouse)!==site)) return false;
     return x.date <= dateStr; // 今日まで(遅れは取り込んだ日に入っている)
   }).map(function(x){
     var m = pm[x.code] || {}, pack = m.packQty ? Number(m.packQty) : (x.pack || null);
     var due = x.late || x.date, late = due < dateStr;
-    return { late: late, due: due, no: x.no || '', supplier: x.party || '', code: x.code, name: x.name || '', qty: x.qty, pack: pack,
+    return { late: late, due: due, rid: String(x.recordId||''), no: x.no || '', supplier: x.party || '', code: x.code, name: x.name || '', qty: x.qty, pack: pack,
       cases: pack ? x.qty/pack : null, site: outlookSiteOfWarehouse(x.warehouse), note: x.note || '' };
   }).sort(function(a,b){
     return String(a.code).localeCompare(String(b.code), 'ja', { numeric:true }) || String(a.no).localeCompare(String(b.no)); // 品番順(遅れも同じ並びに。赤で出す)
@@ -13433,7 +13461,8 @@ async function arrivalSheetToggle(){
     }
     if(!ol || isUnverified(ol)){ a.st = null; a.msg = '入荷予定がまだありません(管理 → 在庫・kintone取込 の「kintoneの同期」で取り込んでください)'; return; }
     var dateStr = todayStr();
-    var codes = {}; (ol.arrivals||[]).forEach(function(x){ if(x.date <= dateStr) codes[x.code] = true; });
+    await arrivalReceivedLoad(true);
+    var codes = {}; outlookArrivals(ol).forEach(function(x){ if(x.date <= dateStr) codes[x.code] = true; });
     var pm = Object.keys(codes).length ? await getProductMasterInfoBatch(Object.keys(codes)) : {};
     if(!pm || pm.__error) pm = {};
     // 今の在庫(ロジザード、引当を除く。全拠点)。外部倉庫に持っていってよいかの目安に使う
@@ -13493,9 +13522,25 @@ function renderArrivalSheetPanel(){
       '<span class="pool-hint" style="margin:0;">納入期日が今日の発注と、期日を過ぎてまだ入っていない発注(遅れ)。kintone 発注履歴(949) '+esc(a.st.outlook.syncedAt ? fmtDateTime(a.st.outlook.syncedAt) : '')+'取込。品番順・A4縦</span></div>'
       : '<div class="pool-hint" style="margin:0;">今日入る発注はありません</div>';
   }
+  // 遅れの発注書(期日を過ぎて kintone でまだ計上されていない物)。もう入っていれば「入荷済みにする」
+  var lateHtml = '';
+  if(a.st && !a.loading){
+    var lateBy = {}, lateOrder = [];
+    arrivalSheetRows(a.st, '', a.date).forEach(function(r){ if(!r.late || !r.rid) return; if(!lateBy[r.rid]){ lateBy[r.rid] = { rid: r.rid, no: r.no, due: r.due, sup: r.supplier, names: [] }; lateOrder.push(r.rid); } if(lateBy[r.rid].names.length<3) lateBy[r.rid].names.push(r.code+' '+r.name); });
+    var marks = (state.arrivalReceived && state.arrivalReceived.marks) || {};
+    var markedNow = Object.keys(marks).sort(function(x, y){ return String(marks[y].at).localeCompare(String(marks[x].at)); }).slice(0, 10);
+    if(lateOrder.length || markedNow.length){
+      lateHtml = '<div class="tpick-short-box" style="border-color:#F79009;background:#FFFAEB;margin:10px 0 0;text-align:left;">'+
+        (lateOrder.length ? '<div><b>遅れの発注書 '+lateOrder.length+'件</b> <span class="sk-minor">納入期日を過ぎて、kintone でまだ計上されていない発注書です。もう入っているなら「入荷済みにする」を押すと、入庫明細・将来在庫から外します</span></div>'+
+          lateOrder.map(function(rid){ var x = lateBy[rid]; return '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0;font-size:13px;"><b>'+esc(x.no||'(番号なし)')+'</b><span>期日 '+esc(x.due.slice(5).replace('-','/'))+'</span><span class="sk-minor">'+esc(x.sup)+' ・ '+esc(x.names.join('、'))+'</span><button type="button" class="vc-manage-toggle-btn" data-arrival-recv="'+esc(rid)+'|'+esc(x.no)+'|1">✓ 入荷済みにする</button></div>'; }).join('') : '')+
+        (markedNow.length ? '<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:13px;">入荷済みにした発注書 '+Object.keys(marks).length+'件(押すと戻せます)</summary>'+
+          markedNow.map(function(rid){ var m = marks[rid]; return '<div style="display:flex;gap:8px;align-items:center;font-size:12px;margin:3px 0;"><b>'+esc(m.no||rid)+'</b><span class="sk-minor">'+esc(fmtDateTime(m.at))+'</span><button type="button" class="ll-btn" data-arrival-recv="'+esc(rid)+'|'+esc(m.no||'')+'|0">戻す</button></div>'; }).join('')+'</details>' : '')+
+      '</div>';
+    }
+  }
   return '<div class="stf-card" id="arrivalSheetPanel" style="margin:8px 0 12px;border-left-color:#2E90FA;">'+
     '<div class="stf-section-title" style="margin-top:0;">📦 本日の入庫明細(仕入先ごと・発注番号ごと)</div>'+
-    (a.msg ? '<div class="vc-import-status">'+esc(a.msg)+'</div>' : '')+body+'</div>';
+    (a.msg ? '<div class="vc-import-status">'+esc(a.msg)+'</div>' : '')+body+lateHtml+'</div>';
 }
 /* 入庫明細を、保存せずにそのまま印刷する(印刷の画面を開く)。仕入先を空にすると全部 */
 function arrivalSheetPrint(supplier, no){
@@ -13524,6 +13569,19 @@ function bindArrivalSheet(){
   document.querySelectorAll('[data-arrival-pdf-no]').forEach(function(el){ el.addEventListener('click', function(){ arrivalSheetPrint('', el.getAttribute('data-arrival-pdf-no')); }); });
   document.querySelectorAll('[data-arrival-pdf-split]').forEach(function(el){ el.addEventListener('click', function(){ arrivalSheetPrintSplit(el.getAttribute('data-arrival-pdf-split')); }); });
   document.querySelectorAll('[data-arrival-pdf-all]').forEach(function(el){ el.addEventListener('click', function(){ arrivalSheetPrint(''); }); });
+  document.querySelectorAll('[data-arrival-recv]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var p = el.getAttribute('data-arrival-recv').split('|'), on = p[2]==='1';
+      if(on && !await appConfirm('発注書 '+(p[1]||p[0])+' を入荷済みにして、入庫明細・将来在庫から外しますか?')) return;
+      el.disabled = true;
+      var r = await arrivalReceivedSet(p[0], p[1], on);
+      el.disabled = false;
+      if(!r.ok){ showToast('⚠️ 保存できませんでした'); return; }
+      await appendAuditLog({ action: on ? '発注書を入荷済みにする' : '発注書の入荷済みを戻す', target: p[1]||p[0], before:null, after: on ? '入荷済み' : '入荷予定に戻す' });
+      showToast(on ? '入荷済みにしました' : '入荷予定に戻しました');
+      render();
+    });
+  });
 }
 /* キャンバスの絵を、見えない枠(iframe)の中で印刷する。PDF と同じく、ページに入らなければ行の切れ目でページを分け、2ページ目からも見出しを付ける。
    d は vcCanvasToPdf と同じ形({ canvas, headH, rowH, width, height, scale, portrait }) */
@@ -13902,7 +13960,7 @@ function stockBackCompute(st){
   var today = todayStr(), end = (function(){ var d = new Date(today+'T00:00:00'); d.setMonth(d.getMonth()+2); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
   var est = {}, arr = {};
   try{ outlookEstimateLines(ol).lines.forEach(function(x){ if(x.date>=today && x.date<=end) est[x.code] = (est[x.code]||0) + (Number(x.qty)||0); }); }catch(e){}
-  (ol.arrivals||[]).forEach(function(x){ if(x.date<=end) arr[x.code] = (arr[x.code]||0) + (Number(x.qty)||0); });
+  outlookArrivals(ol).forEach(function(x){ if(x.date<=end) arr[x.code] = (arr[x.code]||0) + (Number(x.qty)||0); });
   var rows = [];
   Object.keys(wh.products).forEach(function(code){
     var P = wh.products[code], ext = 0, byWh = {};

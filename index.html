@@ -8974,7 +8974,7 @@ function renderShukei(){
   }).join('');
   function asOf(d){ return d && d.uploadedAt ? fmtDateTime(d.uploadedAt) : '未登録'; }
   var status = '<div class="pool-hint" style="margin:6px 0 10px;">ロジザードの在庫: '+esc(asOf(data.logizard))+' ・ 弥生('+esc(site.name)+')の在庫: '+esc(asOf(data.yayoi))+
-    (hasManagerSession() ? ' <button type="button" class="vc-manage-toggle-btn" data-go-datahub="1" style="min-height:0;padding:3px 10px;">データ取込を開く</button>' : '')+'</div>';
+    (hasManagerSession() ? ' <button type="button" class="vc-manage-toggle-btn" data-go-datahub="1" style="min-height:0;padding:3px 10px;">在庫・kintone取込を開く</button>' : '')+'</div>';
   var body = '';
   if(tab==='sheet') body = renderShukeiSheet(siteKey, site, data, draft);
   else body = renderShukeiDiff(siteKey, site, data);
@@ -10673,17 +10673,17 @@ function renderVcAlloc(){
   var status = '<div class="pool-hint" style="margin:6px 0 10px;">出荷指示: '+(order && order.uploadedAt ? esc(fmtDateTime(order.uploadedAt))+'取込'+(order.workDates && order.workDates.length ? '(出荷作業日 '+esc(order.workDates.map(dateLabelFromStr).join('・'))+')' : '') : '未取込')+
     ' ・ ロジザードの在庫: '+(lz && lz.uploadedAt ? esc(fmtDateTime(lz.uploadedAt)) : '未登録')+
     ' <button type="button" class="vc-manage-toggle-btn" id="vcaReload" style="min-height:0;padding:3px 10px;">読み直す</button> '+(order && order.lines ? csvButton('vcAlloc', 'この表をCSV出力') : '')+
-    (hasManagerSession() ? ' <button type="button" class="vc-manage-toggle-btn" data-go-datahub="1" style="min-height:0;padding:3px 10px;">データ取込を開く</button>' : '')+'</div>';
+    (hasManagerSession() ? ' <button type="button" class="vc-manage-toggle-btn" data-go-datahub="1" style="min-height:0;padding:3px 10px;">在庫・kintone取込を開く</button>' : '')+'</div>';
   var warn = '';
   if(calc){
     var unk = Object.keys(calc.unknownDests);
     if(unk.length) warn += '<div class="vc-warning-box">納品先一覧に無い納品先があります: '+esc(unk.map(function(k){ return k+'('+calc.unknownDests[k]+')'; }).join('、'))+'。振り分け番号が「?」になります。「設定 → 得意先・単価」の納品先一覧で番号を登録してください。</div>';
-    if(!lz) warn += '<div class="vc-warning-box">ロジザードの在庫が登録されていません。「管理 → データ取込」でロジザードの在庫のCSVを取り込んでください。</div>';
+    if(!lz) warn += '<div class="vc-warning-box">ロジザードの在庫が登録されていません。「管理 → 在庫・kintone取込」でロジザードの在庫のCSVを取り込んでください。</div>';
     else if(order.uploadedAt && lz.uploadedAt && lz.uploadedAt < order.uploadedAt && Date.parse(order.uploadedAt)-Date.parse(lz.uploadedAt) > 12*3600000)
-      warn += '<div class="vc-warning-box">ロジザードの在庫が出荷指示より古いデータです('+esc(fmtDateTime(lz.uploadedAt))+')。最新の在庫を「管理 → データ取込」で取り込むと、優先倉庫が正確になります。</div>';
+      warn += '<div class="vc-warning-box">ロジザードの在庫が出荷指示より古いデータです('+esc(fmtDateTime(lz.uploadedAt))+')。最新の在庫を「管理 → 在庫・kintone取込」で取り込むと、優先倉庫が正確になります。</div>';
   }
   var body;
-  if(!calc) body = '<div class="empty-note">VCの出荷指示のCSVがまだ取り込まれていません。「管理 → データ取込」で取り込んでください。</div>';
+  if(!calc) body = '<div class="empty-note">VCの出荷指示のCSVがまだ取り込まれていません。「管理 → 在庫・kintone取込」で取り込んでください。</div>';
   else if(tab==='dash') body = renderVcAllocDash(calc);
   else if(tab==='dest') body = renderVcAllocDests(calc);
   else body = renderVcAllocTable(calc, tab);
@@ -11013,7 +11013,7 @@ async function importSharedDataFiles(files){
 function renderDataHub(){
   ensureManagerSessionChecked();
   if(!hasManagerSession()){
-    return renderManagerLoginForm('データ取込', '管理者アカウントでログインしてください。');
+    return renderManagerLoginForm('在庫・kintone取込', '管理者アカウントでログインしてください。');
   }
   if(!state.vcAllocData){
     if(!state.vcAllocLoading){
@@ -11737,16 +11737,16 @@ function renderWorkReportPanel(){
         (selT && tasks.indexOf(selT)===-1 ? '<option value="'+esc(selT)+'" selected>'+esc(selT)+'</option>' : '')+
         tasks.map(function(t){ return '<option value="'+esc(t)+'"'+(t===selT?' selected':'')+'>'+esc(t)+'</option>'; }).join('')+
       '</select>'+(sugT ? ' <span class="vca-site is-split">候補</span>' : '')+'</td></tr>';
-  }).join('') || '<tr><td colspan="5" class="empty-note">まだ作業日報がありません(「管理 → データ取込」で取得してください)。</td></tr>';
+  }).join('') || '<tr><td colspan="5" class="empty-note">まだ作業日報がありません(「管理 → 在庫・kintone取込」で取得してください)。</td></tr>';
   return '<div class="panel" id="workReportPanel" style="margin-top:16px;">'+
     '<div class="panel-title">作業日報の対応表(kintone)</div>'+
     '<div class="pool-hint" style="margin-bottom:8px;">日報の作業内容ごとに単価とロジリンクの作業を決めると、収支の売上と請求の明細1に使われます。</div>'+
-    '<div class="pool-hint" style="margin:0;">最終同期: '+(st && st.syncedAt ? esc(fmtDateTime(st.syncedAt))+'('+esc(st.from)+'〜'+esc(st.to)+')' : '―')+' ・ 取得は「管理 → データ取込」で行います。</div>'+
+    '<div class="pool-hint" style="margin:0;">最終同期: '+(st && st.syncedAt ? esc(fmtDateTime(st.syncedAt))+'('+esc(st.from)+'〜'+esc(st.to)+')' : '―')+' ・ 取得は「管理 → 在庫・kintone取込」で行います。</div>'+
     '<div style="margin-top:8px;">'+msg+'</div>'+
     (cache && cache.error ? '<div class="vc-warning-box">'+esc(cache.error)+'</div>' : '')+
     '<div class="ll-form-group-title" style="margin-top:14px;">作業内容の対応表(直近120日に出てきた作業内容)</div>'+
     '<div class="pool-hint" style="margin:0 0 6px;">日報の作業内容ごとに、作業単価マスタの項目(単価)と、ロジリンクの作業を選んでください。選ぶとすぐ保存されます。名前の似たものを「候補」として選んであります(まだ保存されていません)。'+
-      (prices.length ? '' : ' 作業単価が読み込まれていません(「管理 → データ取込」で取得してください)。')+'</div>'+
+      (prices.length ? '' : ' 作業単価が読み込まれていません(「管理 → 在庫・kintone取込」で取得してください)。')+'</div>'+
     (pending ? '<button type="button" class="vc-manage-toggle-btn" id="wrSaveSuggest" style="margin-bottom:8px;">候補をまとめて保存('+pending+'件)</button>' : '')+
     '<div style="overflow-x:auto;max-height:480px;overflow-y:auto;" data-keep-scroll="wrMapTable"><table class="report-table" style="font-size:12.5px;"><thead><tr><th>日報の作業内容</th><th class="num">行数</th><th>作業単価マスタの項目</th><th class="num">単価</th><th>ロジリンクの作業</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div>'+
   '</div>';
@@ -11833,7 +11833,7 @@ function billingCompareWork(yayoiRows, reportRows){
 }
 
 /* ---------- 在庫(管理 → 在庫) ----------
-   ロジザードの在庫(データ取込で登録したもの)から、今の在庫のボリューム(才数・ケース・ピース)と、
+   ロジザードの在庫(在庫・kintone取込で登録したもの)から、今の在庫のボリューム(才数・ケース・ピース)と、
    ブロック・棚・ロケーションごとの使い方(使っているロケ数・1ロケあたりの才数・少量のロケ・混載のロケ)を出す。
    ・才数 = 在庫数 ÷ 入数 × 1ケースの才数(入数は弥生の在庫・無ければ商品台帳、才数は kintone の商品台帳)。入数か才数が無い商品は「才数不明」として別に数える。
    ・容量(才)をブロックごとに入れると使用率を出す(stock-capacity)。ロジザードのCSVには空きロケが載らないため、容量は手で入れる。
@@ -12953,7 +12953,7 @@ function renderStockTab(){
     }
     return '<div class="mgr-wrap"><div class="panel"><div class="panel-title">在庫</div><div class="pool-hint">読み込み中…(商品台帳の入数・才数を読み込んでいます)</div></div></div>';
   }
-  if(st.error || !st.calc) return '<div class="mgr-wrap"><div class="panel"><div class="panel-title">在庫</div><div class="empty-note">ロジザードの在庫がまだ取り込まれていません。「データ取込」で取り込んでください。</div></div></div>';
+  if(st.error || !st.calc) return '<div class="mgr-wrap"><div class="panel"><div class="panel-title">在庫</div><div class="empty-note">ロジザードの在庫がまだ取り込まれていません。「管理 → 在庫・kintone取込」で取り込んでください。</div></div></div>';
   var c = st.calc, snaps = st.snaps || [], cap = st.capacity || {};
   var tab = state.stockTab || 'summary';
   if(tab==='blocks' || tab==='missing') tab = 'summary'; // 概要にまとめた
@@ -13057,7 +13057,7 @@ function renderStockTab(){
   if(tab==='summary'){ // 才数不明(概要のいちばん下。開いて見る)
     var np = Object.keys(c.noPack), ns = Object.keys(c.noSai);
     body += '<details class="slot-settings" style="margin-top:16px;"><summary>才数不明の商品('+(np.length+ns.length)+') ▾</summary>'+
-      '<div class="pool-hint">ここに出る商品は、才数を計算できないため、才数・使用率に入っていません。kintone の商品台帳に入数・才数を登録し、データ取込で商品台帳を同期してください。</div>'+
+      '<div class="pool-hint">ここに出る商品は、才数を計算できないため、才数・使用率に入っていません。kintone の商品台帳に入数・才数を登録し、管理 → 在庫・kintone取込で商品台帳を同期してください。</div>'+
       '<div class="vca-two"><div><div class="stf-section-title">入数が無い('+np.length+')</div><div class="sk-minor" style="line-height:1.8;">'+np.sort().map(function(k){ return esc(k)+' '+esc(c.noPack[k]); }).join('<br>')+'</div></div>'+
       '<div><div class="stf-section-title">才数が無い('+ns.length+')</div><div class="sk-minor" style="line-height:1.8;">'+ns.sort().map(function(k){ return esc(k)+' '+esc(c.noSai[k]); }).join('<br>')+'</div></div></div></details>';
   }
@@ -13147,7 +13147,7 @@ function exportStockCsv(kind){
      ・見積もりの入っていない在庫 = 在庫があるのに、今日以降の見積もりが1件も無い品番
    数量はピース。拠点は明細の倉庫コード(弥生の倉庫コード: 高屋 0018・丹南 0000)で分ける。 */
 var STOCK_OUTLOOK_KEY = 'stock-outlook';
-var STOCK_OUTLOOK_STATUS_KEY = 'stock-outlook-status'; // 最後に取り込んだ日時と件数だけ(データ取込の画面で、大きな本体を読まずに出す)
+var STOCK_OUTLOOK_STATUS_KEY = 'stock-outlook-status'; // 最後に取り込んだ日時と件数だけ(在庫・kintone取込の画面で、大きな本体を読まずに出す)
 function outlookSiteOfWarehouse(code){
   var k = Object.keys(SHUKEI_SITES).filter(function(x){ return SHUKEI_SITES[x].yayoiWarehouse===String(code||'').trim(); })[0];
   return k || '';
@@ -13427,7 +13427,7 @@ async function arrivalSheetToggle(){
       if(!r.ok) a.msg = r.msg+'(前に取り込んだ内容で出します)';
       else ol = await loadKeyJson(STOCK_OUTLOOK_KEY, function(){ return null; });
     }
-    if(!ol || isUnverified(ol)){ a.st = null; a.msg = '入荷予定がまだありません(管理 → データ取込 の「kintoneの同期」で取り込んでください)'; return; }
+    if(!ol || isUnverified(ol)){ a.st = null; a.msg = '入荷予定がまだありません(管理 → 在庫・kintone取込 の「kintoneの同期」で取り込んでください)'; return; }
     var dateStr = todayStr();
     var codes = {}; (ol.arrivals||[]).forEach(function(x){ if(x.date <= dateStr) codes[x.code] = true; });
     var pm = Object.keys(codes).length ? await getProductMasterInfoBatch(Object.keys(codes)) : {};
@@ -13760,7 +13760,7 @@ function coopTitles(r){
   };
 }
 function renderCoopSwap(st){
-  if(!st.outlook) return '<div class="empty-note">生協の企画(kintone の見積もり)がまだありません。管理 → データ取込 の「kintoneの同期」で「見積もり・入荷予定」を取り込んでください。</div>';
+  if(!st.outlook) return '<div class="empty-note">生協の企画(kintone の見積もり)がまだありません。管理 → 在庫・kintone取込 の「kintoneの同期」で「見積もり・入荷予定」を取り込んでください。</div>';
   var r0 = computeCoopSwap(st);
   var selHtml = { put: coopPartySelectHtml(r0, 'put'), this: coopPartySelectHtml(r0, 'this'), next: coopPartySelectHtml(r0, 'next') };
   var r = coopApplyParties(r0, coopPartySel()), t = renderCoopSwapTables(r, false), ti = coopTitles(r);
@@ -13837,11 +13837,11 @@ function printHtmlDoc(title, bodyHtml, css){
 function renderStockOutlook(st){
   var ol = st.outlook, site = state.outlookSite || '';
   var sync = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
-    '<span class="pool-hint" style="margin:0;">取り込みは 管理 → データ取込 の「kintoneの同期」で。</span>'+
+    '<span class="pool-hint" style="margin:0;">取り込みは 管理 → 在庫・kintone取込 の「kintoneの同期」で。</span>'+
     '<span class="pool-hint" style="margin:0;">'+(ol && ol.syncedAt ? '最後に取り込んだ日時 '+esc(fmtDateTime(ol.syncedAt))+(ol.estimateLineDate ? '(明細の「'+esc(ol.estimateLineDate)+'」が '+esc(ol.from||'')+' 以降の行。見積もり '+formatNum(ol.estimateRecords||0)+'件を確認)' : '(見積日が '+esc(ol.from||'')+' 以降の見積もり '+formatNum(ol.estimateRecords||0)+'件)') : 'まだ取り込んでいません')+(ol && ol.arrivalNote ? ' ・ '+esc(ol.arrivalNote) : '')+'</span>'+
     '<label class="pool-hint" style="margin:0 0 0 auto;">拠点 <select id="outlookSite"><option value="">全部</option>'+Object.keys(SHUKEI_SITES).map(function(k){ return '<option value="'+k+'"'+(site===k?' selected':'')+'>'+esc(SHUKEI_SITES[k].name)+'</option>'; }).join('')+'</select></label>'+
   '</div>';
-  if(!ol) return sync+'<div class="empty-note">管理 → データ取込 の「kintoneの同期」で見積もり・入荷予定を取り込むと、将来在庫と、見積もりの入っていない在庫が出ます。</div>';
+  if(!ol) return sync+'<div class="empty-note">管理 → 在庫・kintone取込 の「kintoneの同期」で見積もり・入荷予定を取り込むと、将来在庫と、見積もりの入っていない在庫が出ます。</div>';
   var o = computeStockOutlook(st, site);
   var shortN = o.rows.filter(function(g){ return g.shortDate; }).length;
   var noEstCube = o.noEst.reduce(function(a,x){ return a+(x.cube||0); }, 0);
@@ -13925,8 +13925,8 @@ function renderStockBack(st){
     }).catch(function(){ state.yayoiWh = { products:{}, warehouses:{} }; }).then(function(){ state.yayoiWhLoading = false; render(); });
   }
   if(!state.yayoiWh) return '<div class="empty-note">読み込み中…</div>';
-  if(!Object.keys(state.yayoiWh.warehouses||{}).length) return '<div class="empty-note">外部倉庫の在庫がまだありません。管理 → データ取込 で、弥生の在庫のCSV(全外部倉庫)を取り込み直してください(高屋・丹南以外の倉庫の在庫も残すようにしました)。</div>';
-  if(!st.outlook) return '<div class="empty-note">見積もり・入荷予定がまだありません(管理 → データ取込 → kintoneの同期)。</div>';
+  if(!Object.keys(state.yayoiWh.warehouses||{}).length) return '<div class="empty-note">外部倉庫の在庫がまだありません。管理 → 在庫・kintone取込 で、弥生の在庫のCSV(全外部倉庫)を取り込み直してください(高屋・丹南以外の倉庫の在庫も残すようにしました)。</div>';
+  if(!st.outlook) return '<div class="empty-note">見積もり・入荷予定がまだありません(管理 → 在庫・kintone取込 → kintoneの同期)。</div>';
   var R = stockBackCompute(st);
   if(!R) return '<div class="empty-note">読み込み中…</div>';
   var whInfo = state.yayoiWh.warehouses;
@@ -14300,7 +14300,7 @@ function render(){
     return;
   }
   // データ更新・請求データは、管理の中のタブに移した(以前のアドレス・ボタンから来たときはそのタブを開く)
-  if(state.role==='dataHub'){ state.role = 'adminHub'; state.adminHubTab = 'data'; }
+  if(state.role==='dataHub'){ state.role = 'adminHub'; state.adminHubTab = 'stockData'; }
   if(state.role==='billing'){ state.role = 'adminHub'; state.adminHubTab = 'billing'; }
   if(state.role==='adminHub' && state.adminHubTab==='stock'){ state.role = 'stock'; } // 在庫は誰でも見られる画面に移した
   var html = '';
@@ -14339,7 +14339,7 @@ function render(){
   if(state.role==='stock') bindStockTab();
   bindCsvButtons();
   document.querySelectorAll('[data-go-datahub]').forEach(function(el){
-    el.addEventListener('click', function(){ state.role = 'adminHub'; state.adminHubTab = 'data'; state.dataHubMsg = ''; state.vcAllocData = null; state.vcDestData = null; render(); });
+    el.addEventListener('click', function(){ state.role = 'adminHub'; state.adminHubTab = 'stockData'; state.dataHubMsg = ''; state.vcAllocData = null; state.vcDestData = null; render(); });
   });
   if(state.modal) bindModal();
   var instrClose = document.getElementById('instrAlertClose');
@@ -14461,7 +14461,7 @@ function renderGateDataStatus(){
   return '<div class="gate-status">'+
     '<div class="gs-head"><span class="gate-status-title">データの更新状況</span>'+
       '<span class="gs-legend"><i class="is-ok"></i>今日更新 <i class="is-stale"></i>前の日のまま <i class="is-none"></i>未登録</span>'+
-      (hasManagerSession() ? '<button type="button" class="vc-manage-toggle-btn" id="gateGoDataHub" style="min-height:0;padding:3px 10px;margin-left:auto;">データ取込を開く</button>' : '')+
+      (hasManagerSession() ? '<button type="button" class="vc-manage-toggle-btn" id="gateGoDataHub" style="min-height:0;padding:3px 10px;margin-left:auto;">在庫・kintone取込を開く</button>' : '')+
     '</div>'+
     '<div class="gs-grid">'+
       GATE_STATUS_SOURCES.map(function(src){ return tile(names[src.name] || src.label, st[src.name], true); }).join('')+
@@ -14573,7 +14573,7 @@ function renderGateDashboard(){
     (arr.open ? renderArrivalSheetPanel() : '')+
     '<button type="button" class="hd-btn'+(arr.open ? '' : ' is-primary')+'" id="arrivalSheetPdf">'+(arr.open ? '閉じる' : '仕入先ごとに見る・印刷')+'</button>'+
   '</article>';
-  var dataCard = dataStatus ? '<article class="hd-card hd-span3 hd-data hd-link"'+link('adminHub','data','管理の「データ取込」を開く')+'>'+label('database','データの更新状況','データ取込',true)+dataStatus+'</article>' : '';
+  var dataCard = dataStatus ? '<article class="hd-card hd-span3 hd-data hd-link"'+link('adminHub','stockData','管理の「在庫・kintone取込」を開く')+'>'+label('database','データの更新状況','在庫・kintone取込',true)+dataStatus+'</article>' : '';
   var kpiHtml = '';
   try{
     var sumT = computeTodaySummary(state.day, activeRoster(), state.workVolume);
@@ -14635,7 +14635,7 @@ function bindGate(){
     });
   });
   var hubBtn = document.getElementById('gateGoDataHub');
-  if(hubBtn) hubBtn.addEventListener('click', function(){ state.role = 'adminHub'; state.adminHubTab = 'data'; state.dataHubMsg = ''; state.vcAllocData = null; state.vcDestData = null; render(); startPolling(); });
+  if(hubBtn) hubBtn.addEventListener('click', function(){ state.role = 'adminHub'; state.adminHubTab = 'stockData'; state.dataHubMsg = ''; state.vcAllocData = null; state.vcDestData = null; render(); startPolling(); });
   bindArrivalSheet();
   bindTotalPick();
   var tpt = document.getElementById('tpickPanelToggle');
@@ -14671,7 +14671,7 @@ var COMMON_NAV_ITEMS = [
 var NAV_GROUPS = [
   { label:'現場', items:[ { role:'input' }, { role:'monitor' } ] },
   { label:'事務所', items:[ { role:'report' }, { role:'shukei' }, { role:'vcAlloc' }, { role:'stock' } ] },
-  { label:'管理', items:[ { role:'adminHub', tab:'data', label:'作業量CSV取込', ic:'data', lock:true }, { role:'adminHub', lock:true }, { role:'adminHub', tab:'setBom', label:'セット構成', ic:'listChecks', lock:true }, { role:'settingsHub', lock:true }, { href:'factory.html', label:'生産管理', ic:'factory', lock:true } ] }
+  { label:'管理', items:[ { role:'adminHub', tab:'data', label:'作業量CSV取込', ic:'data', lock:true }, { role:'adminHub', tab:'stockData', label:'在庫・kintone取込', ic:'database', lock:true }, { role:'adminHub', lock:true }, { role:'adminHub', tab:'setBom', label:'セット構成', ic:'listChecks', lock:true }, { role:'settingsHub', lock:true }, { href:'factory.html', label:'生産管理', ic:'factory', lock:true } ] }
 ];
 var ADMIN_NAV_ITEMS = [
   { role:'adminHub', label:'管理', ic:'👤' },
@@ -14740,7 +14740,7 @@ function renderTopbar(){
     if(item.href){
       return '<a class="topbar-nav-item" href="'+item.href+'"><span class="nav-ic">'+llIcon(item.ic)+'</span>'+esc(item.label)+(item.lock && locked ? '<span class="nav-lock" title="ログインが必要です">'+llIcon('lock',13)+'</span>' : '')+'</a>';
     }
-    var on = state.role===item.role && (item.tab ? state.adminHubTab===item.tab : !(item.role==='adminHub' && (state.adminHubTab==='data' || state.adminHubTab==='setBom')));
+    var on = state.role===item.role && (item.tab ? state.adminHubTab===item.tab : !(item.role==='adminHub' && (state.adminHubTab==='data' || state.adminHubTab==='stockData' || state.adminHubTab==='setBom')));
     return '<button type="button" class="topbar-nav-item'+(on?' active':'')+'" data-nav-role="'+item.role+'"'+(item.tab ? ' data-nav-admin-tab="'+item.tab+'"' : '')+
       (isRoleBlockedForAccount(item.role) ? readOnlyBlockedAttrs(item.role)+' title="'+READONLY_BLOCKED_TITLE+'"' : '')+'>'+
       '<span class="nav-ic">'+llIcon(item.ic || item.role)+'</span>'+esc(item.label || labelOf[item.role] || '')+
@@ -14791,7 +14791,7 @@ function bindCommon(){
       if(isRoleBlockedForAccount(role)) return; // 閲覧専用アカウントでは開かない
       var navTab = el.getAttribute('data-nav-admin-tab');
       if(navTab) state.adminHubTab = navTab;
-      else if(role==='adminHub' && (state.adminHubTab==='data' || state.adminHubTab==='setBom')) state.adminHubTab = 'today'; // 「管理」は、今日の状況から
+      else if(role==='adminHub' && (state.adminHubTab==='data' || state.adminHubTab==='stockData' || state.adminHubTab==='setBom')) state.adminHubTab = 'today'; // 「管理」は、今日の状況から
       if(role==='monitor') state.monitorEntryRole = state.role || '';
       state.role = role || null;
       state.activeStaffId = null;
@@ -14904,7 +14904,8 @@ var ADMIN_HUB_TABS = [
   { key:'logMgmt', label:'実績・生産性', subs:[['logMgmt','作業記録'],['productivity','生産性']] },
   { key:'financial', label:'収支' },
   { key:'billing', label:'請求' },
-  { key:'data', label:'データ取込' },
+  { key:'data', label:'作業量CSV取込' },
+  { key:'stockData', label:'在庫・kintone取込' }, // 作業量CSV取込とそれ以外を分けた(2026-10-22)
   { key:'setBom', label:'セット構成' }
 ];
 function renderAdminHub(){
@@ -14926,7 +14927,8 @@ function renderAdminHub(){
   else if(state.adminHubTab==='financial') body = renderFinancial();
   else if(state.adminHubTab==='logMgmt') body = renderLogManagementTab();
   else if(state.adminHubTab==='billing') body = renderBilling();
-  else if(state.adminHubTab==='data') body = '<div class="mgr-wrap">'+renderCsvImportPanel()+renderDataHub()+renderKintoneSyncPanel()+'</div>';
+  else if(state.adminHubTab==='data') body = '<div class="mgr-wrap">'+renderCsvImportPanel()+'</div>';
+  else if(state.adminHubTab==='stockData') body = '<div class="mgr-wrap">'+renderDataHub()+renderKintoneSyncPanel()+'</div>';
   else if(state.adminHubTab==='setBom') body = '<div class="mgr-wrap">'+renderSetBomAdmin()+'</div>';
   else body = renderManager();
   // 各画面は自前の外枠(mgr-wrap等)を持っているため、タブバーをその内側の先頭に差し込む
@@ -15000,7 +15002,7 @@ function bindKintoneAutoSync(){
     render();
   });
 }
-/* ---------- データ取込の中の「kintoneの同期」(商品台帳・作業単価・作業日報) ---------- */
+/* ---------- 在庫・kintone取込の中の「kintoneの同期」(商品台帳・作業単価・作業日報) ---------- */
 function renderKintoneSyncPanel(){
   if(!state.kSyncLoaded && !state.kSyncLoading){
     state.kSyncLoading = true;
@@ -15117,7 +15119,8 @@ function bindAdminHub(){
   else if(state.adminHubTab==='financial') bindFinancial();
   else if(state.adminHubTab==='logMgmt') bindLogManagementTab();
   else if(state.adminHubTab==='billing') bindBilling();
-  else if(state.adminHubTab==='data'){ bindCsvImportPanel(); bindDataHub(); bindKintoneSyncPanel(); }
+  else if(state.adminHubTab==='data'){ bindCsvImportPanel(); }
+  else if(state.adminHubTab==='stockData'){ bindDataHub(); bindKintoneSyncPanel(); }
   else bindManager();
 }
 /* 設定 → システム: 通信量の目安(端末ごと・日ごと) */
@@ -15201,7 +15204,7 @@ function renderKintoneProductSettingsPanel(){
 
     '<button type="button" class="add-btn" id="kintoneSettingsSaveBtn" style="margin-top:6px;">設定を保存</button>'+
 
-    '<div class="pool-hint" style="margin-top:12px;">商品台帳の取得は「管理 → データ取込」で行います。</div>'+
+    '<div class="pool-hint" style="margin-top:12px;">商品台帳の取得は「管理 → 在庫・kintone取込」で行います。</div>'+
   '</div>';
 }
 /* 単価は小数もあり得るため、formatNum(整数に丸める)ではなくそのまま表示する */
@@ -15237,7 +15240,7 @@ function renderWorkPriceMasterPanel(){
   }else if(!wp.ok){
     body = '<div class="vc-warning-box">'+esc(wp.reason)+'</div>';
   }else if(!wp.prices.length){
-    body = '<div class="empty-note">まだ取得していません(「管理 → データ取込」で取得してください)。</div>';
+    body = '<div class="empty-note">まだ取得していません(「管理 → 在庫・kintone取込」で取得してください)。</div>';
   }else{
     var statusCounts = {};
     wp.prices.forEach(function(p){ var k = p.status||'(なし)'; statusCounts[k] = (statusCounts[k]||0)+1; });
@@ -15302,7 +15305,7 @@ function renderWorkPriceMasterPanel(){
   return '<div class="panel" id="workPriceMasterPanel" style="margin-top:16px;">'+
     '<div class="panel-title">作業単価(kintone)</div>'+
     '<div class="pool-hint" style="margin-bottom:8px;">項目ごとに、当てはめる得意先と計算単位を決めます(決めていない項目は収支の売上に入りません)。</div>'+
-    '<div class="pool-hint" style="margin:0;">kintoneからの取得は「管理 → データ取込」で行います。</div>'+
+    '<div class="pool-hint" style="margin:0;">kintoneからの取得は「管理 → 在庫・kintone取込」で行います。</div>'+
     '<div style="margin-top:10px;">'+statusHtml+'</div>'+
     '<div style="margin-top:12px;">'+body+'</div>'+
   '</div>';

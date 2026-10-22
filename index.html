@@ -13978,7 +13978,8 @@ var EXTERNAL_WH_KEY = 'external-warehouses';
 function stockBackCompute(st){
   var wh = state.yayoiWh, ol = st.outlook, lzP = st.lz && st.lz.products;
   if(!wh || !wh.products || !ol || !lzP) return null;
-  var sel = state.externalWh && state.externalWh.list ? state.externalWh.list : Object.keys(wh.warehouses||{});
+  var EXT_DEFAULT = ['0008']; // 外部倉庫(2026-10-22 に確かめた)。画面で選び直すと kv に残る
+  var sel = state.externalWh && state.externalWh.list ? state.externalWh.list : EXT_DEFAULT.filter(function(w){ return (wh.warehouses||{})[w]; });
   var today = todayStr(), end = (function(){ var d = new Date(today+'T00:00:00'); d.setMonth(d.getMonth()+2); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
   var est = {}, arr = {};
   try{ outlookEstimateLines(ol).lines.forEach(function(x){ if(x.date>=today && x.date<=end) est[x.code] = (est[x.code]||0) + (Number(x.qty)||0); }); }catch(e){}

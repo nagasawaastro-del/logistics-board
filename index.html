@@ -15926,6 +15926,18 @@ function bindCsvImportPanel(){
       render();
     });
   });
+  document.querySelectorAll('[data-wv-tp-off]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var p = el.getAttribute('data-wv-tp-off').split('|'), date = state.wvTargetDate || todayStr();
+      el.disabled = true;
+      var r = await tpickSetOff(date, p[0], p[1]==='1');
+      el.disabled = false;
+      if(!r.ok){ showToast('⚠️ 保存できませんでした。もう一度押してください'); return; }
+      state.tpkHist = { date: date, tp: r.value };
+      showToast(p[1]==='1' ? 'この取込のトータルピッキングを使わないにしました' : 'この取込のトータルピッキングを使うに戻しました');
+      render();
+    });
+  });
   document.querySelectorAll('[data-wv-import-carry]').forEach(function(el){
     el.addEventListener('click', async function(){
       var importId = el.getAttribute('data-wv-import-carry');
@@ -16831,6 +16843,21 @@ function renderCsvImportPanel(){
   }
 
   // 取込履歴: 対象日付に取り込まれた全作業枠の履歴を、常時表示(折りたたまない)。
+  // トータルピッキングの 使う/使わない(取込履歴からも切り替える。2026-10-22)。表示中の日付の tpick を読む(版が同じなら読み直さない)
+  var tpDate = wvTargetDate;
+  if(!state.tpkHist || state.tpkHist.date!==tpDate){
+    if(!state.tpkHistLoading){
+      state.tpkHistLoading = true;
+      loadKeyJson('tpick:'+tpDate, function(){ return {}; }).then(function(v){ state.tpkHist = { date: tpDate, tp: (v && !isUnverified(v)) ? v : {} }; }).catch(function(){ state.tpkHist = { date: tpDate, tp: {} }; }).then(function(){ state.tpkHistLoading = false; render(); });
+    }
+  }
+  var tpHist = state.tpkHist && state.tpkHist.date===tpDate ? state.tpkHist.tp : null;
+  var tpBtn = function(imp){
+    var e = tpHist && tpHist.imports && tpHist.imports[imp.id];
+    if(!e) return '';
+    return e.off ? '<button type="button" class="vc-manage-toggle-btn" data-wv-tp-off="'+esc(imp.id)+'|0" title="トータルピッキングを使わないにしています。押すと使うに戻します" style="opacity:.7;">トータル: 使わない</button> '
+      : '<button type="button" class="vc-manage-toggle-btn" data-wv-tp-off="'+esc(imp.id)+'|1" title="押すと、この取込のトータルピッキングを使わないにします(タブレット・今日の状況に出しません)">トータル: 使う</button> ';
+  };
   var wvImportRows = wvActiveImports(wvViewData).slice().sort(function(a,b){
     return new Date(b.importedAt) - new Date(a.importedAt);
   }).map(function(imp){
@@ -16846,7 +16873,7 @@ function renderCsvImportPanel(){
       '<td class="num">'+formatNum(imp.totalQty)+'ピース</td>'+
       '<td class="num" data-wv-split="'+imp.id+'">'+(outboundSplitOfImport(imp) ? formatNum(outboundSplitOfImport(imp).caseCount)+'ケース / バラ'+formatNum(outboundSplitOfImport(imp).pieceCount)+'ピース' : '<span style="color:var(--slate-500);">データなし</span>')+'</td>'+
       '<td class="num">'+(importSetText(imp) || '<span style="color:var(--slate-500);" title="ブロック略称の列が無いCSVか、機能追加前の取込です(取り込み直すと数えます)">データなし</span>')+'</td>'+
-      '<td class="num">'+todayBtn+'<button type="button" class="vc-manage-toggle-btn" data-wv-import-edit="'+imp.id+'">編集</button> <button type="button" class="vc-manage-toggle-btn" data-wv-import-carry="'+imp.id+'" title="終わらなかった分を次の日に続ける(トータルピッキングの番号に枝番)">繰越</button> <button type="button" class="vc-manage-toggle-btn" data-wv-import-move="'+imp.id+'">日付変更</button> <button type="button" class="log-stop-btn" data-wv-import-delete="'+imp.id+'">削除</button></td>'+
+      '<td class="num">'+todayBtn+tpBtn(imp)+'<button type="button" class="vc-manage-toggle-btn" data-wv-import-edit="'+imp.id+'">編集</button> <button type="button" class="vc-manage-toggle-btn" data-wv-import-carry="'+imp.id+'" title="終わらなかった分を次の日に続ける(トータルピッキングの番号に枝番)">繰越</button> <button type="button" class="vc-manage-toggle-btn" data-wv-import-move="'+imp.id+'">日付変更</button> <button type="button" class="log-stop-btn" data-wv-import-delete="'+imp.id+'">削除</button></td>'+
     '</tr>';
   }).join('') || '<tr><td colspan="9" style="color:var(--slate-500);">この日付の取込履歴はまだありません</td></tr>';
   var wvDeletedImports = (wvViewData.imports||[]).filter(function(i){ return i.deletedAt; });
@@ -21545,6 +21572,7 @@ function bindAutoMapPreviewModal(m){
       var tpSaved = null;
       if(saveOk && tpEntries.length){
         tpSaved = await tpickSaveImports(d.targetDate, tpEntries);
+        state.tpkHist = null; // 取込履歴の「トータル: 使う/使わない」を読み直す
         if(!tpSaved) showToast('⚠️ 取込は保存しましたが、トータルピッキングを保存できませんでした');
       }
       if(saveOk){

@@ -9281,12 +9281,15 @@ function bindTpickAfterImportModal(m){
   });
 }
 /* 取り込んだCSVの分を読む(日付を変えたとき・タブを開いたとき) */
-function tpickSavedLoad(dateStr){
-  var sv = state.tpickSaved = { date: dateStr, loading: true };
-  Promise.all([loadKeyJson('tpick:'+dateStr, function(){ return {}; }), loadKeyJson('tpick-prog:'+dateStr, function(){ return {}; }), getWorkVolumeForDate(dateStr)]).then(function(r){
+function tpickSavedLoad(dateStr, silent){
+  var old = state.tpickSaved;
+  // silent: 表示中の内容を残したまま、後ろで読み直す(1分ごと。いろいろな PC の取込・タブレットの進み具合を出すため。2026-10-22)
+  var sv = silent && old && old.date===dateStr && old.tp ? old : (state.tpickSaved = { date: dateStr, loading: true });
+  if(silent){ if(sv.refreshing) return; sv.refreshing = true; }
+  Promise.all([loadKeyJson('tpick:'+dateStr, function(){ return {}; }), loadKeyJson('tpick-prog:'+dateStr, function(){ return {}; }), dateStr===todayStr() ? loadWorkVolume(dateStr) : getWorkVolumeForDate(dateStr)]).then(function(r){
     if(state.tpickSaved!==sv) return;
-    sv.tp = r[0] || {}; sv.prog = r[1] || {}; sv.wv = r[2] || emptyWorkVolume(); sv.loading = false; render();
-  }).catch(function(){ sv.loading = false; sv.error = '読み込めませんでした'; render(); });
+    sv.tp = r[0] || sv.tp || {}; sv.prog = r[1] || sv.prog || {}; sv.wv = r[2] || sv.wv || emptyWorkVolume(); sv.loading = false; sv.refreshing = false; sv.at = Date.now(); render();
+  }).catch(function(){ sv.loading = false; sv.refreshing = false; sv.at = Date.now(); if(!silent) sv.error = '読み込めませんでした'; render(); });
 }
 /* 今日の状況の「🧾 トータルピッキング」: 取り込んだCSVの分(作業記録と同じ番号)を見て印刷(ロジザードの紙が出せないときの予備) */
 function renderTpickPanel(){
@@ -9308,6 +9311,7 @@ function setBomPanelHtml(officeBatches){
 function renderTotalPickSaved(){
   var sv = state.tpickSaved;
   if(!sv){ tpickSavedLoad(todayStr()); sv = state.tpickSaved; }
+  else if(!sv.loading && sv.at && Date.now() - sv.at > 60000) tpickSavedLoad(sv.date, true); // 1分ごとに後ろで読み直す
   var head = '<div class="panel-title" style="font-size:16px;margin-top:4px;">取り込んだCSVから(作業記録と同じ番号)</div>'+
     '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0 10px;"><label style="font-size:12px;color:var(--slate-500);">出荷日 <input type="date" id="tpickSavedDate" value="'+esc(sv.date||todayStr())+'"></label>'+
     '<button type="button" class="vc-manage-toggle-btn" id="tpickSavedReload">読み直す</button>'+
@@ -15852,7 +15856,7 @@ function bindCsvImportPanel(){
       var r = await tpickSetOff(date, p[0], p[1]==='1');
       el.disabled = false;
       if(!r.ok){ showToast('⚠️ 保存できませんでした。もう一度押してください'); return; }
-      state.tpkHist = { date: date, tp: r.value };
+      state.tpkHist = { date: date, at: Date.now(), tp: r.value };
       showToast(p[1]==='1' ? 'この取込のトータルピッキングを使わないにしました' : 'この取込のトータルピッキングを使うに戻しました');
       render();
     });
@@ -16853,10 +16857,13 @@ function renderCsvImportPanel(){
   // 取込履歴: 対象日付に取り込まれた全作業枠の履歴を、常時表示(折りたたまない)。
   // トータルピッキングの 使う/使わない(取込履歴からも切り替える。2026-10-22)。表示中の日付の tpick を読む(版が同じなら読み直さない)
   var tpDate = wvTargetDate;
-  if(!state.tpkHist || state.tpkHist.date!==tpDate){
+  // 1分たったら読み直す(ほかの端末の取込や、あとから入った取込にもボタンを出すため。版が同じなら中身は読まない)
+  if(!state.tpkHist || state.tpkHist.date!==tpDate || Date.now() - (state.tpkHist.at||0) > 60000){
     if(!state.tpkHistLoading){
       state.tpkHistLoading = true;
-      loadKeyJson('tpick:'+tpDate, function(){ return {}; }).then(function(v){ state.tpkHist = { date: tpDate, tp: (v && !isUnverified(v)) ? v : {} }; }).catch(function(){ state.tpkHist = { date: tpDate, tp: {} }; }).then(function(){ state.tpkHistLoading = false; render(); });
+      var keepOld = state.tpkHist && state.tpkHist.date===tpDate ? state.tpkHist.tp : null;
+      loadKeyJson('tpick:'+tpDate, function(){ return {}; }).then(function(v){ state.tpkHist = { date: tpDate, at: Date.now(), tp: (v && !isUnverified(v)) ? v : (keepOld || {}) }; })
+        .catch(function(){ state.tpkHist = { date: tpDate, at: Date.now(), tp: keepOld || {} }; }).then(function(){ state.tpkHistLoading = false; render(); });
     }
   }
   var tpHist = state.tpkHist && state.tpkHist.date===tpDate ? state.tpkHist.tp : null;

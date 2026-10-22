@@ -16338,6 +16338,94 @@ function bindCarryEod(){
     render();
   });
 }
+/* ---------- 日報(2026-10-22) ----------
+   1日分を1枚にまとめて印刷する(PDF にも保存できる)。出荷・作業ごと・スタッフごと・トータルピッキング・欠品・繰越。金額・時給は載せない。
+   今日は画面が持っている内容、前の日は読み込んで作る */
+async function dailyReportPrint(dateStr){
+  var isToday = dateStr===todayStr();
+  var day, wv, tp, prog;
+  try{
+    var r = await Promise.all([
+      isToday && state.day ? Promise.resolve(state.day) : loadDayByDate(dateStr),
+      isToday && state.workVolume ? Promise.resolve(state.workVolume) : loadWorkVolume(dateStr),
+      loadKeyJson('tpick:'+dateStr, function(){ return {}; }),
+      loadKeyJson('tpick-prog:'+dateStr, function(){ return {}; })
+    ]);
+    day = r[0]; wv = r[1] || emptyWorkVolume(); tp = (r[2] && !isUnverified(r[2])) ? r[2] : {}; prog = (r[3] && !isUnverified(r[3])) ? r[3] : {};
+  }catch(e){ showToast('⚠️ 日報のデータを読めませんでした'); return; }
+  if(!day){ showToast(dateStr+' の記録がありません'); return; }
+  var agg = aggregateDays([day]), g = wvGrandTotals(wv);
+  var num = function(v){ return formatNum(v||0); };
+  var hm = function(ms){ return fmtHM(Math.max(0, ms||0)); };
+  // 作業ごと
+  var tids = {};
+  Object.keys(agg.perTask).forEach(function(t){ if(t!=='BREAK') tids[t] = true; });
+  wvActiveImports(wv).forEach(function(i){ tids[i.taskId] = true; });
+  var taskRows = Object.keys(tids).map(function(tid){
+    var t = taskById(tid), a = agg.perTask[tid] || { ms:0, staff:{} }, w = wvTotalsForTask(wv, tid);
+    var hours = a.ms/3600000, per = hours>0 && w.totalQty ? Math.round(w.totalQty / hours) : null;
+    return { name: t.name || '(作業)', ms: a.ms, staff: Object.keys(a.staff||{}).length, count: w.primaryCount, lines: w.lineCount, qty: w.totalQty, per: per, csv: w.importCount };
+  }).sort(function(a, b){ return b.ms - a.ms; });
+  // スタッフごと
+  var staffRows = Object.keys(agg.perStaff).map(function(sid){
+    var p = agg.perStaff[sid];
+    var top = Object.keys(p.byTask).filter(function(t){ return t!=='BREAK'; }).sort(function(a, b){ return p.byTask[b].ms - p.byTask[a].ms; }).slice(0, 3)
+      .map(function(t){ return (taskById(t).name||'')+' '+hm(p.byTask[t].ms); }).join('、');
+    return { name: staffById(sid).name || '', work: p.ms - (p.breakMs||0), brk: p.breakMs||0, top: top };
+  }).sort(function(a, b){ return b.work - a.work; });
+  var totalWork = staffRows.reduce(function(a, r){ return a + r.work; }, 0);
+  // トータルピッキング
+  var batches = (prog && prog.batches) || {};
+  var tpRows = [], shorts = [];
+  Object.keys(tids).forEach(function(tid){
+    var bs = tpickBatchesForTask(tp, wv, tid).filter(function(b){ return b.who!=='office'; });
+    if(!bs.length) return;
+    var done = bs.filter(function(b){ return batches[b.id] && batches[b.id].doneAt; }).length;
+    tpRows.push({ name: taskById(tid).name || '', done: done, total: bs.length });
+    bs.forEach(function(b){ var pr = batches[b.id]; if(pr && pr.short) Object.keys(pr.short).forEach(function(k){ var it = b.items[Number(k)]; if(it) shorts.push({ label: b.label, it: it, s: pr.short[k] }); }); });
+  });
+  // 繰越
+  var carriedIn = wvActiveImports(wv).filter(function(i){ return i.carryNo; });
+  var unfinished = [];
+  wvActiveImports(wv).forEach(function(imp){
+    var e = tp.imports && tp.imports[imp.id]; if(!e || e.off) return;
+    var bs = tpickBatchesForTask(tp, wv, imp.taskId).filter(function(b){ return b.who!=='office' && b.id.split(':')[0]===imp.id; });
+    var d = bs.filter(function(b){ return batches[b.id] && batches[b.id].doneAt; }).length;
+    if(bs.length && d < bs.length) unfinished.push({ name: taskById(imp.taskId).name || '', file: imp.fileName || '', done: d, total: bs.length });
+  });
+  var tbl = function(head, rows){ return '<table><thead><tr>'+head.map(function(h){ return '<th>'+h+'</th>'; }).join('')+'</tr></thead><tbody>'+(rows.join('') || '<tr><td colspan="'+head.length+'" class="muted">なし</td></tr>')+'</tbody></table>'; };
+  var now = new Date();
+  var html = '<div class="pg">'+
+    '<div class="hd"><h1>日報</h1><div class="dt">'+esc(dateLabelFromStr(dateStr))+'<span class="muted"> ・ 作成 '+esc(fmtDateTime(now.toISOString()))+'</span></div></div>'+
+    '<div class="kpis">'+
+      '<div><span>出荷件数</span><b>'+(g.importCount ? num(g.primaryCount) : '—')+'</b></div>'+
+      '<div><span>明細</span><b>'+(g.importCount ? num(g.lineCount) : '—')+'</b></div>'+
+      '<div><span>ピース</span><b>'+(g.importCount ? num(g.totalQty) : '—')+'</b></div>'+
+      '<div><span>ケース</span><b>'+(g.importCount && g.splitWith ? num(g.caseCount) : '—')+'</b></div>'+
+      '<div><span>セット</span><b>'+(g.importCount && g.setKnown ? num(g.setQty) : '—')+'</b></div>'+
+      '<div><span>作業人数</span><b>'+staffRows.filter(function(r){ return r.work>0; }).length+'人</b></div>'+
+      '<div><span>作業時間(休憩除く)</span><b>'+hm(totalWork)+'</b></div>'+
+    '</div>'+
+    '<h2>作業ごと</h2>'+tbl(['作業','件数','明細','ピース','作業時間','人数','ピース/人時'], taskRows.map(function(r){
+      return '<tr><td>'+esc(r.name)+'</td><td class="n">'+(r.csv ? num(r.count) : '')+'</td><td class="n">'+(r.csv ? num(r.lines) : '')+'</td><td class="n">'+(r.csv ? num(r.qty) : '')+'</td><td class="n">'+hm(r.ms)+'</td><td class="n">'+r.staff+'</td><td class="n">'+(r.per!==null ? num(r.per) : '')+'</td></tr>';
+    }))+
+    '<h2>スタッフごと</h2>'+tbl(['名前','作業時間','休憩','主な作業'], staffRows.map(function(r){
+      return '<tr><td>'+esc(r.name)+'</td><td class="n">'+hm(r.work)+'</td><td class="n">'+hm(r.brk)+'</td><td>'+esc(r.top)+'</td></tr>';
+    }))+
+    '<h2>トータルピッキング</h2>'+tbl(['作業','完了した番号'], tpRows.map(function(r){ return '<tr><td>'+esc(r.name)+'</td><td class="n">'+r.done+' / '+r.total+'</td></tr>'; }))+
+    (shorts.length ? '<h2>欠品</h2>'+tbl(['番号','ロケーション','品番','商品名','指示数','取れた数','足りない'], shorts.map(function(x){
+      return '<tr><td>'+esc(x.label)+'</td><td>'+esc(x.it.b)+' '+esc(tpickLocText(x.it.l))+'</td><td>'+esc(x.it.c)+'</td><td>'+esc(x.it.n||'')+'</td><td class="n">'+num(x.it.qty)+'</td><td class="n">'+num(x.s.got)+'</td><td class="n">'+num(x.it.qty - x.s.got)+'</td></tr>';
+    })) : '')+
+    '<h2>繰越</h2>'+tbl(['','作業','ファイル','番号'], carriedIn.map(function(i){ return '<tr><td>前の日から(枝番'+i.carryNo+')</td><td>'+esc(taskById(i.taskId).name||'')+'</td><td>'+esc(i.fileName||'')+'</td><td></td></tr>'; })
+      .concat(unfinished.map(function(u){ return '<tr><td>終わっていない</td><td>'+esc(u.name)+'</td><td>'+esc(u.file)+'</td><td class="n">完了 '+u.done+' / '+u.total+'</td></tr>'; })))+
+    '<div class="memo"><b>メモ</b></div>'+
+  '</div>';
+  var css = '@page{size:A4 portrait;margin:10mm;} .hd{display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #000;margin-bottom:8px;} h1{font-size:24px;margin:0 0 4px;letter-spacing:.2em;} .dt{font-size:15px;font-weight:700;}'+
+    '.muted{color:#667085;font-weight:400;font-size:11px;} .kpis{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin:6px 0 10px;} .kpis div{border:1px solid #98A2B3;border-radius:6px;padding:4px 6px;} .kpis span{display:block;font-size:10px;color:#475467;} .kpis b{font-size:16px;}'+
+    'h2{font-size:14px;margin:12px 0 4px;border-left:4px solid #344054;padding-left:6px;} table{width:100%;border-collapse:collapse;font-size:11.5px;} th{background:#eee;border:1px solid #98A2B3;padding:3px 5px;text-align:left;font-weight:600;} td{border:1px solid #D0D5DD;padding:3px 5px;} td.n{text-align:right;font-variant-numeric:tabular-nums;}'+
+    '.memo{margin-top:12px;border:1px solid #98A2B3;min-height:80px;padding:6px;font-size:12px;}';
+  printHtmlDoc('日報_'+dateStr, html, css);
+}
 function renderTodayStatusBoard(tasks){
   if(!state.staffingSuggestionLoaded){
     loadStaffingSuggestion(todayStr()).then(function(d){ state.staffingSuggestion = d; state.staffingSuggestionLoaded = true; render(); });
@@ -16444,7 +16532,8 @@ function renderTodayStatusBoard(tasks){
   var noneNote = (!red.length && !yellow.length && !green.length) ? '<div class="empty-note">本日の作業の状況はまだありません(CSV取込・作業開始で表示されます)</div>' : '';
   var notStartedHtml = notStarted.length ? '<div class="pool-hint" style="margin-top:10px;">未着手(CSVの数量なし): '+notStarted.map(function(t){ return esc(t.name); }).join('・')+'</div>' : '';
   return '<div class="panel" style="margin-bottom:14px;" id="todayStatusBoard">'+
-    '<div class="stf-head"><div class="panel-title">📋 今日の状況</div>'+'<button type="button" class="vc-manage-toggle-btn" id="tpickPanelToggle" style="margin-left:auto;" title="取り込んだCSVのトータルピッキング(作業記録と同じ番号)を見て印刷します">🧾 トータルピッキング'+(state.tpickPanelOpen ? ' ▴' : ' ▾')+'</button>'+'<div class="stf-asof">'+esc(fmtClockMs(plan.nowMs))+'時点・自動計算'+(plan.breakHold?'・休憩中':'')+'</div></div>'+
+    '<div class="stf-head"><div class="panel-title">📋 今日の状況</div>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="dailyReportBtn" style="margin-left:auto;" title="今日の日報を印刷します(PDF にも保存できます)">📄 日報</button>'+'<button type="button" class="vc-manage-toggle-btn" id="tpickPanelToggle" title="取り込んだCSVのトータルピッキング(作業記録と同じ番号)を見て印刷します">🧾 トータルピッキング'+(state.tpickPanelOpen ? ' ▴' : ' ▾')+'</button>'+'<div class="stf-asof">'+esc(fmtClockMs(plan.nowMs))+'時点・自動計算'+(plan.breakHold?'・休憩中':'')+'</div></div>'+
     renderTpickPanel()+
     renderCarryEod()+
     bar+
@@ -17208,6 +17297,8 @@ function bindManager(){
   var tpt = document.getElementById('tpickPanelToggle');
   if(tpt) tpt.addEventListener('click', function(){ state.tpickPanelOpen = !state.tpickPanelOpen; if(state.tpickPanelOpen) tpickSavedLoad(todayStr()); render(); });
   bindCarryEod();
+  var drb = document.getElementById('dailyReportBtn');
+  if(drb) drb.addEventListener('click', function(){ dailyReportPrint(todayStr()); });
   document.querySelectorAll('[data-mgr-shift-start]').forEach(function(el){
     el.addEventListener('focusin', function(){ state.suppressRender = true; });
     el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
@@ -17952,6 +18043,7 @@ function renderReport(){
     controls = '<div class="report-controls">'+
       '<div class="report-field"><label>日付</label><input type="date" id="reportDateInput" value="'+state.reportDate+'"></div>'+
       '<button class="report-go-btn" id="reportSingleGo">この日を集計</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="reportDailyPrint" title="この日の日報を印刷します(PDF にも保存できます)">📄 この日の日報</button>'+
     '</div>';
     body = renderReportSingleBody();
   }else{
@@ -18641,6 +18733,8 @@ function bindReport(){
     el.addEventListener('focusout', function(){ setTimeout(function(){ state.suppressRender = false; }, 150); });
   });
   var singleGo = document.getElementById('reportSingleGo');
+  var rdp = document.getElementById('reportDailyPrint');
+  if(rdp) rdp.addEventListener('click', function(){ var di = document.getElementById('reportDateInput'); dailyReportPrint((di && di.value) || state.reportDate || todayStr()); });
   if(singleGo) singleGo.addEventListener('click', function(){
     state.suppressRender = false;
     runSingleReport(dateInput.value || todayStr());

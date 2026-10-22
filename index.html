@@ -1499,6 +1499,11 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .sb-name{ font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sb-del{ padding:4px 0; }
 @media (max-width:600px){ .sb-row{ grid-template-columns:1fr 80px 34px; } .sb-name{ grid-column:1 / 4; order:3; } .sb-row-head span:nth-child(3){ display:none; } }
+.tpick-cam{ position:fixed; left:50%; top:12px; transform:translateX(-50%); z-index:3000; width:min(560px, 94vw); background:#101828; border-radius:14px; overflow:hidden; box-shadow:0 20px 40px rgba(0,0,0,.4); }
+.tpick-cam video{ width:100%; height:min(42vh, 320px); object-fit:cover; display:block; background:#000; }
+.tpick-cam-bar{ display:flex; gap:10px; align-items:center; padding:8px 10px; color:#fff; font-size:14px; }
+.tpick-cam-bar .tpick-cam-msg{ flex:1; color:#D0D5DD; font-size:12px; }
+.tpick-cam-bar .ll-btn{ background:#fff; }
 @keyframes tpickTabFlash{ 0%{ box-shadow:0 0 0 0 rgba(18,183,106,.9); } 40%{ box-shadow:0 0 0 6px rgba(18,183,106,.45); } 100%{ box-shadow:0 0 0 0 rgba(18,183,106,0); } }
 .tpick-tabs .sub-switch-btn.is-flash{ animation:tpickTabFlash 1.2s ease; } /* 文字が読めるように、背景ではなく輪で光らせる */
 @media (prefers-reduced-motion: reduce){ .tpick-line.is-leaving, .tpick-item.is-leaving, .tpick-tabs .sub-switch-btn.is-flash{ animation:none; } }
@@ -2053,6 +2058,7 @@ html[data-app-theme="dark"] .tpick-item.is-done{background:rgba(47,233,123,0.13)
 html[data-app-theme="dark"] .tpick-chk{color:#90fdcf !important}
 html[data-app-theme="dark"] .tpick-item.is-done .tpick-chk{background:rgba(48,232,111,0.13) !important}
 html[data-app-theme="dark"] .sb-row-head{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] .tpick-cam-bar .ll-btn{background:var(--dk-card) !important}
 html[data-app-theme="dark"] .tpick-short-btn{background:var(--dk-card) !important;color:#f1a29b !important}
 html[data-app-theme="dark"] .tpick-item.is-short{background:rgba(238,58,41,0.13) !important;border-color:rgba(250,42,29,0.45) !important}
 html[data-app-theme="dark"] .tpick-item.is-short .tpick-chk{background:rgba(247,48,33,0.16) !important;color:#f1a29b !important}
@@ -8743,6 +8749,8 @@ function shukeiParseLogizard(text){
     if(!code) return;
     var blk = r[ix['ブロック略称']] || '';
     var p = products[code] || (products[code] = { name: (ix['商品名']!==undefined ? r[ix['商品名']] : '') || '', blocks:{} });
+    // JAN: 検索名称が「品番/商品名/JAN」の形(最後の 8桁か13桁)。トータルピッキングのバーコード読み取りに使う(2026-10-22)
+    if(!p.jan && ix['検索名称']!==undefined){ var jm = /(\d{13}|\d{8})\s*$/.exec(String(r[ix['検索名称']]||'').trim()); if(jm) p.jan = jm[1]; }
     var b = p.blocks[blk] || (p.blocks[blk] = { qty:0, locs:[], locQty:{}, locAlloc: ix['引当数']!==undefined ? {} : undefined });
     var q = shukeiNum(r[ix['在庫数(引当数を含む)']]);
     b.qty += q;
@@ -9791,6 +9799,131 @@ function renderTpickListModal(m){
     '<div class="modal-actions" style="margin-top:12px;"><button type="button" class="modal-cancel" id="tpickClose">閉じる</button></div>'+
   '</div></div>';
 }
+/* ---------- トータルピッキングのバーコード読み取り(2026-10-22) ----------
+   JAN をカメラ(Android の Chrome の BarcodeDetector)か、Bluetooth/USB のスキャナー(キーボードとして入力する物)で読む。
+   JAN → 品番は、ロジザードの在庫の検索名称(品番/商品名/JAN)から。読んだ品番が受け持った番号の未ピッキングの行にあれば「済」にする。
+   無ければ音と知らせ(取りまちがいに気づけるように)。手で押して済にするのも今までどおり */
+function tpickJanIndex(){
+  var st = state.logiStock;
+  if(!st || !st.products) return null;
+  if(st.__janIx) return st.__janIx;
+  var ix = {};
+  Object.keys(st.products).forEach(function(code){ var j = st.products[code].jan; if(j) (ix[j] = ix[j] || []).push(code); });
+  Object.defineProperty(st, '__janIx', { value: ix, enumerable: false, configurable: true });
+  return ix;
+}
+function tpickBeep(ok){
+  try{
+    var ac = tpickBeep.ac || (tpickBeep.ac = new (window.AudioContext || window.webkitAudioContext)());
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = ok ? 'sine' : 'square'; o.frequency.value = ok ? 1320 : 220;
+    g.gain.value = 0.15; o.connect(g); g.connect(ac.destination);
+    o.start(); o.stop(ac.currentTime + (ok ? 0.12 : 0.45));
+  }catch(e){}
+  try{ if(navigator.vibrate) navigator.vibrate(ok ? 60 : [120, 80, 120]); }catch(e){}
+}
+/* 読んだコード(JAN など)を、いま開いている受け持ちの番号に当てる */
+async function tpickHandleScan(raw){
+  var m = state.modal;
+  if(!m || m.kind!=='tpickBatch') return;
+  var code = String(raw||'').trim();
+  if(!code) return;
+  await logiStockLoad();
+  var t = state.tpk || {};
+  var b = tpickBatchesForTask(t.tp, state.workVolume, m.taskId).filter(function(x){ return x.id===m.batchId; })[0];
+  if(!b) return;
+  var p = tpickProgOf(b.id) || {};
+  if(p.staffId!==state.activeStaffId || p.doneAt){ tpickBeep(false); showToast('受け持っている番号で読んでください'); return; }
+  var ix = tpickJanIndex() || {};
+  var codes = ix[code] || [];
+  if(!codes.length && b.items.some(function(it){ return it.c===code; })) codes = [code]; // 品番そのもののバーコード
+  if(!codes.length){ tpickBeep(false); showToast('登録されていないバーコードです('+code+')。ロジザードの在庫を取り込み直すと読めることがあります'); return; }
+  var done = p.done || {}, short = p.short || {};
+  var hit = -1, already = false;
+  b.items.forEach(function(it, i){
+    if(codes.indexOf(it.c)===-1) return;
+    if(done[i] || short[i]){ already = true; return; }
+    if(hit===-1) hit = i;
+  });
+  if(hit===-1){
+    tpickBeep(false);
+    showToast(already ? (codes[0]+' はもう済です') : ('この番号にない品番です('+codes.join('・')+')'));
+    return;
+  }
+  var me = state.activeStaffId, key = String(hit);
+  var r = await tpickProg(m.batchId, function(cur){
+    if(!cur || cur.staffId!==me) return false;
+    var d = Object.assign({}, cur.done||{}); d[key] = 1;
+    return Object.assign({}, cur, { done: d });
+  });
+  if(!r.ok){ tpickBeep(false); showToast('⚠️ 保存できませんでした。もう一度読んでください'); return; }
+  tpickBeep(true);
+  var it = b.items[hit];
+  showToast('✓ '+it.c+' '+formatNum(it.qty)+'個 を済にしました');
+  state.tpickDoneFlash = { at: Date.now(), to: 'done' };
+  render();
+}
+/* スキャナー(キーボードとして速く打たれて Enter で終わる)を受け取る。入力欄にいるときは邪魔しない */
+(function(){
+  var buf = '', last = 0;
+  document.addEventListener('keydown', function(ev){
+    var m = state.modal;
+    if(!m || m.kind!=='tpickBatch') return;
+    var a = document.activeElement;
+    if(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+    var now = Date.now();
+    if(now - last > 80) buf = '';
+    last = now;
+    if(ev.key==='Enter'){ if(buf.length>=6){ ev.preventDefault(); var c = buf; buf = ''; tpickHandleScan(c); } buf = ''; return; }
+    if(ev.key && ev.key.length===1) buf += ev.key;
+  }, true);
+})();
+/* カメラで読む。画面の上に重ねて出す(番号の画面が描き直されても消えないように document.body に置く) */
+var tpickCam = null;
+function tpickCamStop(){
+  var c = tpickCam; tpickCam = null;
+  if(!c) return;
+  clearTimeout(c.idleTimer); clearTimeout(c.loop);
+  try{ c.stream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
+  if(c.box && c.box.parentNode) c.box.parentNode.removeChild(c.box);
+}
+async function tpickCamStart(){
+  if(tpickCam) return;
+  if(!('BarcodeDetector' in window)){ showToast('この端末のブラウザはカメラでの読み取りに対応していません。スキャナーか、手で押してください'); return; }
+  var stream;
+  try{ stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }); }
+  catch(e){ showToast('カメラを使えませんでした(ブラウザの設定でカメラを許可してください)'); return; }
+  var det;
+  try{ det = new window.BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128','itf'] }); }catch(e){ det = new window.BarcodeDetector(); }
+  var box = document.createElement('div');
+  box.className = 'tpick-cam';
+  box.innerHTML = '<video playsinline muted></video><div class="tpick-cam-bar"><label><input type="checkbox" id="tpickCamCont"'+(state.tpickCamCont ? ' checked' : '')+'> 続けて読む</label><span class="tpick-cam-msg">バーコードを枠に入れてください</span><button type="button" class="ll-btn" id="tpickCamClose">やめる</button></div>';
+  document.body.appendChild(box);
+  var video = box.querySelector('video'); video.srcObject = stream;
+  try{ await video.play(); }catch(e){}
+  var c = tpickCam = { stream: stream, box: box, lastCode: '', lastAt: 0 };
+  box.querySelector('#tpickCamClose').addEventListener('click', tpickCamStop);
+  box.querySelector('#tpickCamCont').addEventListener('change', function(ev){ state.tpickCamCont = ev.target.checked; resetIdle(); });
+  function resetIdle(){ clearTimeout(c.idleTimer); c.idleTimer = setTimeout(function(){ if(tpickCam===c){ tpickCamStop(); showToast('30秒読まなかったので、カメラを止めました'); } }, state.tpickCamCont ? 120000 : 30000); }
+  resetIdle();
+  async function tick(){
+    if(tpickCam!==c) return;
+    if(!state.modal || state.modal.kind!=='tpickBatch'){ tpickCamStop(); return; }
+    try{
+      var found = await det.detect(video);
+      if(found && found.length){
+        var v = found[0].rawValue, now = Date.now();
+        if(v && !(v===c.lastCode && now - c.lastAt < 2500)){ // 同じ物を続けて読まない
+          c.lastCode = v; c.lastAt = now; resetIdle();
+          await tpickHandleScan(v);
+          if(!state.tpickCamCont){ tpickCamStop(); return; }
+        }
+      }
+    }catch(e){}
+    c.loop = setTimeout(tick, 180);
+  }
+  tick();
+}
 function renderTpickBatchModal(m){
   var t = state.tpk || {};
   var b = tpickBatchesForTask(t.tp, state.workVolume, m.taskId).filter(function(x){ return x.id===m.batchId; })[0];
@@ -9835,6 +9968,7 @@ function renderTpickBatchModal(m){
     '<div class="modal-task-name">'+esc(b.label)+' ・ '+b.items.length+'行 ・ '+formatNum(b.qty)+'個</div>'+
     '<div class="pool-hint" style="margin:4px 0 8px;">'+(mine ? (p.doneAt ? '完了しました' : '取った行を押すと「済」になります(もう一度押すと戻ります)。足りないときは右の「欠品」') : (p.staffId ? esc(p.staffName||'')+'さんが受け持っています(見るだけ)' : '受け持っていません(見るだけ)'))+' ・ 済 '+nDone+'/'+b.items.length+'</div>'+
     shortHtml+
+    (canEdit ? '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px;"><button type="button" class="add-btn" id="tpickScanBtn">📷 バーコードを読む</button><span class="pool-hint" style="margin:0;">読むと、その品番の行が「済」になります。スキャナーならそのまま読めます。手で押しても済にできます</span></div>' : '')+
     tabsHtml+
     '<div class="tpick-items">'+rows+'</div>'+
     '<div class="modal-actions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">'+
@@ -9853,6 +9987,9 @@ function bindTpickModals(m){
   if(close) close.addEventListener('click', function(){ state.modal = null; state.suppressRender = false; render(); });
   var back = document.getElementById('tpickBack');
   if(back) back.addEventListener('click', function(){ state.modal = { kind:'tpickList', taskId: m.taskId, who: m.who }; render(); });
+  var scanBtn = document.getElementById('tpickScanBtn');
+  if(scanBtn) scanBtn.addEventListener('click', function(){ logiStockLoad(); tpickCamStart(); });
+  if(m.kind!=='tpickBatch') tpickCamStop();
   document.querySelectorAll('[data-tpick-tab]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = Object.assign({}, m, { tab: el.getAttribute('data-tpick-tab'), shortIdx: null }); render(); }); });
   document.querySelectorAll('[data-tpick-who]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = Object.assign({}, m, { who: el.getAttribute('data-tpick-who'), whoPicked: true }); render(); }); });
   document.querySelectorAll('[data-tpick-batch]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = { kind:'tpickBatch', taskId: m.taskId, who: m.who, batchId: el.getAttribute('data-tpick-batch') }; render(); }); });

@@ -9890,51 +9890,104 @@ async function tpickHandleScan(raw){
     if(ev.key && ev.key.length===1) buf += ev.key;
   }, true);
 })();
-/* カメラで読む。画面の上に重ねて出す(番号の画面が描き直されても消えないように document.body に置く) */
+/* カメラで読む。画面の上に重ねて出す(番号の画面が描き直されても消えないように document.body に置く)。
+   読むしくみ: 端末の Chrome の BarcodeDetector が JAN を読めればそれを使い、無ければ読み取りの部品(ZXing)を読み込んで使う(2026-10-23。
+   Android でも BarcodeDetector が使えない端末があったため)。カメラが使えないときは、理由と直し方を確認画面で出す */
 var tpickCam = null;
+var ZXING_URL = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
 function tpickCamStop(){
   var c = tpickCam; tpickCam = null;
   if(!c) return;
   clearTimeout(c.idleTimer); clearTimeout(c.loop);
-  try{ c.stream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
+  try{ if(c.zx) c.zx.reset(); }catch(e){}
+  try{ if(c.stream) c.stream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
   if(c.box && c.box.parentNode) c.box.parentNode.removeChild(c.box);
+}
+function tpickLoadZxing(){
+  if(window.ZXing) return Promise.resolve(window.ZXing);
+  if(tpickLoadZxing.p) return tpickLoadZxing.p;
+  tpickLoadZxing.p = new Promise(function(res, rej){
+    var sc = document.createElement('script'); sc.src = ZXING_URL; sc.async = true;
+    sc.onload = function(){ window.ZXing ? res(window.ZXing) : rej(new Error('読み取りの部品を読めませんでした')); };
+    sc.onerror = function(){ tpickLoadZxing.p = null; rej(new Error('読み取りの部品を読み込めませんでした(通信を確かめてください)')); };
+    document.head.appendChild(sc);
+  });
+  return tpickLoadZxing.p;
+}
+async function tpickNativeDetector(){
+  if(!('BarcodeDetector' in window)) return null;
+  try{
+    var fm = window.BarcodeDetector.getSupportedFormats ? await window.BarcodeDetector.getSupportedFormats() : [];
+    if(fm.indexOf('ean_13')===-1) return null; // JAN を読めない(しくみはあっても使えない端末)
+    return new window.BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128','itf'].filter(function(f){ return fm.indexOf(f)!==-1; }) });
+  }catch(e){ return null; }
 }
 async function tpickCamStart(){
   if(tpickCam) return;
-  if(!('BarcodeDetector' in window)){ showToast('この端末のブラウザはカメラでの読み取りに対応していません。スキャナーか、手で押してください'); return; }
-  var stream;
-  try{ stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }); }
-  catch(e){ showToast('カメラを使えませんでした(ブラウザの設定でカメラを許可してください)'); return; }
-  var det;
-  try{ det = new window.BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128','itf'] }); }catch(e){ det = new window.BarcodeDetector(); }
+  // 先に画面を出す(押したのが分かるように)
   var box = document.createElement('div');
   box.className = 'tpick-cam';
-  box.innerHTML = '<video playsinline muted></video><div class="tpick-cam-bar"><label><input type="checkbox" id="tpickCamCont"'+(state.tpickCamCont ? ' checked' : '')+'> 続けて読む</label><span class="tpick-cam-msg">バーコードを枠に入れてください</span><button type="button" class="ll-btn" id="tpickCamClose">やめる</button></div>';
+  box.innerHTML = '<video playsinline muted></video><div class="tpick-cam-bar"><label><input type="checkbox" id="tpickCamCont"'+(state.tpickCamCont ? ' checked' : '')+'> 続けて読む</label><span class="tpick-cam-msg">カメラを起動しています…</span><button type="button" class="ll-btn" id="tpickCamClose">やめる</button></div>';
   document.body.appendChild(box);
+  var c = tpickCam = { box: box, lastCode: '', lastAt: 0 };
+  var msg = box.querySelector('.tpick-cam-msg');
+  box.querySelector('#tpickCamClose').addEventListener('click', tpickCamStop);
+  var fail = async function(text){ if(tpickCam===c) tpickCamStop(); await appAlert(text); };
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ await fail('この端末のブラウザではカメラを使えません。Chrome で開いているか確かめてください。読めないときは、行を手で押して済にできます。'); return; }
+  var stream;
+  try{ stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }); }
+  catch(e){
+    var n = (e && e.name) || '';
+    await fail(n==='NotAllowedError' || n==='SecurityError'
+      ? 'カメラが許可されていません。\n\nChrome のアドレスバーの左のマーク(鍵や「i」)を押して →「権限」または「サイトの設定」→「カメラ」を「許可」にして、ページを開き直してください。\n(Android の「設定 → アプリ → Chrome → 権限 → カメラ」も「許可」になっているか確かめてください)'
+      : n==='NotFoundError' || n==='OverconstrainedError' ? 'カメラが見つかりませんでした。'
+      : n==='NotReadableError' ? 'カメラをほかのアプリが使っています。カメラを使っているアプリを閉じて、もう一度押してください。'
+      : 'カメラを使えませんでした('+(n || (e && e.message) || '理由不明')+')。');
+    return;
+  }
+  if(tpickCam!==c){ stream.getTracks().forEach(function(t){ t.stop(); }); return; }
+  c.stream = stream;
   var video = box.querySelector('video'); video.srcObject = stream;
   try{ await video.play(); }catch(e){}
-  var c = tpickCam = { stream: stream, box: box, lastCode: '', lastAt: 0 };
-  box.querySelector('#tpickCamClose').addEventListener('click', tpickCamStop);
   box.querySelector('#tpickCamCont').addEventListener('change', function(ev){ state.tpickCamCont = ev.target.checked; resetIdle(); });
-  function resetIdle(){ clearTimeout(c.idleTimer); c.idleTimer = setTimeout(function(){ if(tpickCam===c){ tpickCamStop(); showToast('30秒読まなかったので、カメラを止めました'); } }, state.tpickCamCont ? 120000 : 30000); }
+  function resetIdle(){ clearTimeout(c.idleTimer); c.idleTimer = setTimeout(function(){ if(tpickCam===c){ tpickCamStop(); showToast('読まなかったので、カメラを止めました'); } }, state.tpickCamCont ? 120000 : 30000); }
   resetIdle();
-  async function tick(){
-    if(tpickCam!==c) return;
-    if(!state.modal || state.modal.kind!=='tpickBatch'){ tpickCamStop(); return; }
-    try{
-      var found = await det.detect(video);
-      if(found && found.length){
-        var v = found[0].rawValue, now = Date.now();
-        if(v && !(v===c.lastCode && now - c.lastAt < 2500)){ // 同じ物を続けて読まない
-          c.lastCode = v; c.lastAt = now; resetIdle();
-          await tpickHandleScan(v);
-          if(!state.tpickCamCont){ tpickCamStop(); return; }
-        }
-      }
-    }catch(e){}
-    c.loop = setTimeout(tick, 180);
+  async function onCode(v){
+    var now = Date.now();
+    if(!v || (v===c.lastCode && now - c.lastAt < 2500)) return false; // 同じ物を続けて読まない
+    c.lastCode = v; c.lastAt = now; resetIdle();
+    await tpickHandleScan(v);
+    if(!state.tpickCamCont){ tpickCamStop(); return true; }
+    return false;
   }
-  tick();
+  var det = await tpickNativeDetector();
+  if(det){
+    msg.textContent = 'バーコードを枠に入れてください';
+    var tick = async function(){
+      if(tpickCam!==c) return;
+      if(!state.modal || state.modal.kind!=='tpickBatch'){ tpickCamStop(); return; }
+      try{ var found = await det.detect(video); if(found && found.length && await onCode(found[0].rawValue)) return; }catch(e){}
+      c.loop = setTimeout(tick, 180);
+    };
+    tick();
+    return;
+  }
+  // 端末に読むしくみが無い → ZXing で読む
+  msg.textContent = '読み取りの部品を読み込んでいます…';
+  var ZX;
+  try{ ZX = await tpickLoadZxing(); }catch(e){ await fail((e && e.message) || '読み取りの部品を読み込めませんでした'); return; }
+  if(tpickCam!==c) return;
+  try{
+    var hints = new Map();
+    hints.set(ZX.DecodeHintType.POSSIBLE_FORMATS, [ZX.BarcodeFormat.EAN_13, ZX.BarcodeFormat.EAN_8, ZX.BarcodeFormat.UPC_A, ZX.BarcodeFormat.UPC_E, ZX.BarcodeFormat.CODE_128, ZX.BarcodeFormat.ITF]);
+    var reader = c.zx = new ZX.BrowserMultiFormatReader(hints, 200);
+    msg.textContent = 'バーコードを枠に入れてください';
+    reader.decodeFromStream(stream, video, function(result){
+      if(tpickCam!==c) return;
+      if(!state.modal || state.modal.kind!=='tpickBatch'){ tpickCamStop(); return; }
+      if(result) onCode(result.getText ? result.getText() : String(result.text||''));
+    });
+  }catch(e){ await fail('カメラで読めませんでした('+((e && e.message) || '理由不明')+')。行を手で押して済にできます。'); }
 }
 function renderTpickBatchModal(m){
   var t = state.tpk || {};

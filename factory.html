@@ -3702,7 +3702,11 @@ function K981Settings({ data, setK981, isEditor }) {
         ))}
       </div>
       <div style={{ fontSize: 13, fontWeight: 600, margin: '8px 0 4px' }}>作業者の対応表</div>
-      <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 6 }}>担当者の名前と、kintone のログイン名。kintone のアカウントが無い人は空のままにすると、981 の「備考」に名前が入ります。</div>
+      <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 6 }}>担当者の名前と、kintone のログイン名(または kintone の表示名)。空のままでも、981 にこれまで入っている作業者に同じ名字の人が1人だけなら、その人にします。分からない人は「既定の作業者」にして、981 の「備考」に名前が入ります。</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        <span style={{ fontSize: 13, minWidth: 120, fontWeight: 600 }}>既定の作業者</span>
+        <input className="fm-input" style={{ width: 280 }} placeholder="ログイン名か表示名(空なら送らない)" value={cfg.defaultWorker === undefined ? '糸井 史織' : cfg.defaultWorker} onChange={(e) => setK981({ defaultWorker: e.target.value })} />
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {names.map((n) => (
           <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

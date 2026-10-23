@@ -1480,7 +1480,7 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .tpick-no{ font-size:20px; font-weight:800; }
 .tpick-claim{ min-width:110px; border:1px solid transparent; border-radius:8px; padding:6px 14px; font-size:14px; font-weight:700; cursor:pointer; box-shadow:none; } /* 「見る」と同じ形(色だけ目立つ。2026-10-20) */
 .tpick-items{ display:flex; flex-direction:column; gap:6px; }
-.tpick-item{ display:grid; grid-template-columns:40px 150px 1fr 80px; gap:10px; align-items:center; text-align:left; padding:12px 12px; border:1px solid var(--paper-line); border-radius:12px; background:var(--paper-50); font-size:16px; cursor:pointer; color:var(--ink-text); }
+.tpick-item{ display:grid; grid-template-columns:40px 190px 1fr 96px; gap:10px; align-items:center; text-align:left; padding:12px 12px; border:1px solid var(--paper-line); border-radius:12px; background:var(--paper-50); font-size:16px; cursor:pointer; color:var(--ink-text); }
 .tpick-item:disabled{ cursor:default; }
 .tpick-item.is-done{ background:#ECFDF3; border-color:#A6F4C5; color:#475467; }
 .tpick-item.is-done .tpick-code b, .tpick-item.is-done .tpick-qty{ text-decoration:line-through; }
@@ -1499,6 +1499,9 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .sb-name{ font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sb-del{ padding:4px 0; }
 @media (max-width:600px){ .sb-row{ grid-template-columns:1fr 80px 34px; } .sb-name{ grid-column:1 / 4; order:3; } .sb-row-head span:nth-child(3){ display:none; } }
+.hd-vc{ margin-top:10px; padding-top:8px; border-top:1px dashed var(--dash-line, #E4E7EC); }
+.hd-vc-head{ display:flex; gap:10px; align-items:baseline; font-size:14px; }
+.hd-vc-head span:first-of-type{ font-size:20px; font-weight:800; }
 .tpick-cam{ position:fixed; left:50%; top:12px; transform:translateX(-50%); z-index:3000; width:min(560px, 94vw); background:#101828; border-radius:14px; overflow:hidden; box-shadow:0 20px 40px rgba(0,0,0,.4); }
 .tpick-cam video{ width:100%; height:min(42vh, 320px); object-fit:cover; display:block; background:#000; }
 .tpick-cam-bar{ display:flex; gap:10px; align-items:center; padding:8px 10px; color:#fff; font-size:14px; }
@@ -1520,18 +1523,19 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .tpick-short-btn{ border:1px solid #FDA29B; background:#fff; color:#B42318; border-radius:10px; padding:0 12px; font-size:14px; font-weight:700; cursor:pointer; min-width:64px; }
 .tpick-item.is-short{ background:#FEF3F2; border-color:#FECDCA; }
 .tpick-item.is-short .tpick-chk{ border-color:#F04438; background:#FEE4E2; color:#B42318; }
-.tpick-item.is-short .tpick-qty{ color:#B42318; font-size:18px; }
+.tpick-item.is-short .tpick-qty{ color:#B42318; font-size:20px; }
 .tpick-short-box{ border:2px solid #F04438; background:#FEF3F2; border-radius:12px; padding:12px 14px; margin:0 0 10px; font-size:15px; color:#101828; }
 html[data-app-theme="dark"] .tpick-item.is-short{ background:rgba(240,68,56,.12); border-color:rgba(240,68,56,.45); }
 html[data-app-theme="dark"] .tpick-short-btn{ background:transparent; }
 html[data-app-theme="dark"] .tpick-short-box{ background:rgba(240,68,56,.12); color:var(--dk-fg); }
-.tpick-loc{ font-size:15px; }
+.tpick-loc{ font-size:20px; font-weight:700; letter-spacing:.02em; font-variant-numeric:tabular-nums; } /* ロケ・品番・数量を大きく(2026-10-23) */
+.tpick-loc b{ font-size:22px; margin-right:4px; }
 .tpick-code{ display:flex; flex-direction:column; min-width:0; }
-.tpick-code b{ font-size:18px; }
+.tpick-code b{ font-size:22px; letter-spacing:.02em; }
 .tpick-code .muted{ font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.tpick-qty{ font-size:24px; font-weight:800; text-align:right; font-variant-numeric:tabular-nums; }
+.tpick-qty{ font-size:32px; font-weight:900; text-align:right; font-variant-numeric:tabular-nums; }
 html[data-app-theme="dark"] .tpick-item.is-done{ background:rgba(18,183,106,.12); border-color:rgba(18,183,106,.4); color:var(--dk-muted); }
-@media (max-width:600px){ .tpick-row{ grid-template-columns:70px 1fr; } .tpick-item{ grid-template-columns:34px 1fr 64px; } .tpick-loc{ grid-column:2 / 4; order:-1; } }
+@media (max-width:600px){ .tpick-row{ grid-template-columns:70px 1fr; } .tpick-item{ grid-template-columns:34px 1fr 80px; } .tpick-loc{ grid-column:2 / 4; order:-1; } }
 .kpi-row{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:4px 0 18px; }
 .kpi-tile{ background:var(--paper-50); border:1px solid var(--paper-line); border-radius:12px; padding:14px 16px; min-width:0; }
 .kpi-label{ font-size:12.5px; color:var(--slate-500); font-weight:600; }
@@ -2065,6 +2069,7 @@ html[data-app-theme="dark"] .tpick-item.is-done{background:rgba(47,233,123,0.13)
 html[data-app-theme="dark"] .tpick-chk{color:#90fdcf !important}
 html[data-app-theme="dark"] .tpick-item.is-done .tpick-chk{background:rgba(48,232,111,0.13) !important}
 html[data-app-theme="dark"] .sb-row-head{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] .hd-vc{border-top-color:rgba(77,124,203,0.45) !important}
 html[data-app-theme="dark"] .tpick-cam-bar .ll-btn{background:var(--dk-card) !important}
 html[data-app-theme="dark"] .mon-tp-chip.is-done{color:#98f4c9 !important}
 html[data-app-theme="dark"] .mon-tp-note.is-short{color:#f79c96 !important}
@@ -9158,7 +9163,7 @@ function tpickPrintGroups(groups, fileTitle){
       var rows = pg.map(function(it){
         no++;
         var showB = it.block!==prevBlock, showL = showB || it.loc!==prevLoc; prevBlock = it.block; prevLoc = it.loc;
-        return '<tr><td rowspan="2" class="c">'+no+'</td><td rowspan="2" class="c">'+(showB ? esc(it.block) : '')+'</td><td rowspan="2">'+(showL ? esc(tpickLocText(it.loc)) : '')+'</td>'+
+        return '<tr><td rowspan="2" class="c">'+no+'</td><td rowspan="2" class="c blk">'+(showB ? esc(it.block) : '')+'</td><td rowspan="2" class="loc">'+(showL ? esc(tpickLocText(it.loc)) : '')+'</td>'+
           '<td class="code">'+esc(it.code)+'</td><td rowspan="2" class="c">'+esc(tpickQualityText(it.quality))+'</td><td rowspan="2" class="q">'+formatNum(it.qty)+'</td><td rowspan="2" class="chk"></td></tr>'+
           '<tr><td class="name">'+esc(it.name)+'</td></tr>'+
           (it.subs ? (it.subs.missing ? '<tr class="sub"><td></td><td class="c">部品</td><td colspan="5" class="warn">構成が未登録です(管理 → セット構成 で登録すると、ここに部品が出ます)</td></tr>' :
@@ -9181,7 +9186,7 @@ function tpickPrintGroups(groups, fileTitle){
     '.who{font-size:22px;font-weight:800;margin:2px 0 6px;} .day{display:inline-flex;border:1.5px solid #000;} .day span{background:#ddd;padding:6px 14px;border-right:1.5px solid #000;font-size:13px;} .day b{padding:4px 18px;font-size:20px;font-weight:500;}'+
     '.sums{font-size:15px;text-align:right;} .sums b{display:inline-block;min-width:110px;border-bottom:1px solid #000;text-align:right;font-weight:500;}'+
     'table{width:100%;border-collapse:collapse;font-size:12.5px;} th{background:#ddd;font-weight:500;border:1px solid #000;padding:4px;} td{border:1px solid #000;padding:3px 6px;height:19px;}'+
-    'td.c{text-align:center;} td.q{text-align:right;font-size:18px;width:70px;} td.code{font-size:13px;} td.name{background:#eee;font-size:12.5px;} td.chk{width:34px;} td.num,th.num{text-align:right;}'+
+    'td.c{text-align:center;} td.q{text-align:right;font-size:24px;font-weight:700;width:76px;} td.code{font-size:16px;font-weight:700;letter-spacing:.02em;} td.loc{font-size:16px;font-weight:700;letter-spacing:.02em;} td.blk{font-size:15px;font-weight:700;} td.name{background:#eee;font-size:12.5px;} td.chk{width:34px;} td.num,th.num{text-align:right;}'+
     'tr.sub td{font-size:11.5px;height:16px;border-top:1px dashed #98A2B3;} tr.sub td.scode{padding-left:14px;} tr.sub .per{color:#475467;} tr.sub td.sq{font-size:15px;} tr.sub td.sloc{font-size:11px;} tr.sub .pt{font-size:9px;}'+
     '.warn{color:#B42318;font-weight:700;} .foot{margin-top:8px;font-size:11.5px;border:1px solid #000;padding:5px 7px;}';
   printHtmlDoc(fileTitle || 'トータルピッキングリスト', html, css);
@@ -9895,9 +9900,10 @@ async function tpickHandleScan(raw){
    Android でも BarcodeDetector が使えない端末があったため)。カメラが使えないときは、理由と直し方を確認画面で出す */
 var tpickCam = null;
 var ZXING_URL = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
-function tpickCamStop(){
+function tpickCamStop(why){
   var c = tpickCam; tpickCam = null;
   if(!c) return;
+  if(why) try{ tpickKvUpdate('cam-debug', function(cur){ var list = Array.isArray(cur.list) ? cur.list : []; list.push({ at: new Date().toISOString(), stage: '閉じた', info: String(why), ua: String(navigator.userAgent||'').slice(0,160) }); cur.list = list.slice(-20); return cur; }); }catch(e){}
   clearTimeout(c.idleTimer); clearTimeout(c.loop);
   try{ if(c.zx) c.zx.reset(); }catch(e){}
   try{ if(c.stream) c.stream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
@@ -9922,6 +9928,14 @@ async function tpickNativeDetector(){
     return new window.BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128','itf'].filter(function(f){ return fm.indexOf(f)!==-1; }) });
   }catch(e){ return null; }
 }
+/* カメラの起動の記録(どこで止まったかを調べるため。2026-10-23)。kv「cam-debug」に最近20件。端末の種類・段階・結果だけ */
+function tpickCamLog(stage, info){
+  try{
+    var rec = { at: new Date().toISOString(), stage: stage, info: String(info||'').slice(0, 200), ua: String(navigator.userAgent||'').slice(0, 160), staff: (staffById(state.activeStaffId)||{}).name || '' };
+    var c = tpickCam; if(c){ c.logs = c.logs || []; c.logs.push(stage+(info ? ': '+info : '')); }
+    tpickKvUpdate('cam-debug', function(cur){ var list = Array.isArray(cur.list) ? cur.list : []; list.push(rec); cur.list = list.slice(-20); return cur; });
+  }catch(e){}
+}
 async function tpickCamStart(){
   if(tpickCam) return;
   // 先に画面を出す(押したのが分かるように)
@@ -9931,8 +9945,20 @@ async function tpickCamStart(){
   document.body.appendChild(box);
   var c = tpickCam = { box: box, lastCode: '', lastAt: 0 };
   var msg = box.querySelector('.tpick-cam-msg');
-  box.querySelector('#tpickCamClose').addEventListener('click', tpickCamStop);
-  var fail = async function(text){ if(tpickCam===c) tpickCamStop(); await appAlert(text); };
+  box.querySelector('#tpickCamClose').addEventListener('click', function(){ tpickCamStop('やめる'); });
+  // 止まったら、カメラの画面を閉じずに理由を出す(「やめる」で閉じる)
+  var fail = async function(text){
+    tpickCamLog('失敗', text);
+    if(tpickCam!==c) return;
+    clearTimeout(c.idleTimer); clearTimeout(c.loop);
+    try{ if(c.stream) c.stream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
+    var v = box.querySelector('video'); if(v) v.style.display = 'none';
+    msg.style.color = '#FDA29B'; msg.style.whiteSpace = 'pre-line'; msg.style.fontSize = '14px';
+    msg.textContent = text+'\n(行を手で押しても済にできます)';
+  };
+  tpickCamLog('開始', ('BarcodeDetector' in window) ? 'BarcodeDetector あり' : 'BarcodeDetector なし');
+  // 許可の画面が出たまま進まないとき
+  var waitTimer = setTimeout(function(){ if(tpickCam===c && !c.stream){ msg.textContent = 'カメラの許可を待っています…(画面の上か下に「カメラの使用を許可」が出ていたら「許可」を押してください)'; tpickCamLog('許可待ち', '8秒'); } }, 8000);
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ await fail('この端末のブラウザではカメラを使えません。Chrome で開いているか確かめてください。読めないときは、行を手で押して済にできます。'); return; }
   var stream;
   try{ stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }); }
@@ -9945,12 +9971,14 @@ async function tpickCamStart(){
       : 'カメラを使えませんでした('+(n || (e && e.message) || '理由不明')+')。');
     return;
   }
-  if(tpickCam!==c){ stream.getTracks().forEach(function(t){ t.stop(); }); return; }
+  clearTimeout(waitTimer);
+  if(tpickCam!==c){ stream.getTracks().forEach(function(t){ t.stop(); }); tpickCamLog('閉じた後に許可', ''); return; }
   c.stream = stream;
+  tpickCamLog('カメラ OK', (stream.getVideoTracks()[0] && stream.getVideoTracks()[0].label) || '');
   var video = box.querySelector('video'); video.srcObject = stream;
-  try{ await video.play(); }catch(e){}
+  try{ await video.play(); }catch(e){ tpickCamLog('映像の再生', (e && (e.name+' '+e.message)) || ''); }
   box.querySelector('#tpickCamCont').addEventListener('change', function(ev){ state.tpickCamCont = ev.target.checked; resetIdle(); });
-  function resetIdle(){ clearTimeout(c.idleTimer); c.idleTimer = setTimeout(function(){ if(tpickCam===c){ tpickCamStop(); showToast('読まなかったので、カメラを止めました'); } }, state.tpickCamCont ? 120000 : 30000); }
+  function resetIdle(){ clearTimeout(c.idleTimer); c.idleTimer = setTimeout(function(){ if(tpickCam===c){ tpickCamStop('読まなかった'); showToast('読まなかったので、カメラを止めました'); } }, state.tpickCamCont ? 120000 : 30000); }
   resetIdle();
   async function onCode(v){
     var now = Date.now();
@@ -9961,11 +9989,12 @@ async function tpickCamStart(){
     return false;
   }
   var det = await tpickNativeDetector();
+  tpickCamLog('読むしくみ', det ? '端末(BarcodeDetector)' : 'ZXing');
   if(det){
     msg.textContent = 'バーコードを枠に入れてください';
     var tick = async function(){
       if(tpickCam!==c) return;
-      if(!state.modal || state.modal.kind!=='tpickBatch'){ tpickCamStop(); return; }
+      if(!state.modal || state.modal.kind!=='tpickBatch'){ tpickCamStop('番号の画面を閉じた'); return; }
       try{ var found = await det.detect(video); if(found && found.length && await onCode(found[0].rawValue)) return; }catch(e){}
       c.loop = setTimeout(tick, 180);
     };
@@ -9984,7 +10013,7 @@ async function tpickCamStart(){
     msg.textContent = 'バーコードを枠に入れてください';
     reader.decodeFromStream(stream, video, function(result){
       if(tpickCam!==c) return;
-      if(!state.modal || state.modal.kind!=='tpickBatch'){ tpickCamStop(); return; }
+      if(!state.modal || state.modal.kind!=='tpickBatch'){ tpickCamStop('番号の画面を閉じた'); return; }
       if(result) onCode(result.getText ? result.getText() : String(result.text||''));
     });
   }catch(e){ await fail('カメラで読めませんでした('+((e && e.message) || '理由不明')+')。行を手で押して済にできます。'); }
@@ -10054,7 +10083,7 @@ function bindTpickModals(m){
   if(back) back.addEventListener('click', function(){ state.modal = { kind:'tpickList', taskId: m.taskId, who: m.who }; render(); });
   var scanBtn = document.getElementById('tpickScanBtn');
   if(scanBtn) scanBtn.addEventListener('click', function(){ logiStockLoad(); tpickCamStart(); });
-  if(m.kind!=='tpickBatch') tpickCamStop();
+  if(m.kind!=='tpickBatch') tpickCamStop('番号の画面を閉じた');
   document.querySelectorAll('[data-tpick-tab]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = Object.assign({}, m, { tab: el.getAttribute('data-tpick-tab'), shortIdx: null }); render(); }); });
   document.querySelectorAll('[data-tpick-who]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = Object.assign({}, m, { who: el.getAttribute('data-tpick-who'), whoPicked: true }); render(); }); });
   document.querySelectorAll('[data-tpick-batch]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = { kind:'tpickBatch', taskId: m.taskId, who: m.who, batchId: el.getAttribute('data-tpick-batch') }; render(); }); });
@@ -14644,7 +14673,7 @@ function renderGateDashboard(){
   var RED = { short:1, shortNoCandidate:1, overdue:1, breakHold:1 };
   var ORDER = { red:0, work:1, none:2, done:3 };
   var rows = [], cnt = { red:0, work:0, done:0, none:0 };
-  var totP = 0, remP = 0, lastEta = 0, lastBeyond = false;
+  var totP = 0, remP = 0, lastEta = 0, lastBeyond = false, vcTot = 0, vcRem = 0; // VC は数がまとまって大きいので、別に数える(2026-10-23)
   tasks.forEach(function(t){
     var c = plan ? plan.taskById[t.id] || null : null;
     var n = plan ? Object.keys(plan.staff).filter(function(sid){ var x = plan.staff[sid]; return x.present && x.currentTaskId===t.id; }).length : 0;
@@ -14652,7 +14681,10 @@ function renderGateDashboard(){
     cnt[st]++;
     if(c && c.piecesQty>0){
       var rp = st==='done' ? 0 : (c.basis==='pieces' ? c.remainingQty : c.remainingPieces);
-      if(rp!==undefined && rp!==null){ totP += c.piecesQty; remP += Math.max(0, rp); }
+      if(rp!==undefined && rp!==null){
+        if(isVcKindTask(t.id) || /^\s*VC/i.test(String(t.name||'').normalize('NFKC'))){ vcTot += c.piecesQty; vcRem += Math.max(0, rp); } // VC・VC(DIY)
+        else { totP += c.piecesQty; remP += Math.max(0, rp); }
+      }
     }
     if(c && st!=='done' && c.workerEta && c.workerEta.ms>lastEta){ lastEta = c.workerEta.ms; lastBeyond = !!c.workerEta.beyondShift; }
     rows.push({ t:t, c:c, st:st, n:n });
@@ -14680,7 +14712,7 @@ function renderGateDashboard(){
   var progress = '<article class="hd-card hd-span2 hd-link"'+link('adminHub','today','管理の「今日の状況」を開く')+'>'+label('activity','今日の進み具合','今日の状況',true)+
     '<div class="hd-hero-row">'+
       '<div><div class="hd-big">'+(tasks.length ? pct : '—')+'<span>%</span></div>'+
-        '<div class="hd-sub">'+(totP>0 ? formatNum(Math.round(totP-remP))+' / '+formatNum(Math.round(totP))+' ピース(CSVの出荷)' : (tasks.length ? '作業の完了 '+cnt.done+' / '+tasks.length : '今日の作業はまだありません'))+'</div></div>'+
+        '<div class="hd-sub">'+(totP>0 ? formatNum(Math.round(totP-remP))+' / '+formatNum(Math.round(totP))+' ピース(CSVの出荷'+(vcTot>0 ? '・VC を除く' : '')+')' : (tasks.length ? '作業の完了 '+cnt.done+' / '+tasks.length : '今日の作業はまだありません'))+'</div></div>'+
       '<div class="hd-kv">'+
         '<div><div class="k">全部終わる見込み</div><div class="v">'+(lastEta ? fmtClockMs(lastEta)+(lastBeyond?'以降':'') : (tasks.length && cnt.done===tasks.length ? '完了' : '—'))+'</div></div>'+
         '<div><div class="k">作業</div><div class="v">'+cnt.done+' / '+tasks.length+' 完了</div></div>'+
@@ -14688,6 +14720,9 @@ function renderGateDashboard(){
       '</div>'+
     '</div>'+
     '<div class="hd-bar"><i style="width:'+Math.max(0,Math.min(100,pct))+'%;background:var(--dash-acc);"></i></div>'+
+    (vcTot>0 ? (function(){ var vp = Math.round((vcTot-vcRem)/vcTot*100);
+      return '<div class="hd-vc"><div class="hd-vc-head"><b>VC</b><span>'+vp+'%</span><span class="hd-sub" style="margin:0;">'+formatNum(Math.round(vcTot-vcRem))+' / '+formatNum(Math.round(vcTot))+' ピース</span></div>'+
+        '<div class="hd-bar" style="margin-top:4px;"><i style="width:'+Math.max(0,Math.min(100,vp))+'%;background:#7A5AF8;"></i></div></div>'; })() : '')+
   '</article>';
   var MAXP = 7;
   var staffCard = '<article class="hd-card hd-link"'+link('monitor','','モニターを開く')+'>'+label('users','出勤 '+people.length+'人','モニター')+

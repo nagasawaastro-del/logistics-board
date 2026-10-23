@@ -4,10 +4,9 @@
 # 生産管理の画面を開かなくても進むように、毎時(日本時間 9〜19時・月〜土)に呼ぶ。
 # 合言葉: GitHub の Secrets と Supabase の Secrets の両方に、同じ値の FACTORY_CRON_KEY を登録する(16文字以上)。
 #         登録していない間は、何もせずに終わる。
+# 2026-10-23: 定期実行は Supabase(pg_cron → 関数 scheduled-jobs)に移したので、ここは手で動かすとき(Run workflow)だけ
 name: factory-sync
 on:
-  schedule:
-    - cron: '0 0-10 * * 1-6'   # UTC の 0〜10時 = 日本時間 9〜19時
   workflow_dispatch: {}
 jobs:
   sync:

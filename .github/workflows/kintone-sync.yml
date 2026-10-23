@@ -5,10 +5,9 @@
 # 合言葉: 生産管理の定期取り込みと同じ FACTORY_CRON_KEY(GitHub の Secrets と Supabase の Secrets に同じ値)。
 #         登録していない間は、何もせずに終わる。
 # 手で動かすときは Actions →「kintone-sync」→「Run workflow」(設定に関係なく、オンの項目を全部取る)。
+# 2026-10-23: 定期実行は Supabase(pg_cron → 関数 scheduled-jobs)に移したので、ここは手で動かすとき(Run workflow)だけ
 name: kintone-sync
 on:
-  schedule:
-    - cron: '7,22,37,52 20-23,0-12 * * *'   # UTC 20〜12時台 = 日本時間 5〜21時台。毎時0分は GitHub が混むのでずらす
   workflow_dispatch: {}
 jobs:
   sync:

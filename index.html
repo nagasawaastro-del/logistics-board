@@ -9170,7 +9170,7 @@ function tpickPrintGroups(groups, fileTitle){
             it.subs.list.map(function(c, ci){
               return '<tr class="sub"><td></td><td class="c">'+(ci===0 ? '部品'+(it.subs.pattern ? '<div class="pt">'+esc(it.subs.pattern)+'</div>' : '') : '')+'</td><td class="sloc">'+esc(c.locs)+'</td>'+
                 '<td class="scode">└ <b>'+esc(c.code)+'</b> '+esc(c.name)+' <span class="per">×'+formatNum(c.per)+'</span></td>'+
-                '<td class="c'+(c.short ? ' warn' : '')+'">在庫 '+(c.stock===null ? 'なし' : formatNum(c.stock))+(c.short ? ' 不足' : '')+'</td><td class="q sq">'+formatNum(c.need)+'</td><td class="chk"></td></tr>';
+                '<td class="c'+(c.short ? ' warn' : '')+'">'+esc(c.stockText)+'</td><td class="q sq">'+formatNum(c.need)+'</td><td class="chk"></td></tr>';
             }).join('')) : '');
       }).join('');
       return '<div class="pg"><div class="top"><div class="pn">'+(pi+1)+' / '+pages.length+'</div><h1>トータルピッキングリスト</h1><div class="dt">日付: '+esc(stamp)+'</div></div>'+
@@ -9246,11 +9246,11 @@ function setBomWarnHtml(items){
   if(!(items||[]).some(function(it){ return String(it.b||'').toUpperCase()==='SET'; })) return '';
   if(!state.setBom || !state.logiStock){ Promise.all([setBomLoad(), logiStockLoad()]).then(function(){ render(); }); return '<div class="pool-hint" style="margin:0 0 10px;">SET の部品を確かめています…</div>'; }
   var exp = setBomExpand(items);
-  var shorts = exp.totals.filter(function(t){ var st = logiStockOf(t.code); return !st || st.qty < t.need; });
-  if(!shorts.length && !exp.missing.length) return '<div class="pool-hint" style="margin:0 0 10px;color:#067647;">✓ SET の部品は、ロジザードの在庫で足りています</div>';
+  var shorts = exp.totals.filter(function(t){ return setBomStockFor(t.code, t.need).short; });
+  if(!shorts.length && !exp.missing.length) return '<div class="pool-hint" style="margin:0 0 10px;color:#067647;">✓ SET の部品は、高屋の在庫で足りています</div>';
   var names = {}; exp.sets.forEach(function(S){ names[S.code] = S.name; });
   return '<div class="tpick-short-box" style="margin:0 0 10px;text-align:left;">'+
-    (shorts.length ? '<div><b style="color:#B42318;">⚠️ SET の部品が足りません</b></div><div style="font-size:13px;margin-top:4px;">'+shorts.map(function(t){ var st = logiStockOf(t.code); return '<b>'+esc(t.code)+'</b> 必要 '+formatNum(t.need)+' ・ 在庫 '+(st ? formatNum(st.qty) : 'なし')+'(SET '+esc(t.sets.join('・'))+')'; }).join('<br>')+'</div>' : '')+
+    (shorts.length ? '<div><b style="color:#B42318;">⚠️ SET の部品が高屋の在庫で足りません</b></div><div style="font-size:13px;margin-top:4px;">'+shorts.map(function(t){ var x = setBomStockFor(t.code, t.need); return '<b>'+esc(t.code)+'</b> 必要 '+formatNum(t.need)+' ・ '+esc(x.text)+(x.locs ? ' <span class="muted">'+esc(x.locs)+'</span>' : '')+'(SET '+esc(t.sets.join('・'))+')'; }).join('<br>')+'</div>' : '')+
     (exp.missing.length ? '<div style="margin-top:6px;font-size:13px;"><b>構成が未登録の SET</b>: '+esc(exp.missing.join('・'))+' <button type="button" class="vc-manage-toggle-btn" data-setbom-edit="'+esc(JSON.stringify({ codes: exp.missing, names: names }))+'">🧩 登録する</button></div>' : '')+
     '<div class="muted" style="font-size:11px;margin-top:4px;">在庫は最後に取り込んだロジザードの在庫です(引当込み)</div></div>';
 }
@@ -9412,7 +9412,24 @@ function logiStockOf(code){
     Object.keys(b.locQty||{}).forEach(function(l){ locs.push({ blk: blk, loc: l, qty: b.locQty[l], alloc: b.locAlloc ? (b.locAlloc[l]||0) : 0 }); alloc += b.locAlloc ? (b.locAlloc[l]||0) : 0; });
   });
   locs.sort(function(a, b){ return b.qty - a.qty; });
-  return { name: p.name||'', qty: qty, alloc: alloc, locs: locs };
+  var tkB = SHUKEI_SITES.takaya.stockBlocks, tnB = SHUKEI_SITES.tannan.stockBlocks, tk = 0, tn = 0;
+  Object.keys(p.blocks||{}).forEach(function(blk){ var B = String(blk).toUpperCase(), q = p.blocks[blk].qty||0; if(tkB.indexOf(B)!==-1) tk += q; else if(tnB.indexOf(B)!==-1) tn += q; });
+  return { name: p.name||'', qty: qty, alloc: alloc, locs: locs, tk: tk, tn: tn };
+}
+/* 部品の在庫の出し方(2026-10-23): 高屋で足りれば高屋だけ。高屋で足りなければ「高屋 n 不足」と丹南の在庫・棚も出す。合わせても足りなければ「全体でも不足」 */
+function setBomStockFor(code, need){
+  var st = logiStockOf(code);
+  if(!st) return { text: '在庫なし', locs: '', short: true, allShort: true, st: null };
+  var short = st.tk < need, allShort = st.tk + st.tn < need;
+  var tkLocs = setBomLocText(st, 2), tnLocs = setBomLocTextSite(st, 'tannan', 2);
+  if(!short) return { text: '在庫 '+formatNum(st.tk), locs: tkLocs, short: false, allShort: false, st: st };
+  return { text: '高屋 '+formatNum(st.tk)+' 不足'+(st.tn>0 ? ' ・ 丹南 '+formatNum(st.tn) : '')+(allShort ? ' 全体でも不足' : ''),
+    locs: tkLocs+(st.tn>0 && tnLocs ? (tkLocs ? ' / ' : '')+'丹南 '+tnLocs : ''), short: true, allShort: allShort, st: st };
+}
+function setBomLocTextSite(st, site, max){
+  var blocks = SHUKEI_SITES[site].stockBlocks;
+  var locs = st ? st.locs.filter(function(l){ return blocks.indexOf(String(l.blk||'').toUpperCase())!==-1; }) : [];
+  return locs.slice(0, max||2).map(function(l){ return l.blk+' '+tpickLocText(l.loc)+'('+formatNum(l.qty)+')'; }).join(' ')+(locs.length>(max||2) ? ' ほか'+(locs.length-(max||2)) : '');
 }
 /* SET の行から構成部品を広げる。items: トータルピッキングの行(b=ブロック, c=品番, n=商品名, qty) */
 function setBomExpand(items){
@@ -9429,10 +9446,11 @@ function setBomExpand(items){
     if(!pats.length){ S.comps = null; return S; }
     var built = pats.map(function(pt, pi){
       var comps = pt.items.map(function(c){ return { code: c.code, per: Number(c.qty)||0, need: S.qty * (Number(c.qty)||0) }; });
-      var ok = comps.every(function(c){ var st = logiStockOf(c.code); return st && st.qty >= c.need; });
-      return { name: pt.name || ('パターン'+(pi+1)), comps: comps, ok: ok };
+      var ok = comps.every(function(c){ var st = logiStockOf(c.code); return st && st.tk >= c.need; }); // 高屋で足りる
+      var okAll = comps.every(function(c){ var st = logiStockOf(c.code); return st && st.tk + st.tn >= c.need; }); // 丹南と合わせれば足りる
+      return { name: pt.name || ('パターン'+(pi+1)), comps: comps, ok: ok, okAll: okAll };
     });
-    var pick = built.filter(function(b){ return b.ok; })[0] || built[0];
+    var pick = built.filter(function(b){ return b.ok; })[0] || built.filter(function(b){ return b.okAll; })[0] || built[0];
     S.comps = pick.comps; S.patternName = built.length>1 ? pick.name : ''; S.patternOk = pick.ok;
     S.alts = built.filter(function(b){ return b!==pick; });
     S.comps.forEach(function(c){
@@ -9444,26 +9462,27 @@ function setBomExpand(items){
   return { sets: list, totals: tOrder.map(function(k){ return totals[k]; }), missing: list.filter(function(S){ return !S.comps; }).map(function(S){ return S.code; }) };
 }
 function setBomLocText(st, max){
-  if(!st || !st.locs.length) return '';
-  return st.locs.slice(0, max||3).map(function(l){ return l.blk+' '+tpickLocText(l.loc)+'('+formatNum(l.qty)+')'; }).join(' ')+(st.locs.length>(max||3) ? ' ほか'+(st.locs.length-(max||3)) : '');
+  // 部品のロケーションは、高屋のブロックの棚だけ(2026-10-23。丹南の棚は出さない)
+  var takaya = SHUKEI_SITES.takaya.stockBlocks;
+  var locs = st ? st.locs.filter(function(l){ return takaya.indexOf(String(l.blk||'').toUpperCase())!==-1; }) : [];
+  if(!locs.length) return st && st.locs.length ? '高屋に棚なし' : '';
+  return locs.slice(0, max||3).map(function(l){ return l.blk+' '+tpickLocText(l.loc)+'('+formatNum(l.qty)+')'; }).join(' ')+(locs.length>(max||3) ? ' ほか'+(locs.length-(max||3)) : '');
 }
 /* 部品の表(画面と印刷で同じ形)。print=true なら印刷用(済の欄つき) */
 function setBomTablesHtml(exp, print){
   if(!exp.sets.length) return '';
   var nameOf = function(code){ var st = logiStockOf(code); return st ? st.name : ''; };
   var stockCell = function(code, need){
-    var st = logiStockOf(code);
-    if(!st) return '<td class="num"'+(print ? '' : ' style="color:#B42318;"')+'>在庫なし</td><td></td>';
-    var short = st.qty < need;
-    return '<td class="num"'+(short ? ' style="color:#B42318;font-weight:700;"' : '')+'>'+formatNum(st.qty)+(short ? ' 不足' : '')+'</td><td'+(print ? '' : ' class="sk-minor"')+'>'+esc(setBomLocText(st, 3))+'</td>';
+    var x = setBomStockFor(code, need);
+    return '<td class="num"'+(x.short ? ' style="color:#B42318;font-weight:700;"' : '')+'>'+esc(x.text)+'</td><td'+(print ? '' : ' class="sk-minor"')+'>'+esc(x.locs)+'</td>';
   };
   var perSet = exp.sets.map(function(S){
     if(!S.comps) return '<tr><td><b>'+esc(S.code)+'</b><div'+(print ? '' : ' class="sk-minor"')+'>'+esc(S.name)+'</div></td><td class="num">'+formatNum(S.qty)+'</td><td colspan="'+(print ? 6 : 5)+'" style="color:#B42318;">構成が未登録です</td></tr>';
     var altText = (S.alts||[]).map(function(a){
-      return a.name+': '+a.comps.map(function(c){ var st = logiStockOf(c.code); return c.code+'×'+formatNum(c.per)+'(必要'+formatNum(c.need)+'・在庫'+(st ? formatNum(st.qty) : 'なし')+')'; }).join(' ')+(a.ok ? '' : ' 不足あり');
+      return a.name+': '+a.comps.map(function(c){ var st = logiStockOf(c.code); return c.code+'×'+formatNum(c.per)+'(必要'+formatNum(c.need)+'・高屋'+(st ? formatNum(st.tk) : 'なし')+(st && st.tk < c.need && st.tn ? '・丹南'+formatNum(st.tn) : '')+')'; }).join(' ')+(a.ok ? '' : ' 高屋で不足あり');
     }).join(' / ');
     var head = '<b>'+esc(S.code)+'</b><div'+(print ? '' : ' class="sk-minor"')+'>'+esc(S.name)+'</div>'+
-      (S.patternName ? '<div style="font-size:11px;'+(S.patternOk ? '' : 'color:#B42318;')+'">使う構成: '+esc(S.patternName)+(S.patternOk ? '' : '(どのパターンも在庫が足りません)')+'</div>' : '');
+      (S.patternName ? '<div style="font-size:11px;'+(S.patternOk ? '' : 'color:#B42318;')+'">使う構成: '+esc(S.patternName)+(S.patternOk ? '' : '(どのパターンも高屋の在庫では足りません)')+'</div>' : '');
     return S.comps.map(function(c, i){
       return '<tr>'+(i===0 ? '<td rowspan="'+S.comps.length+'">'+head+'</td><td rowspan="'+S.comps.length+'" class="num">'+formatNum(S.qty)+'</td>' : '')+
         '<td><b>'+esc(c.code)+'</b><div'+(print ? '' : ' class="sk-minor"')+'>'+esc(nameOf(c.code))+'</div></td><td class="num">×'+formatNum(c.per)+'</td><td class="num"><b>'+formatNum(c.need)+'</b></td>'+stockCell(c.code, c.need)+(print ? '<td class="chk"></td>' : '')+'</tr>';
@@ -9534,8 +9553,8 @@ function setBomSubsFor(it, allItems){
   if(!S.comps) return { missing: true };
   var share = it.qty / (S.qty || it.qty); // 同じ SET が何行もあるときは、その行の数のぶん
   return { pattern: S.patternName || '', ok: S.patternOk, list: S.comps.map(function(c){
-    var need = Math.round(c.per * it.qty * 1000)/1000, st = logiStockOf(c.code);
-    return { code: c.code, name: st ? st.name : '', per: c.per, need: need, stock: st ? st.qty : null, locs: st ? setBomLocText(st, 2) : '', short: !st || st.qty < c.need };
+    var need = Math.round(c.per * it.qty * 1000)/1000, x = setBomStockFor(c.code, c.need);
+    return { code: c.code, name: x.st ? x.st.name : '', per: c.per, need: need, stockText: x.text, locs: x.locs, short: x.short };
   }) };
 }
 /* 印刷: 部品ごとの合計(同じ部品を複数の SET で使うときだけ。紙のいちばん下) */
@@ -9545,7 +9564,7 @@ function setBomTotalsPrintHtml(items){
   var missing = exp.missing;
   if(!multi.length && !missing.length) return '';
   return '<div class="foot">'+
-    (multi.length ? '<b>部品ごとの合計(複数の SET で使う部品)</b> '+multi.map(function(t){ var st = logiStockOf(t.code); return esc(t.code)+' 必要 '+formatNum(t.need)+' ・ 在庫 '+(st ? formatNum(st.qty) : 'なし')+(st && st.qty>=t.need ? '' : ' 不足'); }).join(' / ') : '')+
+    (multi.length ? '<b>部品ごとの合計(複数の SET で使う部品)</b> '+multi.map(function(t){ var x = setBomStockFor(t.code, t.need); return esc(t.code)+' 必要 '+formatNum(t.need)+' ・ '+esc(x.text); }).join(' / ') : '')+
     (missing.length ? '<div>構成が未登録の SET: '+esc(missing.join('・'))+'(管理 → セット構成 で登録すると部品が出ます)</div>' : '')+
   '</div>';
 }

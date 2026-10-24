@@ -2133,8 +2133,6 @@ html[data-app-theme="dark"] [style*="background:#FEF3F2" i]{background:rgba(238,
 html[data-app-theme="dark"] [style*="background: #FEF3F2" i]{background:rgba(238,58,41,0.13) !important}
 html[data-app-theme="dark"] [style*="background:#FFFAEB" i]{background:rgba(255,197,25,0.13) !important}
 html[data-app-theme="dark"] [style*="background: #FFFAEB" i]{background:rgba(255,197,25,0.13) !important}
-html[data-app-theme="dark"] [style*="color:#333" i]{color:var(--dk-fg) !important}
-html[data-app-theme="dark"] [style*="color: #333" i]{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] [style*="color:#067647" i]{color:#94f9cf !important}
 html[data-app-theme="dark"] [style*="color: #067647" i]{color:#94f9cf !important}
 html[data-app-theme="dark"] [style*="color:#101828" i]{color:#a5bbe8 !important}
@@ -9525,7 +9523,7 @@ var CLIENT_DEFS_KEY = 'client-defs';
 var CLIENT_KINDS = {
   inb:  { label:'入荷実績', fields: [['date','入荷日'],['no','入荷番号・発注番号'],['lineNo','行番号'],['supplier','仕入先',1],['code','品番',1],['name','品名'],['qty','数量',1],['cases','ケース数'],['note','備考']] },
   ship: { label:'出荷実績', fields: [['date','出荷日'],['slip','伝票番号'],['lineNo','行番号'],['code','品番',1],['name','品名'],['qty','数量',1],['note','備考']] },
-  set:  { label:'セット指示書', fields: [['date','作業日'],['no','指示番号'],['setCode','セット品番',1],['setName','セット名'],['setQty','セット数'],['partCode','部品品番',1],['partName','部品名'],['partQty','部品数',1],['note','備考']] }
+  set:  { label:'セット指示書', fields: [['date','作業日'],['no','指示番号・PO'],['setCode','セット品番・JAN',1],['setName','セット名'],['setQty','セット数'],['partCode','部品品番・JAN',1],['partName','部品名'],['partPer','1セットの部品数'],['partQty','部品数(合計)'],['note','備考']] }
 };
 // 見出しの名前から、項目を当てる(はじめの案。画面で直せる)
 var CLIENT_GUESS = {
@@ -9533,13 +9531,15 @@ var CLIENT_GUESS = {
   no: /番号|NO\.?$/i, code: /^(商品)?(品番|コード|ID)$|商品コード|品番|SKU|JAN/i, name: /品名|商品名/i, qty: /^数量$|数量|個数|出荷数|qty/i, cases: /ケース/i,
   due: /納期|納品日/i, note: /^(備考|メモ|摘要)$/,
   supplier: /仕入先|メーカー|取引先名/i,
-  setCode: /セット.*(品番|コード)/i, setName: /セット.*(名|品名)/i, setQty: /セット.*数/i, partCode: /部品.*(品番|コード)|構成.*(品番|コード)/i, partName: /部品.*名|構成.*名/i, partQty: /部品.*数|構成.*数|入数/i
+  setCode: /セット.*(品番|コード)/i, setName: /セット.*(名|品名)/i, setQty: /セット.*数/i, partCode: /部品.*(品番|コード)|構成.*(品番|コード)/i, partName: /部品.*名|構成.*名/i, partPer: /^個数$|1セット/i, partQty: /部品.*数|構成.*数/i
 };
 // 見出しの名前がこれと同じなら先に当てる(ロジザードの CSV。入荷日は直接入荷で空のことがあるので入荷確定日を先に)
 var CLIENT_GUESS_FIRST = {
-  date: ['入荷確定日','出荷確定日','入荷日','出荷日','作業日'], no: ['入荷管理番号','出荷管理番号','荷主入荷NO'], supplier: ['取引先名','仕入先名'],
+  date: ['入荷確定日','出荷確定日','入荷日','出荷日','作業日'], no: ['入荷管理番号','出荷管理番号','荷主入荷NO','PO','指示番号'], supplier: ['取引先名','仕入先名'],
   slip: ['出荷伝票NO','荷主出荷NO','伝票番号'], lineNo: ['入荷管理行番号','出荷指示行NO','出荷予定行NO','行番号'], cases: ['ケース数','個口数'],
-  code: ['商品ID','商品コード','品番'], name: ['商品名','品名'], qty: ['確定数','出荷確定数','出荷数','数量'], note: ['備考']
+  code: ['商品ID','商品コード','品番'], name: ['商品名','品名'], qty: ['確定数','出荷確定数','出荷数','数量'], note: ['備考'],
+  // セット作業指示書(エクセル): PO・セットJAN・商品名・数量・単品JAN・商品名(2つめ)・個数(1セットあたり)
+  setCode: ['セットJAN','セット品番'], setName: ['商品名','セット名'], setQty: ['数量','セット数'], partCode: ['単品JAN','部品品番'], partName: ['商品名(2)','部品名'], partPer: ['個数']
 };
 // 入荷の区分(作業料の数え方)
 var CLIENT_INB_MODES = [['piece','ピース(中身の検品)'],['case','ケース'],['jan','JAN貼り']];
@@ -9581,6 +9581,10 @@ function clientParseDate(v){
 }
 function clientNum(v){ var n = Number(String(v||'').normalize('NFKC').replace(/[,\s円個]/g,'')); return isFinite(n) ? n : null; }
 /* 見出しの行と対応から、取り込む行を作る */
+function clientUniqHead(rows, headerRow){
+  var h = rows[headerRow-1]; if(!h) return; var seen = {};
+  for(var i=0; i<h.length; i++){ var v = String(h[i]||''); if(!v) continue; seen[v] = (seen[v]||0) + 1; if(seen[v]>1) h[i] = v+'('+seen[v]+')'; }
+}
 function clientMapRows(rows, headerRow, cols, kind){
   var head = rows[headerRow-1] || [];
   var ix = {}; Object.keys(cols||{}).forEach(function(f){ var i = head.indexOf(cols[f]); if(i!==-1) ix[f] = i; });
@@ -9592,6 +9596,22 @@ function clientMapRows(rows, headerRow, cols, kind){
     Object.keys(ix).forEach(function(f){ o[f] = r[ix[f]] || ''; });
     if(o.supplier==='0') o.supplier = ''; // ロジザードの直接入荷は取引先が 0(入荷は仕入先が空の行を取り込まない)
     if(need.some(function(f){ return !o[f]; })){ skipped++; return; }
+    if(kind==='set'){
+      var codes = String(o.partCode).split(/\r?\n/).map(function(x){ return x.trim(); }).filter(Boolean);
+      var names = String(o.partName||'').split(/\r?\n/), pers = String(o.partPer===undefined ? '' : o.partPer).split(/\r?\n/), tots = String(o.partQty===undefined ? '' : o.partQty).split(/\r?\n/);
+      var sq = clientNum(o.setQty); if(sq===null || o.setQty===undefined || o.setQty==='') sq = 1;
+      var date = o.date!==undefined ? (clientParseDate(o.date) || '') : undefined;
+      codes.forEach(function(code, k){
+        var per = clientNum(pers[k] || (codes.length===1 ? pers[0] : '')), tot = clientNum(tots[k] || (codes.length===1 ? tots[0] : ''));
+        var x = Object.assign({}, o, { partCode: code, partName: (names[k] || (codes.length===1 ? names[0] : '') || '').trim(), setQty: sq });
+        if(date!==undefined) x.date = date;
+        if(per!==null && per>0){ x.partPer = per; x.partQty = tot!==null && tot>0 ? tot : sq * per; }
+        else if(tot!==null && tot>0){ x.partQty = tot; delete x.partPer; }
+        else { x.partQty = sq; delete x.partPer; } // 数が無ければ 1セットに1つ
+        out.push(x);
+      });
+      return;
+    }
     ['qty','cases','setQty','partQty'].forEach(function(f){ if(o[f]!==undefined){ var n = clientNum(o[f]); o[f] = n===null ? o[f] : n; } });
     if(o.date!==undefined) o.date = clientParseDate(o.date) || '';
     if(o.due!==undefined) o.due = clientParseDate(o.due) || o.due;
@@ -9621,6 +9641,7 @@ function renderClientData(){
     imp = '<div class="ll-form-group shukei-drop" data-cd-drop="1" style="margin:0 0 10px;">'+
         '<div class="ll-form-group-title">'+esc(K.label)+'の取り込み</div>'+
         '<div class="pool-hint" style="margin:0 0 6px;">ロジザードから出力した'+esc(K.label)+'の CSV(Excel も可)を選ぶか、この枠にドラッグ&ドロップしてください(1回に1ファイル)。列の対応は覚えているので、次からはそのまま取り込みます。同じ'+(kind==='set' ? '指示' : '伝票の同じ行')+'は、2回取り込んでもだぶりません。</div>'+
+        (kind==='set' ? '<div class="ch-row" style="margin:0 0 8px;"><label class="ch-field"><span>作業日(指示書に日付が無いとき)</span><input type="date" id="cdSetDate" value="'+esc(c.setWorkDate || todayStr())+'"></label></div>' : '')+
         (kind==='inb' ? '<div style="margin:0 0 8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><b>この取込の区分</b><select id="cdInbMode">'+CLIENT_INB_MODES.map(function(m){ return '<option value="'+m[0]+'"'+((c.inbMode||'piece')===m[0] ? ' selected' : '')+'>'+esc(m[1])+'</option>'; }).join('')+'</select><span class="sk-minor">取り込んだあとも、下の表で伝票ごとに直せます</span></div>' : '')+
         '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 ファイルを選んで取り込む<input type="file" id="cdFile" accept=".csv,.txt,.xlsx,.xls" style="display:none;"></label>'+
         '<span class="shukei-drop-hint">またはファイルをこの枠にドラッグ&ドロップ</span>'+
@@ -9761,6 +9782,7 @@ async function clientDoImport(c, mapped){
   var file = c.file, impId = 'i'+Date.now().toString(36), now = new Date().toISOString(), who = (state.managerSession && state.managerSession.user) ? '管理者' : '';
   var byMonth = {};
   var inbMode = c.kind==='inb' ? (c.inbMode || 'piece') : '';
+  if(c.kind==='set'){ var wd = c.setWorkDate || todayStr(); mapped.rows.forEach(function(r){ if(!r.date) r.date = wd; }); c.setFrom = c.setTo = mapped.rows.length ? mapped.rows[0].date : wd; }
   mapped.rows.forEach(function(r){ var m = (r.date || todayStr()).slice(0,7); (byMonth[m] = byMonth[m] || []).push(Object.assign({ imp: impId }, r, inbMode ? { mode: inbMode } : {})); });
   var months = Object.keys(byMonth).sort(), okAll = true, added = 0, dup = 0, upd = 0, remN = 0, dupFix = 0;
   for(var i=0; i<months.length; i++){
@@ -9819,6 +9841,7 @@ function bindClientData(){
   if(c.kind==='inb') bindClientInbModes(c);
   if(c.kind==='inb' || c.kind==='ship') bindClientRowDelete(c);
   var im = document.getElementById('cdInbMode'); if(im) im.addEventListener('change', function(){ c.inbMode = im.value; });
+  var sd = document.getElementById('cdSetDate'); if(sd) sd.addEventListener('change', function(){ c.setWorkDate = sd.value; });
   document.querySelectorAll('[data-cd-kind]').forEach(function(el){ el.addEventListener('click', function(){ c.kind = el.getAttribute('data-cd-kind'); c.data = null; c.file = null; c.cols = null; c.msg = ''; render(); }); });
   var add = document.getElementById('cdAddClient');
   if(add) add.addEventListener('click', async function(){
@@ -9848,6 +9871,7 @@ function bindClientData(){
       var saved = await loadKeyJson(clientMapKey(c.clientId, c.kind), function(){ return null; });
       c.file = { name: file.name, rows: rows }; c.msg = '';
       c.headerRow = (saved && saved.headerRow) || 1;
+      clientUniqHead(rows, c.headerRow);
       var headRow = rows[c.headerRow-1] || [];
       // 覚えている対応(見出しの名前が同じなら)→ 名前から当てる
       c.cols = {};
@@ -9880,7 +9904,7 @@ function bindClientData(){
     });
   });
   var hr = document.getElementById('cdHeaderRow');
-  if(hr) hr.addEventListener('change', function(){ c.headerRow = Math.max(1, Math.floor(Number(hr.value)||1)); render(); });
+  if(hr) hr.addEventListener('change', function(){ c.headerRow = Math.max(1, Math.floor(Number(hr.value)||1)); if(c.file) clientUniqHead(c.file.rows, c.headerRow); render(); });
   document.querySelectorAll('[data-cd-col]').forEach(function(el){ el.addEventListener('change', function(){ c.cols = c.cols || {}; c.cols[el.getAttribute('data-cd-col')] = el.value; render(); }); });
   var fc = document.getElementById('cdFileCancel');
   if(fc) fc.addEventListener('click', function(){ c.file = null; c.cols = null; render(); });
@@ -10253,8 +10277,9 @@ function ean13Svg(code, h){
   for(var b=0;b<bits.length;b++) if(bits[b]==='1') rects += '<rect x="'+((b+9)*m).toFixed(1)+'" y="0" width="'+m+'" height="'+H+'"/>';
   return '<svg xmlns="http://www.w3.org/2000/svg" width="'+W.toFixed(0)+'" height="'+(H+12)+'" viewBox="0 0 '+W.toFixed(1)+' '+(H+12)+'"><rect width="100%" height="100%" fill="#fff"/><g fill="#000">'+rects+'</g><text x="'+(W/2).toFixed(1)+'" y="'+(H+10)+'" font-size="10" text-anchor="middle" font-family="monospace">'+d+'</text></svg>';
 }
+function clientJan(code){ var d = String(code||'').replace(/\s/g,''); return /^\d{13}$/.test(d) ? d : janOf(code); }
 function clientSetTotals(rows, from, to){
-  var fin = {}, parts = {}, needBom = [];
+  var fin = {}, parts = {}, comp = {}, needBom = [];
   (rows||[]).forEach(function(r){
     var d = r.date || ''; if(from && d < from) return; if(to && d > to) return;
     if(!r.setCode) return;
@@ -10262,13 +10287,22 @@ function clientSetTotals(rows, from, to){
     var key = r.setCode+'|'+(r.no||'')+'|'+d; // 同じ指示の同じセットは1回だけ数える(部品の行ごとにセット数が繰り返されるため)
     var F = fin[r.setCode] || (fin[r.setCode] = { code: r.setCode, name: r.setName||'', qty: 0, seen: {} });
     if(!F.seen[key]){ F.seen[key] = 1; F.qty += sq; }
-    if(r.partCode){ var pq = typeof r.partQty==='number' ? r.partQty : (clientNum(r.partQty)||0); var Pp = parts[r.partCode] || (parts[r.partCode] = { code: r.partCode, name: r.partName||'', qty: 0 }); Pp.qty += pq; }
+    if(r.partCode){
+      var pq = typeof r.partQty==='number' ? r.partQty : (clientNum(r.partQty)||0);
+      var Pp = parts[r.partCode] || (parts[r.partCode] = { code: r.partCode, name: r.partName||'', qty: 0 }); Pp.qty += pq;
+      var C = comp[r.setCode] || (comp[r.setCode] = {}), per = typeof r.partPer==='number' ? r.partPer : (sq>0 ? pq / sq : pq);
+      var Cp = C[r.partCode] || (C[r.partCode] = { code: r.partCode, name: r.partName||'', per: per, qty: 0 }); Cp.qty += pq;
+    }
     else if(needBom.indexOf(r.setCode)===-1) needBom.push(r.setCode);
   });
   // 部品の行が無い指示は、セット構成(管理 → セット構成)から部品を出す
   var sets = (state.setBom && state.setBom.sets) || {};
-  needBom.forEach(function(code){ var pt = setBomPatterns(sets[code])[0]; if(!pt) return; pt.items.forEach(function(it){ var Pp = parts[it.code] || (parts[it.code] = { code: it.code, name: '', qty: 0 }); Pp.qty += (fin[code] ? fin[code].qty : 0) * it.qty; }); });
-  return { fin: Object.keys(fin).sort().map(function(k){ return fin[k]; }), parts: Object.keys(parts).sort().map(function(k){ return parts[k]; }) };
+  needBom.forEach(function(code){ var pt = setBomPatterns(sets[code])[0]; if(!pt) return; pt.items.forEach(function(it){ var q = (fin[code] ? fin[code].qty : 0) * it.qty; var Pp = parts[it.code] || (parts[it.code] = { code: it.code, name: '', qty: 0 }); Pp.qty += q; var C = comp[code] || (comp[code] = {}); C[it.code] = { code: it.code, name: '', per: it.qty, qty: q }; }); });
+  // 並びは名前の順(JAN ラベルも同じ順。2026-10-24)
+  var byName = function(a, b){ var x = a.name || a.code, y = b.name || b.code; return x < y ? -1 : x > y ? 1 : (a.code < b.code ? -1 : 1); };
+  var finL = Object.keys(fin).map(function(k){ return fin[k]; }).sort(byName);
+  finL.forEach(function(F){ F.comp = Object.keys(comp[F.code] || {}).map(function(k){ return comp[F.code][k]; }).sort(byName); });
+  return { fin: finL, parts: Object.keys(parts).map(function(k){ return parts[k]; }).sort(byName) };
 }
 function renderClientSetSheet(cl){
   var c = clientDataState(), month = c.month || todayStr().slice(0,7);
@@ -10279,26 +10313,80 @@ function renderClientSetSheet(cl){
   var T = clientSetTotals(data.rows, from, to);
   var nameOf = function(code, n){ if(n) return n; var st = logiStockOf(code); return st ? st.name : ''; };
   var tbl = function(list, label){ return '<div class="stf-section-title">'+label+'</div><div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>品番</th><th>品名</th><th class="num">合計数</th><th>JAN</th></tr></thead><tbody>'+
-    (list.map(function(x){ var j = janOf(x.code); return '<tr><td><b>'+esc(x.code)+'</b></td><td>'+esc(nameOf(x.code, x.name))+'</td><td class="num"><b>'+formatNum(x.qty)+'</b></td><td>'+(j ? esc(j) : '<span class="sk-minor">JAN なし</span>')+'</td></tr>'; }).join('') || '<tr><td colspan="4" class="empty-note">ありません</td></tr>')+'</tbody></table></div>'; };
+    (list.map(function(x){ var j = clientJan(x.code); return '<tr><td><b>'+esc(x.code)+'</b></td><td>'+esc(nameOf(x.code, x.name))+'</td><td class="num"><b>'+formatNum(x.qty)+'</b></td><td>'+(j ? esc(j) : '<span class="sk-minor">JAN なし</span>')+'</td></tr>'; }).join('') || '<tr><td colspan="4" class="empty-note">ありません</td></tr>')+'</tbody></table></div>'; };
   return '<div class="panel">'+
     '<div class="panel-title">セット指示書の作り直し</div>'+
-    '<div class="pool-hint" style="margin:0 0 8px;">「セット指示書」の取込(作業指示)から、期間の<b>完成品の合計</b>と、それに使う<b>構成部品の合計</b>を作り直します。部品の行が無い指示は、管理 → セット構成 の登録から部品を出します。印刷には JAN のバーコードが付きます(JAN はロジザードの在庫の検索名称から)。</div>'+
+    '<div class="pool-hint" style="margin:0 0 8px;">上で取り込んだセット作業指示書(エクセル)から、作業日の範囲の<b>作るもの(完成品)</b>と<b>使うもの(構成部品の合計)</b>、<b>セットごとの中身</b>を作り直します。並びは商品名の順。「JANラベル」は、完成品の JAN を同じ順に、数の枚数だけ A4 の 28455(3列×10段)に並べます。品番が13桁ならそれを JAN に、そうでなければロジザードの在庫の JAN を使います。</div>'+
     '<div class="ch-row"><label class="ch-field"><span>作業日(から)</span><input type="date" id="chSetFrom" value="'+esc(from)+'"></label><label class="ch-field"><span>作業日(まで)</span><input type="date" id="chSetTo" value="'+esc(to)+'"></label><span class="ch-note">(月の取込: '+esc(month)+'。月をまたぐときは月を選び直してください)</span>'+
-      '<button type="button" class="add-btn" id="chSetPrint">🖨 セット指示書を印刷・PDF</button></div>'+
-    tbl(T.fin, '完成品の合計('+T.fin.length+'品番)')+tbl(T.parts, '構成部品の合計('+T.parts.length+'品番)')+
+      '<button type="button" class="add-btn" id="chSetPrint">🖨 セット指示書を印刷・PDF</button>'+
+      '<button type="button" class="add-btn" id="chJanPrint">🏷️ JANラベル(28455)を印刷・PDF</button></div>'+
+    '<details style="margin:0 0 10px;"><summary style="cursor:pointer;font-size:13px;">JANラベルの印刷の設定(ずれの直し・使い始める位置)</summary>'+
+      '<div class="ch-row" style="margin-top:8px;"><label class="ch-field"><span>右へずらす(mm)</span><input type="number" step="0.5" id="chJanDx" value="'+esc(String(clientJanCfg().dx))+'" style="width:90px;"></label>'+
+      '<label class="ch-field"><span>下へずらす(mm)</span><input type="number" step="0.5" id="chJanDy" value="'+esc(String(clientJanCfg().dy))+'" style="width:90px;"></label>'+
+      '<label class="ch-field"><span>使い始める位置(1〜30)</span><input type="number" min="1" max="30" id="chJanStart" value="'+esc(String(clientJanCfg().start))+'" style="width:90px;"></label>'+
+      '<span class="ch-note">A4・3列×10段(28455)。ずれの直しはこの端末で覚えます。使い始める位置は、使いかけのシートの何枚目からか(左上から右へ数える)</span></div></details>'+
+    tbl(T.fin, '作るもの: 完成品の合計('+T.fin.length+'品番・'+formatNum(T.fin.reduce(function(a, x){ return a + x.qty; }, 0))+'個)')+tbl(T.parts, '使うもの: 構成部品の合計('+T.parts.length+'品番)')+
+    '<div class="stf-section-title">セットごとの中身</div><div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>セット</th><th class="num">数</th><th>中身(1セットあたり → 合計)</th></tr></thead><tbody>'+
+      (T.fin.map(function(F){ return '<tr><td><b>'+esc(nameOf(F.code, F.name))+'</b><div class="sk-minor">'+esc(F.code)+'</div></td><td class="num"><b>'+formatNum(F.qty)+'</b></td><td>'+((F.comp||[]).map(function(p){ return esc(nameOf(p.code, p.name))+' <span class="sk-minor">'+esc(p.code)+'</span> ×'+formatNum(p.per)+' → <b>'+formatNum(p.qty)+'</b>'; }).join('<br>') || '<span class="sk-minor">中身の登録なし</span>')+'</td></tr>'; }).join('') || '<tr><td colspan="3" class="empty-note">ありません</td></tr>')+'</tbody></table></div>'+
   '</div>';
 }
 function clientSetSheetPrint(cl){
   var c = clientDataState(), month = c.month || todayStr().slice(0,7), data = clientMonthData(cl.id, 'set', month);
   var from = c.setFrom || todayStr(), to = c.setTo || from, T = clientSetTotals(data ? data.rows : [], from, to);
   var nameOf = function(code, n){ if(n) return n; var st = logiStockOf(code); return st ? st.name : ''; };
-  var rows = function(list){ return list.map(function(x){ var j = janOf(x.code); return '<tr><td><b>'+esc(x.code)+'</b><div class="nm">'+esc(nameOf(x.code, x.name))+'</div></td><td class="q">'+formatNum(x.qty)+'</td><td class="bc">'+(j ? ean13Svg(j, 34) : '<span class="nb">JAN なし</span>')+'</td><td class="chk"></td></tr>'; }).join(''); };
-  var head = '<thead><tr><th>品番 / 品名</th><th>合計数</th><th>JAN</th><th>済</th></tr></thead>';
-  var html = '<h1>セット指示書</h1><div class="meta">'+esc(cl.name)+' ・ 作業日 '+esc(from.replace(/-/g,'/'))+(to!==from ? ' 〜 '+esc(to.replace(/-/g,'/')) : '')+' ・ 作成 '+esc(fmtDateTime(new Date().toISOString()))+'</div>'+
-    '<h2>完成品の合計('+T.fin.length+'品番)</h2><table>'+head+'<tbody>'+rows(T.fin)+'</tbody></table>'+
-    '<h2>構成部品の合計('+T.parts.length+'品番)</h2><table>'+head+'<tbody>'+rows(T.parts)+'</tbody></table>';
-  var css = '@page{size:A4 portrait;margin:10mm;} h1{font-size:22px;letter-spacing:.2em;margin:0 0 4px;} .meta{font-size:12px;margin-bottom:8px;} h2{font-size:14px;margin:12px 0 4px;border-left:4px solid #000;padding-left:6px;} table{width:100%;border-collapse:collapse;font-size:12px;} th{background:#eee;border:1px solid #000;padding:4px;} td{border:1px solid #000;padding:4px 6px;vertical-align:middle;} td.q{text-align:right;font-size:20px;font-weight:700;width:80px;} td.bc{width:190px;text-align:center;} td.chk{width:34px;} .nm{font-size:11px;color:#333;} .nb{font-size:10px;color:#667085;} tr{page-break-inside:avoid;}';
-  printHtmlDoc('セット指示書_'+cl.name+'_'+from, html, css);
+  var rows = function(list){ return list.map(function(x){ var j = clientJan(x.code); return '<tr><td><div class="nm1">'+esc(nameOf(x.code, x.name))+'</div><div class="cd">'+esc(x.code)+'</div></td><td class="q">'+formatNum(x.qty)+'</td><td class="bc">'+(j ? ean13Svg(j, 30) : '<span class="nb">JAN なし</span>')+'</td><td class="chk"></td></tr>'; }).join(''); };
+  var head = '<thead><tr><th>品名 / JAN</th><th>数</th><th>JAN</th><th>済</th></tr></thead>';
+  var compRows = T.fin.map(function(F){ return '<tr><td><div class="nm1">'+esc(nameOf(F.code, F.name))+'</div><div class="cd">'+esc(F.code)+'</div></td><td class="q">'+formatNum(F.qty)+'</td><td>'+((F.comp||[]).map(function(p){ return '<div>'+esc(nameOf(p.code, p.name))+' <span class="cd">'+esc(p.code)+'</span> ×'+formatNum(p.per)+' → <b>'+formatNum(p.qty)+'</b></div>'; }).join('') || '—')+'</td><td class="chk"></td></tr>'; }).join('');
+  var totalSets = T.fin.reduce(function(a, x){ return a + x.qty; }, 0);
+  var html = '<h1>セット作業指示書</h1><div class="meta">'+esc(cl.name)+' ・ 作業日 '+esc(from.replace(/-/g,'/'))+(to!==from ? ' 〜 '+esc(to.replace(/-/g,'/')) : '')+' ・ 作るセット '+formatNum(totalSets)+'個('+T.fin.length+'品番) ・ 作成 '+esc(fmtDateTime(new Date().toISOString()))+'</div>'+
+    '<h2>作るもの(完成品)</h2><table>'+head+'<tbody>'+rows(T.fin)+'</tbody></table>'+
+    '<h2>使うもの(構成部品の合計)</h2><table>'+head+'<tbody>'+rows(T.parts)+'</tbody></table>'+
+    '<h2>セットごとの中身(1セットあたり → 合計)</h2><table><thead><tr><th>セット</th><th>数</th><th>中身</th><th>済</th></tr></thead><tbody>'+compRows+'</tbody></table>';
+  var css = '@page{size:A4 portrait;margin:10mm;} h1{font-size:22px;letter-spacing:.2em;margin:0 0 4px;} .meta{font-size:12px;margin-bottom:8px;} h2{font-size:14px;margin:12px 0 4px;border-left:4px solid #000;padding-left:6px;} table{width:100%;border-collapse:collapse;font-size:12px;} th{background:#eee;border:1px solid #000;padding:4px;} td{border:1px solid #000;padding:4px 6px;vertical-align:middle;} td.q{text-align:right;font-size:20px;font-weight:700;width:70px;} td.bc{width:180px;text-align:center;} td.chk{width:30px;} .nm1{font-size:12px;font-weight:700;} .cd{font-size:10px;color:#475467;} .nb{font-size:10px;color:#667085;} tr{page-break-inside:avoid;}';
+  printHtmlDoc('セット作業指示書_'+cl.name+'_'+from, html, css);
+}
+/* JAN ラベル(A4・3列×10段 = 28455)。完成品を指示書と同じ順に、数の枚数だけ。見本(デスクトップの JANラベル_28455.pdf)と同じ位置 */
+function clientJanCfg(){ var v = {}; try{ v = JSON.parse(localStorage.getItem('janLabelCfg') || '{}') || {}; }catch(e){} return { dx: Number(v.dx)||0, dy: Number(v.dy)||0, start: Math.min(30, Math.max(1, Math.floor(Number(v.start)||1))) }; }
+function clientJanLabelSvg(code){
+  // ean13Svg と同じ線の並び。下に数字(先頭1桁は左、6桁ずつ左右)。縦横は外側の CSS で mm に合わせる
+  var d = String(code||'').replace(/\D/g,'');
+  if(d.length===12){ var sm = 0; for(var i=0;i<12;i++) sm += Number(d[i]) * (i%2 ? 3 : 1); d += String((10 - sm%10)%10); }
+  if(d.length!==13) return '';
+  var L = ['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
+  var G = ['0100111','0110011','0011011','0100001','0011101','0111001','0000101','0010001','0001001','0010111'];
+  var R = ['1110010','1100110','1101100','1000010','1011100','1001110','1010000','1000100','1001000','1110100'];
+  var P = ['LLLLLL','LLGLGG','LLGGLG','LLGGGL','LGLLGG','LGGLLG','LGGGLL','LGLGLG','LGLGGL','LGGLGL'];
+  var par = P[Number(d[0])], bits = '101';
+  for(var k=0;k<6;k++) bits += (par[k]==='L' ? L : G)[Number(d[k+1])];
+  bits += '01010';
+  for(var k2=0;k2<6;k2++) bits += R[Number(d[k2+7])];
+  bits += '101';
+  var X0 = 9, H = 34, rects = '';
+  for(var b=0;b<bits.length;b++){ if(bits[b]!=='1') continue; var guard = b<3 || (b>=45 && b<50) || b>=92; rects += '<rect x="'+(X0+b)+'" y="0" width="1" height="'+(guard ? H+5 : H)+'"/>'; }
+  var W = X0 + bits.length + 4, tx = function(x, s){ return '<text x="'+x+'" y="'+(H+8)+'" font-size="8" text-anchor="middle" font-family="Arial,Helvetica,sans-serif">'+s+'</text>'; };
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+W+' '+(H+9)+'" preserveAspectRatio="none"><g fill="#000">'+rects+'</g>'+tx(4, d[0])+tx(X0+3+21, d.slice(1,7))+tx(X0+50+21, d.slice(7))+'</svg>';
+}
+function clientJanLabelPrint(cl){
+  var c = clientDataState(), month = c.month || todayStr().slice(0,7), data = clientMonthData(cl.id, 'set', month);
+  var from = c.setFrom || todayStr(), to = c.setTo || from, T = clientSetTotals(data ? data.rows : [], from, to);
+  var nameOf = function(code, n){ if(n) return n; var st = logiStockOf(code); return st ? st.name : ''; };
+  var labels = [], noJan = [];
+  T.fin.forEach(function(F){ var j = clientJan(F.code); if(!j){ noJan.push(F.code); return; } for(var i=0; i<F.qty; i++) labels.push({ jan: j, name: nameOf(F.code, F.name) }); });
+  if(!labels.length){ appAlert('印刷するラベルがありません(作業日の範囲と、セット指示書の取込を確かめてください)'); return; }
+  var cfg = clientJanCfg(), COLX = [27.3, 84.4, 141.5], TOP = 21.8, PITCH = 25.4, PER = 30;
+  var slots = new Array(cfg.start - 1).fill(null).concat(labels), pages = [];
+  for(var p=0; p<slots.length; p+=PER) pages.push(slots.slice(p, p+PER));
+  var html = pages.map(function(pg){
+    return '<div class="pg">'+pg.map(function(l, i){
+      if(!l) return '';
+      var x = COLX[i % 3] + cfg.dx, y = TOP + Math.floor(i / 3) * PITCH + cfg.dy;
+      return '<div class="lb" style="left:'+x.toFixed(2)+'mm;top:'+y.toFixed(2)+'mm;"><div class="nm"><span>'+esc(l.name)+'</span></div><div class="bc">'+clientJanLabelSvg(l.jan)+'</div></div>';
+    }).join('')+'</div>';
+  }).join('');
+  var css = '@page{size:A4 portrait;margin:0;} html,body{margin:0;padding:0;} .pg{position:relative;width:210mm;height:297mm;overflow:hidden;page-break-after:always;} .pg:last-child{page-break-after:auto;}'+
+    '.lb{position:absolute;width:38.5mm;height:23.5mm;} .nm{font-size:2.2mm;line-height:1.15;height:8.2mm;overflow:hidden;font-family:"Noto Sans JP","Yu Gothic",sans-serif;word-break:break-all;display:flex;flex-direction:column;justify-content:flex-end;} .nm span{display:block;max-height:7.6mm;overflow:hidden;} .bc{position:absolute;left:1.9mm;top:8.6mm;width:37.7mm;height:14.8mm;} .bc svg{width:100%;height:100%;display:block;}';
+  if(noJan.length) showToast('JAN の分からないセットが '+noJan.length+'品番あります(ラベルに入れていません)');
+  printHtmlDoc('JANラベル_28455_'+cl.name+'_'+from, html, css);
 }
 function bindClientHub(){
   var c = clientDataState(), cl = clientCur();
@@ -10386,6 +10474,8 @@ function bindClientHub(){
   if(sf) sf.addEventListener('change', function(){ c.setFrom = sf.value; if(!c.setTo || c.setTo < sf.value) c.setTo = sf.value; if(sf.value) c.month = sf.value.slice(0,7); render(); });
   if(stt) stt.addEventListener('change', function(){ c.setTo = stt.value; render(); });
   var sp = document.getElementById('chSetPrint'); if(sp) sp.addEventListener('click', function(){ clientSetSheetPrint(cl); });
+  var jp = document.getElementById('chJanPrint'); if(jp) jp.addEventListener('click', function(){ clientJanLabelPrint(cl); });
+  ['chJanDx','chJanDy','chJanStart'].forEach(function(id){ var el = document.getElementById(id); if(el) el.addEventListener('change', function(){ var v = clientJanCfg(); v[{ chJanDx:'dx', chJanDy:'dy', chJanStart:'start' }[id]] = Number(el.value)||0; try{ localStorage.setItem('janLabelCfg', JSON.stringify(v)); }catch(e){} }); });
 }
 /* 管理 →「セット構成」: 登録済みの SET の一覧(探す・直す・消す)と、新しい SET 品番の登録(2026-10-22) */
 function renderSetBomAdmin(){

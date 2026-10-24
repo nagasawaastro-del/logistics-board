@@ -10829,7 +10829,8 @@ async function tpickCamStart(test, preStream){
     tpickCamLog('カメラ一覧', cams.length+'台: '+cams.map(function(d){ return d.label || '(名前なし)'; }).join(' / '));
   }
   var savedDev = ''; try{ savedDev = localStorage.getItem('tpickCamDevice') || ''; }catch(e){}
-  var pick = cams.filter(function(d){ return d.deviceId && d.deviceId===savedDev; })[0] || cams.filter(function(d){ return /back|rear|environment|背面|外側/i.test(d.label||''); })[0] || null;
+  var pick = cams.filter(function(d){ return d.deviceId && d.deviceId===savedDev; })[0] || cams.filter(function(d){ return /back|rear|environment|背面|外側/i.test(d.label||''); })
+      .sort(function(a, b){ var n = function(d){ var m = String(d.label||'').match(/camera\s*(\d+)/i); return m ? Number(m[1]) : 99; }; return n(a) - n(b); })[0] || null; // 背面が複数なら番号の小さい方(camera 0 がふつうの背面カメラ。2026-10-24)
   if(cams.length>1 && tpickCam===c){
     var sel = document.createElement('select'); sel.className = 'tpick-cam-sel';
     sel.innerHTML = cams.map(function(d, i){ return '<option value="'+esc(d.deviceId)+'"'+(pick && pick.deviceId===d.deviceId ? ' selected' : '')+'>'+esc(d.label || ('カメラ '+(i+1)))+'</option>'; }).join('');
@@ -10867,7 +10868,9 @@ async function tpickCamStart(test, preStream){
   msg.style.whiteSpace = ''; msg.style.color = '';
   tpickCamLog('カメラ OK', ((stream.getVideoTracks()[0] && stream.getVideoTracks()[0].label) || '')+'・'+waited+'秒');
   var video = box.querySelector('video'); video.style.display = ''; video.srcObject = stream; // 映像の枠は、カメラが付いてから出す(待っている間に黒い画面で隠さない)
-  try{ await video.play(); }catch(e){ tpickCamLog('映像の再生', (e && (e.name+' '+e.message)) || ''); }
+  // 映像の再生を待ちすぎない(始まらない端末があった。3秒で先へ進む)
+  var played = false;
+  try{ await Promise.race([video.play().then(function(){ played = true; }), new Promise(function(res){ setTimeout(function(){ if(!played) tpickCamLog('映像の再生', '3秒で始まらない'); res(); }, 3000); })]); }catch(e){ tpickCamLog('映像の再生', (e && (e.name+' '+e.message)) || ''); }
   box.querySelector('#tpickCamCont').addEventListener('change', function(ev){ state.tpickCamCont = ev.target.checked; resetIdle(); });
   function resetIdle(){ clearTimeout(c.idleTimer); c.idleTimer = setTimeout(function(){ if(tpickCam===c){ tpickCamStop('読まなかった'); showToast('読まなかったので、カメラを止めました'); } }, (state.tpickCamCont || test) ? 120000 : 30000); }
   resetIdle();

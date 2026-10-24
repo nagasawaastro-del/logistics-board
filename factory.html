@@ -1027,7 +1027,13 @@ function App() {
       return effects;
     }
     if (ord && ord.productId && rec.foldedQty) {
-      return [{ productId: ord.productId, qty: num(rec.foldedQty) }];
+      const effects = [{ productId: ord.productId, qty: num(rec.foldedQty) }];
+      // セット品の計画の実績(セット数)は、元になるバラ品の在庫から セット数 × 1セットの枚数 を引く(2026-10-24。機械の計画は除く)
+      const sp = d.products.find((p) => p.id === ord.productId);
+      if (ord.kind !== 'machine' && sp && sp.isSet && sp.setSourceProductId && num(sp.piecesPerSet) > 0) {
+        effects.push({ productId: sp.setSourceProductId, qty: -(num(sp.piecesPerSet) * num(rec.foldedQty)) });
+      }
+      return effects;
     }
     return [];
   };

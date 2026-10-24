@@ -9941,7 +9941,6 @@ var CLIENT_FEE_BASIS = [
   ['inbPiece','入荷のピース数(区分がピースの行=中身の検品)',1],
   ['inbJan','入荷のピース数(区分が JAN貼りの行)',1],
   ['shipPiece','出荷のピース数',1],
-  ['packCase','出荷の梱包(出荷伝票1件 = 1ケース)',1],
   ['setPiece','セット作業の数(セット指示書の完成品の数)',1],
   ['po','出荷の件数(伝票番号の数)',1],
   ['tsubo','保管の坪数(月の最大を請求で入れる)',0],
@@ -9957,7 +9956,7 @@ var CLIENT_QUOTE_DEFAULT = { quoteDate: '2026-05-15', items: [
   { id:'inPiece', name:'入庫荷役料', unit:'ピース', price:10, basis:'inbPiece', note:'中身のわからないケース(入荷時に数量の検品)' },
   { id:'inJan', name:'入庫荷役料(JANシール貼り)', unit:'ピース', price:20, basis:'inbJan', note:'入庫時に JAN シール貼り等が必要な商品' },
   { id:'outPiece', name:'出庫荷役料', unit:'ピース', price:10, basis:'shipPiece', note:'ピッキング手数料' },
-  { id:'pack', name:'梱包手数料', unit:'ケース', price:300, basis:'packCase', note:'' },
+  { id:'pack', name:'梱包手数料', unit:'ケース', price:300, basis:'manual', note:'出荷からは数えない(請求で手で入れる)' },
   { id:'setWork', name:'セット作業', unit:'ピース', price:40, basis:'setPiece', note:'' },
   { id:'lzInit', name:'ロジザードZERO導入費用', unit:'式', price:575000, basis:'once', note:'' },
   { id:'lzMonth', name:'ロジザードZERO月額費用', unit:'月', price:51000, basis:'monthly', note:'' },
@@ -9994,7 +9993,7 @@ function clientQ(v){ return typeof v==='number' ? v : (clientNum(v)||0); }
 /* 日ごとの数(入荷のケース・ピース・JAN 貼り、出荷のピース・ケース・件数、セットの数) */
 function clientFeeCounts(inb, ship, set, from, to){
   var days = {}, inR = function(d){ return !!d && (!from || d>=from) && (!to || d<=to); };
-  var D = function(d){ return days[d] || (days[d] = { inbCase:0, inbPiece:0, inbJan:0, shipPiece:0, packCase:0, setPiece:0, po:0 }); };
+  var D = function(d){ return days[d] || (days[d] = { inbCase:0, inbPiece:0, inbJan:0, shipPiece:0, setPiece:0, po:0 }); };
   ((inb && inb.rows) || []).forEach(function(r){
     if(!inR(r.date)) return;
     var x = D(r.date), q = clientQ(r.qty), cs = clientQ(r.cases);
@@ -10005,9 +10004,9 @@ function clientFeeCounts(inb, ship, set, from, to){
   ((ship && ship.rows) || []).forEach(function(r, i){
     if(!inR(r.date)) return;
     var x = D(r.date); x.shipPiece += clientQ(r.qty);
-    // 件数(PO)と梱包は出荷伝票ごとに1回(梱包は伝票1件 = 1ケース。箱数はやめた 2026-10-24)。伝票番号の無い行は1行で1件
+    // 出荷からはピース数と件数(PO = 出荷伝票の数)だけ。箱数・梱包は数えない(2026-10-24)。伝票番号の無い行は1行で1件
     var k = r.date+'|'+(r.slip || ('#'+i));
-    if(!seen[k]){ seen[k] = 1; x.po++; x.packCase++; }
+    if(!seen[k]){ seen[k] = 1; x.po++; }
   });
   var ss = {};
   ((set && set.rows) || []).forEach(function(r){
@@ -10097,7 +10096,7 @@ function renderClientDash(cl){
   var n = function(v){ return v ? formatNum(v) : ''; };
   var rows = list.map(function(d){
     var x = days[d], amt = clientDayAmount(F.items, x);
-    return '<tr><td>'+esc(dateLabelFromStr(d))+'</td><td class="num">'+n(x.inbCase)+'</td><td class="num">'+n(x.inbPiece)+'</td><td class="num">'+n(x.inbJan)+'</td><td class="num">'+n(x.shipPiece)+'</td><td class="num">'+n(x.packCase)+'</td><td class="num">'+n(x.po)+'</td><td class="num">'+n(x.setPiece)+'</td><td class="num"><b>'+clientYen(amt)+'</b></td><td style="min-width:110px;">'+hbar(amt, maxA)+'</td></tr>';
+    return '<tr><td>'+esc(dateLabelFromStr(d))+'</td><td class="num">'+n(x.inbCase)+'</td><td class="num">'+n(x.inbPiece)+'</td><td class="num">'+n(x.inbJan)+'</td><td class="num">'+n(x.shipPiece)+'</td><td class="num">'+n(x.po)+'</td><td class="num">'+n(x.setPiece)+'</td><td class="num"><b>'+clientYen(amt)+'</b></td><td style="min-width:110px;">'+hbar(amt, maxA)+'</td></tr>';
   }).join('') || '<tr><td colspan="10" class="empty-note">この期間の入荷・出荷・セットの取込はまだありません</td></tr>';
   var left = running ? Math.round((new Date(P.to+'T00:00:00') - new Date(today+'T00:00:00')) / 86400000) : 0;
   return '<div class="panel">'+
@@ -10106,13 +10105,13 @@ function renderClientDash(cl){
       (inv ? '<span class="tpick-done-badge" style="margin-bottom:9px;">締め済み '+esc(inv.no)+'</span>' : running ? '<span class="ch-note">締め日まであと'+left+'日</span>' : '')+'</div>'+
     '<div class="pool-hint" style="margin:0 0 10px;">金額は税抜。料金表(見積書)の単価 × 取り込んだ実績の数。取り込んだ実績は締め日までためていき、締め日に「請求」で締めて請求書にします。</div>'+
     '<div class="kpi-row">'+
-      kpiTile('今期の作業料', clientYen(dailyAll), '', '入荷・出荷・梱包・セット・件数')+
+      kpiTile('今期の作業料', clientYen(dailyAll), '', '入荷・出荷・セット・件数')+
       kpiTile('前半の作業料', clientYen(dailyFirst), '', esc(P.from.slice(5).replace('-','/')+'〜'+P.mid.slice(5).replace('-','/')))+
       kpiTile('月額・保管料など', clientYen(fixed), '', noTsubo ? '保管の坪数は「請求」で入れます' : '月額・保管料・1回だけの分')+
       kpiTile('半月の請求見込み', clientYen(dailyFirst + fixed), '', '前半の作業料+月額・保管料')+
       kpiTile(inv ? '締めた請求額(税抜)' : '締め日の見込み', clientYen(inv ? inv.sub : running ? forecast : dailyAll + fixed), '', inv ? '締め済み' : running ? '今日までの日割り+月額・保管料' : '期間の合計(まだ締めていません)')+
     '</div>'+
-    '<div class="stf-section-title">日別</div><div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>日</th><th class="num">入荷ケース</th><th class="num">入荷ピース</th><th class="num">JAN貼り</th><th class="num">出荷ピース</th><th class="num">梱包ケース</th><th class="num">件数</th><th class="num">セット</th><th class="num">作業料</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div class="stf-section-title">日別</div><div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>日</th><th class="num">入荷ケース</th><th class="num">入荷ピース</th><th class="num">JAN貼り</th><th class="num">出荷ピース</th><th class="num">件数</th><th class="num">セット</th><th class="num">作業料</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
   '</div>';
 }
 /* 料金表(見積書): 項目・単位・単価・何に掛けるか。はじめは見積書(2026/5/15)の内容 */
@@ -10136,7 +10135,7 @@ function renderClientRates(cl){
     '<div class="ch-row" style="margin-top:8px;"><label class="ch-field"><span>見積日</span><input type="date" id="chQuoteDate" value="'+esc(E.quoteDate||'')+'"></label></div>'+
     '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>項目</th><th>単位</th><th>単価(円)</th><th>何に掛けるか</th><th>備考</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;"><button type="button" class="vc-manage-toggle-btn" id="chRateAdd">＋ 項目を足す</button><button type="button" class="add-btn" id="chRateSave">保存する</button><button type="button" class="vc-manage-toggle-btn" id="chRateReset">見積書(2026/5/15)の内容に戻す</button></div>'+
-    '<div class="pool-hint" style="margin-top:10px;">入荷は、入荷実績の画面で選んだ区分(ピース・ケース・JAN貼り)で数えます(ケースは伝票ごとのケース(個口)数)。梱包は出荷伝票1件 = 1ケース、件数(1PO)は出荷伝票の数、セット作業はセット指示書の完成品の数。</div>'+
+    '<div class="pool-hint" style="margin-top:10px;">入荷は、入荷実績の画面で選んだ区分(ピース・ケース・JAN貼り)で数えます(ケースは伝票ごとのケース(個口)数)。出荷はピース数と件数(1PO = 出荷伝票の数)だけを数えます(梱包は数えません)、セット作業はセット指示書の完成品の数。</div>'+
   '</div>';
 }
 /* 請求: 期間の明細と合計。請求書を印刷(PDF に保存も) */

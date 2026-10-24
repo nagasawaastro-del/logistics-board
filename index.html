@@ -9655,7 +9655,7 @@ function renderClientData(){
     (d && d.rows.length ? '<button type="button" class="vc-manage-toggle-btn" id="cdCsv">CSVで保存</button>' : '')+
     (kind==='set' && d && d.rows.length ? '<button type="button" class="vc-manage-toggle-btn" id="cdToBom" title="セット品番ごとの部品と数を、管理 → セット構成 に登録します">🧩 セット構成に登録</button>' : '')+'</div>'+
     (!d ? '<div class="empty-note">読み込み中…</div>' : !d.rows.length ? '<div class="empty-note">この月の取込はありません</div>' :
-      '<div style="margin:6px 0;font-size:13px;">'+d.imports.slice().reverse().map(function(i){ return '<div style="display:flex;gap:8px;align-items:center;margin:2px 0;"><span>'+esc(fmtDateTime(i.at))+'</span><b>'+esc(i.file)+'</b><span class="sk-minor">'+formatNum(i.count)+'行</span><button type="button" class="ll-btn" data-cd-undo="'+esc(i.id)+'">取り消す</button></div>'; }).join('')+'</div>'+
+      (kind==='inb' ? '' : '<div style="margin:6px 0;font-size:13px;">'+d.imports.slice().reverse().map(function(i){ return '<div style="display:flex;gap:8px;align-items:center;margin:2px 0;"><span>'+esc(fmtDateTime(i.at))+'</span><b>'+esc(i.file)+'</b><span class="sk-minor">'+formatNum(i.count)+'行</span><button type="button" class="ll-btn" data-cd-undo="'+esc(i.id)+'">取り消す</button></div>'; }).join('')+'</div>')+
       (kind==='inb' ? clientInbModeBar(c, d)+clientInbTable(c, d, K) :
       '<div style="overflow-x:auto;max-height:420px;overflow-y:auto;"><table class="report-table" style="font-size:12px;"><thead><tr>'+K.fields.map(function(fd){ return '<th>'+esc(fd[1])+'</th>'; }).join('')+'</tr></thead><tbody>'+
         d.rows.slice(0, 300).map(function(r, i){ return '<tr>'+K.fields.map(function(fd){ var v = r[fd[0]]; return clientCellHtml(fd[0], v); }).join('')+'</tr>'; }).join('')+
@@ -9685,15 +9685,15 @@ function clientInbTable(c, d, K){
     var I = clientInbSlipInfo(c, d, sl), r0 = d.rows[sl.idx[0]];
     var sel = '<select data-inb-slip-mode="'+esc(sl.key)+'" style="font-size:12px;">'+(I.mode==='mix' ? '<option value="" selected>品目ごと</option>' : '')+CLIENT_INB_MODES.map(function(m){ return '<option value="'+m[0]+'"'+(I.mode===m[0] ? ' selected' : '')+'>'+esc(m[1].replace(/\(.*\)/,''))+'</option>'; }).join('')+'</select>';
     var cs = I.hasCase ? '<span style="white-space:nowrap;">ケース(個口)数 <input type="number" min="0" data-inb-slip-cases="'+esc(sl.key)+'" value="'+(I.cases ? I.cases : '')+'" style="width:64px;font-size:12px;'+(I.miss ? 'border-color:#B42318;' : '')+'" placeholder="個口"></span>' : '';
-    var head = '<tr class="inb-slip"><td colspan="'+(cols.length+1)+'" style="background:var(--panel-alt,#F2F4F7);"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><b>📦 '+esc(sl.no || '(番号なし)')+'</b><span class="sk-minor">'+esc(r0.date||'')+(r0.supplier ? ' ・ '+esc(r0.supplier) : '')+' ・ '+sl.idx.length+'品目</span>'+sel+cs+(I.miss ? '<span style="color:#B42318;font-size:12px;">ケース数を入れてください</span>' : '')+'</div></td></tr>';
+    var head = '<tr class="inb-slip"><td colspan="'+(cols.length+2)+'" style="background:var(--panel-alt,#F2F4F7);"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><b>📦 '+esc(sl.no || '(番号なし)')+'</b><span class="sk-minor">'+esc(r0.date||'')+(r0.supplier ? ' ・ '+esc(r0.supplier) : '')+' ・ '+sl.idx.length+'品目</span>'+sel+cs+(I.miss ? '<span style="color:#B42318;font-size:12px;">ケース数を入れてください</span>' : '')+'</div></td></tr>';
     var rows = sl.idx.map(function(i){
       var r = d.rows[i], e = clientInbEdit(c, i, r);
       var ms = sl.idx.length>1 ? '<select data-inb-mode="'+i+'" style="font-size:12px;">'+CLIENT_INB_MODES.map(function(m){ return '<option value="'+m[0]+'"'+(e.mode===m[0] ? ' selected' : '')+'>'+esc(m[1].replace(/\(.*\)/,''))+'</option>'; }).join('')+'</select>' : '';
-      return '<tr><td>'+ms+'</td>'+cols.map(function(fd){ return clientCellHtml(fd[0], r[fd[0]]); }).join('')+'</tr>';
+      return '<tr><td>'+ms+'</td>'+cols.map(function(fd){ return clientCellHtml(fd[0], r[fd[0]]); }).join('')+'<td style="white-space:nowrap;"><button type="button" class="log-stop-btn" data-inb-del="'+i+'">削除</button></td></tr>';
     }).join('');
     return head+rows;
   }).join('');
-  return '<div style="overflow-x:auto;max-height:480px;overflow-y:auto;"><table class="report-table" style="font-size:12px;"><thead><tr><th>区分</th>'+cols.map(function(fd){ return '<th>'+esc(fd[1])+'</th>'; }).join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+  return '<div style="overflow-x:auto;max-height:480px;overflow-y:auto;"><table class="report-table" style="font-size:12px;"><thead><tr><th>区分</th>'+cols.map(function(fd){ return '<th>'+esc(fd[1])+'</th>'; }).join('')+'<th></th></tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 function clientInbModeBar(c, d){
   var n = c.inbEditsKey===c.dataKey ? Object.keys(c.inbEdits || {}).length : 0;
@@ -9717,6 +9717,23 @@ function bindClientInbModes(c){
     render();
   }); });
   document.querySelectorAll('[data-inb-all]').forEach(function(el){ el.addEventListener('click', function(){ var m = el.getAttribute('data-inb-all'); (c.data.rows||[]).slice(0, 300).forEach(function(r, i){ setE(i, { mode: m }); }); render(); }); });
+  // 明細の削除(この行だけ消す)
+  document.querySelectorAll('[data-inb-del]').forEach(function(el){ el.addEventListener('click', async function(){
+    var i = Number(el.getAttribute('data-inb-del')), row = c.data && c.data.rows[i]; if(!row) return;
+    if(c.inbEditsKey===c.dataKey && Object.keys(c.inbEdits || {}).length){ appAlert('先に「区分を保存する」を押してください(直した区分が消えないように)'); return; }
+    if(!(await appConfirm('この行を削除しますか?\n'+(row.no||'')+' ・ '+(row.code||'')+' '+(row.name||'')+' ・ '+formatNum(clientQ(row.qty))+'個'))) return;
+    var key = c.dataKey, k0 = clientRowKeys('inb', row), gone = false;
+    var r = await tpickKvUpdate(key, function(cur){
+      cur.rows = cur.rows || [];
+      var j = cur.rows.findIndex(function(x){ var k = clientRowKeys('inb', x); return k.strong===k0.strong && k.weak===k0.weak; });
+      if(j===-1) return false;
+      cur.rows.splice(j, 1); gone = true; return cur;
+    });
+    if(!gone){ showToast('もう消えていました'); }
+    else if(!r.ok){ showToast('⚠️ 削除できませんでした'); return; }
+    else { var cname = ((state.clientDefs.clients||[]).filter(function(x){ return x.id===c.clientId; })[0] || {}).name || ''; await appendAuditLog({ action:'荷主の入荷実績の行を削除', target: cname, before: (row.no||'')+' '+(row.code||'')+' '+clientQ(row.qty)+'個', after: null }); showToast('削除しました'); }
+    c.inbEdits = {}; c.data = null; if(state.cdCache) delete state.cdCache[key]; render();
+  }); });
   var sv = document.getElementById('cdInbSave');
   if(sv) sv.addEventListener('click', async function(){
     var edits = c.inbEdits || {}, key = c.dataKey, bad = 0;
@@ -9742,11 +9759,22 @@ async function clientDoImport(c, mapped){
   var byMonth = {};
   var inbMode = c.kind==='inb' ? (c.inbMode || 'piece') : '';
   mapped.rows.forEach(function(r){ var m = (r.date || todayStr()).slice(0,7); (byMonth[m] = byMonth[m] || []).push(Object.assign({ imp: impId }, r, inbMode ? { mode: inbMode } : {})); });
-  var months = Object.keys(byMonth).sort(), okAll = true, added = 0, dup = 0;
+  var months = Object.keys(byMonth).sort(), okAll = true, added = 0, dup = 0, upd = 0;
   for(var i=0; i<months.length; i++){
     var m = months[i], list = byMonth[m], addN = 0, dupN = 0;
+    var updN = 0;
     var r = await tpickKvUpdate(clientDataKey(c.clientId, c.kind, m), function(cur){
       cur.imports = cur.imports || []; cur.rows = cur.rows || [];
+      if(c.kind==='inb'){ // 入荷は毎回上書き(2026-10-24): 同じ伝票の同じ行は新しい内容に。画面で入れた区分・ケース(個口)数は残す
+        var at = {}; addN = 0; updN = 0;
+        cur.rows.forEach(function(x, j){ var k = clientRowKeys('inb', x); at[k.strong || ('w:'+k.weak)] = j; });
+        list.forEach(function(x){
+          var k = clientRowKeys('inb', x), kk = k.strong || ('w:'+k.weak), j = at[kk];
+          if(j!==undefined){ var old = cur.rows[j]; cur.rows[j] = Object.assign({}, x, { imp: old.imp || x.imp, mode: old.mode || x.mode }, old.cases!==undefined ? { cases: old.cases } : {}); updN++; }
+          else { at[kk] = cur.rows.length; cur.rows.push(x); addN++; }
+        });
+        return cur;
+      }
       var strong = {}, weak = {};
       cur.rows.forEach(function(x){ var k = clientRowKeys(c.kind, x); if(k.strong) strong[k.strong] = 1; else weak[k.weak] = 1; });
       var fresh = list.filter(function(x){ var k = clientRowKeys(c.kind, x); var d = k.strong ? strong[k.strong] : weak[k.weak]; if(d) return false; if(k.strong) strong[k.strong] = 1; else weak[k.weak] = 1; return true; });
@@ -9756,13 +9784,13 @@ async function clientDoImport(c, mapped){
       cur.rows = cur.rows.concat(fresh);
       return cur;
     });
-    if(!r.ok && addN) okAll = false;
-    added += addN; dup += dupN;
+    if(!r.ok && (addN || updN)) okAll = false;
+    added += addN; dup += dupN; upd += updN;
   }
   await tpickKvUpdate(clientMapKey(c.clientId, c.kind), function(cur){ return { headerRow: c.headerRow||1, cols: c.cols, at: now }; });
   var cname = ((state.clientDefs.clients||[]).filter(function(x){ return x.id===c.clientId; })[0] || {}).name || '';
-  if(added) await appendAuditLog({ action:'荷主データを取込', target: cname+' / '+CLIENT_KINDS[c.kind].label, before:null, after: file.name+'・'+added+'行('+months.join('・')+')'+(dup ? '・取り込み済み '+dup+'行' : '') });
-  c.msg = !okAll ? '⚠️ 一部の月を保存できませんでした' : added ? '「'+file.name+'」から '+added+'行を取り込みました('+months.join('・')+')'+(dup ? '。前に取り込んだ '+dup+'行は入れていません' : '') : '「'+file.name+'」は全部取り込み済みでした('+dup+'行)。何も足していません';
+  if(added || upd) await appendAuditLog({ action:'荷主データを取込', target: cname+' / '+CLIENT_KINDS[c.kind].label, before:null, after: file.name+'・'+added+'行'+(upd ? '・上書き '+upd+'行' : '')+'('+months.join('・')+')'+(dup ? '・取り込み済み '+dup+'行' : '') });
+  c.msg = !okAll ? '⚠️ 一部の月を保存できませんでした' : c.kind==='inb' ? '「'+file.name+'」を取り込みました: 新しい行 '+added+'行・上書き '+upd+'行('+months.join('・')+')' : added ? '「'+file.name+'」から '+added+'行を取り込みました('+months.join('・')+')'+(dup ? '。前に取り込んだ '+dup+'行は入れていません' : '') : '「'+file.name+'」は全部取り込み済みでした('+dup+'行)。何も足していません';
   showToast(c.msg);
   c.file = null; c.data = null; if(state.cdCache) Object.keys(state.cdCache).forEach(function(k){ if(k.indexOf('client-data:')===0) delete state.cdCache[k]; });
   c.month = months.slice(-1)[0] || c.month; c.forceMap = false;

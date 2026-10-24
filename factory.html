@@ -246,6 +246,12 @@ async function publishFoldPlans(payload) {
 }
 // kintone 生産実績アプリ(981)への登録は使わないことにした(2026-10-24。981 の製造指示No・終了時刻が必須で合わないため)。また使うときは true に
 const K981_ENABLED = false;
+/* 完成品在庫の表示: セット品はセット単位(バラに直した数も添える)、ほかは枚(2026-10-24) */
+const stockText = (p, products) => {
+  if (!p.isSet) return `${fmt(p.finishedStock)}枚`;
+  const per = num(p.piecesPerSet);
+  return `${fmt(p.finishedStock)}セット` + (per > 0 ? `(バラ ${fmt(num(p.finishedStock) * per)}枚)` : '');
+};
 const k981Target = (cfg, r) => !!(K981_ENABLED && cfg && cfg.enabled && cfg.startDate && r.date >= cfg.startDate && (cfg.lineCategory || {})[r.lineId]);
 
 /* ==================================================================== */
@@ -1498,7 +1504,7 @@ function DashboardTab({ data, lineById, orderById, lotById, orderStats, salesOrd
                         {hasAssociatedSet ? (
                           <span style={{ color: C.textFaint, fontSize: 12 }}>—(セット品で管理)</span>
                         ) : (
-                          `${fmt(p.finishedStock)}枚`
+                          stockText(p, data.products)
                         )}
                       </td>
                     </tr>
@@ -1594,7 +1600,7 @@ function ProductTab({ data, addProduct, updateProduct, removeProduct, packSet, i
             <Field label="標準生産速度(枚/時間)"><input type="number" className="fm-input" value={form.speedPerHour} onChange={(e) => setForm({ ...form, speedPerHour: e.target.value })} placeholder="800" /></Field>
             <Field label="最低ロット(枚)"><input type="number" className="fm-input" value={form.minLotQty} onChange={(e) => setForm({ ...form, minLotQty: e.target.value })} placeholder="1000" /></Field>
             <Field label="保管場所"><input className="fm-input" value={form.storageLocation} onChange={(e) => setForm({ ...form, storageLocation: e.target.value })} placeholder="倉庫A-1" /></Field>
-            <Field label="完成品在庫(枚)"><input type="number" className="fm-input" value={form.finishedStock} onChange={(e) => setForm({ ...form, finishedStock: e.target.value })} placeholder="0" /></Field>
+            <Field label={form.isSet ? '完成品在庫(セット)' : '完成品在庫(枚)'}><input type="number" className="fm-input" value={form.finishedStock} onChange={(e) => setForm({ ...form, finishedStock: e.target.value })} placeholder="0" /></Field>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, paddingTop: 10, borderTop: `1px dashed ${C.border}` }}>
             <input
@@ -1701,7 +1707,7 @@ function ProductTab({ data, addProduct, updateProduct, removeProduct, packSet, i
                   <td className="fm-mono" style={{ padding: '8px' }}>{p.speedPerHour ? `${fmt(p.speedPerHour)}枚/h` : '—'}</td>
                   <td className="fm-mono" style={{ padding: '8px' }}>{p.minLotQty ? `${fmt(p.minLotQty)}枚` : '—'}</td>
                   <td style={{ padding: '8px', fontSize: 12, color: C.textDim }}>{p.storageLocation || '—'}</td>
-                  <td className="fm-mono" style={{ padding: '8px' }}>{fmt(p.finishedStock)}枚</td>
+                  <td className="fm-mono" style={{ padding: '8px' }}>{stockText(p, data.products)}</td>
                   <td style={{ padding: '8px' }}>
                     {p.isSet ? <Badge tone="amber">セット品({p.piecesPerSet}枚/{base?.productName || '?'})</Badge> : <Badge tone="dim">バラ品</Badge>}
                   </td>

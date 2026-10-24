@@ -10733,14 +10733,16 @@ function tpickCamLog(stage, info){
     tpickKvUpdate('cam-debug', function(cur){ var list = Array.isArray(cur.list) ? cur.list : []; list.push(rec); cur.list = list.slice(-20); return cur; });
   }catch(e){}
 }
-async function tpickCamStart(){
+/* test = true: カメラの読み取りを試すだけ(作業記録の画面から。データが無くても試せる。2026-10-24) */
+async function tpickCamStart(test){
   if(tpickCam) return;
   // 先に画面を出す(押したのが分かるように)
   var box = document.createElement('div');
   box.className = 'tpick-cam';
   box.innerHTML = '<video playsinline muted></video><div class="tpick-cam-bar"><label><input type="checkbox" id="tpickCamCont"'+(state.tpickCamCont ? ' checked' : '')+'> 続けて読む</label><span class="tpick-cam-msg">カメラを起動しています…</span><button type="button" class="ll-btn" id="tpickCamClose">やめる</button></div>';
   document.body.appendChild(box);
-  var c = tpickCam = { box: box, lastCode: '', lastAt: 0 };
+  var c = tpickCam = { box: box, lastCode: '', lastAt: 0, test: !!test };
+  var inPick = function(){ return test || (state.modal && state.modal.kind==='tpickBatch'); };
   var msg = box.querySelector('.tpick-cam-msg');
   box.querySelector('#tpickCamClose').addEventListener('click', function(){ tpickCamStop('やめる'); });
   // 止まったら、カメラの画面を閉じずに理由を出す(「やめる」で閉じる)
@@ -10751,9 +10753,9 @@ async function tpickCamStart(){
     try{ if(c.stream) c.stream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
     var v = box.querySelector('video'); if(v) v.style.display = 'none';
     msg.style.color = '#FDA29B'; msg.style.whiteSpace = 'pre-line'; msg.style.fontSize = '14px';
-    msg.textContent = text+'\n(行を手で押しても済にできます)';
+    msg.textContent = text+(test ? '' : '\n(行を手で押しても済にできます)');
   };
-  tpickCamLog('開始', ('BarcodeDetector' in window) ? 'BarcodeDetector あり' : 'BarcodeDetector なし');
+  tpickCamLog(test ? '試す: 開始' : '開始', ('BarcodeDetector' in window) ? 'BarcodeDetector あり' : 'BarcodeDetector なし');
   // 許可の画面が出たまま進まないとき
   var waitTimer = setTimeout(function(){ if(tpickCam===c && !c.stream){ msg.textContent = 'カメラの許可を待っています…(画面の上か下に「カメラの使用を許可」が出ていたら「許可」を押してください)'; tpickCamLog('許可待ち', '8秒'); } }, 8000);
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ await fail('この端末のブラウザではカメラを使えません。Chrome で開いているか確かめてください。読めないときは、行を手で押して済にできます。'); return; }
@@ -10775,12 +10777,21 @@ async function tpickCamStart(){
   var video = box.querySelector('video'); video.srcObject = stream;
   try{ await video.play(); }catch(e){ tpickCamLog('映像の再生', (e && (e.name+' '+e.message)) || ''); }
   box.querySelector('#tpickCamCont').addEventListener('change', function(ev){ state.tpickCamCont = ev.target.checked; resetIdle(); });
-  function resetIdle(){ clearTimeout(c.idleTimer); c.idleTimer = setTimeout(function(){ if(tpickCam===c){ tpickCamStop('読まなかった'); showToast('読まなかったので、カメラを止めました'); } }, state.tpickCamCont ? 120000 : 30000); }
+  function resetIdle(){ clearTimeout(c.idleTimer); c.idleTimer = setTimeout(function(){ if(tpickCam===c){ tpickCamStop('読まなかった'); showToast('読まなかったので、カメラを止めました'); } }, (state.tpickCamCont || test) ? 120000 : 30000); }
   resetIdle();
   async function onCode(v){
     var now = Date.now();
     if(!v || (v===c.lastCode && now - c.lastAt < 2500)) return false; // 同じ物を続けて読まない
     c.lastCode = v; c.lastAt = now; resetIdle();
+    if(test){ // 試すだけ: 読めた番号と品名を出す(済にはしない)
+      await logiStockLoad();
+      var codes = (tpickJanIndex() || {})[v] || [], st = codes.length ? logiStockOf(codes[0]) : null;
+      tpickBeep(true);
+      msg.style.color = '#A6F4C5'; msg.style.fontSize = '15px';
+      msg.textContent = '✓ 読めました: '+v+(codes.length ? '(品番 '+codes.join('・')+(st && st.name ? ' '+st.name : '')+')' : '(ロジザードの在庫に無い番号)');
+      tpickCamLog('試す: 読めた', v.length+'桁'+(codes.length ? '・品番あり' : '・品番なし'));
+      return false;
+    }
     await tpickHandleScan(v);
     if(!state.tpickCamCont){ tpickCamStop(); return true; }
     return false;
@@ -10791,7 +10802,7 @@ async function tpickCamStart(){
     msg.textContent = 'バーコードを枠に入れてください';
     var tick = async function(){
       if(tpickCam!==c) return;
-      if(!state.modal || state.modal.kind!=='tpickBatch'){ tpickCamStop('番号の画面を閉じた'); return; }
+      if(!inPick()){ tpickCamStop('番号の画面を閉じた'); return; }
       try{ var found = await det.detect(video); if(found && found.length && await onCode(found[0].rawValue)) return; }catch(e){}
       c.loop = setTimeout(tick, 180);
     };
@@ -10810,7 +10821,7 @@ async function tpickCamStart(){
     msg.textContent = 'バーコードを枠に入れてください';
     reader.decodeFromStream(stream, video, function(result){
       if(tpickCam!==c) return;
-      if(!state.modal || state.modal.kind!=='tpickBatch'){ tpickCamStop('番号の画面を閉じた'); return; }
+      if(!inPick()){ tpickCamStop('番号の画面を閉じた'); return; }
       if(result) onCode(result.getText ? result.getText() : String(result.text||''));
     });
   }catch(e){ await fail('カメラで読めませんでした('+((e && e.message) || '理由不明')+')。行を手で押して済にできます。'); }
@@ -19770,6 +19781,7 @@ function renderInput(){
     return '<div class="input-wrap"><div class="name-grid-wrap">'+
       '<div class="name-grid-title">あなたの名前をタップしてください</div>'+
       (present.length ? '<div class="name-grid">'+tiles+'</div>' : '<div class="name-empty">本日出勤登録されているスタッフがいません。<br>管理者に出勤登録を依頼してください。</div>')+
+      '<button type="button" class="other-tasks-toggle" id="camTestBtn" style="margin-top:16px;">📷 カメラの読み取りを試す(JAN を読んで品名を出すだけ)</button>'+
     '</div></div>';
   }
 
@@ -19959,7 +19971,8 @@ function renderInput(){
       '<div style="display:flex;align-items:center;gap:14px;">'+staffAvatarHtml(staff, 'md')+'<div><div class="staff-header-name">'+esc(staff.name)+'</div><div class="staff-header-sub">作業をタップすると開始/切替します</div></div></div>'+
       '<button class="back-link" id="backToNames">戻る</button>'+
     '</div>'+
-    '<div class="task-tile-wrap">'+workInstructionBanner+breakBanner+suggestBanner+body+otherTasksHtml+'</div>'+
+    '<div class="task-tile-wrap">'+workInstructionBanner+breakBanner+suggestBanner+body+otherTasksHtml+
+      '<button type="button" class="other-tasks-toggle" id="camTestBtn">📷 カメラの読み取りを試す(JAN を読んで品名を出すだけ)</button></div>'+
     '<div class="end-day-bar"><button class="end-day-btn" id="endDayBtn">本日の作業を終了する</button></div>'+
   '</div>';
 }
@@ -20045,6 +20058,8 @@ function bindInput(){
       completeMyTask(el.getAttribute('data-complete-mytask'));
     });
   });
+  var camTest = document.getElementById('camTestBtn');
+  if(camTest) camTest.addEventListener('click', function(){ logiStockLoad(); tpickCamStart(true); });
   document.querySelectorAll('[data-tpick-open]').forEach(function(el){
     el.addEventListener('click', function(e){
       e.stopPropagation();

@@ -10102,6 +10102,56 @@ function renderClientHub(){
   return '<div class="mgr-wrap client-hub">'+tabs+(cl ? '<div class="ch-row ch-clientbar">'+clientPickerHtml()+'</div>' : '')+body+'</div>';
 }
 function clientYen(v){ return '¥'+formatNum(Math.round(v)); }
+/* 荷主の作業の人件費(2026-10-24): 作業記録のうち、名前に「モビイクス」(請求の設定で変えられる)を含む作業の時間 × その人の時給。
+   収支・分析と同じ計算(laborCostFromAgg)。合計だけを出し、一人ひとりの時給は出さない。日ごとの作業記録はこの画面を開いているあいだ覚える */
+function clientLaborKeyword(cfg){ return String((cfg && cfg.laborKeyword) || 'モビイクス'); }
+function clientTaskMatch(l, kw){
+  if(!l || l.taskId==='BREAK' || !kw) return false;
+  var t = taskById(l.taskId), n = (t && t.name && t.name!=='(削除済み)') ? t.name : (l.taskName || '');
+  return String(n).normalize('NFKC').indexOf(String(kw).normalize('NFKC'))!==-1;
+}
+function clientWages(){
+  if(state.financialWages && state.financialWages.ok) return state.financialWages;
+  if(!state.cdWages && !state.cdWagesLoading){
+    state.cdWagesLoading = true;
+    fetchStaffWages().then(function(w){ state.cdWages = w; }).catch(function(){ state.cdWages = { ok:false, reason:'時給を読み込めませんでした。', byStaff:{} }; }).then(function(){ state.cdWagesLoading = false; render(); });
+  }
+  return state.cdWages || null;
+}
+function clientLaborDays(P){
+  var today = todayStr(), cache = state.cdLaborDays || (state.cdLaborDays = {}), dates = [], d = P.from;
+  while(d <= P.to && d <= today){ dates.push(d); d = clientAddDays(d, 1); }
+  var missing = dates.filter(function(x){ return x!==today && !(x in cache); });
+  if(missing.length){
+    if(!state.cdLaborLoading){
+      state.cdLaborLoading = true;
+      (async function(){
+        for(var i=0; i<missing.length; i+=6){
+          var part = missing.slice(i, i+6), got = await Promise.all(part.map(function(x){ return loadDayByDate(x); }));
+          part.forEach(function(x, j){ cache[x] = got[j] || { logs: [] }; });
+        }
+        state.cdLaborLoading = false; render();
+      })();
+    }
+    return null;
+  }
+  var out = {}; dates.forEach(function(x){ out[x] = x===today ? (state.day || { logs: [] }) : cache[x]; }); return out;
+}
+function clientLabor(P, cfg){
+  var wages = clientWages(), days = clientLaborDays(P);
+  if(!wages || !days) return null;
+  if(!wages.ok) return { error: wages.reason || '時給を読み込めませんでした。' };
+  var kw = clientLaborKeyword(cfg), out = { kw: kw, total: 0, hours: 0, byDay: {}, missing: [] };
+  Object.keys(days).forEach(function(date){
+    var logs = ((days[date] && days[date].logs) || []).filter(function(l){ return clientTaskMatch(l, kw); });
+    if(!logs.length) return;
+    var lc = laborCostFromAgg(aggregateDays([{ logs: logs }]), wages);
+    out.byDay[date] = { cost: lc.total, hours: lc.hours };
+    out.total += lc.total; out.hours += lc.hours;
+    lc.missingStaffIds.forEach(function(sid){ if(out.missing.indexOf(sid)===-1) out.missing.push(sid); });
+  });
+  return out;
+}
 function renderClientDash(cl){
   var c = clientDataState(), month = c.month || todayStr().slice(0,7);
   var F = clientFeeData(cl, month);
@@ -10116,12 +10166,18 @@ function renderClientDash(cl){
   var forecast = (elapsed>0 ? dailyAll / elapsed * P.days : 0) + fixed;
   var tsuboIt = F.items.filter(function(it){ return it.basis==='tsubo'; })[0], noTsubo = tsuboIt && !Number((F.manual.qty||{})[tsuboIt.id]);
   var inv = clientInvoiceOf(cl.id, month);
-  var list = Object.keys(days).sort(), maxA = list.reduce(function(m, d){ return Math.max(m, clientDayAmount(F.items, days[d])); }, 0);
+  var LB = clientLabor(P, F.cfg), lbOk = LB && !LB.error;
+  var list = Object.keys(days).concat(lbOk ? Object.keys(LB.byDay).filter(function(d){ return !days[d]; }) : []).sort(), maxA = list.reduce(function(m, d){ return Math.max(m, days[d] ? clientDayAmount(F.items, days[d]) : 0); }, 0);
   var n = function(v){ return v ? formatNum(v) : ''; };
   var rows = list.map(function(d){
-    var x = days[d], amt = clientDayAmount(F.items, x);
-    return '<tr><td>'+esc(dateLabelFromStr(d))+'</td><td class="num">'+n(x.inbCase)+'</td><td class="num">'+n(x.inbPiece)+'</td><td class="num">'+n(x.inbJan)+'</td><td class="num">'+n(x.shipPiece)+'</td><td class="num">'+n(x.po)+'</td><td class="num">'+n(x.setPiece)+'</td><td class="num"><b>'+clientYen(amt)+'</b></td><td style="min-width:110px;">'+hbar(amt, maxA)+'</td></tr>';
-  }).join('') || '<tr><td colspan="10" class="empty-note">この期間の入荷・出荷・セットの取込はまだありません</td></tr>';
+    var x = days[d] || {}, amt = days[d] ? clientDayAmount(F.items, x) : 0, lb = lbOk ? LB.byDay[d] : null;
+    return '<tr><td>'+esc(dateLabelFromStr(d))+'</td><td class="num">'+n(x.inbCase)+'</td><td class="num">'+n(x.inbPiece)+'</td><td class="num">'+n(x.inbJan)+'</td><td class="num">'+n(x.shipPiece)+'</td><td class="num">'+n(x.po)+'</td><td class="num">'+n(x.setPiece)+'</td><td class="num"><b>'+clientYen(amt)+'</b></td>'+
+      '<td class="num">'+(lb ? lb.hours.toFixed(1)+'h' : '')+'</td><td class="num">'+(lb ? clientYen(lb.cost) : '')+'</td><td style="min-width:110px;">'+hbar(amt, maxA)+'</td></tr>';
+  }).join('') || '<tr><td colspan="11" class="empty-note">この期間の入荷・出荷・セットの取込・作業記録はまだありません</td></tr>';
+  var lbTiles = !LB ? kpiTile('人件費(作業記録)', '…', '', '読み込み中') :
+    LB.error ? kpiTile('人件費(作業記録)', '—', '', esc(LB.error)) :
+    kpiTile('人件費(作業記録)', clientYen(LB.total), '', '「'+esc(LB.kw)+'」の作業 '+LB.hours.toFixed(1)+'時間')+
+    kpiTile('作業料 − 人件費', clientYen(dailyAll - LB.total), '', '今期の作業料から(月額・保管料は含めない)');
   var left = running ? Math.round((new Date(P.to+'T00:00:00') - new Date(today+'T00:00:00')) / 86400000) : 0;
   return '<div class="panel">'+
     '<div class="panel-title">ダッシュボード</div>'+
@@ -10135,7 +10191,9 @@ function renderClientDash(cl){
       kpiTile('半月の請求見込み', clientYen(dailyFirst + fixed), '', '前半の作業料+月額・保管料')+
       kpiTile(inv ? '締めた請求額(税抜)' : '締め日の見込み', clientYen(inv ? inv.sub : running ? forecast : dailyAll + fixed), '', inv ? '締め済み' : running ? '今日までの日割り+月額・保管料' : '期間の合計(まだ締めていません)')+
     '</div>'+
-    '<div class="stf-section-title">日別</div><div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>日</th><th class="num">入荷ケース</th><th class="num">入荷ピース</th><th class="num">JAN貼り</th><th class="num">出荷ピース</th><th class="num">件数</th><th class="num">セット</th><th class="num">作業料</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div class="kpi-row" style="margin-top:10px;">'+lbTiles+'</div>'+
+    (lbOk && LB.missing.length ? '<div class="pool-hint" style="color:#B42318;">時給の分からないスタッフ '+LB.missing.length+'人の作業時間は、人件費に入っていません(設定 → 時給)。</div>' : '')+
+    '<div class="stf-section-title">日別</div><div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>日</th><th class="num">入荷ケース</th><th class="num">入荷ピース</th><th class="num">JAN貼り</th><th class="num">出荷ピース</th><th class="num">件数</th><th class="num">セット</th><th class="num">作業料</th><th class="num">作業時間</th><th class="num">人件費</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
   '</div>';
 }
 /* 料金表(見積書): 項目・単位・単価・何に掛けるか。はじめは見積書(2026/5/15)の内容 */
@@ -10232,6 +10290,7 @@ function renderClientBill(cl){
         '<label class="ch-field"><span>住所・連絡先</span><textarea id="chIssuerAddr" rows="2" style="width:100%;">'+esc(cfg.address||'')+'</textarea></label>'+
         '<label class="ch-field"><span>登録番号(インボイス)</span><input type="text" id="chRegNo" value="'+esc(cfg.regNo||'')+'" style="width:100%;"></label>'+
         '<label class="ch-field"><span>振込先</span><textarea id="chBank" rows="2" style="width:100%;">'+esc(cfg.bank||'')+'</textarea></label>'+
+        '<label class="ch-field"><span>人件費に数える作業(作業記録の作業の名前に含む文字)</span><input type="text" id="chLaborKw" value="'+esc(clientLaborKeyword(cfg))+'" style="width:100%;"></label>'+
         '<label class="ch-field"><span>消費税(%)</span><input type="number" id="chTax" value="'+esc(String(cfg.taxRate===undefined ? 10 : cfg.taxRate))+'" style="width:80px;"></label>'+
         '<div><button type="button" class="vc-manage-toggle-btn" id="chBillSave">保存する</button></div>'+
       '</div></details>'+
@@ -10465,7 +10524,7 @@ function bindClientHub(){
   }
   var bs = document.getElementById('chBillSave');
   if(bs) bs.addEventListener('click', async function(){
-    var v = { closeDay: Number(document.getElementById('chCloseDay').value)||0, issuer: document.getElementById('chIssuer').value.trim(), address: document.getElementById('chIssuerAddr').value.trim(), regNo: document.getElementById('chRegNo').value.trim(), bank: document.getElementById('chBank').value.trim(), taxRate: Number(document.getElementById('chTax').value)||10, at: new Date().toISOString() };
+    var v = { laborKeyword: ((document.getElementById('chLaborKw')||{}).value || '').trim() || 'モビイクス', closeDay: Number(document.getElementById('chCloseDay').value)||0, issuer: document.getElementById('chIssuer').value.trim(), address: document.getElementById('chIssuerAddr').value.trim(), regNo: document.getElementById('chRegNo').value.trim(), bank: document.getElementById('chBank').value.trim(), taxRate: Number(document.getElementById('chTax').value)||10, at: new Date().toISOString() };
     var ok = await persistKey('client-bill-settings', v);
     if(!ok){ showToast('⚠️ 保存できませんでした'); return; }
     state.clientBillCfg = v; showToast('保存しました'); render();

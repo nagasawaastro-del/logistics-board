@@ -244,7 +244,9 @@ async function publishFoldPlans(payload) {
   const { error } = await supabaseClient.from('kv_store').upsert({ key: 'factory-fold-plans', value: json }, { onConflict: 'key' });
   if (!error) lastFoldPlansJson = json;
 }
-const k981Target = (cfg, r) => !!(cfg && cfg.enabled && cfg.startDate && r.date >= cfg.startDate && (cfg.lineCategory || {})[r.lineId]);
+// kintone 生産実績アプリ(981)への登録は使わないことにした(2026-10-24。981 の製造指示No・終了時刻が必須で合わないため)。また使うときは true に
+const K981_ENABLED = false;
+const k981Target = (cfg, r) => !!(K981_ENABLED && cfg && cfg.enabled && cfg.startDate && r.date >= cfg.startDate && (cfg.lineCategory || {})[r.lineId]);
 
 /* ==================================================================== */
 /* アイコン(lucide-reactの代わりに絵文字ベースの軽量シムを使用)             */
@@ -834,7 +836,7 @@ function App() {
   const [k981Busy, setK981Busy] = useState(false);
   const [k981Last, setK981Last] = useState(null);
   const refreshK981Status = useCallback(async () => { const st = await loadK981Status(); if (st) setK981Status(st); }, []);
-  useEffect(() => { if (canView && data && data.k981 && data.k981.enabled && !k981Status) refreshK981Status(); }, [canView, data, k981Status, refreshK981Status]);
+  useEffect(() => { if (K981_ENABLED && canView && data && data.k981 && data.k981.enabled && !k981Status) refreshK981Status(); }, [canView, data, k981Status, refreshK981Status]);
   const k981AutoSent = React.useRef(false);
   const pushK981 = useCallback(async (ids) => {
     setK981Busy(true);
@@ -848,7 +850,7 @@ function App() {
     // まだ kintone に送っていない対象の実績(タブレットからサーバーで取り込んだ分など)があれば、開いたときに1回送る
     if (!isEditor || !data || !k981Status || k981AutoSent.current || k981Busy) return;
     const cfg = data.k981 || {};
-    if (!cfg.enabled) return;
+    if (!K981_ENABLED || !cfg.enabled) return;
     if (data.records.some((r) => k981Target(cfg, r) && !k981Status[r.id])) { k981AutoSent.current = true; pushK981(); }
   }, [isEditor, data, k981Status, k981Busy, pushK981]);
   const setK981 = (patch) => setData((d) => ({ ...d, k981: { ...(d.k981 || {}), ...patch } }));
@@ -2741,7 +2743,7 @@ function InventoryTab({ data, addLot, updateLot, removeLot, addMaterialTransacti
 /* ------------------------------------------------------------------ */
 function K981StatusPanel({ data, k981Status, k981Busy, k981Last, pushK981, isEditor }) {
   const cfg = data.k981 || {};
-  if (!cfg.enabled) return null;
+  if (!K981_ENABLED || !cfg.enabled) return null;
   const targets = data.records.filter((r) => k981Target(cfg, r));
   const st = k981Status || {};
   const sent = targets.filter((r) => st[r.id] && st[r.id].kintone_id && !st[r.id].error).length;
@@ -3085,7 +3087,7 @@ function ProductionTab({ data, addRecord, updateRecord, removeRecord, lineById, 
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 780 }}>
           <thead>
             <tr style={{ textAlign: 'left', color: C.textDim, borderBottom: `1px solid ${C.border}` }}>
-              {['日付', 'ライン', '計画', '商品コード', '担当者', 'かかった時間', '完成数', '不良', ...((data.k981 || {}).enabled ? ['kintone'] : []), ''].map((h) => <th key={h} style={{ padding: '6px 8px', fontWeight: 500 }}>{h}</th>)}
+              {['日付', 'ライン', '計画', '商品コード', '担当者', 'かかった時間', '完成数', '不良', ...(K981_ENABLED && (data.k981 || {}).enabled ? ['kintone'] : []), ''].map((h) => <th key={h} style={{ padding: '6px 8px', fontWeight: 500 }}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -3120,7 +3122,7 @@ function ProductionTab({ data, addRecord, updateRecord, removeRecord, lineById, 
                     </div>
                   ) : <span className="fm-mono" style={{ color: C.textDim }}>0</span>}
                 </td>
-                {(data.k981 || {}).enabled && (
+                {K981_ENABLED && (data.k981 || {}).enabled && (
                   <td style={{ padding: '8px' }}>
                     {!k981Target(data.k981, r) ? <span style={{ color: C.textFaint }}>—</span>
                       : (k981Status && k981Status[r.id] && k981Status[r.id].error) ? <span title={k981Status[r.id].error}><Badge tone="red">未送信</Badge></span>
@@ -3654,7 +3656,7 @@ function K981Settings({ data, setK981, isEditor }) {
   const [opts, setOpts] = useState(null); // kintone の製造分類の選択肢など
   const [msg, setMsg] = useState('');
   const [newName, setNewName] = useState('');
-  if (!isEditor) return null;
+  if (!isEditor || !K981_ENABLED) return null;
   const readFields = async () => {
     setMsg('kintone を読んでいます…');
     const r = await callK981({ action: 'fields' });

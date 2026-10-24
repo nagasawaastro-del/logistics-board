@@ -9759,21 +9759,33 @@ async function clientDoImport(c, mapped){
   var byMonth = {};
   var inbMode = c.kind==='inb' ? (c.inbMode || 'piece') : '';
   mapped.rows.forEach(function(r){ var m = (r.date || todayStr()).slice(0,7); (byMonth[m] = byMonth[m] || []).push(Object.assign({ imp: impId }, r, inbMode ? { mode: inbMode } : {})); });
-  var months = Object.keys(byMonth).sort(), okAll = true, added = 0, dup = 0, upd = 0, remN = 0;
+  var months = Object.keys(byMonth).sort(), okAll = true, added = 0, dup = 0, upd = 0, remN = 0, dupFix = 0;
   for(var i=0; i<months.length; i++){
     var m = months[i], list = byMonth[m], addN = 0, dupN = 0;
     var updN = 0;
     var r = await tpickKvUpdate(clientDataKey(c.clientId, c.kind, m), function(cur){
       cur.imports = cur.imports || []; cur.rows = cur.rows || [];
       if(c.kind==='inb'){ // 入荷は毎回上書き(2026-10-24): 同じ伝票の同じ行は新しい内容に。画面で入れた区分・ケース(個口)数は残す
-        var at = {}; addN = 0; updN = 0;
+        var at = {}, atWeak = {}; addN = 0; updN = 0;
         var n0 = cur.rows.length; cur.rows = cur.rows.filter(function(x){ return x.supplier && x.supplier!=='0'; }); remN += n0 - cur.rows.length; // 仕入先が空の行は入れない(前に入った分も消す)
-        cur.rows.forEach(function(x, j){ var k = clientRowKeys('inb', x); at[k.strong || ('w:'+k.weak)] = j; });
+        // 行番号の無い古い行(行番号を取り込む前に入った分)は、日付・番号・品番・数が同じなら同じ行(2026-10-24)
+        cur.rows.forEach(function(x, j){ var k = clientRowKeys('inb', x); if(k.strong) at[k.strong] = j; else (atWeak[k.weak] = atWeak[k.weak] || []).push(j); });
         list.forEach(function(x){
-          var k = clientRowKeys('inb', x), kk = k.strong || ('w:'+k.weak), j = at[kk];
-          if(j!==undefined){ var old = cur.rows[j]; cur.rows[j] = Object.assign({}, x, { imp: old.imp || x.imp, mode: old.mode || x.mode }, old.cases!==undefined ? { cases: old.cases } : {}); updN++; }
-          else { at[kk] = cur.rows.length; cur.rows.push(x); addN++; }
+          var k = clientRowKeys('inb', x), j = k.strong ? at[k.strong] : undefined;
+          if(j===undefined && atWeak[k.weak] && atWeak[k.weak].length) j = atWeak[k.weak].shift();
+          if(j!==undefined){ var old = cur.rows[j]; cur.rows[j] = Object.assign({}, x, { imp: old.imp || x.imp, mode: old.mode || x.mode }, old.cases!==undefined && old.cases!==null ? { cases: old.cases } : {}); if(k.strong) at[k.strong] = j; updN++; }
+          else { if(k.strong) at[k.strong] = cur.rows.length; cur.rows.push(x); addN++; }
         });
+        // すでにだぶっている古い行(行番号なし)を消す。古い行のケース数は、残る行に無ければ移す
+        var withLine = {}; cur.rows.forEach(function(x){ var k = clientRowKeys('inb', x); if(k.strong) (withLine[k.weak] = withLine[k.weak] || []).push(x); });
+        var n1 = cur.rows.length;
+        cur.rows = cur.rows.filter(function(x){
+          var k = clientRowKeys('inb', x); if(k.strong) return true;
+          var keep = (withLine[k.weak] || []).shift(); if(!keep) return true;
+          if((keep.cases===undefined || keep.cases===null || keep.cases==='') && clientQ(x.cases)>0) keep.cases = x.cases;
+          return false;
+        });
+        dupFix += n1 - cur.rows.length;
         return cur;
       }
       var strong = {}, weak = {};
@@ -9791,7 +9803,7 @@ async function clientDoImport(c, mapped){
   await tpickKvUpdate(clientMapKey(c.clientId, c.kind), function(cur){ return { headerRow: c.headerRow||1, cols: c.cols, at: now }; });
   var cname = ((state.clientDefs.clients||[]).filter(function(x){ return x.id===c.clientId; })[0] || {}).name || '';
   if(added || upd) await appendAuditLog({ action:'荷主データを取込', target: cname+' / '+CLIENT_KINDS[c.kind].label, before:null, after: file.name+'・'+added+'行'+(upd ? '・上書き '+upd+'行' : '')+'('+months.join('・')+')'+(dup ? '・取り込み済み '+dup+'行' : '') });
-  c.msg = !okAll ? '⚠️ 一部の月を保存できませんでした' : c.kind==='inb' ? '「'+file.name+'」を取り込みました: 新しい行 '+added+'行・上書き '+upd+'行('+months.join('・')+')'+(mapped.skipped ? '。仕入先などが空の '+mapped.skipped+'行は入れていません' : '')+(remN ? '。前に入っていた仕入先が空の '+remN+'行を消しました' : '') : added ? '「'+file.name+'」から '+added+'行を取り込みました('+months.join('・')+')'+(dup ? '。前に取り込んだ '+dup+'行は入れていません' : '') : '「'+file.name+'」は全部取り込み済みでした('+dup+'行)。何も足していません';
+  c.msg = !okAll ? '⚠️ 一部の月を保存できませんでした' : c.kind==='inb' ? '「'+file.name+'」を取り込みました: 新しい行 '+added+'行・上書き '+upd+'行('+months.join('・')+')'+(mapped.skipped ? '。仕入先などが空の '+mapped.skipped+'行は入れていません' : '')+(remN ? '。前に入っていた仕入先が空の '+remN+'行を消しました' : '')+(dupFix ? '。だぶっていた古い行 '+dupFix+'行をまとめました' : '') : added ? '「'+file.name+'」から '+added+'行を取り込みました('+months.join('・')+')'+(dup ? '。前に取り込んだ '+dup+'行は入れていません' : '') : '「'+file.name+'」は全部取り込み済みでした('+dup+'行)。何も足していません';
   showToast(c.msg);
   c.file = null; c.data = null; if(state.cdCache) Object.keys(state.cdCache).forEach(function(k){ if(k.indexOf('client-data:')===0) delete state.cdCache[k]; });
   c.month = months.slice(-1)[0] || c.month; c.forceMap = false;

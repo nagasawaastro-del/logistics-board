@@ -1513,6 +1513,18 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .tpick-cam-bar .ll-btn{ background:#fff; }
 .tpick-cam-bar label{ white-space:nowrap; }
 .tpick-cam-sel{ max-width:170px; font-size:13px; }
+/* 荷主ページ: ほかの管理のページと同じ形にそろえる(2026-10-24) */
+.client-hub .ch-row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin:0 0 12px;}
+.client-hub .ch-field{display:flex;flex-direction:column;gap:4px;font-size:14px;}
+.client-hub .ch-field>span{font-size:11px;color:var(--slate-500);}
+.client-hub input[type=month],.client-hub input[type=date],.client-hub input[type=number],.client-hub input[type=text],.client-hub select,.client-hub textarea{border:1px solid var(--paper-line);border-radius:8px;padding:7px 9px;font-size:14px;font-family:inherit;}
+.client-hub .report-table input,.client-hub .report-table select{padding:4px 6px;font-size:13px;}
+.client-hub .ch-period{font-size:14px;font-weight:700;padding-bottom:9px;}
+.client-hub .ch-note{font-size:12px;color:var(--slate-500);padding-bottom:10px;}
+.client-hub .ch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px 14px;align-items:end;}
+.client-hub .ch-clientbar{margin-top:-2px;}
+.client-hub .stf-card{font-size:14px;}
+.client-hub .shukei-drop label.sk-minor{font-size:13px;}
 .mon-tp{ display:flex; flex-direction:column; gap:6px; }
 .mon-tp-row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:15px; }
 .mon-tp-task{ font-weight:800; min-width:9em; }
@@ -2077,6 +2089,8 @@ html[data-app-theme="dark"] .tpick-item.is-done .tpick-chk{background:rgba(48,23
 html[data-app-theme="dark"] .sb-row-head{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .hd-vc{border-top-color:rgba(77,124,203,0.45) !important}
 html[data-app-theme="dark"] .tpick-cam-bar .ll-btn{background:var(--dk-card) !important}
+html[data-app-theme="dark"] .client-hub .ch-field>span{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] .client-hub .ch-note{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .mon-tp-chip.is-done{color:#98f4c9 !important}
 html[data-app-theme="dark"] .mon-tp-note.is-short{color:#f79c96 !important}
 html[data-app-theme="dark"] .tpick-short-btn{background:var(--dk-card) !important;color:#f1a29b !important}
@@ -9596,13 +9610,9 @@ function renderClientData(){
   var clients = state.clientDefs.clients;
   if(!c.clientId && clients.length) c.clientId = clients[0].id;
   var kind = CLIENT_KINDS[c.kind] ? c.kind : 'ship', K = CLIENT_KINDS[kind];
-  var head = (state.role==='clientHub' ? '<div class="panel-title">📥 '+esc(K.label)+'の取込</div>' : '<div class="panel-title">📥 荷主データ取込</div>')+
-    '<div class="pool-hint" style="margin:0 0 10px;">荷主の入荷実績・出荷実績・セット指示書を、CSV か Excel で取り込みます。ファイルの見出しの列を「品番」「数量」などに対応させると、荷主・種類ごとに覚えて次から使います。<b>電話番号・住所など個人の情報の列は取り込まないでください</b>(対応させなければ取り込みません)。</div>'+
-    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">荷主 '+
-      (clients.length ? '<select id="cdClient">'+clients.map(function(x){ return '<option value="'+esc(x.id)+'"'+(x.id===c.clientId ? ' selected' : '')+'>'+esc(x.name)+'</option>'; }).join('')+'</select>' : '<span class="sk-minor">まだ登録がありません</span>')+
-      '<button type="button" class="vc-manage-toggle-btn" id="cdAddClient">＋ 荷主を登録</button>'+
-      (c.clientId ? '<button type="button" class="ll-btn" id="cdRenameClient">名前を直す</button>' : '')+
-    '</div>'+
+  var inHub = state.role==='clientHub' && clients.length;
+  var head = '<div class="panel-title">'+(state.role==='clientHub' ? esc(K.label)+'の取込' : '荷主データ取込')+'</div>'+
+    (inHub ? '' : '<div class="pool-hint" style="margin:0 0 10px;">荷主の入荷実績・出荷実績・セット指示書を、CSV か Excel で取り込みます。<b>電話番号・住所など個人の情報の列は取り込みません</b>(項目にありません)。</div><div class="ch-row">'+clientPickerHtml()+'</div>')+
     (state.role==='clientHub' ? '' : '<div class="sub-switch" style="margin:0 0 10px;">'+Object.keys(CLIENT_KINDS).map(function(k){ return '<button type="button" class="sub-switch-btn'+(k===kind ? ' active' : '')+'" data-cd-kind="'+k+'">'+esc(CLIENT_KINDS[k].label)+'</button>'; }).join('')+'</div>');
   if(!c.clientId) return '<div class="panel">'+head+'<div class="empty-note">「＋ 荷主を登録」で荷主を足してください。</div></div>';
   // 取込(ファイル → 列の対応 → 取り込む)
@@ -9641,7 +9651,7 @@ function renderClientData(){
     }
   }
   var d = c.dataKey===dkey ? c.data : null;
-  var dataHtml = '<div class="stf-card"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><b>取り込んだ'+esc(K.label)+'</b> 月 <input type="month" id="cdMonth" value="'+esc(c.month)+'">'+
+  var dataHtml = '<div class="stf-card"><div class="ch-row" style="margin:0;"><b style="padding-bottom:9px;">取り込んだ'+esc(K.label)+'</b><label class="ch-field"><span>月</span><input type="month" id="cdMonth" value="'+esc(c.month)+'"></label>'+
     (d && d.rows.length ? '<button type="button" class="vc-manage-toggle-btn" id="cdCsv">CSVで保存</button>' : '')+
     (kind==='set' && d && d.rows.length ? '<button type="button" class="vc-manage-toggle-btn" id="cdToBom" title="セット品番ごとの部品と数を、管理 → セット構成 に登録します">🧩 セット構成に登録</button>' : '')+'</div>'+
     (!d ? '<div class="empty-note">読み込み中…</div>' : !d.rows.length ? '<div class="empty-note">この月の取込はありません</div>' :
@@ -9998,6 +10008,14 @@ function clientFeeData(cl, month){
   clientPeriodMonths(P).forEach(function(m){ ['inb','ship','set'].forEach(function(k){ var d = clientMonthData(cl.id, k, m); if(!d){ ok = false; return; } out[k].rows = out[k].rows.concat(d.rows || []); }); });
   return ok ? out : null;
 }
+/* 荷主を選ぶ・登録する・名前を直す(荷主ページの上と、まだ荷主が無いときの取込) */
+function clientPickerHtml(){
+  var c = clientDataState(), clients = (state.clientDefs && state.clientDefs.clients) || [];
+  if(!c.clientId && clients.length) c.clientId = clients[0].id;
+  return (clients.length ? '<label class="ch-field"><span>荷主</span><select id="cdClient">'+clients.map(function(x){ return '<option value="'+esc(x.id)+'"'+(x.id===c.clientId ? ' selected' : '')+'>'+esc(x.name)+'</option>'; }).join('')+'</select></label>' : '<span class="ch-note">まだ荷主の登録がありません</span>')+
+    '<button type="button" class="ll-btn" id="cdAddClient" style="margin-bottom:2px;">＋ 荷主を登録</button>'+
+    (c.clientId ? '<button type="button" class="ll-btn" id="cdRenameClient" style="margin-bottom:2px;">名前を直す</button>' : '');
+}
 function renderClientHub(){
   ensureManagerSessionChecked();
   if(!hasManagerSession()) return renderManagerLoginForm('荷主ページ', '管理者アカウントでログインしてください。');
@@ -10013,7 +10031,7 @@ function renderClientHub(){
   else if(tab==='rates') body = renderClientRates(cl);
   else if(tab==='set'){ if(c.kind!=='set'){ c.kind = 'set'; c.data = null; c.file = null; c.cols = null; } body = renderClientData()+renderClientSetSheet(cl); } // 上で指示書を取り込み、下で作り直す
   else { if(c.kind!==tab){ c.kind = tab; c.data = null; c.file = null; c.cols = null; } body = renderClientData(); }
-  return '<div class="mgr-wrap"><div class="panel-title" style="font-size:20px;margin:0 0 8px;">🏷️ 荷主ページ'+(cl ? ' ・ '+esc(cl.name) : '')+'</div>'+tabs+body+'</div>';
+  return '<div class="mgr-wrap client-hub">'+tabs+(cl ? '<div class="ch-row ch-clientbar">'+clientPickerHtml()+'</div>' : '')+body+'</div>';
 }
 function clientYen(v){ return '¥'+formatNum(Math.round(v)); }
 function renderClientDash(cl){
@@ -10038,8 +10056,9 @@ function renderClientDash(cl){
   }).join('') || '<tr><td colspan="10" class="empty-note">この期間の入荷・出荷・セットの取込はまだありません</td></tr>';
   var left = running ? Math.round((new Date(P.to+'T00:00:00') - new Date(today+'T00:00:00')) / 86400000) : 0;
   return '<div class="panel">'+
-    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">請求月 <input type="month" id="chMonth" value="'+esc(month)+'"><b>'+esc(P.label)+'</b>'+
-      (inv ? '<span class="tpick-done-badge">締め済み '+esc(inv.no)+'</span>' : running ? '<span class="sk-minor">締め日まであと'+left+'日</span>' : '')+'</div>'+
+    '<div class="panel-title">ダッシュボード</div>'+
+    '<div class="ch-row" style="margin-bottom:6px;"><label class="ch-field"><span>請求月</span><input type="month" id="chMonth" value="'+esc(month)+'"></label><div class="ch-period">'+esc(P.label)+'</div>'+
+      (inv ? '<span class="tpick-done-badge" style="margin-bottom:9px;">締め済み '+esc(inv.no)+'</span>' : running ? '<span class="ch-note">締め日まであと'+left+'日</span>' : '')+'</div>'+
     '<div class="pool-hint" style="margin:0 0 10px;">金額は税抜。料金表(見積書)の単価 × 取り込んだ実績の数。取り込んだ実績は締め日までためていき、締め日に「請求」で締めて請求書にします。</div>'+
     '<div class="kpi-row">'+
       kpiTile('今期の作業料', clientYen(dailyAll), '', '入荷・出荷・梱包・セット・件数')+
@@ -10065,11 +10084,11 @@ function renderClientRates(cl){
       '<td><input type="number" data-rate-f="'+i+':price" value="'+esc(String(it.price===undefined ? '' : it.price))+'" style="width:100px;"></td>'+
       '<td><select data-rate-f="'+i+':basis" style="max-width:260px;">'+opts(it.basis)+'</select></td>'+
       '<td><input type="text" data-rate-f="'+i+':note" value="'+esc(it.note||'')+'" style="width:100%;min-width:160px;"></td>'+
-      '<td><button type="button" class="log-stop-btn" data-rate-del="'+i+'">消す</button></td></tr>';
+      '<td style="white-space:nowrap;"><button type="button" class="log-stop-btn" data-rate-del="'+i+'">消す</button></td></tr>';
   }).join('');
-  return '<div class="panel"><div class="panel-title">💴 料金表(見積書)</div>'+
+  return '<div class="panel"><div class="panel-title">料金表(見積書)</div>'+
     '<div class="pool-hint">見積書の項目ごとに、単価と「何に掛けるか」を決めます。ダッシュボード・請求はこの表で計算します(税抜)。'+(saved ? '' : '<b>まだ保存していません(見積書 2026/5/15 の内容を出しています)。</b>')+'</div>'+
-    '<div style="margin:8px 0;">見積日 <input type="date" id="chQuoteDate" value="'+esc(E.quoteDate||'')+'"></div>'+
+    '<div class="ch-row" style="margin-top:8px;"><label class="ch-field"><span>見積日</span><input type="date" id="chQuoteDate" value="'+esc(E.quoteDate||'')+'"></label></div>'+
     '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>項目</th><th>単位</th><th>単価(円)</th><th>何に掛けるか</th><th>備考</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;"><button type="button" class="vc-manage-toggle-btn" id="chRateAdd">＋ 項目を足す</button><button type="button" class="add-btn" id="chRateSave">保存する</button><button type="button" class="vc-manage-toggle-btn" id="chRateReset">見積書(2026/5/15)の内容に戻す</button></div>'+
     '<div class="pool-hint" style="margin-top:10px;">入荷は、入荷実績の画面で選んだ区分(ピース・ケース・JAN貼り)で数えます(ケースは伝票ごとのケース(個口)数)。梱包は出荷の箱数(出荷伝票ごとに1回)、件数(1PO)は出荷伝票の数、セット作業はセット指示書の完成品の数。</div>'+
@@ -10107,7 +10126,7 @@ function renderClientBill(cl){
   var manualInputs = fixedItems.map(function(it){
     var v = mq[it.id]===undefined ? (it.basis==='monthly' ? 1 : '') : mq[it.id];
     var lab = it.basis==='tsubo' ? 'この期間の最大使用坪数' : it.basis==='once' ? 'この月に入れる数(入れる月だけ 1)' : it.basis==='monthly' ? '数(ふつうは 1)' : '数';
-    return '<label style="display:flex;gap:8px;align-items:center;">'+esc(it.name)+'('+esc(lab)+') <input type="number" step="any" data-man-q="'+esc(it.id)+'" value="'+esc(String(v))+'" style="width:100px;"'+(inv ? ' disabled' : '')+'> '+esc(it.unit||'')+'</label>';
+    return '<label class="ch-field"><span>'+esc(it.name)+'('+esc(lab)+')</span><div><input type="number" step="any" data-man-q="'+esc(it.id)+'" value="'+esc(String(v))+'" style="width:120px;"'+(inv ? ' disabled' : '')+'> <span class="ch-note">'+esc(it.unit||'')+'</span></div></label>';
   }).join('');
   var closeBox = '';
   if(per==='month'){
@@ -10126,25 +10145,26 @@ function renderClientBill(cl){
   var histHtml = '<div class="stf-section-title" style="margin-top:14px;">発行した請求書</div>'+(hist.length ? '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>請求月</th><th>番号</th><th>期間</th><th class="num">合計(税込)</th><th>締めた日</th><th></th></tr></thead><tbody>'+
     hist.map(function(x){ return '<tr><td>'+esc(x.month)+'</td><td><b>'+esc(x.no)+'</b></td><td>'+esc(x.label)+'</td><td class="num">'+formatNum(x.total)+'</td><td>'+esc(fmtDateTime(x.at))+'</td><td><button type="button" class="ll-btn" data-inv-print="'+esc(x.month)+'">🖨 印刷・PDF</button></td></tr>'; }).join('')+'</tbody></table></div>' : '<div class="empty-note">まだありません</div>');
   return '<div class="panel">'+
-    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">請求月 <input type="month" id="chMonth" value="'+esc(month)+'">'+
+    '<div class="panel-title">請求</div>'+
+    '<div class="ch-row"><label class="ch-field"><span>請求月</span><input type="month" id="chMonth" value="'+esc(month)+'"></label>'+
       '<div class="sub-switch" style="margin:0;">'+[['first','半月の見込み'],['month','締め日(請求書)']].map(function(x){ return '<button type="button" class="sub-switch-btn'+(per===x[0] ? ' active' : '')+'" data-bill-per="'+x[0]+'">'+x[1]+'</button>'; }).join('')+'</div>'+
       '<button type="button" class="add-btn" id="chBillPrint">🖨 '+(per==='first' ? '請求見込みを印刷・PDF' : inv ? '請求書を印刷・PDF' : '下書きを印刷・PDF')+'</button></div>'+
     closeBox+
     '<div class="kpi-row">'+kpiTile('小計(税抜)', clientYen(show.sub), '', esc(show.label))+kpiTile('消費税('+show.tax+'%)', clientYen(show.taxAmt), '', '')+(show.freight ? kpiTile('立替運賃', clientYen(show.freight), '', '') : '')+kpiTile('合計', clientYen(show.total), '', per==='first' ? '月額・保管料は1か月分で入れています' : inv ? '締め済み' : 'まだ締めていません')+'</div>'+
     '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>項目</th><th class="num">数量</th><th>単位</th><th class="num">単価</th><th class="num">金額</th><th>数え方</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div class="stf-section-title" style="margin-top:12px;">この請求月に手で入れる数('+esc(month)+')'+(inv ? ' <span class="sk-minor">締め済みのため直せません</span>' : '')+'</div>'+
-    '<div style="display:grid;gap:6px;max-width:620px;">'+manualInputs+
-      '<label style="display:flex;gap:8px;align-items:center;">運賃の立替(円・税なしで足す) <input type="number" step="1" id="chFreight" value="'+esc(String(F.manual.freight||''))+'" style="width:120px;"'+(inv ? ' disabled' : '')+'></label>'+
+    '<div class="ch-grid">'+manualInputs+
+      '<label class="ch-field"><span>運賃の立替(円・税なしで足す)</span><div><input type="number" step="1" id="chFreight" value="'+esc(String(F.manual.freight||''))+'" style="width:120px;"'+(inv ? ' disabled' : '')+'> <span class="ch-note">円</span></div></label>'+
       (inv ? '' : '<div><button type="button" class="vc-manage-toggle-btn" id="chManSave">保存する</button></div>')+'</div>'+
     histHtml+
-    '<details style="margin-top:10px;"><summary style="cursor:pointer;font-weight:700;">締め日・請求書の発行元・消費税(設定)</summary>'+
-      '<div style="display:grid;gap:6px;margin-top:8px;max-width:520px;">'+
-        '<label>締め日 <select id="chCloseDay">'+[[0,'月末'],[5,'5日'],[10,'10日'],[15,'15日'],[20,'20日'],[25,'25日']].map(function(x){ return '<option value="'+x[0]+'"'+((Number(cfg.closeDay)||0)===x[0] ? ' selected' : '')+'>'+x[1]+'</option>'; }).join('')+'</select></label>'+
-        '<label>発行元(会社名) <input type="text" id="chIssuer" value="'+esc(cfg.issuer||'')+'" style="width:100%;"></label>'+
-        '<label>住所・連絡先 <textarea id="chIssuerAddr" rows="2" style="width:100%;">'+esc(cfg.address||'')+'</textarea></label>'+
-        '<label>登録番号(インボイス) <input type="text" id="chRegNo" value="'+esc(cfg.regNo||'')+'" style="width:100%;"></label>'+
-        '<label>振込先 <textarea id="chBank" rows="2" style="width:100%;">'+esc(cfg.bank||'')+'</textarea></label>'+
-        '<label>消費税(%) <input type="number" id="chTax" value="'+esc(String(cfg.taxRate===undefined ? 10 : cfg.taxRate))+'" style="width:80px;"></label>'+
+    '<details style="margin-top:10px;"><summary style="cursor:pointer;font-weight:700;font-size:14px;">締め日・請求書の発行元・消費税(設定)</summary>'+
+      '<div style="display:grid;gap:10px;margin-top:10px;max-width:520px;">'+
+        '<label class="ch-field"><span>締め日</span><select id="chCloseDay">'+[[0,'月末'],[5,'5日'],[10,'10日'],[15,'15日'],[20,'20日'],[25,'25日']].map(function(x){ return '<option value="'+x[0]+'"'+((Number(cfg.closeDay)||0)===x[0] ? ' selected' : '')+'>'+x[1]+'</option>'; }).join('')+'</select></label>'+
+        '<label class="ch-field"><span>発行元(会社名)</span><input type="text" id="chIssuer" value="'+esc(cfg.issuer||'')+'" style="width:100%;"></label>'+
+        '<label class="ch-field"><span>住所・連絡先</span><textarea id="chIssuerAddr" rows="2" style="width:100%;">'+esc(cfg.address||'')+'</textarea></label>'+
+        '<label class="ch-field"><span>登録番号(インボイス)</span><input type="text" id="chRegNo" value="'+esc(cfg.regNo||'')+'" style="width:100%;"></label>'+
+        '<label class="ch-field"><span>振込先</span><textarea id="chBank" rows="2" style="width:100%;">'+esc(cfg.bank||'')+'</textarea></label>'+
+        '<label class="ch-field"><span>消費税(%)</span><input type="number" id="chTax" value="'+esc(String(cfg.taxRate===undefined ? 10 : cfg.taxRate))+'" style="width:80px;"></label>'+
         '<div><button type="button" class="vc-manage-toggle-btn" id="chBillSave">保存する</button></div>'+
       '</div></details>'+
   '</div>';
@@ -10217,8 +10237,9 @@ function renderClientSetSheet(cl){
   var tbl = function(list, label){ return '<div class="stf-section-title">'+label+'</div><div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>品番</th><th>品名</th><th class="num">合計数</th><th>JAN</th></tr></thead><tbody>'+
     (list.map(function(x){ var j = janOf(x.code); return '<tr><td><b>'+esc(x.code)+'</b></td><td>'+esc(nameOf(x.code, x.name))+'</td><td class="num"><b>'+formatNum(x.qty)+'</b></td><td>'+(j ? esc(j) : '<span class="sk-minor">JAN なし</span>')+'</td></tr>'; }).join('') || '<tr><td colspan="4" class="empty-note">ありません</td></tr>')+'</tbody></table></div>'; };
   return '<div class="panel">'+
+    '<div class="panel-title">セット指示書の作り直し</div>'+
     '<div class="pool-hint" style="margin:0 0 8px;">「セット指示書」の取込(作業指示)から、期間の<b>完成品の合計</b>と、それに使う<b>構成部品の合計</b>を作り直します。部品の行が無い指示は、管理 → セット構成 の登録から部品を出します。印刷には JAN のバーコードが付きます(JAN はロジザードの在庫の検索名称から)。</div>'+
-    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">作業日 <input type="date" id="chSetFrom" value="'+esc(from)+'"> 〜 <input type="date" id="chSetTo" value="'+esc(to)+'"><span class="sk-minor">(月の取込: '+esc(month)+'。月をまたぐときは月を選び直してください)</span>'+
+    '<div class="ch-row"><label class="ch-field"><span>作業日(から)</span><input type="date" id="chSetFrom" value="'+esc(from)+'"></label><label class="ch-field"><span>作業日(まで)</span><input type="date" id="chSetTo" value="'+esc(to)+'"></label><span class="ch-note">(月の取込: '+esc(month)+'。月をまたぐときは月を選び直してください)</span>'+
       '<button type="button" class="add-btn" id="chSetPrint">🖨 セット指示書を印刷・PDF</button></div>'+
     tbl(T.fin, '完成品の合計('+T.fin.length+'品番)')+tbl(T.parts, '構成部品の合計('+T.parts.length+'品番)')+
   '</div>';
@@ -10239,8 +10260,8 @@ function bindClientHub(){
   var c = clientDataState(), cl = clientCur();
   document.querySelectorAll('[data-client-tab]').forEach(function(el){ el.addEventListener('click', function(){ state.clientTab = el.getAttribute('data-client-tab'); render(); }); });
   var tab = state.clientTab || 'dash';
-  if(!cl || (tab!=='dash' && tab!=='bill' && tab!=='set' && tab!=='rates')){ bindClientData(); return; }
-  if(tab==='set') bindClientData();
+  bindClientData(); // 荷主の選択・登録(上の行)と、取込のタブ
+  if(!cl || (tab!=='dash' && tab!=='bill' && tab!=='set' && tab!=='rates')) return;
   var mo = document.getElementById('chMonth');
   if(mo) mo.addEventListener('change', function(){ if(mo.value){ c.month = mo.value; c.data = null; render(); } });
   document.querySelectorAll('[data-bill-per]').forEach(function(el){ el.addEventListener('click', function(){ c.billPer = el.getAttribute('data-bill-per'); render(); }); });

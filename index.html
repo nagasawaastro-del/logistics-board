@@ -10734,14 +10734,14 @@ function tpickCamLog(stage, info){
   }catch(e){}
 }
 /* test = true: カメラの読み取りを試すだけ(作業記録の画面から。データが無くても試せる。2026-10-24) */
-async function tpickCamStart(test){
-  if(tpickCam) return;
+async function tpickCamStart(test, preStream){
+  if(tpickCam){ if(preStream) preStream.getTracks().forEach(function(t){ t.stop(); }); return; }
   // 先に画面を出す(押したのが分かるように)
   var box = document.createElement('div');
   box.className = 'tpick-cam';
-  box.innerHTML = '<video playsinline muted></video><div class="tpick-cam-bar"><label><input type="checkbox" id="tpickCamCont"'+(state.tpickCamCont ? ' checked' : '')+'> 続けて読む</label><span class="tpick-cam-msg">カメラを起動しています…</span><button type="button" class="ll-btn" id="tpickCamClose">やめる</button></div>';
+  box.innerHTML = '<video playsinline muted style="display:none;"></video><div class="tpick-cam-bar"><label><input type="checkbox" id="tpickCamCont"'+(state.tpickCamCont ? ' checked' : '')+'> 続けて読む</label><span class="tpick-cam-msg">カメラを起動しています…</span><button type="button" class="ll-btn" id="tpickCamClose">やめる</button></div>';
   document.body.appendChild(box);
-  var c = tpickCam = { box: box, lastCode: '', lastAt: 0, test: !!test };
+  var c = tpickCam = { box: box, lastCode: '', lastAt: 0, test: !!test, startAt: Date.now() };
   var inPick = function(){ return test || (state.modal && state.modal.kind==='tpickBatch'); };
   var msg = box.querySelector('.tpick-cam-msg');
   box.querySelector('#tpickCamClose').addEventListener('click', function(){ tpickCamStop('やめる'); });
@@ -10755,12 +10755,22 @@ async function tpickCamStart(test){
     msg.style.color = '#FDA29B'; msg.style.whiteSpace = 'pre-line'; msg.style.fontSize = '14px';
     msg.textContent = text+(test ? '' : '\n(行を手で押しても済にできます)');
   };
-  tpickCamLog(test ? '試す: 開始' : '開始', ('BarcodeDetector' in window) ? 'BarcodeDetector あり' : 'BarcodeDetector なし');
-  // 許可の画面が出たまま進まないとき
-  var waitTimer = setTimeout(function(){ if(tpickCam===c && !c.stream){ msg.textContent = 'カメラの許可を待っています…(画面の上か下に「カメラの使用を許可」が出ていたら「許可」を押してください)'; tpickCamLog('許可待ち', '8秒'); } }, 8000);
+  // 許可の状態(granted 許可済み / prompt 毎回聞く / denied 拒否)と、ホーム画面のアイコンから開いているか(アドレスバーが無い)を記録(2026-10-24)
+  var perm = '';
+  try{ if(navigator.permissions && navigator.permissions.query) perm = (await navigator.permissions.query({ name: 'camera' })).state || ''; }catch(e){ perm = '?'; }
+  var standalone = false; try{ standalone = !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || !!navigator.standalone; }catch(e){}
+  if(!preStream) tpickCamLog(test ? '試す: 開始' : '開始', (('BarcodeDetector' in window) ? 'BarcodeDetector あり' : 'BarcodeDetector なし')+'・許可: '+(perm || '不明')+(standalone ? '・ホーム画面から' : ''));
+  // 許可の画面が出たまま進まないとき(状態に合わせて案内)
+  var waitTimer = setTimeout(function(){
+    if(tpickCam!==c || c.stream) return;
+    msg.style.whiteSpace = 'pre-line';
+    msg.textContent = perm==='granted' ? 'カメラを起動しています(時間がかかっています)…'
+      : 'カメラの許可を待っています。\n・「カメラの使用を許可」が出ていたら「許可」を押してください(「今回のみ」ではなく、ずっと許可する方を選ぶと次から聞かれません)。\n・何も出ていなければ、アドレスバーの左のマーク →「権限」→「カメラ」→「許可」。'+(standalone ? '\n・ホーム画面のアイコンから開いているときは、Chrome で開くと許可の確認が出ます。' : '')+'\n許可したら、この画面は開いたまま待ってください(閉じても2分以内に許可すれば自動で開きます)。';
+    tpickCamLog('許可待ち', '8秒・許可: '+(perm || '不明'));
+  }, 8000);
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ await fail('この端末のブラウザではカメラを使えません。Chrome で開いているか確かめてください。読めないときは、行を手で押して済にできます。'); return; }
   var stream;
-  try{ stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }); }
+  try{ stream = preStream || await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }); }
   catch(e){
     var n = (e && e.name) || '';
     await fail(n==='NotAllowedError' || n==='SecurityError'
@@ -10771,10 +10781,17 @@ async function tpickCamStart(test){
     return;
   }
   clearTimeout(waitTimer);
-  if(tpickCam!==c){ stream.getTracks().forEach(function(t){ t.stop(); }); tpickCamLog('閉じた後に許可', ''); return; }
+  var waited = Math.round((Date.now() - c.startAt) / 1000);
+  if(tpickCam!==c){
+    // 閉じたあとに許可された: 2分以内で、ほかのカメラが開いていなければ、そのまま開き直す(設定で許可して戻ってきたとき)
+    if(!tpickCam && waited <= 120){ tpickCamLog('閉じた後に許可', waited+'秒・開き直した'); tpickCamStart(test, stream); }
+    else { stream.getTracks().forEach(function(t){ t.stop(); }); tpickCamLog('閉じた後に許可', waited+'秒'); }
+    return;
+  }
   c.stream = stream;
-  tpickCamLog('カメラ OK', (stream.getVideoTracks()[0] && stream.getVideoTracks()[0].label) || '');
-  var video = box.querySelector('video'); video.srcObject = stream;
+  msg.style.whiteSpace = ''; msg.style.color = '';
+  tpickCamLog('カメラ OK', ((stream.getVideoTracks()[0] && stream.getVideoTracks()[0].label) || '')+'・'+waited+'秒');
+  var video = box.querySelector('video'); video.style.display = ''; video.srcObject = stream; // 映像の枠は、カメラが付いてから出す(待っている間に黒い画面で隠さない)
   try{ await video.play(); }catch(e){ tpickCamLog('映像の再生', (e && (e.name+' '+e.message)) || ''); }
   box.querySelector('#tpickCamCont').addEventListener('change', function(ev){ state.tpickCamCont = ev.target.checked; resetIdle(); });
   function resetIdle(){ clearTimeout(c.idleTimer); c.idleTimer = setTimeout(function(){ if(tpickCam===c){ tpickCamStop('読まなかった'); showToast('読まなかったので、カメラを止めました'); } }, (state.tpickCamCont || test) ? 120000 : 30000); }

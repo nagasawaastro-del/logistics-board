@@ -10835,7 +10835,13 @@ async function tpickCamStart(test, preStream){
     sel.innerHTML = cams.map(function(d, i){ return '<option value="'+esc(d.deviceId)+'"'+(pick && pick.deviceId===d.deviceId ? ' selected' : '')+'>'+esc(d.label || ('カメラ '+(i+1)))+'</option>'; }).join('');
     var lab = document.createElement('label'); lab.textContent = 'カメラ '; lab.appendChild(sel);
     box.querySelector('.tpick-cam-bar').insertBefore(lab, box.querySelector('.tpick-cam-msg'));
-    sel.addEventListener('change', function(){ try{ localStorage.setItem('tpickCamDevice', sel.value); }catch(e){} tpickCamLog('カメラを変えた', (sel.options[sel.selectedIndex]||{}).text || ''); tpickCamStop('カメラを変えた'); setTimeout(function(){ tpickCamStart(test); }, 300); });
+    // 止まったままのカメラの頼みはページを開き直さないと消えない(ほかのカメラもふさがる)ため、試すときは開き直してから選んだカメラで自動で試す
+    sel.addEventListener('change', function(){
+      try{ localStorage.setItem('tpickCamDevice', sel.value); }catch(e){}
+      tpickCamLog('カメラを変えた', (sel.options[sel.selectedIndex]||{}).text || '');
+      if(test){ msg.textContent = 'ページを開き直して、選んだカメラで試します…'; try{ sessionStorage.setItem('tpickCamAutoTest', String(Date.now())); }catch(e){} setTimeout(function(){ location.reload(); }, 600); return; }
+      tpickCamStop('カメラを変えた'); setTimeout(function(){ tpickCamStart(test); }, 300);
+    });
   }
   var vcons = pick ? { deviceId: { exact: pick.deviceId }, width: { ideal: 640 }, height: { ideal: 480 } } : { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } };
   if(!preStream) tpickCamLog('頼んだカメラ', pick ? (pick.label || '名前なし') : '背面(指定なし)');
@@ -20145,6 +20151,8 @@ function bindInput(){
     });
   });
   var camTest = document.getElementById('camTestBtn');
+  // カメラを変えて開き直したとき: 選んだカメラで自動で試す(1分以内の印だけ)
+  try{ var autoT = Number(sessionStorage.getItem('tpickCamAutoTest')||0); if(autoT){ sessionStorage.removeItem('tpickCamAutoTest'); if(camTest && Date.now()-autoT < 60000) setTimeout(function(){ logiStockLoad(); tpickCamStart(true); }, 800); } }catch(e){}
   if(camTest) camTest.addEventListener('click', function(){ logiStockLoad(); tpickCamStart(true); });
   document.querySelectorAll('[data-tpick-open]').forEach(function(el){
     el.addEventListener('click', function(e){

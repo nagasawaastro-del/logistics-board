@@ -1524,6 +1524,7 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .client-hub .ch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px 14px;align-items:end;}
 .client-hub .ch-clientbar{margin-top:-2px;}
 .client-hub .stf-card{font-size:14px;}
+.client-hub table.setorder td{vertical-align:middle;} .client-hub table.setorder tr.sub td{border-top:1px dashed var(--paper-line);} .client-hub table.setorder td.q,.client-hub table.setorder td.pq{text-align:right;font-weight:700;} .client-hub table.setorder td.q{font-size:17px;} .client-hub table.setorder td.no,.client-hub table.setorder td.lbl{text-align:center;} .client-hub table.setorder .cd{font-size:11px;color:var(--slate-500);} .client-hub table.setorder .nm1{font-weight:700;}
 .client-hub .shukei-drop label.sk-minor{font-size:13px;}
 .mon-tp{ display:flex; flex-direction:column; gap:6px; }
 .mon-tp-row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:15px; }
@@ -2091,6 +2092,7 @@ html[data-app-theme="dark"] .hd-vc{border-top-color:rgba(77,124,203,0.45) !impor
 html[data-app-theme="dark"] .tpick-cam-bar .ll-btn{background:var(--dk-card) !important}
 html[data-app-theme="dark"] .client-hub .ch-field>span{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .client-hub .ch-note{color:var(--dk-muted) !important}
+html[data-app-theme="dark"] .client-hub table.setorder .cd{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .mon-tp-chip.is-done{color:#98f4c9 !important}
 html[data-app-theme="dark"] .mon-tp-note.is-short{color:#f79c96 !important}
 html[data-app-theme="dark"] .tpick-short-btn{background:var(--dk-card) !important;color:#f1a29b !important}
@@ -10387,14 +10389,13 @@ function renderClientSetSheet(cl){
   if(!state.logiStock || !state.setBom){ Promise.all([logiStockLoad(), setBomLoad()]).then(function(){ render(); }); }
   var S = clientSetSel(cl);
   if(!S) return '<div class="panel"><div class="empty-note">読み込み中…</div></div>';
-  var T = S.T, view = c.setView || 'fin';
+  var T = S.T, view = c.setView || 'order';
   var nameOf = function(code, n){ if(n) return n; var st = logiStockOf(code); return st ? st.name : ''; };
   var totalSets = T.fin.reduce(function(a, x){ return a + x.qty; }, 0);
   var box = function(inner){ return '<div style="overflow:auto;max-height:520px;"><table class="report-table" style="font-size:13px;">'+inner+'</table></div>'; };
   var tbl = function(list){ return box('<thead><tr><th>品番</th><th>品名</th><th class="num">合計数</th><th>JAN</th></tr></thead><tbody>'+
     (list.map(function(x){ var j = clientJan(x.code); return '<tr><td><b>'+esc(x.code)+'</b></td><td>'+esc(nameOf(x.code, x.name))+'</td><td class="num"><b>'+formatNum(x.qty)+'</b></td><td>'+(j ? esc(j) : '<span class="sk-minor">JAN なし</span>')+'</td></tr>'; }).join('') || '<tr><td colspan="4" class="empty-note">ありません</td></tr>')+'</tbody>'); };
-  var compTbl = box('<thead><tr><th>セット</th><th class="num">数</th><th>中身(1セットあたり → 合計)</th></tr></thead><tbody>'+
-    (T.fin.map(function(F){ return '<tr><td><b>'+esc(nameOf(F.code, F.name))+'</b><div class="sk-minor">'+esc(F.code)+'</div></td><td class="num"><b>'+formatNum(F.qty)+'</b></td><td>'+((F.comp||[]).map(function(p){ return esc(nameOf(p.code, p.name))+' <span class="sk-minor">'+esc(p.code)+'</span> ×'+formatNum(p.per)+' → <b>'+formatNum(p.qty)+'</b>'; }).join('<br>') || '<span class="sk-minor">中身の登録なし</span>')+'</td></tr>'; }).join('') || '<tr><td colspan="3" class="empty-note">ありません</td></tr>')+'</tbody>');
+  var orderTbl = '<div style="overflow:auto;max-height:560px;">'+clientSetOrderTable(T, nameOf, false)+'</div>';
   var impOpts = S.imps.map(function(i){ return '<option value="'+esc(i.id)+'"'+(S.mode===i.id ? ' selected' : '')+'>'+esc(fmtDateTime(i.at)+' '+i.file+'('+i.count+'行)')+'</option>'; }).join('')+'<option value=""'+(S.mode ? '' : ' selected')+'>作業日の範囲で選ぶ</option>';
   return '<div class="panel">'+
     '<div class="panel-title">セット指示書の作り直し</div>'+
@@ -10413,24 +10414,45 @@ function renderClientSetSheet(cl){
       '<label class="ch-field"><span>下へずらす(mm)</span><input type="number" step="0.5" id="chJanDy" value="'+esc(String(clientJanCfg().dy))+'" style="width:90px;"></label>'+
       '<label class="ch-field"><span>使い始める位置(1〜30)</span><input type="number" min="1" max="30" id="chJanStart" value="'+esc(String(clientJanCfg().start))+'" style="width:90px;"></label>'+
       '<span class="ch-note">A4・3列×10段(28455)。ずれの直しはこの端末で覚えます。使い始める位置は、使いかけのシートの何枚目からか(左上から右へ数える)</span></div></details>'+
-    '<div class="sub-switch" style="margin:0 0 8px;">'+[['fin','作るもの('+T.fin.length+')'],['parts','使うもの('+T.parts.length+')'],['comp','セットごとの中身']].map(function(x){ return '<button type="button" class="sub-switch-btn'+(view===x[0] ? ' active' : '')+'" data-set-view="'+x[0]+'">'+esc(x[1])+'</button>'; }).join('')+'</div>'+
-    (view==='parts' ? tbl(T.parts) : view==='comp' ? compTbl : tbl(T.fin))+
+    '<div class="sub-switch" style="margin:0 0 8px;">'+[['order','作業の順(完成品と部品)'],['fin','作るもの('+T.fin.length+')'],['parts','使うもの('+T.parts.length+')']].map(function(x){ return '<button type="button" class="sub-switch-btn'+(view===x[0] ? ' active' : '')+'" data-set-view="'+x[0]+'">'+esc(x[1])+'</button>'; }).join('')+'</div>'+
+    (view==='parts' ? tbl(T.parts) : view==='fin' ? tbl(T.fin) : orderTbl)+
     '<div class="pool-hint" style="margin-top:8px;">並びは商品名の順(指示書・JAN ラベルも同じ順)。品番が13桁ならそれを JAN に、そうでなければロジザードの在庫の JAN を使います。</div>'+
   '</div>';
+}
+/* 作業の順の表(完成品ごとに、横に部品と数)。print = 印刷用(バーコードつき) */
+function clientSetOrderTable(T, nameOf, print){
+  var no = 0, label = 0;
+  var body = T.fin.map(function(F){
+    no++;
+    var comp = (F.comp && F.comp.length) ? F.comp : [null], k = comp.length, j = clientJan(F.code);
+    var from = label + 1; if(j) label += F.qty; // JAN の分からないセットはラベルに入らない
+    var head = '<td rowspan="'+k+'" class="no">'+no+'</td>'+
+      '<td rowspan="'+k+'" class="fin"><div class="nm1">'+esc(nameOf(F.code, F.name))+'</div><div class="cd">'+esc(F.code)+'</div>'+(print && j ? '<div class="bcs">'+ean13Svg(j, 22)+'</div>' : '')+'</td>'+
+      '<td rowspan="'+k+'" class="q">'+formatNum(F.qty)+'</td>';
+    var tail = '<td rowspan="'+k+'" class="lbl">'+(!j ? 'JANなし' : F.qty ? from+(F.qty>1 ? '〜'+label : '') : '')+'</td><td rowspan="'+k+'" class="chk"></td>';
+    return comp.map(function(p, i){
+      var part = p ? '<td class="pt"><div class="nm2">'+esc(nameOf(p.code, p.name))+'</div><div class="cd">'+esc(p.code)+'</div></td><td class="per">×'+formatNum(p.per)+'</td><td class="pq">'+formatNum(p.qty)+'</td>'
+        : '<td class="pt" colspan="3"><span class="cd">中身の登録なし</span></td>';
+      return '<tr class="'+(i===0 ? 'top' : 'sub')+'">'+(i===0 ? head : '')+part+(i===0 ? tail : '')+'</tr>';
+    }).join('');
+  }).join('');
+  return '<table class="'+(print ? '' : 'report-table')+' setorder"><thead><tr><th>No</th><th>作る完成品</th><th>作る数</th><th>使う部品</th><th>1セット</th><th>使う数</th><th>シール</th><th>済</th></tr></thead><tbody>'+(body || '<tr><td colspan="8">ありません</td></tr>')+'</tbody></table>';
 }
 function clientSetSheetPrint(cl){
   var S = clientSetSel(cl); if(!S) return;
   var T = S.T, from = S.mode ? todayStr() : S.from;
   var nameOf = function(code, n){ if(n) return n; var st = logiStockOf(code); return st ? st.name : ''; };
-  var rows = function(list){ return list.map(function(x){ var j = clientJan(x.code); return '<tr><td><div class="nm1">'+esc(nameOf(x.code, x.name))+'</div><div class="cd">'+esc(x.code)+'</div></td><td class="q">'+formatNum(x.qty)+'</td><td class="bc">'+(j ? ean13Svg(j, 30) : '<span class="nb">JAN なし</span>')+'</td><td class="chk"></td></tr>'; }).join(''); };
-  var head = '<thead><tr><th>品名 / JAN</th><th>数</th><th>JAN</th><th>済</th></tr></thead>';
-  var compRows = T.fin.map(function(F){ return '<tr><td><div class="nm1">'+esc(nameOf(F.code, F.name))+'</div><div class="cd">'+esc(F.code)+'</div></td><td class="q">'+formatNum(F.qty)+'</td><td>'+((F.comp||[]).map(function(p){ return '<div>'+esc(nameOf(p.code, p.name))+' <span class="cd">'+esc(p.code)+'</span> ×'+formatNum(p.per)+' → <b>'+formatNum(p.qty)+'</b></div>'; }).join('') || '—')+'</td><td class="chk"></td></tr>'; }).join('');
   var totalSets = T.fin.reduce(function(a, x){ return a + x.qty; }, 0);
+  var partRows = T.parts.map(function(x){ return '<tr><td><div class="nm2">'+esc(nameOf(x.code, x.name))+'</div><div class="cd">'+esc(x.code)+'</div></td><td class="pq">'+formatNum(x.qty)+'</td><td class="chk"></td></tr>'; }).join('');
   var html = '<h1>セット作業指示書</h1><div class="meta">'+esc(cl.name)+' ・ '+esc(S.label)+' ・ 作るセット '+formatNum(totalSets)+'個('+T.fin.length+'品番) ・ 作成 '+esc(fmtDateTime(new Date().toISOString()))+'</div>'+
-    '<h2>作るもの(完成品)</h2><table>'+head+'<tbody>'+rows(T.fin)+'</tbody></table>'+
-    '<h2>使うもの(構成部品の合計)</h2><table>'+head+'<tbody>'+rows(T.parts)+'</tbody></table>'+
-    '<h2>セットごとの中身(1セットあたり → 合計)</h2><table><thead><tr><th>セット</th><th>数</th><th>中身</th><th>済</th></tr></thead><tbody>'+compRows+'</tbody></table>';
-  var css = '@page{size:A4 portrait;margin:10mm;} h1{font-size:22px;letter-spacing:.2em;margin:0 0 4px;} .meta{font-size:12px;margin-bottom:8px;} h2{font-size:14px;margin:12px 0 4px;border-left:4px solid #000;padding-left:6px;} table{width:100%;border-collapse:collapse;font-size:12px;} th{background:#eee;border:1px solid #000;padding:4px;} td{border:1px solid #000;padding:4px 6px;vertical-align:middle;} td.q{text-align:right;font-size:20px;font-weight:700;width:70px;} td.bc{width:180px;text-align:center;} td.chk{width:30px;} .nm1{font-size:12px;font-weight:700;} .cd{font-size:10px;color:#475467;} .nb{font-size:10px;color:#667085;} tr{page-break-inside:avoid;}';
+    '<div class="memo">上から順に作ってください。「シール」は JAN ラベルの何枚目か(ラベルも同じ順に並んでいます)。</div>'+
+    clientSetOrderTable(T, nameOf, true)+
+    '<h2 class="pb">使う部品の合計(集めるとき用)</h2><table class="parts"><thead><tr><th>部品</th><th>合計</th><th>済</th></tr></thead><tbody>'+partRows+'</tbody></table>';
+  var css = '@page{size:A4 portrait;margin:8mm;} h1{font-size:20px;letter-spacing:.2em;margin:0 0 2px;} .meta{font-size:11px;margin-bottom:4px;} .memo{font-size:11px;margin-bottom:6px;} h2{font-size:14px;margin:10px 0 4px;border-left:4px solid #000;padding-left:6px;} h2.pb{page-break-before:always;}'+
+    'table{width:100%;border-collapse:collapse;font-size:11px;} th{background:#eee;border:1px solid #000;padding:3px;font-size:10.5px;} td{border:1px solid #000;padding:3px 5px;vertical-align:middle;}'+
+    'td.no{width:22px;text-align:center;font-weight:700;} td.fin{width:36%;} td.q{width:46px;text-align:right;font-size:18px;font-weight:700;} td.pt{} td.per{width:44px;text-align:right;} td.pq{width:50px;text-align:right;font-size:15px;font-weight:700;} td.lbl{width:54px;text-align:center;font-size:10px;} td.chk{width:26px;}'+
+    'tr.sub td{border-top:1px dashed #98A2B3;} .nm1{font-size:11.5px;font-weight:700;} .nm2{font-size:11px;} .cd{font-size:9.5px;color:#475467;} .bcs svg{height:30px;width:auto;display:block;margin-top:2px;} tbody{page-break-inside:auto;} tr{page-break-inside:avoid;}'+
+    'table.parts td.pq{font-size:14px;}';
   printHtmlDoc('セット作業指示書_'+cl.name+'_'+from, html, css);
 }
 /* JAN ラベル(A4・3列×10段 = 28455)。完成品を指示書と同じ順に、数の枚数だけ。見本(デスクトップの JANラベル_28455.pdf)と同じ位置 */
@@ -15733,6 +15755,9 @@ async function loadGateDataStatus(){
   // kintone 商品台帳(入数・才数)の同期
   var ks = await loadKintoneSyncStatus();
   out.kintoneProduct = (ks && ks.fetchedAt) ? { at: ks.fetchedAt, detail: formatNum(ks.savedCount||0)+'件' } : null;
+  // kintone 見積もり・入荷予定の同期(日時と件数だけの小さな記録。2026-10-26)
+  var os = await loadKeyJson(STOCK_OUTLOOK_STATUS_KEY, function(){ return null; });
+  out.kintoneOutlook = (os && os.syncedAt) ? { at: os.syncedAt, detail: '入荷予定 '+formatNum(os.arrivalLines||0)+'行・見積 '+formatNum(os.estimateRecords||0)+'件' } : null;
   // kintone 作業日報の同期
   var ws = await loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; });
   var md = function(d){ return d ? Number(d.slice(5,7))+'/'+Number(d.slice(8,10)) : ''; };
@@ -15799,6 +15824,7 @@ function renderGateDataStatus(){
     '</div>'+
     '<div class="gs-grid">'+
       GATE_STATUS_SOURCES.map(function(src){ return tile(names[src.name] || src.label, st[src.name], true); }).join('')+
+      tile('kintone 見積・入荷予定', st.kintoneOutlook, false)+
       tile('kintone 商品台帳', st.kintoneProduct, false)+
       (hasManagerSession() ? tile('kintone 作業単価', st.kintonePrice, false) : '')+
       tile('kintone 作業日報', st.kintoneReport, false)+

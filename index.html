@@ -4292,18 +4292,29 @@ function summarizeShipperGroups(groupsSubset){
 /* ---------- CSV → 得意先マスター照合 → 作業枠ごとの取込計画、の共通パイプライン ----------
    手動CSV取込・将来の共有フォルダ自動取込のどちらからも、この関数を呼び出す想定。
    DOM操作を一切行わない純粋なデータ処理関数。 */
-function buildAutoMappedImportPlan(parseResult, mapping, targetDate){
-  var resolved = resolveCustomerTaskMapping(parseResult.shipperGroups, mapping, targetDate || todayStr());
+/* opts(2026-10-26): snOverrides = { 荷主出荷NO: 作業ID }(確認画面で伝票をほかの作業へ移した分。この取込だけ)、
+   rawByProduct・productInfo があれば、商品ごとの集計を作業に入った伝票で分けて作る */
+function buildAutoMappedImportPlan(parseResult, mapping, targetDate, opts){
+  opts = opts || {};
+  var snOv = opts.snOverrides || {}, moved = [];
+  var groups = (parseResult.shipperGroups || []).filter(function(g){ if(snOv[g.shipperNo]){ moved.push(g); return false; } return true; });
+  var resolved = resolveCustomerTaskMapping(groups, mapping, targetDate || todayStr());
+  moved.forEach(function(g){ (resolved.byTask[snOv[g.shipperNo]] = resolved.byTask[snOv[g.shipperNo]] || []).push(g); });
   var taskPlans = Object.keys(resolved.byTask).map(function(taskId){
     var groupsSubset = resolved.byTask[taskId];
     var summary = summarizeShipperGroups(groupsSubset);
-    var customerNamesInTask = {};
-    groupsSubset.forEach(function(g){ customerNamesInTask[g.customerName] = true; });
     var byProductForTask = {};
-    Object.keys(parseResult.byProduct||{}).forEach(function(code){
-      var p = parseResult.byProduct[code];
-      if(customerNamesInTask[p.customerName]) byProductForTask[code] = p;
-    });
+    if(opts.rawByProduct){
+      var snSet = {}; groupsSubset.forEach(function(g){ snSet[g.shipperNo] = true; });
+      byProductForTask = attachOutboundBreakdown(filterByProductForShipperNos(opts.rawByProduct, snSet), opts.productInfo || {});
+    }else{
+      var customerNamesInTask = {};
+      groupsSubset.forEach(function(g){ customerNamesInTask[g.customerName] = true; });
+      Object.keys(parseResult.byProduct||{}).forEach(function(code){
+        var p = parseResult.byProduct[code];
+        if(customerNamesInTask[p.customerName]) byProductForTask[code] = p;
+      });
+    }
     return {
       taskId: taskId,
       primaryCount: summary.primaryCount, lineCount: summary.lineCount, totalQty: summary.totalQty,
@@ -17138,8 +17149,9 @@ function bindCsvImportPanel(){
         // 読み込めない・入数が無い場合も取込は止めず、理由(packQtyStatus)を残す
         var productCodes = Object.keys(filteredResult.byProduct);
         var productInfo = productCodes.length ? await getProductMasterInfoBatch(productCodes) : {};
+        var rawByProduct = filteredResult.byProduct; // 伝票ごとの数量つき(伝票をほかの作業へ移したときに分け直す)
         filteredResult.byProduct = attachOutboundBreakdown(filteredResult.byProduct, productInfo);
-        var plan = buildAutoMappedImportPlan(filteredResult, mapping, targetDate);
+        var plan = buildAutoMappedImportPlan(filteredResult, mapping, targetDate, { rawByProduct: rawByProduct, productInfo: productInfo });
         state.autoMapPreviewData = {
           fileName: fileName, targetDate: targetDate, fingerprint: fingerprint, fileSize: fileSize,
           rowCount: result.rowCount, missingColumns: result.missingColumns||[],
@@ -17147,6 +17159,7 @@ function bindCsvImportPanel(){
           tpLines: (result.tpLines||[]).filter(function(x){ return keepSet[x.sn]; }),
           skippedShipperNos: skippedShipperNos,
           taskPlans: plan.taskPlans, unmapped: plan.unmapped,
+          rawByProduct: rawByProduct, productInfo: productInfo, snOverrides: {},
           rowAnomalies: result.rowAnomalies||[],
           dummyExcluded: result.dummyExcluded || null
         };
@@ -22820,14 +22833,23 @@ function renderAutoMapPreviewModal(m){
     '</details>'
   ) : '';
 
+  var snOv = d.snOverrides || {};
+  var planSel = function(p){
+    return '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:12px;">作業 <select data-am-plan="'+esc(p.taskId)+'" style="border:1px solid var(--paper-line);border-radius:8px;padding:4px 8px;font-size:13px;">'+todayTasks.map(function(t){ return '<option value="'+t.id+'"'+(t.id===p.taskId ? ' selected' : '')+'>'+esc(t.name)+'</option>'; }).join('')+'</select></div>';
+  };
   var taskRows = d.taskPlans.map(function(p){
     var t = taskById(p.taskId);
+    var nMoved = (p.shipperNos || []).filter(function(sn){ return snOv[sn]; }).length;
+    var custHtml = (nMoved ? '<div style="font-size:12px;color:#B54708;margin-top:4px;">作業を切り替えました(いつもの振り分けから変更)</div>' : '')+planSel(p);
     return '<div class="checklist-item">'+
       '<div class="checklist-item-title">✓ '+esc(t.name)+'</div>'+
       '<div class="checklist-item-action">件数/PO数 '+formatNum(p.primaryCount)+' ・ 明細 '+formatNum(p.lineCount)+' ・ 出荷数量 '+formatNum(p.totalQty)+'ピース'+(outboundSplitOfImport(p) ? '(ケース '+formatNum(outboundSplitOfImport(p).caseCount)+'ケース・バラ '+formatNum(outboundSplitOfImport(p).pieceCount)+'ピース)' : '')+'('+Object.keys(p.byCustomer).length+'得意先)'+
         ' ・ セット '+(importSetText(p) || '<span style="color:var(--slate-500);">分からない(ブロック略称の列なし)</span>')+'</div>'+
+      custHtml+
     '</div>';
   }).join('') || '<div class="empty-note">自動紐付けできた作業枠はありません</div>';
+  var ovHtml = '<div class="pool-hint" style="margin:6px 0 0;">作業枠の「作業」を選び直すと、<b>この取込だけ</b>、この CSV の伝票をまとめてその作業にします(個配とゆうパックの切り替えなど)。トータルピッキングも切り替えた作業で作ります。</div>';
+  var filterHtml = '';
 
   var unmappedRows = d.unmapped.map(function(u){
     var taskOpts = todayTasks.map(function(t){ return '<option value="'+t.id+'">'+esc(t.name)+'</option>'; }).join('');
@@ -22850,7 +22872,7 @@ function renderAutoMapPreviewModal(m){
       warnHtml+
       ((d.skippedShipperNos && d.skippedShipperNos.length) ? '<div class="vc-import-status" style="background:var(--paper-100);color:var(--slate-500);border-color:var(--paper-line);">新規取込対象: '+d.taskPlans.reduce(function(a,p){return a+p.primaryCount;},0)+'件 / 重複スキップ: '+d.skippedShipperNos.length+'件<br><span style="font-size:11px;">スキップ理由: 既に取り込み済みの荷主出荷番号</span></div>' : '')+
       '<div class="panel-title" style="font-size:14px;">✓ 自動紐付け済み('+d.taskPlans.length+'作業枠)</div>'+
-      taskRows+
+      filterHtml+taskRows+ovHtml+
       '<div class="panel-title" style="font-size:14px;margin-top:14px;color:#F04438;">⚠️ 未紐付け('+d.unmapped.length+'件)</div>'+
       unmappedRows+
       '<div class="modal-actions" style="margin-top:14px;">'+
@@ -22913,7 +22935,7 @@ function bindAutoMapPreviewModal(m){
         return;
       }
 
-      var plan = buildAutoMappedImportPlan(d.rawParseResult, state.customerTaskMapping, d.targetDate);
+      var plan = buildAutoMappedImportPlan(d.rawParseResult, state.customerTaskMapping, d.targetDate, { snOverrides: d.snOverrides, rawByProduct: d.rawByProduct, productInfo: d.productInfo });
       var stillUnmapped = plan.unmapped.some(function(u){ return normalizeCustomerName(u.customerName)===norm; });
       d.taskPlans = plan.taskPlans;
       d.unmapped = plan.unmapped;
@@ -22925,6 +22947,26 @@ function bindAutoMapPreviewModal(m){
       render();
     });
   });
+  var amRecompute = function(d){
+    var plan = buildAutoMappedImportPlan(d.rawParseResult, state.customerTaskMapping, d.targetDate, { snOverrides: d.snOverrides, rawByProduct: d.rawByProduct, productInfo: d.productInfo });
+    d.taskPlans = plan.taskPlans; d.unmapped = plan.unmapped;
+  };
+  document.querySelectorAll('[data-am-plan]').forEach(function(el){
+    el.addEventListener('change', function(){
+      var d = state.autoMapPreviewData; if(!d) return;
+      var from = el.getAttribute('data-am-plan'), to = el.value;
+      var plan = (d.taskPlans || []).filter(function(p){ return p.taskId===from; })[0]; if(!plan || !to || to===from) return;
+      d.snOverrides = d.snOverrides || {};
+      (plan.shipperNos || []).forEach(function(sn){
+        var g = (d.rawParseResult.shipperGroups || []).find(function(x){ return x.shipperNo===sn; });
+        var m = g ? findMappingForCustomer(state.customerTaskMapping || { entries: [] }, g.customerName) : null;
+        if(m && resolveMappingEntryTaskId(m, d.targetDate)===to) delete d.snOverrides[sn]; else d.snOverrides[sn] = to; // いつもの作業に戻したら印を消す
+      });
+      amRecompute(d);
+      showToast('「'+taskById(from).name+'」の '+(plan.shipperNos||[]).length+'件を「'+taskById(to).name+'」にしました(この取込だけ)');
+      render();
+    });
+  });
   var confirmBtn = document.getElementById('autoMapPreviewConfirmBtn');
   if(confirmBtn){
     confirmBtn.addEventListener('click', async function(){
@@ -22933,6 +22975,8 @@ function bindAutoMapPreviewModal(m){
         showToast('自動紐付けできた作業枠がないため、確定できません');
         return;
       }
+      var movedN = Object.keys(d.snOverrides || {}).length;
+      if(movedN) await appendAuditLog({ action:'CSV取込で作業を切り替えた', target: d.fileName, before:null, after: movedN+'件('+Object.keys(d.snOverrides).slice(0,10).map(function(sn){ return sn+'→'+taskById(d.snOverrides[sn]).name; }).join('・')+(movedN>10 ? ' ほか' : '')+')' });
       var newImports = []; // サーバーの今の内容に足して保存する(この端末の古い内容で上書きしない)
       var groupImportId = uid(); // 同一CSVから生成された取込群であることが分かるように共通のグループIDを持たせる
       var tpEntries = [];

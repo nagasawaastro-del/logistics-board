@@ -351,6 +351,7 @@ input,select{font-family:inherit;}
 .vca-site.is-split{background:#FFFAEB;color:#B54708;}
 .vca-site.is-none{background:#FEF3F2;color:#B42318;}
 .vca-site.is-handled{background:#F4EBFF;color:#6941C6;}
+.vca-setbom > td{background:#FAF5FF;border-top:0 !important;}
 .vca-table td.vca-use{font-weight:800;color:var(--ink-900);}
 .vca-table tr.vca-row-none td{background:#FEF3F2 !important;}
 .vca-site-sel{font-size:12px;padding:2px 4px;}
@@ -1780,6 +1781,7 @@ html[data-app-theme="dark"] .vca-site.is-tannan{background:rgba(47,233,123,0.13)
 html[data-app-theme="dark"] .vca-site.is-split{background:rgba(255,197,25,0.13) !important;color:#fab893 !important}
 html[data-app-theme="dark"] .vca-site.is-none{background:rgba(238,58,41,0.13) !important;color:#f1a29b !important}
 html[data-app-theme="dark"] .vca-site.is-handled{background:rgba(128,25,255,0.13) !important;color:#b9a5e8 !important}
+html[data-app-theme="dark"] .vca-setbom > td{background:rgba(140,25,255,0.13) !important}
 html[data-app-theme="dark"] .vca-table td.vca-use{color:var(--dk-fg) !important}
 html[data-app-theme="dark"] .vca-table tr.vca-row-none td{background:rgba(238,58,41,0.13) !important}
 html[data-app-theme="dark"] .vc-warning-box{background:rgba(255,197,25,0.13) !important;color:#fdb022 !important}
@@ -11749,7 +11751,7 @@ function vcAllocOtherRows(calc, kind){
     return { kind: kind, code: p.code, name: p.name||'', qty: p.qty, cases: p.pack ? p.casesUp : null,
       takaya: Math.max(0, p.takaya), tannan: Math.max(0, p.tannan), shortage: p.shortage || 0,
       split: p.site==='split' && p.split ? '高屋 '+formatNum(p.split.takaya)+' + 丹南 '+formatNum(p.split.tannan) : '',
-      note: p.memo || (p.site==='handled' ? '' : vcAllocNote(p)) };
+      note: (vcAllocIsSet(p) ? (function(){ var S = vcAllocSetParts(p.code, p.qty); return S ? 'セット: '+S.items.map(function(it){ return it.code+'×'+it.per+'='+it.need+(it.stock.short ? '(不足)' : ''); }).join('・') : 'セット構成の登録なし'; })()+(p.memo ? ' / '+p.memo : '') : '') || p.memo || (p.site==='handled' ? '' : vcAllocNote(p)) };
   });
 }
 /* 高屋・丹南以外の品番の表を、キャンバスに描く(PDF にする用)。戻り値: { canvas, headH, rowH, rows, scale } */
@@ -11968,6 +11970,7 @@ function renderVcAlloc(){
     return '<div class="mgr-wrap shukei-wrap"><div class="panel"><div class="panel-title">📦 VC引き当て</div><div class="pool-hint">読み込み中…</div></div></div>';
   }
   var d = state.vcAllocData;
+  if((!state.setBom || !state.logiStock) && !state.vcaSetLoading){ state.vcaSetLoading = true; Promise.all([setBomLoad(), logiStockLoad()]).then(function(){ state.vcaSetLoading = false; render(); }); }
   var order = d.order;
   if(order && order.lines) ensureShukeiProductMaster(Object.keys(order.lines.reduce(function(a,l){ a[l[0]] = 1; return a; }, {})));
   var calc = order && order.lines ? computeVcAlloc(order, d.dests, d.stock, state.shukeiPm) : null;
@@ -12047,6 +12050,22 @@ function vcAllocSiteBadge(p){
   var cls = p.site==='takaya' ? 'is-takaya' : (p.site==='tannan' ? 'is-tannan' : (p.site==='split' ? 'is-split' : (p.site==='handled' ? 'is-handled' : 'is-none')));
   return '<span class="vca-site '+cls+'">'+esc(vcAllocSiteLabel(p))+'</span>';
 }
+/* VC引当で「対応: セット対応」(名前に「セット」を含む対応)にした品番は、セット構成の部品・必要数・在庫を出す(2026-10-26) */
+function vcAllocIsSet(p){ return p && p.site==='handled' && /セット/.test(String(p.handling||'')); }
+function vcAllocSetParts(code, qty){
+  var pats = setBomPatterns(((state.setBom && state.setBom.sets) || {})[code]);
+  if(!pats.length) return null;
+  return { more: pats.length - 1, name: pats[0].name || '', items: pats[0].items.map(function(it){ var need = (Number(it.qty)||0) * qty, stv = setBomStockFor(it.code, need), st = logiStockOf(it.code); return { code: it.code, name: (st && st.name) || it.name || '', per: Number(it.qty)||0, need: need, stock: stv }; }) };
+}
+function vcAllocSetRowHtml(p, qty){
+  var S = vcAllocSetParts(p.code, qty);
+  if(!S) return '<tr class="vca-setbom"><td></td><td colspan="10"><span style="color:#B42318;">セット構成の登録がありません</span> <span class="sk-minor">(管理 → セット構成 で「'+esc(p.code)+'」の部品を登録すると、ここに部品と在庫が出ます)</span></td></tr>';
+  return '<tr class="vca-setbom"><td></td><td colspan="10"><div style="font-size:12px;font-weight:700;margin-bottom:2px;">🧩 セットの部品('+formatNum(qty)+'セット分'+(S.name ? '・'+esc(S.name) : '')+(S.more ? '・ほかのパターン '+S.more+'つ' : '')+')</div>'+
+    '<table style="width:100%;font-size:12px;border-collapse:collapse;">'+S.items.map(function(it){
+      return '<tr><td style="padding:2px 6px;white-space:nowrap;"><b>'+esc(it.code)+'</b></td><td style="padding:2px 6px;">'+esc(it.name)+'</td><td style="padding:2px 6px;text-align:right;white-space:nowrap;">×'+formatNum(it.per)+' → <b>'+formatNum(it.need)+'</b></td>'+
+        '<td style="padding:2px 6px;white-space:nowrap;'+(it.stock.short ? 'color:#B42318;font-weight:700;' : '')+'">'+esc(it.stock.text)+'</td><td style="padding:2px 6px;" class="sk-minor">'+esc(it.stock.locs || '')+'</td></tr>';
+    }).join('')+'</table></td></tr>';
+}
 function renderVcAllocTable(calc, kind){
   var sort = state.vcAllocSort;
   var rows = calc.rows.filter(function(r){ return r.p.kind===kind; });
@@ -12080,7 +12099,7 @@ function renderVcAllocTable(calc, kind){
       '<td class="sk-note">'+((ov && editable)
         ? '<input type="text" class="vca-note-in no-print" data-vca-note="'+esc(p.code)+'" value="'+esc(p.memo)+'" placeholder="備考を入力" title="自動の備考: '+esc(vcAllocNote(p))+'" style="width:100%;min-width:160px;font-size:12px;"><span class="print-only">'+esc(p.memo)+'</span>'
         : esc(vcAllocNoteText(p)))+'</td>'+
-    '</tr>';
+    '</tr>'+(vcAllocIsSet(p) ? vcAllocSetRowHtml(p, r.qty) : '');
   }).join('') || '<tr><td colspan="11" class="empty-note">品番がありません</td></tr>';
   body += '<tr class="sk-total"><td></td><td colspan="3">合計 '+formatNum(rows.length)+'行</td><td class="num">'+formatNum(sumQty)+'</td><td colspan="6"></td></tr>';
   var label = kind==='case' ? 'ケース引当' : 'ピース引当';

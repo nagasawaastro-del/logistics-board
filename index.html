@@ -1507,8 +1507,21 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .cd-map label{ display:flex; gap:6px; align-items:center; font-size:13px; }
 .cd-map label span{ min-width:7em; }
 .cd-map select{ flex:1; min-width:0; }
-.tpick-cam{ position:fixed; left:50%; top:12px; transform:translateX(-50%); z-index:3000; width:min(560px, 94vw); background:#101828; border-radius:14px; overflow:hidden; box-shadow:0 20px 40px rgba(0,0,0,.4); }
-.tpick-cam video{ width:100%; height:min(42vh, 320px); object-fit:cover; display:block; background:#000; }
+.tpick-cam{ position:fixed; left:50%; bottom:10px; transform:translateX(-50%); z-index:3000; width:min(560px, 96vw); background:#101828; border-radius:14px; overflow:hidden; box-shadow:0 20px 40px rgba(0,0,0,.4); }
+.tpick-cam-view{ position:relative; }
+.tpick-cam video{ width:100%; height:min(30vh, 230px); object-fit:cover; display:block; background:#000; }
+.tpick-cam-next{ padding:8px 12px 6px; color:#fff; border-bottom:1px solid #344054; }
+.tpick-cam-next:empty{ display:none; }
+.tpick-cam-next .tcn-head{ font-size:12px; color:#98A2B3; }
+.tpick-cam-next .tcn-main{ display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+.tpick-cam-next .tcn-loc{ font-size:20px; font-weight:800; color:#FEC84B; }
+.tpick-cam-next .tcn-code{ font-size:22px; font-weight:800; }
+.tpick-cam-next .tcn-qty{ font-size:26px; font-weight:800; color:#A6F4C5; margin-left:auto; }
+.tpick-cam-next .tcn-name{ font-size:13px; color:#D0D5DD; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tpick-cam-next .tcn-done{ font-size:18px; font-weight:800; color:#A6F4C5; padding:4px 0; }
+.tpick-cam-res{ position:absolute; left:0; right:0; bottom:0; padding:10px 12px; font-size:18px; font-weight:800; color:#fff; text-align:center; display:none; }
+.tpick-cam-res.is-ok{ display:block; background:rgba(18,183,106,.92); }
+.tpick-cam-res.is-ng{ display:block; background:rgba(240,68,56,.94); font-size:15px; }
 .tpick-cam-bar{ display:flex; gap:10px; align-items:center; padding:8px 10px; color:#fff; font-size:14px; }
 .tpick-cam-bar .tpick-cam-msg{ flex:1; color:#D0D5DD; font-size:12px; }
 .tpick-cam-bar .ll-btn{ background:#fff; }
@@ -2091,6 +2104,7 @@ html[data-app-theme="dark"] .tpick-chk{color:#90fdcf !important}
 html[data-app-theme="dark"] .tpick-item.is-done .tpick-chk{background:rgba(48,232,111,0.13) !important}
 html[data-app-theme="dark"] .sb-row-head{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .hd-vc{border-top-color:rgba(77,124,203,0.45) !important}
+html[data-app-theme="dark"] .tpick-cam-next .tcn-head{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .tpick-cam-bar .ll-btn{background:var(--dk-card) !important}
 html[data-app-theme="dark"] .client-hub .ch-field>span{color:var(--dk-muted) !important}
 html[data-app-theme="dark"] .client-hub .ch-note{color:var(--dk-muted) !important}
@@ -10969,6 +10983,13 @@ function tpickBeep(ok){
   try{ if(navigator.vibrate) navigator.vibrate(ok ? 60 : [120, 80, 120]); }catch(e){}
 }
 /* 読んだコード(JAN など)を、いま開いている受け持ちの番号に当てる */
+function tpickScanResult(ok, text){
+  var c = tpickCam;
+  if(c && !c.test && c.box && c.box.parentNode){ tpickCamResult(c, ok, text); }
+  else showToast(text);
+  try{ if(navigator.vibrate) navigator.vibrate(ok ? 80 : [70, 50, 70]); }catch(e){}
+  return { ok: ok, text: text };
+}
 async function tpickHandleScan(raw){
   var m = state.modal;
   if(!m || m.kind!=='tpickBatch') return;
@@ -10979,11 +11000,11 @@ async function tpickHandleScan(raw){
   var b = tpickBatchesForTask(t.tp, state.workVolume, m.taskId).filter(function(x){ return x.id===m.batchId; })[0];
   if(!b) return;
   var p = tpickProgOf(b.id) || {};
-  if(p.staffId!==state.activeStaffId || p.doneAt){ tpickBeep(false); showToast('受け持っている番号で読んでください'); return; }
+  if(p.staffId!==state.activeStaffId || p.doneAt){ tpickBeep(false); return tpickScanResult(false, '受け持っている番号で読んでください'); }
   var ix = tpickJanIndex() || {};
   var codes = ix[code] || [];
   if(!codes.length && b.items.some(function(it){ return it.c===code; })) codes = [code]; // 品番そのもののバーコード
-  if(!codes.length){ tpickBeep(false); showToast('登録されていないバーコードです('+code+')。ロジザードの在庫を取り込み直すと読めることがあります'); return; }
+  if(!codes.length){ tpickBeep(false); return tpickScanResult(false, '登録されていないバーコードです('+code+')。ロジザードの在庫を取り込み直すと読めることがあります'); }
   var done = p.done || {}, short = p.short || {};
   var hit = -1, already = false;
   b.items.forEach(function(it, i){
@@ -10993,8 +11014,7 @@ async function tpickHandleScan(raw){
   });
   if(hit===-1){
     tpickBeep(false);
-    showToast(already ? (codes[0]+' はもう済です') : ('この番号にない品番です('+codes.join('・')+')'));
-    return;
+    return tpickScanResult(false, already ? (codes[0]+' はもう済です') : ('この番号にない品番です('+codes.join('・')+')'));
   }
   var me = state.activeStaffId, key = String(hit);
   var r = await tpickProg(m.batchId, function(cur){
@@ -11002,12 +11022,14 @@ async function tpickHandleScan(raw){
     var d = Object.assign({}, cur.done||{}); d[key] = 1;
     return Object.assign({}, cur, { done: d });
   });
-  if(!r.ok){ tpickBeep(false); showToast('⚠️ 保存できませんでした。もう一度読んでください'); return; }
+  if(!r.ok){ tpickBeep(false); return tpickScanResult(false, '⚠️ 保存できませんでした。もう一度読んでください'); }
   tpickBeep(true);
   var it = b.items[hit];
-  showToast('✓ '+it.c+' '+formatNum(it.qty)+'個 を済にしました');
   state.tpickDoneFlash = { at: Date.now(), to: 'done' };
   render();
+  var res = tpickScanResult(true, '✓ '+it.c+' '+formatNum(it.qty)+'個 済');
+  if(tpickCam) tpickCamNextRefresh(tpickCam);
+  return res;
 }
 /* スキャナー(キーボードとして速く打たれて Enter で終わる)を受け取る。入力欄にいるときは邪魔しない */
 (function(){
@@ -11029,10 +11051,46 @@ async function tpickHandleScan(raw){
    Android でも BarcodeDetector が使えない端末があったため)。カメラが使えないときは、理由と直し方を確認画面で出す */
 var tpickCam = null;
 var ZXING_URL = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+/* 受け持っている番号の、次に取る行(まだ済・欠品でない最初の行)と、のこりの行の数 */
+function tpickCamNextInfo(){
+  var m = state.modal; if(!m || m.kind!=='tpickBatch') return null;
+  var t = state.tpk || {}, b = tpickBatchesForTask(t.tp, state.workVolume, m.taskId).filter(function(x){ return x.id===m.batchId; })[0];
+  if(!b) return null;
+  var p = tpickProgOf(b.id) || {}, done = p.done || {}, short = p.short || {}, rest = [];
+  b.items.forEach(function(it, i){ if(!done[i] && !short[i]) rest.push(it); });
+  return { next: rest[0] || null, rest: rest.length, total: b.items.length };
+}
+function tpickCamNextRefresh(c){
+  var el = c && c.box && c.box.querySelector('.tpick-cam-next'); if(!el || c.test) return;
+  var x = tpickCamNextInfo();
+  if(!x){ el.innerHTML = ''; return; }
+  if(!x.next){
+    el.innerHTML = '<div class="tcn-done">✓ この番号は全部済みました</div>';
+    if(!c.doneClose){ c.doneClose = setTimeout(function(){ if(tpickCam===c){ tpickCamStop('全部済んだ'); showToast('この番号は全部済みました。カメラを止めました'); } }, 1800); }
+    return;
+  }
+  var it = x.next;
+  el.innerHTML = '<div class="tcn-head">次に取る ・ のこり '+x.rest+' / '+x.total+'行</div>'+
+    '<div class="tcn-main"><span class="tcn-loc">'+esc(it.b)+' '+esc(tpickLocText(it.l))+'</span><span class="tcn-code">'+esc(it.c)+'</span><span class="tcn-qty">×'+formatNum(it.qty)+'</span></div>'+
+    '<div class="tcn-name">'+esc(it.n||'')+'</div>';
+}
+function tpickCamResult(c, ok, text){
+  var el = c.box.querySelector('.tpick-cam-res'); if(!el) return;
+  if(ok) c.nOk = (c.nOk||0) + 1; else c.nNg = (c.nNg||0) + 1;
+  el.className = 'tpick-cam-res '+(ok ? 'is-ok' : 'is-ng'); el.textContent = text;
+  clearTimeout(c.resTimer); c.resTimer = setTimeout(function(){ el.className = 'tpick-cam-res'; el.textContent = ''; }, ok ? 1600 : 3200);
+}
 function tpickCamStop(why){
   var c = tpickCam; tpickCam = null;
   if(!c) return;
-  if(why) try{ tpickKvUpdate('cam-debug', function(cur){ var list = Array.isArray(cur.list) ? cur.list : []; list.push({ at: new Date().toISOString(), stage: '閉じた', info: String(why), ua: String(navigator.userAgent||'').slice(0,160) }); cur.list = list.slice(-20); return cur; }); }catch(e){}
+  // 記録はまとめて1件(開いていた間の段階・読めた数・違った数。2026-10-26。前は段階ごとに書いていた)
+  try{
+    var info = [String(why || '閉じた'), (c.test ? '試す' : 'ピッキング'), '読めた '+(c.nOk||0), '違う '+(c.nNg||0), Math.round((Date.now()-c.startAt)/1000)+'秒'].concat(c.logs || []).join(' / ').slice(0, 240);
+    var rec = { at: new Date().toISOString(), stage: 'まとめ', info: info, ua: String(navigator.userAgent||'').slice(0,160), staff: (staffById(state.activeStaffId)||{}).name || '' };
+    tpickKvUpdate('cam-debug', function(cur){ var list = Array.isArray(cur.list) ? cur.list : []; list.push(rec); cur.list = list.slice(-20); return cur; });
+  }catch(e){}
+  clearTimeout(c.resTimer); clearTimeout(c.doneClose); clearInterval(c.nextIv);
+  try{ if(c.torchOn && c.track) c.track.applyConstraints({ advanced: [{ torch: false }] }); }catch(e){}
   clearTimeout(c.idleTimer); clearTimeout(c.loop);
   try{ if(c.zx) c.zx.reset(); }catch(e){}
   try{ if(c.stream) c.stream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
@@ -11061,7 +11119,9 @@ async function tpickNativeDetector(){
 function tpickCamLog(stage, info){
   try{
     var rec = { at: new Date().toISOString(), stage: stage, info: String(info||'').slice(0, 200), ua: String(navigator.userAgent||'').slice(0, 160), staff: (staffById(state.activeStaffId)||{}).name || '' };
-    var c = tpickCam; if(c){ c.logs = c.logs || []; c.logs.push(stage+(info ? ': '+info : '')); }
+    var c = tpickCam;
+    // 窓が開いている間は覚えておき、閉じたときにまとめて1件書く。失敗・許可待ち(閉じずに終わることがある)と、窓の無いときはすぐ書く
+    if(c){ c.logs = c.logs || []; c.logs.push(stage+(info ? ': '+String(info).slice(0, 60) : '')); if(stage!=='失敗' && stage!=='許可待ち') return; }
     tpickKvUpdate('cam-debug', function(cur){ var list = Array.isArray(cur.list) ? cur.list : []; list.push(rec); cur.list = list.slice(-20); return cur; });
   }catch(e){}
 }
@@ -11071,9 +11131,11 @@ async function tpickCamStart(test, preStream){
   // 先に画面を出す(押したのが分かるように)
   var box = document.createElement('div');
   box.className = 'tpick-cam';
-  box.innerHTML = '<video playsinline muted style="display:none;"></video><div class="tpick-cam-bar"><label><input type="checkbox" id="tpickCamCont"'+(state.tpickCamCont ? ' checked' : '')+'> 続けて読む</label><span class="tpick-cam-msg">カメラを起動しています…</span><button type="button" class="ll-btn" id="tpickCamClose">やめる</button></div>';
+  box.innerHTML = (test ? '' : '<div class="tpick-cam-next"></div>')+'<div class="tpick-cam-view"><video playsinline muted style="display:none;"></video><div class="tpick-cam-res"></div></div>'+
+    '<div class="tpick-cam-bar">'+(test ? '' : '<label><input type="checkbox" id="tpickCamCont"'+(state.tpickCamCont!==false ? ' checked' : '')+'> 続けて読む</label>')+'<span class="tpick-cam-msg">カメラを起動しています…</span><button type="button" class="ll-btn" id="tpickCamTorch" style="display:none;">💡 ライト</button><button type="button" class="ll-btn" id="tpickCamClose">やめる</button></div>';
   document.body.appendChild(box);
-  var c = tpickCam = { box: box, lastCode: '', lastAt: 0, test: !!test, startAt: Date.now() };
+  var c = tpickCam = { box: box, lastCode: '', lastAt: 0, test: !!test, startAt: Date.now(), nOk: 0, nNg: 0 };
+  tpickCamNextRefresh(c);
   var inPick = function(){ return test || (state.modal && state.modal.kind==='tpickBatch'); };
   var msg = box.querySelector('.tpick-cam-msg');
   box.querySelector('#tpickCamClose').addEventListener('click', function(){ tpickCamStop('やめる'); });
@@ -11147,13 +11209,22 @@ async function tpickCamStart(test, preStream){
   }
   c.stream = stream;
   msg.style.whiteSpace = ''; msg.style.color = '';
+  try{
+    var track = c.track = stream.getVideoTracks()[0], caps = (track && track.getCapabilities) ? track.getCapabilities() : {};
+    if(caps.focusMode && caps.focusMode.indexOf('continuous')!==-1) track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function(){});
+    if(caps.torch){
+      var tb = box.querySelector('#tpickCamTorch'); tb.style.display = '';
+      tb.addEventListener('click', function(){ c.torchOn = !c.torchOn; track.applyConstraints({ advanced: [{ torch: c.torchOn }] }).catch(function(){}); tb.textContent = c.torchOn ? '💡 ライトを消す' : '💡 ライト'; });
+    }
+    tpickCamLog('ピント・ライト', ((caps.focusMode||[]).join(',') || 'なし')+(caps.torch ? '・ライトあり' : ''));
+  }catch(e){}
   tpickCamLog('カメラ OK', ((stream.getVideoTracks()[0] && stream.getVideoTracks()[0].label) || '')+'・'+waited+'秒');
   var video = box.querySelector('video'); video.style.display = ''; video.srcObject = stream; // 映像の枠は、カメラが付いてから出す(待っている間に黒い画面で隠さない)
   // 映像の再生を待ちすぎない(始まらない端末があった。3秒で先へ進む)
   var played = false;
   try{ await Promise.race([video.play().then(function(){ played = true; }), new Promise(function(res){ setTimeout(function(){ if(!played) tpickCamLog('映像の再生', '3秒で始まらない'); res(); }, 3000); })]); }catch(e){ tpickCamLog('映像の再生', (e && (e.name+' '+e.message)) || ''); }
-  box.querySelector('#tpickCamCont').addEventListener('change', function(ev){ state.tpickCamCont = ev.target.checked; resetIdle(); });
-  function resetIdle(){ clearTimeout(c.idleTimer); c.idleTimer = setTimeout(function(){ if(tpickCam===c){ tpickCamStop('読まなかった'); showToast('読まなかったので、カメラを止めました'); } }, (state.tpickCamCont || test) ? 120000 : 30000); }
+  var contEl = box.querySelector('#tpickCamCont'); if(contEl) contEl.addEventListener('change', function(ev){ state.tpickCamCont = ev.target.checked; resetIdle(); });
+  function resetIdle(){ clearTimeout(c.idleTimer); c.idleTimer = setTimeout(function(){ if(tpickCam===c){ tpickCamStop('読まなかった'); showToast('2分読まなかったので、カメラを止めました'); } }, (state.tpickCamCont!==false || test) ? 120000 : 30000); }
   resetIdle();
   async function onCode(v){
     var now = Date.now();
@@ -11165,20 +11236,21 @@ async function tpickCamStart(test, preStream){
       tpickBeep(true);
       msg.style.color = '#A6F4C5'; msg.style.fontSize = '15px';
       msg.textContent = '✓ 読めました: '+v+(codes.length ? '(品番 '+codes.join('・')+(st && st.name ? ' '+st.name : '')+')' : '(ロジザードの在庫に無い番号)');
-      tpickCamLog('試す: 読めた', v.length+'桁'+(codes.length ? '・品番あり' : '・品番なし'));
+      c.nOk++; tpickCamLog('試す: 読めた', v.length+'桁'+(codes.length ? '・品番あり' : '・品番なし'));
       return false;
     }
     await tpickHandleScan(v);
-    if(!state.tpickCamCont){ tpickCamStop(); return true; }
+    if(state.tpickCamCont===false){ setTimeout(function(){ if(tpickCam===c) tpickCamStop('1回読んだ'); }, 900); return true; }
     return false;
   }
   var det = await tpickNativeDetector();
   tpickCamLog('読むしくみ', det ? '端末(BarcodeDetector)' : 'ZXing');
   if(det){
-    msg.textContent = 'バーコードを枠に入れてください';
+    msg.textContent = 'バーコードを写してください';
     var tick = async function(){
       if(tpickCam!==c) return;
       if(!inPick()){ tpickCamStop('番号の画面を閉じた'); return; }
+      if(!c.test && Date.now() - (c.nextAt||0) > 1500){ c.nextAt = Date.now(); tpickCamNextRefresh(c); } // 手で押して済にした分も、次の行に入れる
       try{ var found = await det.detect(video); if(found && found.length && await onCode(found[0].rawValue)) return; }catch(e){}
       c.loop = setTimeout(tick, 180);
     };
@@ -11194,7 +11266,8 @@ async function tpickCamStart(test, preStream){
     var hints = new Map();
     hints.set(ZX.DecodeHintType.POSSIBLE_FORMATS, [ZX.BarcodeFormat.EAN_13, ZX.BarcodeFormat.EAN_8, ZX.BarcodeFormat.UPC_A, ZX.BarcodeFormat.UPC_E, ZX.BarcodeFormat.CODE_128, ZX.BarcodeFormat.ITF]);
     var reader = c.zx = new ZX.BrowserMultiFormatReader(hints, 200);
-    msg.textContent = 'バーコードを枠に入れてください';
+    msg.textContent = 'バーコードを写してください';
+    c.nextIv = setInterval(function(){ if(tpickCam!==c){ clearInterval(c.nextIv); return; } tpickCamNextRefresh(c); }, 1500);
     reader.decodeFromStream(stream, video, function(result){
       if(tpickCam!==c) return;
       if(!inPick()){ tpickCamStop('番号の画面を閉じた'); return; }

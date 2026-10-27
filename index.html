@@ -1496,12 +1496,14 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .sb-pat{ border:1px dashed var(--paper-line); border-radius:10px; padding:8px 10px; margin-top:8px; }
 .sb-pat-head{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px; font-weight:700; }
 .sb-pat-head input{ flex:1; min-width:160px; font-size:14px; padding:4px 8px; }
-.sb-row{ display:grid; grid-template-columns:minmax(120px,1.2fr) 110px 1.6fr 40px; gap:6px; align-items:center; margin:3px 0; }
+.sb-row{ display:grid; grid-template-columns:minmax(120px,1.2fr) 110px 58px 1.6fr 40px; gap:6px; align-items:center; margin:3px 0; }
+.sb-made{ display:flex; gap:3px; align-items:center; font-size:12px; white-space:nowrap; }
+.sb-made input{ width:auto !important; }
 .sb-row input{ font-size:16px; padding:6px 8px; width:100%; box-sizing:border-box; }
 .sb-row-head{ font-size:11px; color:#667085; margin:0; }
 .sb-name{ font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sb-del{ padding:4px 0; }
-@media (max-width:600px){ .sb-row{ grid-template-columns:1fr 80px 34px; } .sb-name{ grid-column:1 / 4; order:3; } .sb-row-head span:nth-child(3){ display:none; } }
+@media (max-width:600px){ .sb-row{ grid-template-columns:1fr 70px 54px 34px; } .sb-name{ grid-column:1 / 5; order:3; } .sb-row-head span:nth-child(4){ display:none; } }
 .hd-vc{ margin-top:10px; padding-top:8px; border-top:1px dashed var(--dash-line, #E4E7EC); }
 .hd-vc-head{ display:flex; gap:10px; align-items:baseline; font-size:14px; }
 .hd-vc-head span:first-of-type{ font-size:20px; font-weight:800; }
@@ -9470,7 +9472,20 @@ function logiStockOf(code){
   return { name: p.name||'', qty: qty, alloc: alloc, locs: locs, tk: tk, tn: tn };
 }
 /* 部品の在庫の出し方(2026-10-23): 高屋で足りれば高屋だけ。高屋で足りなければ「高屋 n 不足」と丹南の在庫・棚も出す。合わせても足りなければ「全体でも不足」 */
+/* 原材料から生産する部品(セット構成で「生産」に印を付けた部品。どのセットで付けても同じ品番は生産とみなす。2026-10-28) */
+function setBomMade(code){
+  var sets = (state.setBom && state.setBom.sets) || {};
+  return Object.keys(sets).some(function(sc){ return setBomPatterns(sets[sc]).some(function(pt){ return pt.items.some(function(it){ return it.code===code && it.made; }); }); });
+}
 function setBomStockFor(code, need){
+  var r = setBomStockFor0(code, need);
+  if(r.short && setBomMade(code)){
+    var tk = r.st ? r.st.tk : 0;
+    return { text: '生産'+(tk>0 ? '(在庫 '+formatNum(tk)+')' : '')+'・あと '+formatNum(Math.max(0, need - tk))+' 作る', locs: r.locs, short: false, allShort: false, made: true, st: r.st };
+  }
+  return r;
+}
+function setBomStockFor0(code, need){
   var st = logiStockOf(code);
   if(!st) return { text: '在庫なし', locs: '', short: true, allShort: true, st: null };
   var short = st.tk < need, allShort = st.tk + st.tn < need;
@@ -9499,8 +9514,8 @@ function setBomExpand(items){
     if(!pats.length){ S.comps = null; return S; }
     var built = pats.map(function(pt, pi){
       var comps = pt.items.map(function(c){ return { code: c.code, per: Number(c.qty)||0, need: S.qty * (Number(c.qty)||0) }; });
-      var ok = comps.every(function(c){ var st = logiStockOf(c.code); return st && st.tk >= c.need; }); // 高屋で足りる
-      var okAll = comps.every(function(c){ var st = logiStockOf(c.code); return st && st.tk + st.tn >= c.need; }); // 丹南と合わせれば足りる
+      var ok = comps.every(function(c){ var st = logiStockOf(c.code); return (st && st.tk >= c.need) || setBomMade(c.code); }); // 高屋で足りる(生産する部品は足りる扱い)
+      var okAll = comps.every(function(c){ var st = logiStockOf(c.code); return (st && st.tk + st.tn >= c.need) || setBomMade(c.code); }); // 丹南と合わせれば足りる
       return { name: pt.name || ('パターン'+(pi+1)), comps: comps, ok: ok, okAll: okAll };
     });
     var pick = built.filter(function(b){ return b.ok; })[0] || built.filter(function(b){ return b.okAll; })[0] || built[0];
@@ -10703,7 +10718,7 @@ function renderSetBomModal(m){
   codes.forEach(function(code){
     if(m.draft[code]) return;
     var pats = setBomPatterns(sets[code]);
-    m.draft[code] = pats.length ? pats.map(function(pt){ return { name: pt.name||'', items: pt.items.map(function(c){ return { code: c.code, qty: String(c.qty) }; }) }; })
+    m.draft[code] = pats.length ? pats.map(function(pt){ return { name: pt.name||'', items: pt.items.map(function(c){ return { code: c.code, qty: String(c.qty), made: !!c.made }; }) }; })
       : [{ name:'', items:[{ code:'', qty:'' }, { code:'', qty:'' }, { code:'', qty:'' }] }];
   });
   var rows = codes.map(function(code){
@@ -10713,13 +10728,14 @@ function renderSetBomModal(m){
         var ps = it.code ? logiStockOf(it.code) : null;
         return '<div class="sb-row"><input type="text" data-sb="'+esc(code)+'|'+pi+'|'+ri+'|code" value="'+esc(it.code)+'" placeholder="部品の品番" autocomplete="off">'+
           '<input type="number" inputmode="numeric" min="1" data-sb="'+esc(code)+'|'+pi+'|'+ri+'|qty" value="'+esc(it.qty)+'" placeholder="数">'+
+          '<label class="sb-made" title="原材料から生産する部品(在庫が足りなくても「不足」ではなく「生産」と出す)"><input type="checkbox" data-sb-made="'+esc(code)+'|'+pi+'|'+ri+'"'+(it.made ? ' checked' : '')+'> 生産</label>'+
           '<span class="sk-minor sb-name">'+(it.code ? (ps ? esc(ps.name)+' ・ 在庫 '+formatNum(ps.qty) : '<span style="color:#B42318;">ロジザードの在庫にない品番</span>') : '')+'</span>'+
           '<button type="button" class="ll-btn sb-del" data-sb-delrow="'+esc(code)+'|'+pi+'|'+ri+'" title="この行を消す">×</button></div>';
       }).join('');
       return '<div class="sb-pat">'+
         (dr.length>1 || pt.name ? '<div class="sb-pat-head"><span>パターン'+(pi+1)+'</span><input type="text" data-sb-name="'+esc(code)+'|'+pi+'" value="'+esc(pt.name)+'" placeholder="名前(例: 在庫が少ないとき)">'+
           (dr.length>1 ? '<button type="button" class="ll-btn" data-sb-delpat="'+esc(code)+'|'+pi+'">このパターンを消す</button>' : '')+'</div>' : '')+
-        '<div class="sb-row sb-row-head"><span>品番</span><span>数量(1セットに使う数)</span><span></span><span></span></div>'+lines+
+        '<div class="sb-row sb-row-head"><span>品番</span><span>数量(1セットに使う数)</span><span title="原材料から生産する部品">生産</span><span></span><span></span></div>'+lines+
         '<button type="button" class="ll-btn" data-sb-addrow="'+esc(code)+'|'+pi+'" style="margin-top:4px;">＋ 行を足す</button></div>';
     }).join('');
     return '<div class="panel" style="margin:0 0 10px;padding:10px 12px;"><div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;"><b>'+esc(code)+'</b><span class="sk-minor">'+esc((st && st.name) || (m.names && m.names[code]) || '')+'</span>'+
@@ -10760,6 +10776,9 @@ function bindSetBomModal(m){
       render();
     });
   });
+  document.querySelectorAll('[data-sb-made]').forEach(function(el){
+    el.addEventListener('change', function(){ var k = at(el.getAttribute('data-sb-made')+'|made'); dr[k.code][k.pi].items[k.ri].made = el.checked; });
+  });
   document.querySelectorAll('[data-sb-name]').forEach(function(el){
     el.addEventListener('input', function(){ var a = el.getAttribute('data-sb-name').split('|'); dr[a[0]][Number(a[1])].name = el.value; });
   });
@@ -10787,7 +10806,7 @@ function bindSetBomModal(m){
           if(!c && !q) return;
           var n = Number(q.replace(/[^0-9.]/g,''));
           if(!c || !(n>0)){ bad.push(code+' の '+(c || '(品番なし)')+' '+(q || '(数量なし)')); return; }
-          items.push({ code: c, qty: n });
+          items.push(it.made ? { code: c, qty: n, made: true } : { code: c, qty: n });
         });
         return { name: String(pt.name||'').trim(), items: items };
       }).filter(function(pt){ return pt.items.length; });

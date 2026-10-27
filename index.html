@@ -1032,6 +1032,8 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 }
 .modal-overlay button{touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
 .modal-card{background:var(--paper-50);border-radius:16px;padding:30px 26px;max-width:420px;width:100%;text-align:center;box-shadow:var(--shadow-lg);}
+/* 画面より長いポップアップは、ポップアップの中でスクロールする(セット構成など。2026-10-28) */
+.modal-card{max-height:calc(100vh - 40px);max-height:calc(100dvh - 40px);overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;}
 .modal-task-name{font-family:var(--font-display);font-weight:700;font-size:18px;margin-bottom:3px;letter-spacing:-.01em;}
 .modal-q{font-size:14px;color:var(--slate-500);margin-bottom:22px;}
 .qty-display{font-family:var(--font-mono);font-size:52px;font-weight:700;color:var(--ink-900);margin-bottom:20px;}
@@ -23553,8 +23555,29 @@ function renderEditTemplateModal(m){
     '</div>'+
   '</div>';
 }
+/* ポップアップの外(暗いところ)を押したら閉じる(2026-10-28)。そのポップアップの「閉じる」「キャンセル」「やめる」を押したのと同じ。
+   閉じるボタンの無いポップアップは閉じない。入力を変えたあとは、消してよいか確かめる。押し始めと離したところが両方とも外のときだけ(なぞって外に出たときは閉じない) */
+function bindModalOutsideClose(m){
+  if(state.modalDirtyFor!==m){ state.modalDirty = false; state.modalDirtyFor = m; }
+  var ov = document.getElementById('modalOverlay');
+  if(!ov || ov._outside) return;
+  ov._outside = true;
+  var downOn = null;
+  ov.addEventListener('pointerdown', function(e){ downOn = e.target; });
+  ov.addEventListener('input', function(){ state.modalDirty = true; }, true);
+  ov.addEventListener('change', function(e){ if(e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) state.modalDirty = true; }, true);
+  ov.addEventListener('click', async function(e){
+    if(e.target!==ov || downOn!==ov) return;
+    var cancel = ov.querySelector('.modal-cancel') || Array.prototype.filter.call(ov.querySelectorAll('button'), function(b){ return /^(閉じる|キャンセル|やめる)$/.test(String(b.textContent||'').trim()); })[0];
+    if(!cancel) return;
+    if(state.modalDirty && !(await appConfirm('入力した内容を消して閉じますか?'))) return;
+    state.modalDirty = false;
+    cancel.click();
+  });
+}
 function bindModal(){
   var m = state.modal;
+  bindModalOutsideClose(m);
   if(m.kind==='editLog'){ bindEditLogModal(m); return; }
   if(m.kind==='editTask'){ bindEditTaskModal(m); return; }
   if(m.kind==='editTemplate'){ bindEditTemplateModal(m); return; }

@@ -1497,6 +1497,8 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .sb-pat-head{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:6px; font-weight:700; }
 .sb-pat-head input{ flex:1; min-width:160px; font-size:14px; padding:4px 8px; }
 .sb-row{ display:grid; grid-template-columns:minmax(120px,1.2fr) 110px 58px 1.6fr 40px; gap:6px; align-items:center; margin:3px 0; }
+.sb-yield{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; font-size:13px; margin:6px 0 2px; }
+.sb-yield input{ width:64px !important; }
 .sb-made{ display:flex; gap:3px; align-items:center; font-size:12px; white-space:nowrap; }
 .sb-made input{ width:auto !important; }
 .sb-row input{ font-size:16px; padding:6px 8px; width:100%; box-sizing:border-box; }
@@ -9219,12 +9221,12 @@ function tpickPrintGroups(groups, fileTitle){
         no++;
         var showB = it.block!==prevBlock, showL = showB || it.loc!==prevLoc; prevBlock = it.block; prevLoc = it.loc;
         return '<tr><td rowspan="2" class="c">'+no+'</td><td rowspan="2" class="c blk">'+(showB ? esc(it.block) : '')+'</td><td rowspan="2" class="loc">'+(showL ? esc(tpickLocText(it.loc)) : '')+'</td>'+
-          '<td class="code">'+esc(it.code)+'</td>'+(hasSubs ? '<td rowspan="2"></td>' : '')+'<td rowspan="2" class="q">'+formatNum(it.qty)+'</td><td rowspan="2" class="chk"></td></tr>'+
+          '<td class="code">'+esc(it.code)+'</td>'+(hasSubs ? '<td rowspan="2"></td>' : '')+'<td rowspan="2" class="q">'+(it.subs && it.subs.extra ? setBomQtyText(it.qty, it.subs.extra)+'<div style="font-size:10px;font-weight:400;">'+formatNum(it.subs.extra)+'は入庫</div>' : formatNum(it.qty))+'</td><td rowspan="2" class="chk"></td></tr>'+
           '<tr><td class="name">'+esc(it.name)+'</td></tr>'+
           (it.subs ? (it.subs.missing ? '<tr class="sub"><td></td><td class="c">部品</td><td colspan="5" class="warn">構成が未登録です(管理 → セット構成 で登録すると、ここに部品が出ます)</td></tr>' :
             it.subs.list.map(function(c, ci){
               return '<tr class="sub"><td></td><td class="c">'+(ci===0 ? '部品'+(it.subs.pattern ? '<div class="pt">'+esc(it.subs.pattern)+'</div>' : '') : '')+'</td><td></td>'+
-                '<td class="scode">└ <b>'+esc(c.code)+'</b> '+esc(c.name)+' <span class="per">×'+formatNum(c.per)+'</span></td>'+
+                '<td class="scode">└ <b>'+esc(c.code)+'</b> '+esc(c.name)+' <span class="per">'+setBomPerText(c.per, c.y)+'</span></td>'+
                 '<td class="sinfo"><div class="sloc">'+esc(c.locs || '棚なし')+'</div><div class="sstk'+(c.short ? ' warn' : '')+'">'+esc(c.stockText)+'</div></td><td class="q sq">'+formatNum(c.need)+'</td><td class="chk"></td></tr>';
             }).join('')) : '');
       }).join('');
@@ -9499,6 +9501,15 @@ function setBomLocTextSite(st, site, max){
   var locs = st ? st.locs.filter(function(l){ return blocks.indexOf(String(l.blk||'').toUpperCase())!==-1; }) : [];
   return locs.slice(0, max||2).map(function(l){ return l.blk+' '+tpickLocText(l.loc)+'('+formatNum(l.qty)+')'; }).join(' ')+(locs.length>(max||2) ? ' ほか'+(locs.length-(max||2)) : '');
 }
+/* 1回で何個できるか(2026-10-28)。部品3個で完成品が2個できるような構成は、パターンに yield:2。
+   必要な数が1でも1回分(2個)作るので、作る数 = 回数 × できる数、部品 = 回数 × 構成数。余りは入庫(表記は「1+1」) */
+function setBomYield(pt){ var y = Math.floor(Number(pt && pt.yield)||1); return y>1 ? y : 1; }
+function setBomRun(qty, pt){
+  var y = setBomYield(pt), runs = y>1 ? Math.ceil(qty / y - 1e-9) : qty;
+  return { y: y, runs: runs, make: runs * y, extra: y>1 ? Math.max(0, runs * y - qty) : 0 };
+}
+function setBomQtyText(qty, extra){ return formatNum(qty)+(extra>0 ? '+'+formatNum(extra) : ''); }
+function setBomPerText(per, y){ return y>1 ? formatNum(per)+'個で'+formatNum(y)+'個' : '×'+formatNum(per); }
 /* SET の行から構成部品を広げる。items: トータルピッキングの行(b=ブロック, c=品番, n=商品名, qty) */
 function setBomExpand(items){
   var sets = (state.setBom && state.setBom.sets) || {};
@@ -9513,13 +9524,14 @@ function setBomExpand(items){
     var S = bySet[code], pats = setBomPatterns(sets[code]);
     if(!pats.length){ S.comps = null; return S; }
     var built = pats.map(function(pt, pi){
-      var comps = pt.items.map(function(c){ return { code: c.code, per: Number(c.qty)||0, need: S.qty * (Number(c.qty)||0) }; });
+      var run = setBomRun(S.qty, pt);
+      var comps = pt.items.map(function(c){ return { code: c.code, per: Number(c.qty)||0, y: run.y, need: run.runs * (Number(c.qty)||0) }; });
       var ok = comps.every(function(c){ var st = logiStockOf(c.code); return (st && st.tk >= c.need) || setBomMade(c.code); }); // 高屋で足りる(生産する部品は足りる扱い)
       var okAll = comps.every(function(c){ var st = logiStockOf(c.code); return (st && st.tk + st.tn >= c.need) || setBomMade(c.code); }); // 丹南と合わせれば足りる
-      return { name: pt.name || ('パターン'+(pi+1)), comps: comps, ok: ok, okAll: okAll };
+      return { name: pt.name || ('パターン'+(pi+1)), comps: comps, ok: ok, okAll: okAll, extra: run.extra };
     });
     var pick = built.filter(function(b){ return b.ok; })[0] || built.filter(function(b){ return b.okAll; })[0] || built[0];
-    S.comps = pick.comps; S.patternName = built.length>1 ? pick.name : ''; S.patternOk = pick.ok;
+    S.comps = pick.comps; S.patternName = built.length>1 ? pick.name : ''; S.patternOk = pick.ok; S.extra = pick.extra;
     S.alts = built.filter(function(b){ return b!==pick; });
     S.comps.forEach(function(c){
       if(!totals[c.code]){ totals[c.code] = { code: c.code, need: 0, sets: [] }; tOrder.push(c.code); }
@@ -9547,13 +9559,14 @@ function setBomTablesHtml(exp, print){
   var perSet = exp.sets.map(function(S){
     if(!S.comps) return '<tr><td><b>'+esc(S.code)+'</b><div'+(print ? '' : ' class="sk-minor"')+'>'+esc(S.name)+'</div></td><td class="num">'+formatNum(S.qty)+'</td><td colspan="'+(print ? 6 : 5)+'" style="color:#B42318;">構成が未登録です</td></tr>';
     var altText = (S.alts||[]).map(function(a){
-      return a.name+': '+a.comps.map(function(c){ var st = logiStockOf(c.code); return c.code+'×'+formatNum(c.per)+'(必要'+formatNum(c.need)+'・高屋'+(st ? formatNum(st.tk) : 'なし')+(st && st.tk < c.need && st.tn ? '・丹南'+formatNum(st.tn) : '')+')'; }).join(' ')+(a.ok ? '' : ' 高屋で不足あり');
+      return a.name+': '+a.comps.map(function(c){ var st = logiStockOf(c.code); return c.code+(c.y>1 ? ' '+setBomPerText(c.per, c.y) : '×'+formatNum(c.per))+'(必要'+formatNum(c.need)+'・高屋'+(st ? formatNum(st.tk) : 'なし')+(st && st.tk < c.need && st.tn ? '・丹南'+formatNum(st.tn) : '')+')'; }).join(' ')+(a.ok ? '' : ' 高屋で不足あり');
     }).join(' / ');
     var head = '<b>'+esc(S.code)+'</b><div'+(print ? '' : ' class="sk-minor"')+'>'+esc(S.name)+'</div>'+
+      (S.extra ? '<div style="font-size:11px;">'+formatNum(S.qty+S.extra)+'個作って '+formatNum(S.extra)+'個は入庫</div>' : '')+
       (S.patternName ? '<div style="font-size:11px;'+(S.patternOk ? '' : 'color:#B42318;')+'">使う構成: '+esc(S.patternName)+(S.patternOk ? '' : '(どのパターンも高屋の在庫では足りません)')+'</div>' : '');
     return S.comps.map(function(c, i){
-      return '<tr>'+(i===0 ? '<td rowspan="'+S.comps.length+'">'+head+'</td><td rowspan="'+S.comps.length+'" class="num">'+formatNum(S.qty)+'</td>' : '')+
-        '<td><b>'+esc(c.code)+'</b><div'+(print ? '' : ' class="sk-minor"')+'>'+esc(nameOf(c.code))+'</div></td><td class="num">×'+formatNum(c.per)+'</td><td class="num"><b>'+formatNum(c.need)+'</b></td>'+stockCell(c.code, c.need)+(print ? '<td class="chk"></td>' : '')+'</tr>';
+      return '<tr>'+(i===0 ? '<td rowspan="'+S.comps.length+'">'+head+'</td><td rowspan="'+S.comps.length+'" class="num">'+setBomQtyText(S.qty, S.extra)+'</td>' : '')+
+        '<td><b>'+esc(c.code)+'</b><div'+(print ? '' : ' class="sk-minor"')+'>'+esc(nameOf(c.code))+'</div></td><td class="num">'+setBomPerText(c.per, c.y)+'</td><td class="num"><b>'+formatNum(c.need)+'</b></td>'+stockCell(c.code, c.need)+(print ? '<td class="chk"></td>' : '')+'</tr>';
     }).join('')+(altText ? '<tr><td colspan="'+(print ? 8 : 7)+'" style="font-size:11px;color:#475467;">ほかの構成 ・ '+esc(altText)+'</td></tr>' : '');
   }).join('');
   var tot = exp.totals.length ? '<table class="'+(print ? '' : 'report-table')+'" style="margin-top:10px;"><thead><tr><th>部品の品番 / 商品名</th><th>使うSET</th><th class="num">必要数の合計</th><th class="num">ロジザード在庫</th><th>ロケーション(在庫)</th>'+(print ? '<th>済</th>' : '')+'</tr></thead><tbody>'+
@@ -10403,7 +10416,7 @@ function clientSetTotals(rows, from, to){
   });
   // 部品の行が無い指示は、セット構成(管理 → セット構成)から部品を出す
   var sets = (state.setBom && state.setBom.sets) || {};
-  needBom.forEach(function(code){ var pt = setBomPatterns(sets[code])[0]; if(!pt) return; pt.items.forEach(function(it){ var q = (fin[code] ? fin[code].qty : 0) * it.qty; var Pp = parts[it.code] || (parts[it.code] = { code: it.code, name: '', qty: 0 }); Pp.qty += q; var C = comp[code] || (comp[code] = {}); C[it.code] = { code: it.code, name: '', per: it.qty, qty: q }; }); });
+  needBom.forEach(function(code){ var pt = setBomPatterns(sets[code])[0]; if(!pt) return; var run = setBomRun(fin[code] ? fin[code].qty : 0, pt); pt.items.forEach(function(it){ var q = run.runs * it.qty; var Pp = parts[it.code] || (parts[it.code] = { code: it.code, name: '', qty: 0 }); Pp.qty += q; var C = comp[code] || (comp[code] = {}); C[it.code] = { code: it.code, name: '', per: run.y>1 ? it.qty / run.y : it.qty, qty: q }; }); });
   // 並びは名前の順(JAN ラベルも同じ順。2026-10-24)
   var byName = function(a, b){ var x = a.name || a.code, y = b.name || b.code; return x < y ? -1 : x > y ? 1 : (a.code < b.code ? -1 : 1); };
   var finL = Object.keys(fin).map(function(k){ return fin[k]; }).sort(byName);
@@ -10647,7 +10660,7 @@ function renderSetBomAdmin(){
   });
   var rows = list.map(function(code){
     var pats = setBomPatterns(sets[code]), e = sets[code];
-    var summary = pats.map(function(pt, i){ return (pats.length>1 ? '<b>'+esc(pt.name || ('パターン'+(i+1)))+'</b>: ' : '')+pt.items.map(function(c){ return esc(c.code)+'×'+formatNum(c.qty); }).join('、'); }).join('<br>');
+    var summary = pats.map(function(pt, i){ var y = setBomYield(pt); return (pats.length>1 ? '<b>'+esc(pt.name || ('パターン'+(i+1)))+'</b>: ' : '')+pt.items.map(function(c){ return esc(c.code)+'×'+formatNum(c.qty); }).join('、')+(y>1 ? ' <span class="st-label is-orange">→ '+y+'個できる</span>' : ''); }).join('<br>');
     return '<tr><td><b>'+esc(code)+'</b><div class="sk-minor">'+esc(nameOf(code))+'</div></td><td style="font-size:13px;">'+summary+'</td><td class="sk-minor">'+(e && e.at ? esc(fmtDateTime(e.at)) : '')+'</td>'+
       '<td style="white-space:nowrap;"><button type="button" class="vc-manage-toggle-btn" data-sbadm-edit="'+esc(code)+'">直す</button> <button type="button" class="log-stop-btn" data-sbadm-del="'+esc(code)+'">消す</button></td></tr>';
   }).join('') || '<tr><td colspan="4" class="empty-note">'+(codes.length ? '見つかりません' : 'まだ登録がありません')+'</td></tr>';
@@ -10693,9 +10706,9 @@ function setBomSubsFor(it, allItems){
   if(!S) return null;
   if(!S.comps) return { missing: true };
   var share = it.qty / (S.qty || it.qty); // 同じ SET が何行もあるときは、その行の数のぶん
-  return { pattern: S.patternName || '', ok: S.patternOk, list: S.comps.map(function(c){
-    var need = Math.round(c.per * it.qty * 1000)/1000, x = setBomStockFor(c.code, c.need);
-    return { code: c.code, name: x.st ? x.st.name : '', per: c.per, need: need, stockText: x.text, locs: x.locs, short: x.short };
+  return { pattern: S.patternName || '', ok: S.patternOk, extra: share===1 ? (S.extra||0) : 0, list: S.comps.map(function(c){
+    var need = Math.round(c.need * share * 1000)/1000, x = setBomStockFor(c.code, c.need);
+    return { code: c.code, name: x.st ? x.st.name : '', per: c.per, y: c.y, need: need, stockText: x.text, locs: x.locs, short: x.short };
   }) };
 }
 /* 印刷: 部品ごとの合計(同じ部品を複数の SET で使うときだけ。紙のいちばん下) */
@@ -10718,8 +10731,8 @@ function renderSetBomModal(m){
   codes.forEach(function(code){
     if(m.draft[code]) return;
     var pats = setBomPatterns(sets[code]);
-    m.draft[code] = pats.length ? pats.map(function(pt){ return { name: pt.name||'', items: pt.items.map(function(c){ return { code: c.code, qty: String(c.qty), made: !!c.made }; }) }; })
-      : [{ name:'', items:[{ code:'', qty:'' }, { code:'', qty:'' }, { code:'', qty:'' }] }];
+    m.draft[code] = pats.length ? pats.map(function(pt){ return { name: pt.name||'', yield: String(setBomYield(pt)), items: pt.items.map(function(c){ return { code: c.code, qty: String(c.qty), made: !!c.made }; }) }; })
+      : [{ name:'', yield:'1', items:[{ code:'', qty:'' }, { code:'', qty:'' }, { code:'', qty:'' }] }];
   });
   var rows = codes.map(function(code){
     var pats = setBomPatterns(sets[code]), st = logiStockOf(code), dr = m.draft[code];
@@ -10735,7 +10748,8 @@ function renderSetBomModal(m){
       return '<div class="sb-pat">'+
         (dr.length>1 || pt.name ? '<div class="sb-pat-head"><span>パターン'+(pi+1)+'</span><input type="text" data-sb-name="'+esc(code)+'|'+pi+'" value="'+esc(pt.name)+'" placeholder="名前(例: 在庫が少ないとき)">'+
           (dr.length>1 ? '<button type="button" class="ll-btn" data-sb-delpat="'+esc(code)+'|'+pi+'">このパターンを消す</button>' : '')+'</div>' : '')+
-        '<div class="sb-row sb-row-head"><span>品番</span><span>数量(1セットに使う数)</span><span title="原材料から生産する部品">生産</span><span></span><span></span></div>'+lines+
+        '<div class="sb-row sb-row-head"><span>品番</span><span>数量(1回に使う数)</span><span title="原材料から生産する部品">生産</span><span></span><span></span></div>'+lines+
+        '<div class="sb-yield">この部品で <input type="number" inputmode="numeric" min="1" step="1" data-sb-yield="'+esc(code)+'|'+pi+'" value="'+esc(pt.yield||'1')+'"> 個できる <span class="sk-minor">(ふつうは 1。部品3個で2個できるなら、数量に 3・ここに 2。必要が1でも2個作り、1個は入庫「1+1」)</span></div>'+
         '<button type="button" class="ll-btn" data-sb-addrow="'+esc(code)+'|'+pi+'" style="margin-top:4px;">＋ 行を足す</button></div>';
     }).join('');
     return '<div class="panel" style="margin:0 0 10px;padding:10px 12px;"><div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;"><b>'+esc(code)+'</b><span class="sk-minor">'+esc((st && st.name) || (m.names && m.names[code]) || '')+'</span>'+
@@ -10745,7 +10759,7 @@ function renderSetBomModal(m){
   }).join('') || '<div class="empty-note">SET の品番がありません</div>';
   return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card" style="max-width:680px;">'+
     '<div class="modal-task-name">🧩 セット構成の登録</div>'+
-    '<div class="pool-hint" style="margin:4px 0 10px;">SET の品番ごとに、構成部品の<b>品番</b>と<b>数量</b>(1セットに使う数)を入れます。品番の欄に Excel の2列(品番・数量)を貼り付けると、下の行にまとめて入ります。構成が何通りかあるときは「＋ 別のパターンを足す」。使うのは、上から順に部品の在庫が全部足りるパターンです。全部の行を空にすると登録を消します。一度登録すると、次からトータルピッキングの事務所用に部品が自動で出ます。</div>'+
+    '<div class="pool-hint" style="margin:4px 0 10px;">SET の品番ごとに、構成部品の<b>品番</b>と<b>数量</b>(1セットに使う数)を入れます。部品3個で2個できるような SET は、数量に 3、「この部品で ○ 個できる」に 2(必要が1でも2個作り、1個は入庫。数は「1+1」と出ます)。品番の欄に Excel の2列(品番・数量)を貼り付けると、下の行にまとめて入ります。構成が何通りかあるときは「＋ 別のパターンを足す」。使うのは、上から順に部品の在庫が全部足りるパターンです。全部の行を空にすると登録を消します。一度登録すると、次からトータルピッキングの事務所用に部品が自動で出ます。</div>'+
     rows+
     (m.showAll ? '' : '<button type="button" class="ll-btn" id="setBomShowAll" style="margin-bottom:8px;">登録済みの SET も全部出す</button>')+
     '<details style="margin:6px 0;"'+(m.bulkOpen ? ' open' : '')+'><summary style="cursor:pointer;font-weight:700;">まとめて貼り付ける(SET品番・部品品番・数・パターン名 の3〜4列)</summary><textarea id="setBomBulk" rows="5" style="width:100%;margin-top:6px;font-size:14px;" placeholder="SET品番 部品品番 数 (パターン名)"></textarea></details>'+
@@ -10779,6 +10793,9 @@ function bindSetBomModal(m){
   document.querySelectorAll('[data-sb-made]').forEach(function(el){
     el.addEventListener('change', function(){ var k = at(el.getAttribute('data-sb-made')+'|made'); dr[k.code][k.pi].items[k.ri].made = el.checked; });
   });
+  document.querySelectorAll('[data-sb-yield]').forEach(function(el){
+    el.addEventListener('input', function(){ var a = el.getAttribute('data-sb-yield').split('|'); dr[a[0]][Number(a[1])].yield = el.value; });
+  });
   document.querySelectorAll('[data-sb-name]').forEach(function(el){
     el.addEventListener('input', function(){ var a = el.getAttribute('data-sb-name').split('|'); dr[a[0]][Number(a[1])].name = el.value; });
   });
@@ -10789,7 +10806,7 @@ function bindSetBomModal(m){
     el.addEventListener('click', function(){ var k = at(el.getAttribute('data-sb-delrow')); var items = dr[k.code][k.pi].items; items.splice(k.ri, 1); if(!items.length) items.push({ code:'', qty:'' }); render(); });
   });
   document.querySelectorAll('[data-sb-addpat]').forEach(function(el){
-    el.addEventListener('click', function(){ var code = el.getAttribute('data-sb-addpat'); dr[code].push({ name:'', items:[{ code:'', qty:'' }, { code:'', qty:'' }, { code:'', qty:'' }] }); render(); });
+    el.addEventListener('click', function(){ var code = el.getAttribute('data-sb-addpat'); dr[code].push({ name:'', yield:'1', items:[{ code:'', qty:'' }, { code:'', qty:'' }, { code:'', qty:'' }] }); render(); });
   });
   document.querySelectorAll('[data-sb-delpat]').forEach(function(el){
     el.addEventListener('click', function(){ var a = el.getAttribute('data-sb-delpat').split('|'); dr[a[0]].splice(Number(a[1]), 1); render(); });
@@ -10808,7 +10825,9 @@ function bindSetBomModal(m){
           if(!c || !(n>0)){ bad.push(code+' の '+(c || '(品番なし)')+' '+(q || '(数量なし)')); return; }
           items.push(it.made ? { code: c, qty: n, made: true } : { code: c, qty: n });
         });
-        return { name: String(pt.name||'').trim(), items: items };
+        var y = Number(String(pt.yield||'1').replace(/[^0-9.]/g,''));
+        if(!(y>=1) || Math.floor(y)!==y){ bad.push(code+' のできる数 '+(pt.yield||'')+'(1以上の整数)'); y = 1; }
+        return y>1 ? { name: String(pt.name||'').trim(), items: items, yield: y } : { name: String(pt.name||'').trim(), items: items };
       }).filter(function(pt){ return pt.items.length; });
     });
     var bulk = document.getElementById('setBomBulk');
@@ -10827,7 +10846,7 @@ function bindSetBomModal(m){
       });
       Object.keys(bulkSets).forEach(function(code){ var bs = bulkSets[code]; edits[code] = bs.order.map(function(pn){ return { name: pn, items: bs.by[pn] }; }); });
     }
-    if(bad.length){ showToast('品番と数量(1以上)を両方入れてください: '+bad.slice(0,3).join(' / ')); return; }
+    if(bad.length){ showToast('入力を確かめてください(品番と数量は両方・1以上。できる数は1以上の整数): '+bad.slice(0,3).join(' / ')); return; }
     sv.disabled = true;
     var who = (state.managerSession && state.managerSession.user && state.managerSession.user.email) || '';
     var r = await tpickKvUpdate(SET_BOM_KEY, function(cur){
@@ -11845,7 +11864,7 @@ function vcAllocOtherRows(calc, kind){
     return { kind: kind, code: p.code, name: p.name||'', qty: p.qty, cases: p.pack ? p.casesUp : null,
       takaya: Math.max(0, p.takaya), tannan: Math.max(0, p.tannan), shortage: p.shortage || 0,
       split: p.site==='split' && p.split ? '高屋 '+formatNum(p.split.takaya)+' + 丹南 '+formatNum(p.split.tannan) : '',
-      note: (vcAllocIsSet(p) ? (function(){ var S = vcAllocSetParts(p.code, p.qty); return S ? 'セット: '+S.items.map(function(it){ return it.code+'×'+it.per+'='+it.need+(it.stock.short ? '(不足)' : ''); }).join('・') : 'セット構成の登録なし'; })()+(p.memo ? ' / '+p.memo : '') : '') || p.memo || (p.site==='handled' ? '' : vcAllocNote(p)) };
+      note: (vcAllocIsSet(p) ? (function(){ var S = vcAllocSetParts(p.code, p.qty); return S ? 'セット'+(S.extra ? '('+setBomQtyText(p.qty, S.extra)+'・'+S.extra+'は入庫)' : '')+': '+S.items.map(function(it){ return it.code+(S.y>1 ? ' '+it.per+'個で'+S.y+'個' : '×'+it.per)+'='+it.need+(it.stock.short ? '(不足)' : ''); }).join('・') : 'セット構成の登録なし'; })()+(p.memo ? ' / '+p.memo : '') : '') || p.memo || (p.site==='handled' ? '' : vcAllocNote(p)) };
   });
 }
 /* 高屋・丹南以外の品番の表を、キャンバスに描く(PDF にする用)。戻り値: { canvas, headH, rowH, rows, scale } */
@@ -12149,14 +12168,15 @@ function vcAllocIsSet(p){ return p && p.site==='handled' && /セット/.test(Str
 function vcAllocSetParts(code, qty){
   var pats = setBomPatterns(((state.setBom && state.setBom.sets) || {})[code]);
   if(!pats.length) return null;
-  return { more: pats.length - 1, name: pats[0].name || '', items: pats[0].items.map(function(it){ var need = (Number(it.qty)||0) * qty, stv = setBomStockFor(it.code, need), st = logiStockOf(it.code); return { code: it.code, name: (st && st.name) || it.name || '', per: Number(it.qty)||0, need: need, stock: stv }; }) };
+  var run = setBomRun(qty, pats[0]);
+  return { more: pats.length - 1, name: pats[0].name || '', extra: run.extra, y: run.y, items: pats[0].items.map(function(it){ var need = (Number(it.qty)||0) * run.runs, stv = setBomStockFor(it.code, need), st = logiStockOf(it.code); return { code: it.code, name: (st && st.name) || it.name || '', per: Number(it.qty)||0, need: need, stock: stv }; }) };
 }
 function vcAllocSetRowHtml(p, qty){
   var S = vcAllocSetParts(p.code, qty);
   if(!S) return '<tr class="vca-setbom"><td></td><td colspan="10"><span style="color:#B42318;">セット構成の登録がありません</span> <span class="sk-minor">(管理 → セット構成 で「'+esc(p.code)+'」の部品を登録すると、ここに部品と在庫が出ます)</span></td></tr>';
-  return '<tr class="vca-setbom"><td></td><td colspan="10"><div style="font-size:12px;font-weight:700;margin-bottom:2px;">🧩 セットの部品('+formatNum(qty)+'セット分'+(S.name ? '・'+esc(S.name) : '')+(S.more ? '・ほかのパターン '+S.more+'つ' : '')+')</div>'+
+  return '<tr class="vca-setbom"><td></td><td colspan="10"><div style="font-size:12px;font-weight:700;margin-bottom:2px;">🧩 セットの部品('+(S.extra ? setBomQtyText(qty, S.extra)+'セット分・'+formatNum(S.extra)+'は入庫' : formatNum(qty)+'セット分')+(S.name ? '・'+esc(S.name) : '')+(S.more ? '・ほかのパターン '+S.more+'つ' : '')+')</div>'+
     '<table style="width:100%;font-size:12px;border-collapse:collapse;">'+S.items.map(function(it){
-      return '<tr><td style="padding:2px 6px;white-space:nowrap;"><b>'+esc(it.code)+'</b></td><td style="padding:2px 6px;">'+esc(it.name)+'</td><td style="padding:2px 6px;text-align:right;white-space:nowrap;">×'+formatNum(it.per)+' → <b>'+formatNum(it.need)+'</b></td>'+
+      return '<tr><td style="padding:2px 6px;white-space:nowrap;"><b>'+esc(it.code)+'</b></td><td style="padding:2px 6px;">'+esc(it.name)+'</td><td style="padding:2px 6px;text-align:right;white-space:nowrap;">'+setBomPerText(it.per, S.y)+' → <b>'+formatNum(it.need)+'</b></td>'+
         '<td style="padding:2px 6px;white-space:nowrap;'+(it.stock.short ? 'color:#B42318;font-weight:700;' : '')+'">'+esc(it.stock.text)+'</td><td style="padding:2px 6px;" class="sk-minor">'+esc(it.stock.locs || '')+'</td></tr>';
     }).join('')+'</table></td></tr>';
 }

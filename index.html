@@ -16346,8 +16346,8 @@ function bindCommon(){
       var role = el.getAttribute('data-nav-role');
       if(isRoleBlockedForAccount(role)) return; // 閲覧専用アカウントでは開かない
       var navTab = el.getAttribute('data-nav-admin-tab');
-      if(navTab) state.adminHubTab = navTab;
       if(el.getAttribute('data-nav-stock-tab')) state.stockTab = el.getAttribute('data-nav-stock-tab'); // トップの「今週の生協企画」から生協の入れ替えへ
+      if(navTab) state.adminHubTab = navTab;
       else if(role==='adminHub' && (state.adminHubTab==='data' || state.adminHubTab==='stockData' || state.adminHubTab==='setBom')) state.adminHubTab = 'today'; // 「管理」は、今日の状況から
       if(role==='monitor') state.monitorEntryRole = state.role || '';
       state.role = role || null;

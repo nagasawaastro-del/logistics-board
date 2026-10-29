@@ -333,6 +333,8 @@ input,select{font-family:inherit;}
 .bill-file.is-ok{color:var(--ink-900);font-weight:600;}
 .vca-cards{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
 .vca-card{flex:1 1 150px;border:1px solid var(--paper-line);border-radius:var(--radius-lg);padding:10px 14px;background:#fff;}
+.coop-view-card{cursor:pointer;}
+.coop-view-card.is-on{border-color:#1570EF;box-shadow:inset 0 0 0 2px #1570EF;}
 .vca-card.is-danger{border-color:#F04438;background:#FEF3F2;}
 .vca-card-label{font-size:12px;color:var(--slate-500);font-weight:700;}
 .vca-card-val{font-size:24px;font-weight:800;color:var(--ink-900);margin-top:2px;}
@@ -1534,6 +1536,8 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .tpick-cam-next .tcn-qty{ font-size:26px; font-weight:800; color:#A6F4C5; margin-left:auto; }
 .tpick-cam-next .tcn-name{ font-size:13px; color:#D0D5DD; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .tpick-cam-next .tcn-done{ font-size:18px; font-weight:800; color:#A6F4C5; padding:4px 0; }
+.tpick-cam-guide{ position:absolute; left:10%; right:10%; top:20%; bottom:20%; border:3px solid rgba(254,200,75,.95); border-radius:8px; pointer-events:none; box-shadow:0 0 0 999px rgba(0,0,0,.28); }
+.tpick-cam-view{ overflow:hidden; }
 .tpick-cam-res{ position:absolute; left:0; right:0; bottom:0; padding:10px 12px; font-size:18px; font-weight:800; color:#fff; text-align:center; display:none; }
 .tpick-cam-res.is-ok{ display:block; background:rgba(18,183,106,.92); }
 .tpick-cam-res.is-ng{ display:block; background:rgba(240,68,56,.94); font-size:15px; }
@@ -11164,6 +11168,17 @@ async function tpickNativeDetector(){
     return new window.BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128','itf'].filter(function(f){ return fm.indexOf(f)!==-1; }) });
   }catch(e){ return null; }
 }
+/* 読んだバーコードが、画面の黄色い枠(映像のまん中)の中にあるか。映像は上下を切って見せているため、
+   見えていない所や隣の商品のバーコードを読まないように(2026-10-29。読み違いが多かった) */
+var TPICK_GUIDE_W = 0.8, TPICK_GUIDE_H = 0.6; // 枠の大きさ(見えている広さに対して。CSS の .tpick-cam-guide と合わせる)
+function tpickCamInGuide(video, bb){
+  if(!bb) return true;
+  var vw = video.videoWidth, vh = video.videoHeight, ew = video.clientWidth, eh = video.clientHeight;
+  if(!vw || !vh || !ew || !eh) return true;
+  var sc = Math.max(ew/vw, eh/vh), w = ew/sc, h = eh/sc; // 見えている広さ(映像の画素で)
+  var cx = bb.x + bb.width/2, cy = bb.y + bb.height/2;
+  return Math.abs(cx - vw/2) <= w*TPICK_GUIDE_W/2 && Math.abs(cy - vh/2) <= h*TPICK_GUIDE_H/2;
+}
 /* カメラの起動の記録(どこで止まったかを調べるため。2026-10-23)。kv「cam-debug」に最近20件。端末の種類・段階・結果だけ */
 function tpickCamLog(stage, info){
   try{
@@ -11180,8 +11195,8 @@ async function tpickCamStart(test, preStream){
   // 先に画面を出す(押したのが分かるように)
   var box = document.createElement('div');
   box.className = 'tpick-cam';
-  box.innerHTML = (test ? '' : '<div class="tpick-cam-next"></div>')+'<div class="tpick-cam-view"><video playsinline muted style="display:none;"></video><div class="tpick-cam-res"></div></div>'+
-    '<div class="tpick-cam-bar">'+(test ? '' : '<label><input type="checkbox" id="tpickCamCont"'+(state.tpickCamCont!==false ? ' checked' : '')+'> 続けて読む</label>')+'<span class="tpick-cam-msg">カメラを起動しています…</span><button type="button" class="ll-btn" id="tpickCamTorch" style="display:none;">💡 ライト</button><button type="button" class="ll-btn" id="tpickCamClose">やめる</button></div>';
+  box.innerHTML = (test ? '' : '<div class="tpick-cam-next"></div>')+'<div class="tpick-cam-view"><video playsinline muted style="display:none;"></video><div class="tpick-cam-guide" style="display:none;"></div><div class="tpick-cam-res"></div></div>'+
+    '<div class="tpick-cam-bar">'+(test ? '' : '<label><input type="checkbox" id="tpickCamCont"'+(state.tpickCamCont!==false ? ' checked' : '')+'> 続けて読む</label>')+'<span class="tpick-cam-msg">カメラを起動しています…</span><button type="button" class="ll-btn" id="tpickCamZoom" style="display:none;">🔍 1倍</button><button type="button" class="ll-btn" id="tpickCamTorch" style="display:none;">💡 ライト</button><button type="button" class="ll-btn" id="tpickCamClose">やめる</button></div>';
   document.body.appendChild(box);
   var c = tpickCam = { box: box, lastCode: '', lastAt: 0, test: !!test, startAt: Date.now(), nOk: 0, nNg: 0 };
   tpickCamNextRefresh(c);
@@ -11265,14 +11280,25 @@ async function tpickCamStart(test, preStream){
       var tb = box.querySelector('#tpickCamTorch'); tb.style.display = '';
       tb.addEventListener('click', function(){ c.torchOn = !c.torchOn; track.applyConstraints({ advanced: [{ torch: c.torchOn }] }).catch(function(){}); tb.textContent = c.torchOn ? '💡 ライトを消す' : '💡 ライト'; });
     }
-    tpickCamLog('ピント・ライト', ((caps.focusMode||[]).join(',') || 'なし')+(caps.torch ? '・ライトあり' : ''));
+    // ズーム(少し離して持てるように。2026-10-29): 押すたびに 1倍 → 2倍 → 3倍。端末に覚える
+    if(caps.zoom && caps.zoom.max > (caps.zoom.min||1)){
+      var zb = box.querySelector('#tpickCamZoom'), zmin = caps.zoom.min||1, zmax = caps.zoom.max;
+      var steps = [1, 2, 3].filter(function(z){ return z>=zmin && z<=zmax; }); if(steps[0]!==zmin) steps.unshift(zmin);
+      var setZoom = function(z){ c.zoom = z; track.applyConstraints({ advanced: [{ zoom: z }] }).catch(function(){}); zb.textContent = '🔍 '+formatNum(z)+'倍'; try{ localStorage.setItem('tpickCamZoom', String(z)); }catch(e){} };
+      var z0 = 0; try{ z0 = Number(localStorage.getItem('tpickCamZoom'))||0; }catch(e){}
+      zb.style.display = '';
+      if(steps.indexOf(z0)>0) setZoom(z0);
+      zb.addEventListener('click', function(){ var i = steps.indexOf(c.zoom||steps[0]); setZoom(steps[(i+1) % steps.length]); resetIdle(); });
+    }
+    tpickCamLog('ピント・ライト', ((caps.focusMode||[]).join(',') || 'なし')+(caps.torch ? '・ライトあり' : '')+(caps.zoom ? '・ズーム '+caps.zoom.min+'〜'+caps.zoom.max : ''));
   }catch(e){}
   tpickCamLog('カメラ OK', ((stream.getVideoTracks()[0] && stream.getVideoTracks()[0].label) || '')+'・'+waited+'秒');
-  var video = box.querySelector('video'); video.style.display = ''; video.srcObject = stream; // 映像の枠は、カメラが付いてから出す(待っている間に黒い画面で隠さない)
+  var video = box.querySelector('video'); video.style.display = ''; box.querySelector('.tpick-cam-guide').style.display = ''; video.srcObject = stream; // 映像の枠は、カメラが付いてから出す(待っている間に黒い画面で隠さない)
   // 映像の再生を待ちすぎない(始まらない端末があった。3秒で先へ進む)
   var played = false;
   try{ await Promise.race([video.play().then(function(){ played = true; }), new Promise(function(res){ setTimeout(function(){ if(!played) tpickCamLog('映像の再生', '3秒で始まらない'); res(); }, 3000); })]); }catch(e){ tpickCamLog('映像の再生', (e && (e.name+' '+e.message)) || ''); }
   var contEl = box.querySelector('#tpickCamCont'); if(contEl) contEl.addEventListener('change', function(ev){ state.tpickCamCont = ev.target.checked; resetIdle(); });
+  var guideMsg = 'バーコードを黄色い枠に入れてください(ぼやけるときは少し離す)';
   function resetIdle(){ clearTimeout(c.idleTimer); c.idleTimer = setTimeout(function(){ if(tpickCam===c){ tpickCamStop('読まなかった'); showToast('2分読まなかったので、カメラを止めました'); } }, (state.tpickCamCont!==false || test) ? 120000 : 30000); }
   resetIdle();
   async function onCode(v){
@@ -11295,12 +11321,16 @@ async function tpickCamStart(test, preStream){
   var det = await tpickNativeDetector();
   tpickCamLog('読むしくみ', det ? '端末(BarcodeDetector)' : 'ZXing');
   if(det){
-    msg.textContent = 'バーコードを写してください';
+    msg.textContent = guideMsg;
     var tick = async function(){
       if(tpickCam!==c) return;
       if(!inPick()){ tpickCamStop('番号の画面を閉じた'); return; }
       if(!c.test && Date.now() - (c.nextAt||0) > 1500){ c.nextAt = Date.now(); tpickCamNextRefresh(c); } // 手で押して済にした分も、次の行に入れる
-      try{ var found = await det.detect(video); if(found && found.length && await onCode(found[0].rawValue)) return; }catch(e){}
+      try{
+        var found = (await det.detect(video)) || [];
+        var hit = found.filter(function(f){ return tpickCamInGuide(video, f.boundingBox); })[0]; // 枠の外のバーコードは読まない
+        if(hit && await onCode(hit.rawValue)) return;
+      }catch(e){}
       c.loop = setTimeout(tick, 180);
     };
     tick();
@@ -11315,12 +11345,17 @@ async function tpickCamStart(test, preStream){
     var hints = new Map();
     hints.set(ZX.DecodeHintType.POSSIBLE_FORMATS, [ZX.BarcodeFormat.EAN_13, ZX.BarcodeFormat.EAN_8, ZX.BarcodeFormat.UPC_A, ZX.BarcodeFormat.UPC_E, ZX.BarcodeFormat.CODE_128, ZX.BarcodeFormat.ITF]);
     var reader = c.zx = new ZX.BrowserMultiFormatReader(hints, 200);
-    msg.textContent = 'バーコードを写してください';
+    msg.textContent = guideMsg;
     c.nextIv = setInterval(function(){ if(tpickCam!==c){ clearInterval(c.nextIv); return; } tpickCamNextRefresh(c); }, 1500);
     reader.decodeFromStream(stream, video, function(result){
       if(tpickCam!==c) return;
       if(!inPick()){ tpickCamStop('番号の画面を閉じた'); return; }
-      if(result) onCode(result.getText ? result.getText() : String(result.text||''));
+      if(!result) return;
+      try{ // 枠の外のバーコードは読まない
+        var pts = (result.getResultPoints ? result.getResultPoints() : []) || [], xs = pts.map(function(q){ return q.getX ? q.getX() : q.x; }), ys = pts.map(function(q){ return q.getY ? q.getY() : q.y; });
+        if(xs.length && !tpickCamInGuide(video, { x: Math.min.apply(null, xs), y: Math.min.apply(null, ys), width: Math.max.apply(null, xs) - Math.min.apply(null, xs), height: Math.max.apply(null, ys) - Math.min.apply(null, ys) })) return;
+      }catch(e){}
+      onCode(result.getText ? result.getText() : String(result.text||''));
     });
   }catch(e){ await fail('カメラで読めませんでした('+((e && e.message) || '理由不明')+')。行を手で押して済にできます。'); }
 }
@@ -15258,7 +15293,7 @@ function renderCoopSwapTables(r, forPrint){
         return '<tr'+(x.short ? '' : ' style="color:var(--slate-500);"')+'><td class="chk">□</td><td>'+(Object.keys(x.sLocs).length ? locsText(x.sLocs) : '<span class="sk-minor">なし</span>')+'</td><td><b>'+esc(x.code)+'</b></td><td class="sk-minor">'+esc(x.name)+'</td>'+
           '<td>'+plansText(x.plans, week)+'</td><td class="num">'+formatNum(x.need)+'</td>'+(week==='next' ? '<td class="num">'+formatNum(x.have)+'</td>' : '')+
           '<td class="num">'+shortCell(x)+'</td><td>'+pickText(x)+'</td></tr>';
-      }).join('') || '<tr><td colspan="'+(week==='next' ? 9 : 8)+'" class="empty-note">企画はありません</td></tr>')+'</tbody></table>';
+      }).join('') || '<tr><td colspan="'+(week==='next' ? 9 : 8)+'" class="empty-note">'+(r.hidOk ? '補充が要る品番はありません' : '企画はありません')+'</td></tr>')+'</tbody></table>';
   }
   return { putAway: putT, thisWeek: weekT(r.thisRows, 'this'), nextWeek: weekT(r.nextRows, 'next') };
 }
@@ -15274,23 +15309,32 @@ function renderCoopSwap(st){
   if(!st.outlook) return '<div class="empty-note">生協の企画(kintone の見積もり)がまだありません。管理 → 在庫・kintone取込 の「kintoneの同期」で「見積もり・入荷予定」を取り込んでください。</div>';
   var r0 = computeCoopSwap(st);
   var selHtml = { put: coopPartySelectHtml(r0, 'put'), this: coopPartySelectHtml(r0, 'this'), next: coopPartySelectHtml(r0, 'next') };
-  var r = coopApplyParties(r0, coopPartySel()), t = renderCoopSwapTables(r, false), ti = coopTitles(r);
+  var r = coopApplyParties(r0, coopPartySel()), ti = coopTitles(r);
+  // ②③ の表は、ふだんは補充が要る品番だけ(足りている品番はチェックで出す。2026-10-29。印刷は全部)
+  var nOkThis = r.thisRows.filter(function(x){ return !x.short; }).length, nOkNext = r.nextRows.filter(function(x){ return !x.short; }).length;
+  var t = renderCoopSwapTables(state.coopShowOk ? r : Object.assign({}, r, { thisRows: r.thisRows.filter(function(x){ return x.short; }), nextRows: r.nextRows.filter(function(x){ return x.short; }), hidOk: true }), false);
+  var okToggle = function(n){ return n ? '<label class="pool-hint" style="display:inline-flex;align-items:center;gap:4px;margin:0 0 6px;cursor:pointer;"><input type="checkbox" id="coopShowOk"'+(state.coopShowOk ? ' checked' : '')+'> 足りている品番('+n+')も出す</label>' : ''; };
   var sumShort = function(rows){ return rows.reduce(function(a,x){ return a+x.short; }, 0); };
   var head = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
     '<span class="pool-hint" style="margin:0;">企画: kintone の見積もり '+esc(fmtDateTime(st.outlook.syncedAt))+'取込 ・ 在庫: ロジザード '+esc(fmtDateTime(st.lz.uploadedAt))+'取込 ・ 棚在庫で保留: '+esc(coopHoldText())+'</span>'+
     '<button type="button" class="vc-manage-toggle-btn" id="coopPrint" style="margin-left:auto;">🖨 入れ替え指示を印刷</button></div>'+
     (state.coopMsg ? '<div class="vc-import-status">'+state.coopMsg+'</div>' : '');
+  // ①②③ は上のカードで切り替えて1つずつ出す(全部並べるとスクロールが多いため。2026-10-29。印刷は全部)
+  var view = state.coopView || 'put';
+  var cardAttr = function(k){ return ' role="button" tabindex="0" data-coop-view="'+k+'" class="vca-card coop-view-card'+(view===k ? ' is-on' : '')+'"'; };
   var cards = '<div class="vca-cards">'+
-    '<div class="vca-card"><div class="vca-card-label">① 片付け</div><div class="vca-card-val">'+formatNum(r.putAway.length)+'<span style="font-size:13px;font-weight:600;"> ロケ・品番</span></div><div class="vca-card-sub">'+COOP_PUTAWAY_DAYS+'日以内に企画が無い</div></div>'+
-    '<div class="vca-card"><div class="vca-card-label">② 今週の補充</div><div class="vca-card-val">'+formatNum(r.thisRows.filter(function(x){ return x.short; }).length)+'<span style="font-size:13px;font-weight:600;"> / '+r.thisRows.length+' 品番</span></div><div class="vca-card-sub">'+formatNum(sumShort(r.thisRows))+'個を生協ロケへ</div></div>'+
-    '<div class="vca-card"><div class="vca-card-label">③ 来週の補充</div><div class="vca-card-val">'+formatNum(r.nextRows.filter(function(x){ return x.short; }).length)+'<span style="font-size:13px;font-weight:600;"> / '+r.nextRows.length+' 品番</span></div><div class="vca-card-sub">'+formatNum(sumShort(r.nextRows))+'個(入れられるだけ)</div></div>'+
+    '<div'+cardAttr('put')+'><div class="vca-card-label">① 片付け</div><div class="vca-card-val">'+formatNum(r.putAway.length)+'<span style="font-size:13px;font-weight:600;"> ロケ・品番</span></div><div class="vca-card-sub">'+COOP_PUTAWAY_DAYS+'日以内に企画が無い</div></div>'+
+    '<div'+cardAttr('this')+'><div class="vca-card-label">② 今週の補充</div><div class="vca-card-val">'+formatNum(r.thisRows.filter(function(x){ return x.short; }).length)+'<span style="font-size:13px;font-weight:600;"> / '+r.thisRows.length+' 品番</span></div><div class="vca-card-sub">'+formatNum(sumShort(r.thisRows))+'個を生協ロケへ</div></div>'+
+    '<div'+cardAttr('next')+'><div class="vca-card-label">③ 来週の補充</div><div class="vca-card-val">'+formatNum(r.nextRows.filter(function(x){ return x.short; }).length)+'<span style="font-size:13px;font-weight:600;"> / '+r.nextRows.length+' 品番</span></div><div class="vca-card-sub">'+formatNum(sumShort(r.nextRows))+'個(入れられるだけ)</div></div>'+
   '</div>';
   var keepList = r.keep.length ? '<details style="margin-top:10px;"><summary class="pool-hint" style="cursor:pointer;">残す(再来週〜'+coopDate(r.limit)+'に企画がある)('+r.keep.length+') ▾</summary><div class="sk-minor" style="line-height:1.8;">'+
     r.keep.map(function(x){ return '<b>'+esc(coopLocName(x.loc))+'</b> '+esc(x.code)+' '+formatNum(x.qty)+' ・ 次の企画 '+esc(coopDate(x.next.date)+' '+coopPartyShort(x.next.party))+' '+formatNum(x.next.qty); }).join('<br>')+'</div></details>' : '';
-  return head+cards+
-    '<div class="stf-section-title" style="display:flex;align-items:center;gap:8px;">'+esc(ti.put)+selHtml.put+coopSendBtn('put', r.putAway.length)+'</div><div style="overflow-x:auto;">'+t.putAway+'</div>'+keepList+
-    '<div class="stf-section-title" style="margin-top:16px;display:flex;align-items:center;gap:8px;">'+esc(ti.thisW)+selHtml.this+coopSendBtn('this', r.thisRows.filter(function(x){ return x.short; }).length)+'</div><div style="overflow-x:auto;">'+t.thisWeek+'</div>'+
-    '<div class="stf-section-title" style="margin-top:16px;display:flex;align-items:center;gap:8px;">'+esc(ti.nextW)+selHtml.next+coopSendBtn('next', r.nextRows.filter(function(x){ return x.short; }).length)+'</div><div style="overflow-x:auto;">'+t.nextWeek+'</div>'+
+  var body = view==='this'
+    ? '<div class="stf-section-title" style="display:flex;align-items:center;gap:8px;">'+esc(ti.thisW)+selHtml.this+coopSendBtn('this', r.thisRows.filter(function(x){ return x.short; }).length)+'</div>'+okToggle(nOkThis)+'<div style="overflow-x:auto;">'+t.thisWeek+'</div>'
+    : view==='next'
+    ? '<div class="stf-section-title" style="display:flex;align-items:center;gap:8px;">'+esc(ti.nextW)+selHtml.next+coopSendBtn('next', r.nextRows.filter(function(x){ return x.short; }).length)+'</div>'+okToggle(nOkNext)+'<div style="overflow-x:auto;">'+t.nextWeek+'</div>'
+    : '<div class="stf-section-title" style="display:flex;align-items:center;gap:8px;">'+esc(ti.put)+selHtml.put+coopSendBtn('put', r.putAway.length)+'</div><div style="overflow-x:auto;">'+t.putAway+'</div>'+keepList;
+  return head+cards+'<div class="pool-hint" style="margin:-4px 0 6px;">上のカードを押すと、その表に切り替わります(印刷は ①②③ 全部)</div>'+body+
     '<div class="pool-hint" style="margin-top:10px;">生協ロケ = ロジザードのブロック「'+COOP_BLOCK+'」(棚在庫の '+esc(coopHoldText())+' は保留: 生協ロケの在庫に数えず、片付けにも出しません)。'+
     '企画 = kintone の見積もりのうち得意先がコープ・生協・パルシステムの物(見積日を企画の日とする。作り直した見積もりは新しい版だけ。高屋の倉庫の物だけ)。'+
     '来週の補充数 = 来週の企画の数 − 今週の分を引いた生協ロケの残り。在庫は引当数を除いた数。持ってくるロケは、高屋の生協ロケ以外で在庫の多いロケから(今週の分を先に取る)。</div>';
@@ -15481,6 +15525,13 @@ function bindStockTab(){
   });
   var cpp = document.getElementById('coopPrint');
   if(cpp) cpp.addEventListener('click', function(){ if(state.stockData) coopSwapPrint(state.stockData); });
+  var cso = document.getElementById('coopShowOk');
+  if(cso) cso.addEventListener('change', function(){ state.coopShowOk = cso.checked; render(); });
+  document.querySelectorAll('[data-coop-view]').forEach(function(el){
+    var go = function(){ state.coopView = el.getAttribute('data-coop-view'); render(); };
+    el.addEventListener('click', go);
+    el.addEventListener('keydown', function(e){ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); go(); } });
+  });
   document.querySelectorAll('[data-coop-party]').forEach(function(el){ el.addEventListener('change', function(){ coopPartySel()[el.getAttribute('data-coop-party')] = el.value; state.coopMsg = ''; render(); }); });
   document.querySelectorAll('[data-coop-send]').forEach(function(el){ el.addEventListener('click', function(){ if(state.stockData) coopSendToShukei(state.stockData, el.getAttribute('data-coop-send')); }); });
   var cgo = document.getElementById('coopGoShukei');
@@ -23799,7 +23850,8 @@ function renderMonitorStaffCard(s, plan, afterBreakPlan){
     '<div class="mon-bar-total">本日計 '+fmtHM(totalMs)+'</div>'+
   '</div>';
 }
-/* モニター: トータルピッキングの進み具合(作業ごとに、パート・リフトA・リフトの 完了した番号/番号、受け持ち中、欠品。2026-10-22) */
+/* モニター: トータルピッキングの進み具合(作業ごとに、パートさん用の 完了した番号/番号、受け持ち中、欠品。2026-10-22。
+   リフトマン用は出さない(2026-10-29) */
 function renderMonitorTpick(){
   tpickEnsureLoaded(false);
   var t = state.tpk || {};
@@ -23807,7 +23859,7 @@ function renderMonitorTpick(){
   var tids = [];
   wvActiveImports(state.workVolume || emptyWorkVolume()).forEach(function(i){ if(t.tp.imports[i.id] && !t.tp.imports[i.id].off && tids.indexOf(i.taskId)===-1) tids.push(i.taskId); });
   var rows = tids.map(function(tid){
-    var bs = tpickBatchesForTask(t.tp, state.workVolume, tid).filter(function(b){ return b.who!=='office'; });
+    var bs = tpickBatchesForTask(t.tp, state.workVolume, tid).filter(function(b){ return b.who==='part'; });
     if(!bs.length) return '';
     var nShort = 0, working = 0;
     var part = function(who, label){
@@ -23817,7 +23869,7 @@ function renderMonitorTpick(){
       return '<span class="mon-tp-chip'+(done===list.length ? ' is-done' : '')+'">'+label+' <b>'+done+'/'+list.length+'</b></span>';
     };
     bs.forEach(function(b){ var p = tpickProgOf(b.id); if(p && p.short) nShort += Object.keys(p.short).length; if(p && p.staffId && !p.doneAt) working++; });
-    return '<div class="mon-tp-row"><span class="mon-tp-task">'+esc(taskById(tid).name)+'</span>'+part('part','パート')+part('liftA','リフトA')+part('lift','リフト')+
+    return '<div class="mon-tp-row"><span class="mon-tp-task">'+esc(taskById(tid).name)+'</span>'+part('part','パート')+
       (working ? '<span class="mon-tp-note">作業中 '+working+'</span>' : '')+(nShort ? '<span class="mon-tp-note is-short">欠品 '+nShort+'行</span>' : '')+'</div>';
   }).join('');
   if(!rows) return '';

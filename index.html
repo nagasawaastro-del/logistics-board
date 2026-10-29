@@ -1376,8 +1376,25 @@ body{font-feature-settings:"tnum";}
 .hd-link:hover .hd-go{opacity:1;color:#6366f1;}
 .hd-label .ll-ic{flex:none;}
 .hd-span2{grid-column:span 2;}
-.hd-coop-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));column-gap:24px;}
-.hd-coop{display:grid;grid-template-columns:64px 1fr auto;gap:6px;align-items:baseline;font-size:13px;padding:4px 0;border-bottom:1px solid var(--paper-line);}
+.hd-coop-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;}
+.hd-coop{font-size:13px;border-bottom:1px solid var(--paper-line);}
+.hd-coop summary{display:grid;grid-template-columns:16px 72px 1fr auto;gap:6px;align-items:baseline;padding:6px 0;cursor:pointer;list-style:none;}
+.hd-coop summary::-webkit-details-marker{display:none;}
+.hd-coop summary::before{content:'▸';color:var(--slate-500);}
+.hd-coop details[open] summary::before{content:'▾';}
+.hd-coop-badge{display:inline-block;font-size:11px;font-weight:700;padding:0 6px;border-radius:999px;background:#ECFDF3;color:#067647;}
+.hd-coop-badge.is-short{background:#FEF3F2;color:#B42318;}
+.hd-coop-items{width:100%;border-collapse:collapse;margin:2px 0 6px;font-size:12px;}
+.hd-coop-items th{text-align:left;font-weight:600;color:var(--slate-500);padding:3px 6px;border-bottom:1px solid var(--paper-line);}
+.hd-coop-items td{padding:3px 6px;border-bottom:1px solid var(--paper-line);}
+.hd-coop-items .num{text-align:right;white-space:nowrap;}
+.hd-coop-nm{color:var(--slate-500);}
+.hd-coop-short{color:#B42318;}
+.hd-coop-ok{color:var(--slate-500);}
+.hd-coop-act{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:space-between;margin:0 0 8px;}
+html[data-app-theme="dark"] .hd-coop-badge{background:rgba(18,183,106,.15);color:#75E0A7;}
+html[data-app-theme="dark"] .hd-coop-badge.is-short,html[data-app-theme="dark"] .hd-coop-short{color:#FDA29B;}
+html[data-app-theme="dark"] .hd-coop-badge.is-short{background:rgba(240,68,56,.15);}
 .hd-coop.is-past{opacity:.55;}
 .hd-coop.is-today .hd-coop-d{font-weight:700;color:var(--dash-acc);}
 .hd-coop-d{white-space:nowrap;color:var(--slate-500);}
@@ -16169,33 +16186,83 @@ function renderGateDashboard(){
 }
 /* トップページの「今週の生協企画」(2026-10-29): 今週(月〜日)の生協の見積もりを、日付順に 得意先・件名・倉庫・品番の数・数量。
    データは kv「coop-plans」(kintone の同期のときに作る小さな一覧)。データの更新状況と一緒に読む */
-function homeCoopWhLabel(wh){
-  if(!wh) return '';
-  var site = outlookSiteOfWarehouse(wh);
-  return site ? SHUKEI_SITES[site].name : (wh==='0008' ? '外部倉庫' : '倉庫 '+wh);
+/* 2026-10-30: 高屋の企画だけを縦に並べ、企画ごとの折りたたみで品番・企画の数・生協ロケの不足を出す。
+   不足は、生協ロケ(ブロック S。保留のロケを除く・引当を引いた数)の在庫を、日付の早い企画から当てた残り(生協の入れ替えと同じ)。
+   在庫(ロジザード)は、折りたたみを開いたときに初めて読む(通信量を増やさないため)。「出荷集計表へ」で企画の品番を一覧で高屋の出荷集計表に足す */
+function homeCoopIsTakaya(x){ return !x.wh || outlookSiteOfWarehouse(x.wh)==='takaya'; }
+function homeCoopKey(x){ return [x.date, x.party, x.subject].join('|'); }
+function coopSAvailOf(code){ // 生協ロケの在庫(保留のロケを除く・引当を引いた数)
+  var p = state.logiStock && state.logiStock.products && state.logiStock.products[code], b = p && p.blocks && p.blocks[COOP_BLOCK];
+  if(!b) return 0;
+  return Object.keys(b.locQty||{}).reduce(function(a, l){ if(coopIsHoldLoc(l)) return a; var q = (Number(b.locQty[l])||0) - (b.locAlloc ? (Number(b.locAlloc[l])||0) : 0); return a + (q>0 ? q : 0); }, 0);
+}
+function homeCoopShorts(plans){
+  var from = coopDateAdd(todayStr(), -(COOP_ACTIVE_DAYS-1)), left = {}, out = {};
+  plans.filter(function(x){ return homeCoopIsTakaya(x) && Array.isArray(x.items) && x.date>=from; })
+    .sort(function(a, b){ return a.date.localeCompare(b.date); })
+    .forEach(function(x){
+      var m = out[homeCoopKey(x)] = {};
+      x.items.forEach(function(it){
+        var c = it[0], q = Number(it[1])||0;
+        if(!(c in left)) left[c] = coopSAvailOf(c);
+        var use = Math.min(left[c], q); left[c] -= use; m[c] = { s: use, short: q - use };
+      });
+    });
+  return out;
 }
 function renderHomeCoopCard(link, label){
   var st = state.gateDataStatus;
   if(!st || !hasDataAccess()) return '';
-  var head = label('calendar','今週の生協企画','生協の入れ替え');
-  var nav = link('stock','','在庫の「生協の入れ替え」を開く')+' data-nav-stock-tab="coop"';
+  var head = label('calendar','今週の生協企画(高屋)','');
+  var navBtn = '<button type="button" class="hd-btn" data-nav-role="stock" data-nav-stock-tab="coop" style="margin-left:auto;">生協の入れ替えを開く</button>';
   var cp = st.coopPlans;
-  if(!cp) return '<article class="hd-card hd-span3 hd-link"'+nav+'>'+head+'<div class="hd-empty">次の kintone の同期(見積もり・入荷予定)のあとに出ます</div></article>';
+  if(!cp) return '<article class="hd-card hd-span3">'+head+'<div class="hd-empty">次の kintone の同期(見積もり・入荷予定)のあとに出ます</div>'+navBtn+'</article>';
   var wk = coopWeekRange(todayStr()), WDJ = ['日','月','火','水','木','金','土'];
-  var list = cp.plans.filter(function(x){ return x.date>=wk.thisFrom && x.date<=wk.thisTo; });
-  var nextN = cp.plans.filter(function(x){ return x.date>=wk.nextFrom && x.date<=wk.nextTo; }).length;
-  var today = todayStr();
+  var tk = cp.plans.filter(homeCoopIsTakaya);
+  var list = tk.filter(function(x){ return x.date>=wk.thisFrom && x.date<=wk.thisTo; });
+  var nextN = tk.filter(function(x){ return x.date>=wk.nextFrom && x.date<=wk.nextTo; }).length;
+  var today = todayStr(), open = state.homeCoopOpen || {}, loaded = !!state.logiStock;
+  var shorts = loaded ? homeCoopShorts(cp.plans) : {};
   var rows = list.map(function(x){
-    var d = new Date(x.date+'T00:00:00'), wl = homeCoopWhLabel(x.wh), ext = x.wh && !outlookSiteOfWarehouse(x.wh);
-    return '<li class="hd-coop'+(x.date<today ? ' is-past' : '')+(x.date===today ? ' is-today' : '')+'">'+
+    var d = new Date(x.date+'T00:00:00'), k = homeCoopKey(x), sm = shorts[k];
+    var nShort = sm ? Object.keys(sm).filter(function(c){ return sm[c].short>0; }).length : 0;
+    var badge = !Array.isArray(x.items) ? '' : !loaded ? '' : sm ? (nShort ? '<span class="hd-coop-badge is-short">不足 '+nShort+'品番</span>' : '<span class="hd-coop-badge">足りる</span>') : '';
+    var body;
+    if(!Array.isArray(x.items)) body = '<div class="hd-empty" style="margin:6px 0;">品番の一覧は、次の kintone の同期のあとに出ます</div>';
+    else if(!open[k]) body = '';
+    else if(!loaded) body = '<div class="hd-empty" style="margin:6px 0;">在庫を読み込んでいます…</div>';
+    else body = '<table class="hd-coop-items"><thead><tr><th>品番</th><th>商品名</th><th class="num">企画の数</th><th class="num">生協ロケ</th><th class="num">不足</th></tr></thead><tbody>'+
+      x.items.map(function(it){
+        var c = it[0], q = Number(it[1])||0, v = (sm && sm[c]) || { s: 0, short: q };
+        return '<tr><td><b>'+esc(c)+'</b></td><td class="hd-coop-nm">'+esc(it[2]||'')+'</td><td class="num">'+formatNum(q)+'</td><td class="num">'+formatNum(v.s)+'</td>'+
+          '<td class="num">'+(v.short>0 ? '<b class="hd-coop-short">'+formatNum(v.short)+'</b>' : '<span class="hd-coop-ok">—</span>')+'</td></tr>';
+      }).join('')+'</tbody></table>'+
+      '<div class="hd-coop-act"><span class="hd-sub" style="margin:0;">生協ロケ = 保留のロケを除き、引当を引いた数を日付の早い企画から当てた分</span><button type="button" class="hd-btn" data-hd-coop-send="'+esc(k)+'">🧾 高屋の出荷集計表へ('+x.items.length+'品番)</button></div>';
+    return '<li class="hd-coop'+(x.date<today ? ' is-past' : '')+(x.date===today ? ' is-today' : '')+'"><details data-hd-coop="'+esc(k)+'"'+(open[k] ? ' open' : '')+'><summary>'+
       '<span class="hd-coop-d">'+(d.getMonth()+1)+'/'+d.getDate()+'('+WDJ[d.getDay()]+')</span>'+
-      '<span class="hd-coop-m"><b>'+esc(coopPartyShort(x.party))+'</b> '+esc(x.subject)+(wl ? ' <span class="hd-chip'+(ext ? '' : ' is-acc')+'">'+esc(wl)+'</span>' : '')+'</span>'+
-      '<span class="hd-coop-q">'+formatNum(x.qty)+'<small> ・ '+x.lines+'品番</small></span></li>';
+      '<span class="hd-coop-m"><b>'+esc(coopPartyShort(x.party))+'</b> '+esc(x.subject)+' '+badge+'</span>'+
+      '<span class="hd-coop-q">'+formatNum(x.qty)+'<small> ・ '+x.lines+'品番</small></span></summary>'+body+'</details></li>';
   }).join('');
-  return '<article class="hd-card hd-span3 hd-link"'+nav+'>'+head+
-    '<div class="hd-sub" style="margin:0 0 6px;">'+(wk.thisFrom.slice(5).replace('-','/'))+'〜'+(wk.thisTo.slice(5).replace('-','/'))+' ・ '+list.length+'件'+(nextN ? ' ・ 来週 '+nextN+'件' : '')+'</div>'+
-    (rows ? '<ul class="hd-coop-list">'+rows+'</ul>' : '<div class="hd-empty">今週の生協の企画はありません</div>')+
+  return '<article class="hd-card hd-span3">'+head+
+    '<div class="hd-sub" style="margin:0 0 6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span>'+(wk.thisFrom.slice(5).replace('-','/'))+'〜'+(wk.thisTo.slice(5).replace('-','/'))+' ・ '+list.length+'件'+(nextN ? ' ・ 来週 '+nextN+'件' : '')+' ・ 押すと品番と生協ロケの不足</span>'+navBtn+'</div>'+
+    (rows ? '<ul class="hd-coop-list">'+rows+'</ul>' : '<div class="hd-empty">今週の高屋の生協の企画はありません</div>')+
   '</article>';
+}
+/* ホームの生協企画: 企画の品番を一覧で高屋の出荷集計表に足す(数 = 企画の数。備考に 日付・得意先・件名) */
+async function homeCoopToShukei(key){
+  var cp = state.gateDataStatus && state.gateDataStatus.coopPlans;
+  var x = cp && cp.plans.filter(function(p){ return homeCoopKey(p)===key; })[0];
+  if(!x || !Array.isArray(x.items) || !x.items.length){ showToast('送る品番がありません'); return; }
+  var note = '生協 '+coopDate(x.date)+coopPartyShort(x.party)+' '+x.subject;
+  var dr = loadShukeiDraft('takaya'), have = {};
+  dr.rows.forEach(function(r){ have[r.code+'|'+r.note] = true; });
+  var add = x.items.filter(function(it){ return !have[it[0]+'|'+note]; });
+  if(!add.length){ showToast('この企画の品番は、もう出荷集計表に入っています'); return; }
+  if(!await appConfirm('高屋の出荷集計表に「'+coopDate(x.date)+' '+coopPartyShort(x.party)+' '+x.subject+'」の '+add.length+'品番を追加します'+(dr.rows.length ? '(今入っている'+dr.rows.length+'行のあとに)' : '')+(x.items.length>add.length ? '\n同じ行が既にある'+(x.items.length-add.length)+'品番は足しません。' : '')+'\nよろしいですか?')) return;
+  add.forEach(function(it){ dr.rows.push({ vc:'', code: it[0], qty: String(Number(it[1])||0), note: note }); });
+  saveShukeiDraft('takaya', { requester: dr.requester, rows: dr.rows });
+  state.shukeiDraft = null; // 出荷集計表を開いたときに読み直す
+  showToast('高屋の出荷集計表に '+add.length+'品番を追加しました');
 }
 /* トップの見出し: 時間に合わせたあいさつ・今日の日付・使う画面を選ぶ案内 */
 function gateHeroHtml(){
@@ -16409,6 +16476,16 @@ function bindCommon(){
       if(role==='input' || role==='adminHub') requestFreshTodayData(); // 本日の作業系の画面は最新データで再計算する
     });
   });
+  // ホームの生協企画(2026-10-30): 折りたたみを開いたら在庫を読む・出荷集計表へ
+  document.querySelectorAll('[data-hd-coop]').forEach(function(el){
+    el.addEventListener('toggle', function(){
+      var k = el.getAttribute('data-hd-coop'), o = state.homeCoopOpen || (state.homeCoopOpen = {});
+      if(!!o[k]===el.open) return;
+      o[k] = el.open;
+      if(el.open && !state.logiStock) logiStockLoad().then(function(){ render(); }); else render();
+    });
+  });
+  document.querySelectorAll('[data-hd-coop-send]').forEach(function(el){ el.addEventListener('click', function(){ homeCoopToShukei(el.getAttribute('data-hd-coop-send')); }); });
   var b = document.getElementById('switchRoleBtn');
   if(b) b.addEventListener('click', function(){
     state.role = null; state.activeStaffId = null; state.modal = null;

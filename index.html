@@ -15150,12 +15150,12 @@ async function runStockOutlookSync(){
    ③ 来週の企画: 入れられるだけ入れる(今週の分を引いた残りの在庫で足りない分)
    ・企画 = kintone の見積もり(将来在庫で取り込んだ物)のうち、生協の得意先(コープ・生協・パルシステム)の見積もり。見積日を企画の日とする。
      作り直した見積もり(件名の「○月○回」が同じ)は新しい版だけ。高屋(倉庫 0018・倉庫コードなし)の見積もりだけ
-   ・棚在庫のロケ(COOP_HOLD_LOCS。S3-9〜S3-12・S4-1〜S4-4)は保留: 生協ロケの在庫に数えず、片付けにも出さない(持ってくる元にはなる)
+   ・棚在庫のロケ(COOP_HOLD_LOCS。S3-9〜S3-12・S4-1〜S4-4・S4-13〜S4-14)は保留: 片付けにだけ出さない。生協ロケの在庫には数える(2026-10-30 から。前は数えず、持ってくる元にしていた)
    ・在庫は引当数を除いた数。持ってくるロケは、高屋の生協ロケ以外で在庫の多いロケから(今週の分を先に取る) */
 var COOP_BLOCK = 'S';
 var COOP_PUTAWAY_DAYS = 14;
 var COOP_ACTIVE_DAYS = 7;
-var COOP_HOLD_LOCS = [[3, 9, 12], [4, 1, 4]]; // [列, 番号の始め, 終わり]: 棚在庫(保留)
+var COOP_HOLD_LOCS = [[3, 9, 12], [4, 1, 4], [4, 13, 14]]; // [列, 番号の始め, 終わり]: 棚在庫(保留)
 var COOP_PARTY_RE = /コープ|ｺｰﾌﾟ|生協|パルシステム|coop|co-op/i;
 function coopLocParts(l){ return String(l||'').split('-').map(function(x){ return parseInt(x,10)||0; }); }
 function coopLocCmp(a, b){ var x = coopLocParts(a), y = coopLocParts(b); for(var i=0;i<Math.max(x.length,y.length);i++){ var d = (x[i]||0)-(y[i]||0); if(d) return d; } return 0; }
@@ -15180,10 +15180,10 @@ function computeCoopSwap(st){
     (plans[x.code] || (plans[x.code] = [])).push({ date: x.date, party: x.party, qty: Number(x.qty)||0, week: x.date<=wk.thisTo ? 'this' : 'next', active: x.date<=today, name: x.name });
   });
   function locAvail(blk, l){ return (Number((blk.locQty||{})[l])||0) - (blk.locAlloc ? (Number(blk.locAlloc[l])||0) : 0); }
-  function sLocsOf(code){ // 生協ロケ(保留のロケを除く)の在庫
+  function sLocsOf(code){ // 生協ロケ(保留のロケも含む)の在庫
     var b = P[code] && P[code].blocks[COOP_BLOCK], out = {};
     if(!b) return out;
-    Object.keys(b.locQty||{}).forEach(function(l){ if(coopIsHoldLoc(l)) return; var q = locAvail(b, l); if(q>0) out[l] = q; });
+    Object.keys(b.locQty||{}).forEach(function(l){ var q = locAvail(b, l); if(q>0) out[l] = q; });
     return out;
   }
   function sumOf(m){ return Object.keys(m).reduce(function(a,l){ return a+m[l]; }, 0); }
@@ -15195,7 +15195,7 @@ function computeCoopSwap(st){
     if(prod) Object.keys(prod.blocks).forEach(function(b){
       if(stockSiteOfBlock(b)!=='takaya') return;
       Object.keys(prod.blocks[b].locQty||{}).forEach(function(l){
-        if(b===COOP_BLOCK && !coopIsHoldLoc(l)) return; // 生協ロケそのものからは持ってこない(棚在庫の保留ロケからは持ってこられる)
+        if(b===COOP_BLOCK) return; // 生協ロケ(保留のロケも)からは持ってこない(生協ロケの在庫に数えているため)
         var q = locAvail(prod.blocks[b], l); if(q>0) list.push({ block: b, loc: l, qty: q });
       });
     });
@@ -15333,7 +15333,7 @@ function renderCoopSwap(st){
   var okToggle = function(n){ return n ? '<label class="pool-hint" style="display:inline-flex;align-items:center;gap:4px;margin:0 0 6px;cursor:pointer;"><input type="checkbox" id="coopShowOk"'+(state.coopShowOk ? ' checked' : '')+'> 足りている品番('+n+')も出す</label>' : ''; };
   var sumShort = function(rows){ return rows.reduce(function(a,x){ return a+x.short; }, 0); };
   var head = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">'+
-    '<span class="pool-hint" style="margin:0;">企画: kintone の見積もり '+esc(fmtDateTime(st.outlook.syncedAt))+'取込 ・ 在庫: ロジザード '+esc(fmtDateTime(st.lz.uploadedAt))+'取込 ・ 棚在庫で保留: '+esc(coopHoldText())+'</span>'+
+    '<span class="pool-hint" style="margin:0;">企画: kintone の見積もり '+esc(fmtDateTime(st.outlook.syncedAt))+'取込 ・ 在庫: ロジザード '+esc(fmtDateTime(st.lz.uploadedAt))+'取込 ・ 片付けに出さない棚在庫: '+esc(coopHoldText())+'</span>'+
     '<button type="button" class="vc-manage-toggle-btn" id="coopPrint" style="margin-left:auto;">🖨 入れ替え指示を印刷</button></div>'+
     (state.coopMsg ? '<div class="vc-import-status">'+state.coopMsg+'</div>' : '');
   // ①②③ は上のカードで切り替えて1つずつ出す(全部並べるとスクロールが多いため。2026-10-29。印刷は全部)
@@ -15352,7 +15352,7 @@ function renderCoopSwap(st){
     ? '<div class="stf-section-title" style="display:flex;align-items:center;gap:8px;">'+esc(ti.nextW)+selHtml.next+coopSendBtn('next', r.nextRows.filter(function(x){ return x.short; }).length)+'</div>'+okToggle(nOkNext)+'<div style="overflow-x:auto;">'+t.nextWeek+'</div>'
     : '<div class="stf-section-title" style="display:flex;align-items:center;gap:8px;">'+esc(ti.put)+selHtml.put+coopSendBtn('put', r.putAway.length)+'</div><div style="overflow-x:auto;">'+t.putAway+'</div>'+keepList;
   return head+cards+'<div class="pool-hint" style="margin:-4px 0 6px;">上のカードを押すと、その表に切り替わります(印刷は ①②③ 全部)</div>'+body+
-    '<div class="pool-hint" style="margin-top:10px;">生協ロケ = ロジザードのブロック「'+COOP_BLOCK+'」(棚在庫の '+esc(coopHoldText())+' は保留: 生協ロケの在庫に数えず、片付けにも出しません)。'+
+    '<div class="pool-hint" style="margin-top:10px;">生協ロケ = ロジザードのブロック「'+COOP_BLOCK+'」(棚在庫の '+esc(coopHoldText())+' は、生協ロケの在庫に数えますが、片付けには出しません)。'+
     '企画 = kintone の見積もりのうち得意先がコープ・生協・パルシステムの物(見積日を企画の日とする。作り直した見積もりは新しい版だけ。高屋の倉庫の物だけ)。'+
     '来週の補充数 = 来週の企画の数 − 今週の分を引いた生協ロケの残り。在庫は引当数を除いた数。持ってくるロケは、高屋の生協ロケ以外で在庫の多いロケから(今週の分を先に取る)。</div>';
 }
@@ -15387,7 +15387,7 @@ function coopSelLabel(kind){ var v = coopPartySel()[kind]; return v ? ' 【'+(v=
 function coopSwapPrint(st){
   var r = coopApplyParties(computeCoopSwap(st), coopPartySel()), t = renderCoopSwapTables(r, true), ti = coopTitles(r);
   var html = '<h1>生協の入れ替え指示 '+esc(todayStr().replace(/-/g,'/'))+'</h1>'+
-    '<div class="sub">在庫 ロジザード '+esc(fmtDateTime(st.lz.uploadedAt))+'取込 ・ 企画 kintone '+esc(fmtDateTime(st.outlook.syncedAt))+'取込 ・ 棚在庫で保留 '+esc(coopHoldText())+'</div>'+
+    '<div class="sub">在庫 ロジザード '+esc(fmtDateTime(st.lz.uploadedAt))+'取込 ・ 企画 kintone '+esc(fmtDateTime(st.outlook.syncedAt))+'取込 ・ 片付けに出さない棚在庫 '+esc(coopHoldText())+'</div>'+
     '<h2>'+esc(ti.put+coopSelLabel('put'))+' '+r.putAway.length+'件</h2>'+t.putAway+'<h2>'+esc(ti.thisW+coopSelLabel('this'))+'</h2>'+t.thisWeek+'<h2>'+esc(ti.nextW+coopSelLabel('next'))+'</h2>'+t.nextWeek;
   printHtmlDoc('生協の入れ替え指示_'+todayStr(), html,
     'h1{font-size:16px;margin:0 0 2px;}h2{font-size:13px;margin:12px 0 4px;}.sub{color:#475467;font-size:11px;margin-bottom:6px;}'+
@@ -16187,14 +16187,14 @@ function renderGateDashboard(){
 /* トップページの「今週の生協企画」(2026-10-29): 今週(月〜日)の生協の見積もりを、日付順に 得意先・件名・倉庫・品番の数・数量。
    データは kv「coop-plans」(kintone の同期のときに作る小さな一覧)。データの更新状況と一緒に読む */
 /* 2026-10-30: 高屋の企画だけを縦に並べ、企画ごとの折りたたみで品番・企画の数・生協ロケの不足を出す。
-   不足は、生協ロケ(ブロック S。保留のロケを除く・引当を引いた数)の在庫を、日付の早い企画から当てた残り(生協の入れ替えと同じ)。
+   不足は、生協ロケ(ブロック S。保留のロケも含む・引当を引いた数)の在庫を、日付の早い企画から当てた残り(生協の入れ替えと同じ)。
    在庫(ロジザード)は、折りたたみを開いたときに初めて読む(通信量を増やさないため)。「出荷集計表へ」で企画の品番を一覧で高屋の出荷集計表に足す */
 function homeCoopIsTakaya(x){ return !x.wh || outlookSiteOfWarehouse(x.wh)==='takaya'; }
 function homeCoopKey(x){ return [x.date, x.party, x.subject].join('|'); }
-function coopSAvailOf(code){ // 生協ロケの在庫(保留のロケを除く・引当を引いた数)
+function coopSAvailOf(code){ // 生協ロケの在庫(保留のロケも含む・引当を引いた数)
   var p = state.logiStock && state.logiStock.products && state.logiStock.products[code], b = p && p.blocks && p.blocks[COOP_BLOCK];
   if(!b) return 0;
-  return Object.keys(b.locQty||{}).reduce(function(a, l){ if(coopIsHoldLoc(l)) return a; var q = (Number(b.locQty[l])||0) - (b.locAlloc ? (Number(b.locAlloc[l])||0) : 0); return a + (q>0 ? q : 0); }, 0);
+  return Object.keys(b.locQty||{}).reduce(function(a, l){ var q = (Number(b.locQty[l])||0) - (b.locAlloc ? (Number(b.locAlloc[l])||0) : 0); return a + (q>0 ? q : 0); }, 0);
 }
 function homeCoopShorts(plans){
   var from = coopDateAdd(todayStr(), -(COOP_ACTIVE_DAYS-1)), left = {}, out = {};
@@ -16237,7 +16237,7 @@ function renderHomeCoopCard(link, label){
         return '<tr><td><b>'+esc(c)+'</b></td><td class="hd-coop-nm">'+esc(it[2]||'')+'</td><td class="num">'+formatNum(q)+'</td><td class="num">'+formatNum(v.s)+'</td>'+
           '<td class="num">'+(v.short>0 ? '<b class="hd-coop-short">'+formatNum(v.short)+'</b>' : '<span class="hd-coop-ok">—</span>')+'</td></tr>';
       }).join('')+'</tbody></table>'+
-      '<div class="hd-coop-act"><span class="hd-sub" style="margin:0;">生協ロケ = 保留のロケを除き、引当を引いた数を日付の早い企画から当てた分</span><button type="button" class="hd-btn" data-hd-coop-send="'+esc(k)+'">🧾 高屋の出荷集計表へ('+x.items.length+'品番)</button></div>';
+      '<div class="hd-coop-act"><span class="hd-sub" style="margin:0;">生協ロケ = ブロック S の在庫から引当を引いた数を日付の早い企画から当てた分</span><button type="button" class="hd-btn" data-hd-coop-send="'+esc(k)+'">🧾 高屋の出荷集計表へ('+x.items.length+'品番)</button></div>';
     return '<li class="hd-coop'+(x.date<today ? ' is-past' : '')+(x.date===today ? ' is-today' : '')+'"><details data-hd-coop="'+esc(k)+'"'+(open[k] ? ' open' : '')+'><summary>'+
       '<span class="hd-coop-d">'+(d.getMonth()+1)+'/'+d.getDate()+'('+WDJ[d.getDay()]+')</span>'+
       '<span class="hd-coop-m"><b>'+esc(coopPartyShort(x.party))+'</b> '+esc(x.subject)+' '+badge+'</span>'+

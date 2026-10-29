@@ -1374,6 +1374,15 @@ body{font-feature-settings:"tnum";}
 .hd-link:hover .hd-go{opacity:1;color:#6366f1;}
 .hd-label .ll-ic{flex:none;}
 .hd-span2{grid-column:span 2;}
+.hd-coop-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));column-gap:24px;}
+.hd-coop{display:grid;grid-template-columns:64px 1fr auto;gap:6px;align-items:baseline;font-size:13px;padding:4px 0;border-bottom:1px solid var(--paper-line);}
+.hd-coop.is-past{opacity:.55;}
+.hd-coop.is-today .hd-coop-d{font-weight:700;color:var(--dash-acc);}
+.hd-coop-d{white-space:nowrap;color:var(--slate-500);}
+.hd-coop-m{min-width:0;overflow-wrap:anywhere;line-height:1.4;}
+.hd-coop-m .hd-chip{font-size:10px;padding:0 5px;}
+.hd-coop-q{white-space:nowrap;font-weight:700;text-align:right;}
+.hd-coop-q small{font-weight:400;color:var(--slate-500);}
 .hd-span3{grid-column:1 / -1;}
 .hd-arrival #arrivalSheetPanel{margin:0 !important;padding:0 !important;border:none !important;background:transparent !important;box-shadow:none !important;}
 .hd-arrival #arrivalSheetPanel > .stf-section-title{display:none;}
@@ -14588,6 +14597,7 @@ function exportStockCsv(kind){
      ・見積もりの入っていない在庫 = 在庫があるのに、今日以降の見積もりが1件も無い品番
    数量はピース。拠点は明細の倉庫コード(弥生の倉庫コード: 高屋 0018・丹南 0000)で分ける。 */
 var STOCK_OUTLOOK_KEY = 'stock-outlook';
+var COOP_PLANS_KEY = 'coop-plans'; // 生協の企画の一覧(見積もりごとに品番の数と数量だけ。kintone の同期のときに作る。トップページの「今週の生協企画」用。2026-10-29)
 var STOCK_OUTLOOK_STATUS_KEY = 'stock-outlook-status'; // 最後に取り込んだ日時と件数だけ(在庫・kintone取込の画面で、大きな本体を読まずに出す)
 function outlookSiteOfWarehouse(code){
   var k = Object.keys(SHUKEI_SITES).filter(function(x){ return SHUKEI_SITES[x].yayoiWarehouse===String(code||'').trim(); })[0];
@@ -14837,7 +14847,7 @@ function arrivalSheetCanvas(st, site, dateStr, supplier, no){
   g.fillText(fit('入庫明細 '+dateStr.replace(/-/g,'/')+(site ? ' '+SHUKEI_SITES[site].name : '')+(no ? ' 発注番号 '+no : '')+(supplier ? ' '+supplier : ''), W-32), 16, 20);
   g.font = '11px '+FONT; g.fillStyle = '#475467';
   g.fillText(fit((oneSup && rows[0].supplier ? '仕入先 '+rows[0].supplier+' ・ ' : '')+(oneNo && rows[0].no ? '発注番号 '+rows[0].no+' ・ ' : '')+'発注 '+Object.keys(orders).length+'件 ・ 明細 '+nToday+'行'+(nLate ? '(ほかに遅れ '+nLate+'行)' : '')+' ・ 数量 '+formatNum(qtyT)+' ・ 約'+formatNum(Math.round(casesT*10)/10)+'ケース'+
-    ' ・ kintone 発注履歴(949) '+(ol.syncedAt ? fmtDateTime(ol.syncedAt) : '')+'取込 ・ 2か月見積 = '+dateStr.slice(5).replace('-','/')+'〜'+est2mEnd.slice(5).replace('-','/')+'の見積もり'+(st.stockFree ? '(外部OK = 今の在庫+この入荷が2か月の見積より多い分)' : ''), W-32), 16, 42);
+    ' ・ kintone 発注履歴(949) '+(ol.syncedAt ? fmtDateTime(ol.syncedAt) : '')+'取込 ・ 2か月見積 = '+dateStr.slice(5).replace('-','/')+'〜'+est2mEnd.slice(5).replace('-','/')+'の見積もり'+(st.stockFree ? '(備考の外部OK = 今の在庫+この入荷が2か月の見積より多い分のケース数)' : ''), W-32), 16, 42);
   function row(y, cells, head, r, idx){
     var x = 16;
     g.fillStyle = head ? '#E4E7EC' : (r.late ? '#FEF3F2' : (idx%2 ? '#F9FAFB' : '#fff')); g.fillRect(16, y, W-32, RH);
@@ -14864,17 +14874,20 @@ function arrivalSheetCanvas(st, site, dateStr, supplier, no){
   row(TOP, cols.map(function(c){ return c[0]; }), true);
   var mixedSite = rows.some(function(r){ return r.site!==(rows[0] && rows[0].site); }); // 拠点は、高屋と丹南が混ざっているときだけ備考に出す
   rows.forEach(function(r, i){
-    var note = [r.late ? '遅れ '+r.due.slice(5).replace('-','/') : '', r.site && mixedSite ? SHUKEI_SITES[r.site].name : '', r.note || ''].filter(Boolean).join(' ');
+    // 備考: 遅れ・拠点・kintone の内訳(新商品・生産あまり など。「通常」は出さない)・外部倉庫に持っていってよいケース数(2026-10-29)
     var caseN = r.cases===null ? '' : formatNum(Math.floor(r.cases + 1e-9));
     var rem = r.cases===null ? '' : formatNum(Math.round(r.qty - Math.floor(r.cases + 1e-9)*r.pack));
     // 外部倉庫の目安: 今の在庫(引当を除く)+この入荷 − 2か月の見積 が残る分。在庫だけで2か月の見積が足りるなら全部(全量)、足りなければ残る分のケース
     var ext = '';
     if(st.stockFree){
       var e2 = est2m[r.code] || 0, stk = st.stockFree[r.code] || 0, left = stk + r.qty - e2;
-      if(e2 <= stk) ext = '外部OK 全量';
-      else if(left > 0 && r.pack){ var lc = Math.min(Math.floor(left / r.pack), Math.floor(r.qty / r.pack)); if(lc>0) ext = '外部OK '+formatNum(lc)+'c'; }
+      var allC = r.pack ? Math.floor(r.qty / r.pack + 1e-9) : 0;
+      if(e2 <= stk) ext = '外部OK 全量'+(allC ? ' '+formatNum(allC)+'c' : '');
+      else if(left > 0 && r.pack){ var lc = Math.min(Math.floor(left / r.pack), allC); if(lc>0) ext = '外部OK '+formatNum(lc)+'c'; }
     }
-    var val = { est2m: { n: est2m[r.code] ? formatNum(est2m[r.code]) : '—', ext: ext }, code: r.code, qty: formatNum(r.qty), caseN: caseN, rem: rem, pack: r.pack ? formatNum(r.pack) : '', name: r.name, supplier: r.supplier, no: r.no, note: note };
+    var noteK = String(r.note||'').split(/\s*\/\s*/).filter(function(t){ return t && t!=='通常'; }).join(' / ');
+    var note = [r.late ? '遅れ '+r.due.slice(5).replace('-','/') : '', r.site && mixedSite ? SHUKEI_SITES[r.site].name : '', noteK, ext].filter(Boolean).join(' ');
+    var val = { est2m: { n: est2m[r.code] ? formatNum(est2m[r.code]) : '—', ext: '' }, code: r.code, qty: formatNum(r.qty), caseN: caseN, rem: rem, pack: r.pack ? formatNum(r.pack) : '', name: r.name, supplier: r.supplier, no: r.no, note: note };
     row(TOP+RH*(i+1), cols.map(function(c){ return c[3] ? val[c[3]] : ''; }), false, r, i);
   });
   if(!rows.length){ g.fillStyle = '#475467'; g.font = '14px '+FONT; g.fillText('今日入る発注はありません', 24, TOP+RH*1.5); }
@@ -15901,6 +15914,8 @@ async function loadGateDataStatus(){
   out.kintoneProduct = (ks && ks.fetchedAt) ? { at: ks.fetchedAt, detail: formatNum(ks.savedCount||0)+'件' } : null;
   // kintone 見積もり・入荷予定の同期(日時と件数だけの小さな記録。2026-10-26)
   var os = await loadKeyJson(STOCK_OUTLOOK_STATUS_KEY, function(){ return null; });
+  var cp = await loadKeyJson(COOP_PLANS_KEY, function(){ return null; });
+  out.coopPlans = (cp && !isUnverified(cp) && Array.isArray(cp.plans)) ? cp : null;
   out.kintoneOutlook = (os && os.syncedAt) ? { at: os.syncedAt, detail: '入荷予定 '+formatNum(os.arrivalLines||0)+'行・見積 '+formatNum(os.estimateRecords||0)+'件' } : null;
   // kintone 作業日報の同期
   var ws = await loadKeyJson(WORK_REPORT_STATUS_KEY, function(){ return null; });
@@ -16083,6 +16098,7 @@ function renderGateDashboard(){
     (arr.open ? renderArrivalSheetPanel() : '')+
     '<button type="button" class="hd-btn'+(arr.open ? '' : ' is-primary')+'" id="arrivalSheetPdf">'+(arr.open ? '閉じる' : '仕入先ごとに見る・印刷')+'</button>'+
   '</article>';
+  var coopCard = renderHomeCoopCard(link, label);
   var dataCard = dataStatus ? '<article class="hd-card hd-span3 hd-data hd-link"'+link('adminHub','stockData','管理の「在庫・kintone取込」を開く')+'>'+label('database','データの更新状況','在庫・kintone取込',true)+dataStatus+'</article>' : '';
   var kpiHtml = '';
   try{
@@ -16098,7 +16114,37 @@ function renderGateDashboard(){
       kpiTile('作業時間', fmtHM(wsum), '', '休憩を除く')+
     '</div>';
   }catch(e){ kpiHtml = ''; }
-  return kpiHtml+'<section class="hd-grid">'+progress+staffCard+taskCard+statusCard+arrivalCard+dataCard+'</section>';
+  return kpiHtml+'<section class="hd-grid">'+progress+staffCard+taskCard+statusCard+arrivalCard+coopCard+dataCard+'</section>';
+}
+/* トップページの「今週の生協企画」(2026-10-29): 今週(月〜日)の生協の見積もりを、日付順に 得意先・件名・倉庫・品番の数・数量。
+   データは kv「coop-plans」(kintone の同期のときに作る小さな一覧)。データの更新状況と一緒に読む */
+function homeCoopWhLabel(wh){
+  if(!wh) return '';
+  var site = outlookSiteOfWarehouse(wh);
+  return site ? SHUKEI_SITES[site].name : (wh==='0008' ? '外部倉庫' : '倉庫 '+wh);
+}
+function renderHomeCoopCard(link, label){
+  var st = state.gateDataStatus;
+  if(!st || !hasDataAccess()) return '';
+  var head = label('calendar','今週の生協企画','生協の入れ替え');
+  var nav = link('stock','','在庫の「生協の入れ替え」を開く')+' data-nav-stock-tab="coop"';
+  var cp = st.coopPlans;
+  if(!cp) return '<article class="hd-card hd-span3 hd-link"'+nav+'>'+head+'<div class="hd-empty">次の kintone の同期(見積もり・入荷予定)のあとに出ます</div></article>';
+  var wk = coopWeekRange(todayStr()), WDJ = ['日','月','火','水','木','金','土'];
+  var list = cp.plans.filter(function(x){ return x.date>=wk.thisFrom && x.date<=wk.thisTo; });
+  var nextN = cp.plans.filter(function(x){ return x.date>=wk.nextFrom && x.date<=wk.nextTo; }).length;
+  var today = todayStr();
+  var rows = list.map(function(x){
+    var d = new Date(x.date+'T00:00:00'), wl = homeCoopWhLabel(x.wh), ext = x.wh && !outlookSiteOfWarehouse(x.wh);
+    return '<li class="hd-coop'+(x.date<today ? ' is-past' : '')+(x.date===today ? ' is-today' : '')+'">'+
+      '<span class="hd-coop-d">'+(d.getMonth()+1)+'/'+d.getDate()+'('+WDJ[d.getDay()]+')</span>'+
+      '<span class="hd-coop-m"><b>'+esc(coopPartyShort(x.party))+'</b> '+esc(x.subject)+(wl ? ' <span class="hd-chip'+(ext ? '' : ' is-acc')+'">'+esc(wl)+'</span>' : '')+'</span>'+
+      '<span class="hd-coop-q">'+formatNum(x.qty)+'<small> ・ '+x.lines+'品番</small></span></li>';
+  }).join('');
+  return '<article class="hd-card hd-span3 hd-link"'+nav+'>'+head+
+    '<div class="hd-sub" style="margin:0 0 6px;">'+(wk.thisFrom.slice(5).replace('-','/'))+'〜'+(wk.thisTo.slice(5).replace('-','/'))+' ・ '+list.length+'件'+(nextN ? ' ・ 来週 '+nextN+'件' : '')+'</div>'+
+    (rows ? '<ul class="hd-coop-list">'+rows+'</ul>' : '<div class="hd-empty">今週の生協の企画はありません</div>')+
+  '</article>';
 }
 /* トップの見出し: 時間に合わせたあいさつ・今日の日付・使う画面を選ぶ案内 */
 function gateHeroHtml(){
@@ -16301,6 +16347,7 @@ function bindCommon(){
       if(isRoleBlockedForAccount(role)) return; // 閲覧専用アカウントでは開かない
       var navTab = el.getAttribute('data-nav-admin-tab');
       if(navTab) state.adminHubTab = navTab;
+      if(el.getAttribute('data-nav-stock-tab')) state.stockTab = el.getAttribute('data-nav-stock-tab'); // トップの「今週の生協企画」から生協の入れ替えへ
       else if(role==='adminHub' && (state.adminHubTab==='data' || state.adminHubTab==='stockData' || state.adminHubTab==='setBom')) state.adminHubTab = 'today'; // 「管理」は、今日の状況から
       if(role==='monitor') state.monitorEntryRole = state.role || '';
       state.role = role || null;

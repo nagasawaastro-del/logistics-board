@@ -15159,6 +15159,7 @@ var COOP_HOLD_LOCS = [[3, 9, 12], [4, 1, 4], [4, 13, 14]]; // [列, 番号の始
 var COOP_PARTY_RE = /コープ|ｺｰﾌﾟ|生協|パルシステム|coop|co-op/i;
 function coopLocParts(l){ return String(l||'').split('-').map(function(x){ return parseInt(x,10)||0; }); }
 function coopLocCmp(a, b){ var x = coopLocParts(a), y = coopLocParts(b); for(var i=0;i<Math.max(x.length,y.length);i++){ var d = (x[i]||0)-(y[i]||0); if(d) return d; } return 0; }
+function coopIsMikomi(x){ return /見込/.test(String((x && x.subject)||'').normalize('NFKC')); } // 企画見込みの伝票(件名に「見込」)は生協の企画に数えない(2026-10-30)
 function coopIsHoldLoc(l){ var p = coopLocParts(l); return COOP_HOLD_LOCS.some(function(h){ return p[0]===h[0] && p[1]>=h[1] && p[1]<=h[2]; }); }
 function coopHoldText(){ return COOP_HOLD_LOCS.map(function(h){ return 'S'+h[0]+'-'+h[1]+'〜S'+h[0]+'-'+h[2]; }).join('・'); }
 function coopDateAdd(ds, n){ var x = new Date(ds+'T00:00:00'); x.setDate(x.getDate()+n); return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0'); }
@@ -15173,7 +15174,7 @@ function computeCoopSwap(st){
   var plans = {}, later = {};
   var lines = st.outlook ? outlookEstimateLines(st.outlook, { includeActive: true }).lines : [];
   lines.forEach(function(x){
-    if(!COOP_PARTY_RE.test(x.party||'')) return;
+    if(!COOP_PARTY_RE.test(x.party||'') || coopIsMikomi(x)) return;
     if(String(x.warehouse||'').trim() && outlookSiteOfWarehouse(x.warehouse)!=='takaya') return;
     if(x.date < wk.activeFrom) return;
     if(x.date > wk.nextTo){ if(!later[x.code] || x.date < later[x.code].date) later[x.code] = x; return; }
@@ -16189,7 +16190,7 @@ function renderGateDashboard(){
 /* 2026-10-30: 高屋の企画だけを縦に並べ、企画ごとの折りたたみで品番・企画の数・生協ロケの不足を出す。
    不足は、生協ロケ(ブロック S。保留のロケも含む・引当を引いた数)の在庫を、日付の早い企画から当てた残り(生協の入れ替えと同じ)。
    在庫(ロジザード)は、折りたたみを開いたときに初めて読む(通信量を増やさないため)。「出荷集計表へ」で企画の品番を一覧で高屋の出荷集計表に足す */
-function homeCoopIsTakaya(x){ return !x.wh || outlookSiteOfWarehouse(x.wh)==='takaya'; }
+function homeCoopIsTakaya(x){ return (!x.wh || outlookSiteOfWarehouse(x.wh)==='takaya') && !coopIsMikomi(x); } // 高屋の企画(企画見込みの伝票を除く)
 function homeCoopKey(x){ return [x.date, x.party, x.subject].join('|'); }
 function coopSAvailOf(code){ // 生協ロケの在庫(保留のロケも含む・引当を引いた数)
   var p = state.logiStock && state.logiStock.products && state.logiStock.products[code], b = p && p.blocks && p.blocks[COOP_BLOCK];

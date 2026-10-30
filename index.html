@@ -10505,24 +10505,23 @@ function renderClientSetSheet(cl){
     '<div class="pool-hint" style="margin-top:8px;">並びは商品名の順(指示書・JAN ラベルも同じ順)。品番が13桁ならそれを JAN に、そうでなければロジザードの在庫の JAN を使います。</div>'+
   '</div>';
 }
-/* 作業の順の表(完成品ごとに、横に部品と数)。print = 印刷用(バーコードつき) */
+/* 作業の順の表(完成品ごとに、部品と数)。左に使う部品、右に作る完成品(2026-10-30 に入れ替え)。print = 印刷用(バーコードつき) */
 function clientSetOrderTable(T, nameOf, print){
   var no = 0, label = 0;
   var body = T.fin.map(function(F){
     no++;
     var comp = (F.comp && F.comp.length) ? F.comp : [null], k = comp.length, j = clientJan(F.code);
     var from = label + 1; if(j) label += F.qty; // JAN の分からないセットはラベルに入らない
-    var head = '<td rowspan="'+k+'" class="no">'+no+'</td>'+
-      '<td rowspan="'+k+'" class="fin"><div class="nm1">'+esc(nameOf(F.code, F.name))+'</div><div class="cd">'+esc(F.code)+'</div>'+(print && j ? '<div class="bcs">'+ean13Svg(j, 22)+'</div>' : '')+'</td>'+
+    var head = '<td rowspan="'+k+'" class="fin"><div class="nm1">'+esc(nameOf(F.code, F.name))+'</div><div class="cd">'+esc(F.code)+'</div>'+(print && j ? '<div class="bcs">'+ean13Svg(j, 22)+'</div>' : '')+'</td>'+
       '<td rowspan="'+k+'" class="q">'+formatNum(F.qty)+'</td>';
     var tail = '<td rowspan="'+k+'" class="lbl">'+(!j ? 'JANなし' : F.qty ? from+(F.qty>1 ? '〜'+label : '') : '')+'</td><td rowspan="'+k+'" class="chk"></td>';
     return comp.map(function(p, i){
       var part = p ? '<td class="pt"><div class="nm2">'+esc(nameOf(p.code, p.name))+'</div><div class="cd">'+esc(p.code)+'</div></td><td class="per">×'+formatNum(p.per)+'</td><td class="pq">'+formatNum(p.qty)+'</td>'
         : '<td class="pt" colspan="3"><span class="cd">中身の登録なし</span></td>';
-      return '<tr class="'+(i===0 ? 'top' : 'sub')+'">'+(i===0 ? head : '')+part+(i===0 ? tail : '')+'</tr>';
+      return '<tr class="'+(i===0 ? 'top' : 'sub')+'">'+(i===0 ? '<td rowspan="'+k+'" class="no">'+no+'</td>' : '')+part+(i===0 ? head+tail : '')+'</tr>';
     }).join('');
   }).join('');
-  return '<table class="'+(print ? '' : 'report-table')+' setorder"><thead><tr><th>No</th><th>作る完成品</th><th>作る数</th><th>使う部品</th><th>1セット</th><th>使う数</th><th>シール</th><th>済</th></tr></thead><tbody>'+(body || '<tr><td colspan="8">ありません</td></tr>')+'</tbody></table>';
+  return '<table class="'+(print ? '' : 'report-table')+' setorder"><thead><tr><th>No</th><th>使う部品</th><th>1セット</th><th>使う数</th><th>作る完成品</th><th>作る数</th><th>シール</th><th>済</th></tr></thead><tbody>'+(body || '<tr><td colspan="8">ありません</td></tr>')+'</tbody></table>';
 }
 function clientSetSheetPrint(cl){
   var S = clientSetSel(cl); if(!S) return;

@@ -9809,7 +9809,7 @@ function clientInbModeBar(c, d){
   var n = c.inbEditsKey===c.dataKey ? Object.keys(c.inbEdits || {}).length : 0;
   var miss = clientInbSlips(d.rows).filter(function(sl){ return clientInbSlipInfo(c, d, sl).miss; }).length;
   return '<div class="sk-minor" style="margin:6px 0 2px;">入荷伝票(入荷番号)ごとに、区分と<b>ケース(個口)数</b>を入れます(何品目入っていても1個口なら 1)。伝票の中で品目ごとに区分を変えることもできます。</div>'+
-    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 6px;"><span>全部の伝票を</span>'+CLIENT_INB_MODES.map(function(m){ return '<button type="button" class="ll-btn" data-inb-all="'+m[0]+'">'+esc(m[1].replace(/\(.*\)/,''))+'</button>'; }).join('')+
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 6px;">'+
     '<button type="button" class="add-btn" id="cdInbSave"'+(n ? '' : ' disabled')+'>区分を保存する'+(n ? '('+n+'行)' : '')+'</button>'+
     (miss ? '<span style="color:#B42318;font-size:12px;">ケース数が入っていない伝票が '+miss+'件あります(作業料に入りません)</span>' : '')+'</div>';
 }
@@ -9846,7 +9846,6 @@ function bindClientInbModes(c){
     sl.idx.forEach(function(i){ var e = clientInbEdit(c, i, c.data.rows[i]); if(e.mode!=='case'){ if(e.cases!=='' && e.cases!==undefined) setE(i, { cases: '' }); return; } setE(i, { cases: first ? v : '' }); first = false; });
     render();
   }); });
-  document.querySelectorAll('[data-inb-all]').forEach(function(el){ el.addEventListener('click', function(){ var m = el.getAttribute('data-inb-all'); (c.data.rows||[]).slice(0, 300).forEach(function(r, i){ setE(i, { mode: m }); }); render(); }); });
   var sv = document.getElementById('cdInbSave');
   if(sv) sv.addEventListener('click', async function(){
     var edits = c.inbEdits || {}, key = c.dataKey, bad = 0;

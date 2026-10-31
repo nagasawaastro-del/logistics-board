@@ -12169,8 +12169,8 @@ async function loadVcAllocData(){
 }
 /* ---------- 入出庫指示(2026-10-31。いまは入庫だけ) ----------
    エクセル「入庫情報出力」の代わり: 入庫予定日と品番・数量から、CX への入庫予定ファイル KNYUY541.txt(タブ区切り・見出しつき・全29列)を作る。各自の PC で使う(入力はその PC に残す)。
-   品番の情報は kv「cx-inbound-master」= { source, syncedAt / uploadedAt, items: { 品番: [商品名, 入数, JAN] } }。ふだんは sync-product-master が kintone の商品台帳から作る(source: 'kintone')。
-   kintone に JAN が無いときだけ、エクセルの「客先情報」シートから取り込む(この3つだけ。単価は kv に入れない)。
+   品番の情報は kv「cx-inbound-master」= { source, syncedAt / uploadedAt, items: { 品番: [商品名, 入数, JAN] } }。ふだんは sync-product-master が kintone の商品台帳から作る(source: 'kintone'。JAN は「規格・型番」)。
+   kintone の JAN が少ないときだけ、エクセルの「客先情報」シートから取り込む(この3つだけ。単価は kv に入れない)。
    商品コードの列は JAN(客先品番は使わない。エクセルの 1.8 と同じ)。 */
 var CX_IN_MASTER_KEY = 'cx-inbound-master', CX_IN_DRAFT_KEY = 'cxInboundDraft';
 var CX_IN_SUPPLIER = '0367608', CX_IN_CENTER = '3308';
@@ -12263,7 +12263,8 @@ function renderCxOrder(){
   }
   var M = state.cxInMaster, n = M && M.items ? Object.keys(M.items).length : 0, rows = M ? cxInParse(D.lines, M.items || {}) : [];
   var fromKintone = M && M.source==='kintone';
-  var master = hasManagerSession() && M && !fromKintone
+  var nJan = n ? Object.keys(M.items).filter(function(k){ return /^\d{13}$/.test(M.items[k][2]); }).length : 0;
+  var master = hasManagerSession() && M && (!fromKintone || nJan < n/2) // kintone の JAN が少なければ、エクセルから取り込めるように
     ? '<div class="ll-form-group shukei-drop" data-cxin-drop="1" style="margin:12px 0 0;"><div class="ll-form-group-title">客先情報の取り込み(kintone から JAN を読めないときだけ)</div>'+
         '<div class="pool-hint" style="margin:0 0 6px;">入庫情報出力のエクセル(.xlsm)か客先情報(.xlsx)を選ぶか、この枠にドラッグ&ドロップしてください。「客先情報」シートの商品名・入数・JAN だけを取り込みます(単価は取り込みません)。</div>'+
         '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 ファイルを選んで取り込む<input type="file" id="cxInFile" accept=".xlsx,.xlsm,.xls" style="display:none;"></label><span class="shukei-drop-hint">またはファイルをこの枠にドラッグ&ドロップ</span>'+
@@ -12271,7 +12272,7 @@ function renderCxOrder(){
     : '';
   return '<div class="mgr-wrap client-hub"><div class="vc-tabs hub-tabs" style="margin:0 0 14px;"><button type="button" class="vc-tab-btn active">入庫指示</button></div>'+
     '<div class="panel"><div class="panel-title">入庫指示(CX への入庫予定ファイル)</div>'+
-    '<div class="pool-hint" style="margin:0 0 10px;">入庫予定日と品番・数量を入れて、KNYUY541.txt を保存します(同じ名前のファイルに上書きできます)。商品の情報: '+(!M ? '読み込み中…' : n ? formatNum(n)+'品番'+(fromKintone ? '(kintone の商品台帳 '+esc(fmtDateTime(M.syncedAt))+')' : M.uploadedAt ? '(客先情報 '+esc(fmtDateTime(M.uploadedAt))+' 取込)' : '') : '<b style="color:#B42318;">まだありません</b>(kintone の商品台帳を同期すると入ります)')+'</div>'+
+    '<div class="pool-hint" style="margin:0 0 10px;">入庫予定日と品番・数量を入れて、KNYUY541.txt を保存します(同じ名前のファイルに上書きできます)。商品の情報: '+(!M ? '読み込み中…' : n ? formatNum(n)+'品番・JAN '+formatNum(nJan)+'品番'+(fromKintone ? '(kintone の商品台帳 '+esc(fmtDateTime(M.syncedAt))+')' : M.uploadedAt ? '(客先情報 '+esc(fmtDateTime(M.uploadedAt))+' 取込)' : '') : '<b style="color:#B42318;">まだありません</b>(kintone の商品台帳を同期すると入ります)')+'</div>'+
     '<div class="ch-row"><label class="ch-field"><span>作成日</span><input type="text" value="'+esc(todayStr().replace(/-/g,'/'))+'" disabled style="width:120px;"></label>'+
       '<label class="ch-field"><span>入庫予定日</span><input type="date" id="cxInDate" value="'+esc(D.date)+'"></label>'+
       '<button type="button" class="add-btn" id="cxInSave">💾 KNYUY541.txt を保存</button><button type="button" class="ll-btn" id="cxInClear">新規入力(入力を消す)</button></div>'+

@@ -9610,8 +9610,8 @@ function setBomTablesHtml(exp, print){
 var CLIENT_DEFS_KEY = 'client-defs';
 var CLIENT_KINDS = {
   inb:  { label:'入荷実績', fields: [['date','入荷日'],['no','入荷番号・発注番号'],['lineNo','行番号'],['supplier','仕入先',1],['code','品番',1],['name','品名'],['qty','数量',1],['cases','ケース数'],['note','備考']] },
-  // 出荷の行番号は、同じ行のだぶりを見分けるために取り込み続ける。一覧と CSV には出さない(4つめが 1。2026-10-31)
-  ship: { label:'出荷実績', fields: [['date','出荷日'],['slip','伝票番号'],['lineNo','行番号(だぶり防止)',0,1],['center','納品センター'],['code','品番',1],['name','品名'],['qty','数量',1],['note','備考']] },
+  // 出荷の行番号は、同じ行のだぶりを見分けるために取り込み続ける。4つめが 1 の項目は、一覧・CSV・列を選ぶ画面に出さず、見出しの名前で自動で当てる(2026-10-31。手で別の列を選ぶとだぶるため)
+  ship: { label:'出荷実績', fields: [['date','出荷日'],['slip','伝票番号'],['lineNo','行番号',0,1],['center','納品センター'],['code','品番',1],['name','品名'],['qty','数量',1],['note','備考']] },
   set:  { label:'セット指示書', fields: [['date','作業日'],['no','指示番号・PO'],['setCode','セット品番・JAN',1],['setName','セット名'],['setQty','セット数'],['partCode','部品品番・JAN',1],['partName','部品名'],['partPer','1セットの部品数'],['partQty','部品数(合計)'],['note','備考']] }
 };
 // 見出しの名前から、項目を当てる(はじめの案。画面で直せる)
@@ -9744,10 +9744,10 @@ function renderClientData(){
     imp = '<div class="stf-card" style="margin:0 0 10px;"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><b>📄 '+esc(f.name)+'</b><span class="sk-minor">'+formatNum(f.rows.length)+'行</span>'+
         '<span>見出しの行 <input type="number" id="cdHeaderRow" min="1" max="20" value="'+(c.headerRow||1)+'" style="width:60px;"> 行目</span>'+
         '<button type="button" class="ll-btn" id="cdFileCancel" style="margin-left:auto;">やめる</button></div>'+
-      '<div class="cd-map">'+K.fields.map(function(fd){ return '<label><span>'+esc(fd[1])+(fd[2] ? '<b style="color:#B42318;">*</b>' : '')+'</span><select data-cd-col="'+fd[0]+'">'+opts(fd[0])+'</select></label>'; }).join('')+'</div>'+
+      '<div class="cd-map">'+K.fields.filter(function(fd){ return !fd[3]; }).map(function(fd){ return '<label><span>'+esc(fd[1])+(fd[2] ? '<b style="color:#B42318;">*</b>' : '')+'</span><select data-cd-col="'+fd[0]+'">'+opts(fd[0])+'</select></label>'; }).join('')+'</div>'+
       '<div class="sk-minor" style="margin:6px 0;">* は必ず対応させる項目。取り込める行 '+formatNum(mapped.rows.length)+'行'+(mapped.skipped ? '・必須の項目が空で外す行 '+formatNum(mapped.skipped)+'行' : '')+(mapped.missingCols.length ? '・<span style="color:#B42318;">まだ対応させていない必須の項目: '+esc(mapped.missingCols.map(function(x){ return K.fields.filter(function(fd){ return fd[0]===x; })[0][1]; }).join('・'))+'</span>' : '')+'</div>'+
-      (prevRows.length ? '<div style="overflow-x:auto;"><table class="report-table" style="font-size:12px;"><thead><tr>'+K.fields.map(function(fd){ return '<th>'+esc(fd[1])+'</th>'; }).join('')+'</tr></thead><tbody>'+
-        prevRows.map(function(r){ return '<tr>'+K.fields.map(function(fd){ return '<td>'+esc(r[fd[0]]===undefined ? '' : String(r[fd[0]]))+'</td>'; }).join('')+'</tr>'; }).join('')+'</tbody></table></div><div class="sk-minor">はじめの5行の見本</div>' : '')+
+      (prevRows.length ? '<div style="overflow-x:auto;"><table class="report-table" style="font-size:12px;"><thead><tr>'+K.fields.filter(function(fd){ return !fd[3]; }).map(function(fd){ return '<th>'+esc(fd[1])+'</th>'; }).join('')+'</tr></thead><tbody>'+
+        prevRows.map(function(r){ return '<tr>'+K.fields.filter(function(fd){ return !fd[3]; }).map(function(fd){ return '<td>'+esc(r[fd[0]]===undefined ? '' : String(r[fd[0]]))+'</td>'; }).join('')+'</tr>'; }).join('')+'</tbody></table></div><div class="sk-minor">はじめの5行の見本</div>' : '')+
       (kind==='inb' ? '<div class="sk-minor" style="margin-top:6px;">この取込の区分: <b>'+esc((CLIENT_INB_MODES.filter(function(m){ return m[0]===(c.inbMode||'piece'); })[0]||[])[1]||'')+'</b></div>' : '')+
       '<div style="margin-top:8px;"><button type="button" class="add-btn" id="cdImport"'+(mapped.missingCols.length || !mapped.rows.length ? ' disabled' : '')+'>取り込む('+formatNum(mapped.rows.length)+'行)</button></div></div>';
   }
@@ -9883,11 +9883,15 @@ async function clientDoImport(c, mapped){
         var kd = c.kind, at = {}, atWeak = {}; addN = 0; updN = 0;
         if(kd==='inb'){ var n0 = cur.rows.length; cur.rows = cur.rows.filter(function(x){ return x.supplier && x.supplier!=='0'; }); remN += n0 - cur.rows.length; } // 仕入先が空の行は入れない(前に入った分も消す)
         // 行番号の無い古い行(行番号を取り込む前に入った分)は、日付・番号・品番・数が同じなら同じ行(2026-10-24)
-        cur.rows.forEach(function(x, j){ var k = clientRowKeys(kd, x); if(k.strong) at[k.strong] = j; else (atWeak[k.weak] = atWeak[k.weak] || []).push(j); });
+        // ファイルに行番号の列が無いときは、行番号のある前の行とも 日付・番号・品番・数 で突き合わせる(2026-10-31。無いとだぶる)
+        var atWeakLined = {};
+        cur.rows.forEach(function(x, j){ var k = clientRowKeys(kd, x); if(k.strong){ at[k.strong] = j; (atWeakLined[k.weak] = atWeakLined[k.weak] || []).push(j); } else (atWeak[k.weak] = atWeak[k.weak] || []).push(j); });
         list.forEach(function(x){
           var k = clientRowKeys(kd, x), j = k.strong ? at[k.strong] : undefined;
           if(j===undefined && atWeak[k.weak] && atWeak[k.weak].length) j = atWeak[k.weak].shift();
-          if(j!==undefined){ var old = cur.rows[j]; cur.rows[j] = kd==='inb' ? Object.assign({}, x, { imp: old.imp || x.imp, mode: old.mode || x.mode }, old.cases!==undefined && old.cases!==null ? { cases: old.cases } : {}) : Object.assign({}, x, { imp: old.imp || x.imp }); if(k.strong) at[k.strong] = j; updN++; }
+          var keepLine = '';
+          if(j===undefined && !k.strong && atWeakLined[k.weak] && atWeakLined[k.weak].length){ j = atWeakLined[k.weak].shift(); keepLine = cur.rows[j].lineNo; }
+          if(j!==undefined){ var old = cur.rows[j]; cur.rows[j] = kd==='inb' ? Object.assign({}, x, { imp: old.imp || x.imp, mode: old.mode || x.mode }, old.cases!==undefined && old.cases!==null ? { cases: old.cases } : {}) : Object.assign({}, x, { imp: old.imp || x.imp }); if(keepLine!=='') cur.rows[j].lineNo = keepLine; if(k.strong) at[k.strong] = j; updN++; }
           else { if(k.strong) at[k.strong] = cur.rows.length; cur.rows.push(x); addN++; }
         });
         // すでにだぶっている古い行(行番号なし)を消す。古い行のケース数は、残る行に無ければ移す
@@ -9966,6 +9970,11 @@ function bindClientData(){
       // 覚えている対応(見出しの名前が同じなら)→ 名前から当てる
       c.cols = {};
       CLIENT_KINDS[c.kind].fields.forEach(function(fd){
+        if(fd[3]){ // 覚えている対応は使わない(行番号の見出しの列だけ)
+          var auto = (CLIENT_GUESS_FIRST[fd[0]] || []).filter(function(x){ return headRow.indexOf(x)!==-1; })[0] || headRow.filter(function(x){ return x && CLIENT_GUESS[fd[0]].test(x); })[0];
+          if(auto) c.cols[fd[0]] = auto;
+          return;
+        }
         var want = saved && saved.cols && saved.cols[fd[0]];
         if(fd[0]==='center' && saved && saved.cols && saved.cols.center==='') return; // (なし)を選んだまま
         if(want && headRow.indexOf(want)!==-1){ c.cols[fd[0]] = want; return; }
@@ -9976,7 +9985,7 @@ function bindClientData(){
         if(h) c.cols[fd[0]] = h;
       });
       // 覚えている対応がそのまま使えるなら、確認の画面を出さずに取り込む(毎回同じ CSV のため)
-      var fids = CLIENT_KINDS[c.kind].fields.map(function(fd){ return fd[0]; }); // やめた項目(出荷の箱数など)は比べない
+      var fids = CLIENT_KINDS[c.kind].fields.filter(function(fd){ return !fd[3]; }).map(function(fd){ return fd[0]; }); // やめた項目(出荷の箱数など)と、自動で当てる項目は比べない
       var savedOk = saved && saved.cols && Object.keys(saved.cols).every(function(f){ return fids.indexOf(f)===-1 || !saved.cols[f] || c.cols[f]===saved.cols[f]; })
         && !(c.kind==='ship' && saved.cols.center===undefined); // 納品センターの項目を足す前の対応は、1回だけ列を確かめてもらう(人の名前の列を黙って取り込まないため)
       var mapped0 = clientMapRows(rows, c.headerRow, c.cols, c.kind);

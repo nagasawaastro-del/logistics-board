@@ -12174,6 +12174,7 @@ async function loadVcAllocData(){
    商品コードの列は JAN(客先品番は使わない。エクセルの 1.8 と同じ)。 */
 var CX_IN_MASTER_KEY = 'cx-inbound-master', CX_IN_DRAFT_KEY = 'cxInboundDraft';
 var CX_IN_SUPPLIER = '0367608', CX_IN_CENTER = '3308';
+var CX_IN_JAN_FIX = { '503-17': '4943408051426', '503-18': '4943408051624' }; // 仕入先の JAN で登録している品番(kintone の規格・型番より優先。2026-10-31)
 var CX_IN_HEAD = ['伝票番号','行番号','入庫予定日','入庫実績日','仕入先コード','商品コード','商品名カナ','規格名カナ','JANコード','ＣＳ荷姿入数','ＢＬ荷姿入数','入庫予定総PS数','入庫予定ＣＳ数','入庫予定ＢＬ数','入庫予定ＰＳ数','入庫実績総ＰＳ数','入庫実績ＣＳ数','入庫実績ＢＬ数','入庫実績端数','予定製造日','予定賞味期限日','入庫限界製造日','入庫限界賞味期限日','実績製造日','実績賞味期限日','FILLER','任意区分','作成年月日','物流センターコード'];
 function cxInDraft(){
   if(!state.cxIn){
@@ -12186,7 +12187,7 @@ function cxInSaveDraft(){ try{ localStorage.setItem(CX_IN_DRAFT_KEY, JSON.string
 /* 1行 = 品番と数量(タブ・空白・カンマ区切り。エクセルからの貼り付けも可) */
 function cxInParse(text, items){
   return String(text||'').split(/\r?\n/).map(function(l){ return l.normalize('NFKC').trim(); }).filter(Boolean).map(function(l){
-    var m = l.split(/[\t ,]+/), code = m[0] || '', qty = Number(String(m[1]||'').replace(/,/g,'')), it = items[code], r = { code: code, qty: qty, name: it ? it[0] : '', pack: it ? it[1] : null, jan: it ? it[2] : '', err: '', warn: '' };
+    var m = l.split(/[\t ,]+/), code = m[0] || '', qty = Number(String(m[1]||'').replace(/,/g,'')), it = items[code], r = { code: code, qty: qty, name: it ? it[0] : '', pack: it ? it[1] : null, jan: it ? (CX_IN_JAN_FIX[code] || it[2]) : '', err: '', warn: '' };
     if(!it) r.err = '客先情報に無い品番';
     else if(!/^\d{13}$/.test(r.jan)) r.err = 'JAN なし';
     if(!(qty>0) || Math.floor(qty)!==qty) r.err = (r.err ? r.err+'・' : '')+'数量を確かめてください';

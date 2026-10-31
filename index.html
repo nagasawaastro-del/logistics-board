@@ -9610,7 +9610,8 @@ function setBomTablesHtml(exp, print){
 var CLIENT_DEFS_KEY = 'client-defs';
 var CLIENT_KINDS = {
   inb:  { label:'入荷実績', fields: [['date','入荷日'],['no','入荷番号・発注番号'],['lineNo','行番号'],['supplier','仕入先',1],['code','品番',1],['name','品名'],['qty','数量',1],['cases','ケース数'],['note','備考']] },
-  ship: { label:'出荷実績', fields: [['date','出荷日'],['slip','伝票番号'],['lineNo','行番号'],['code','品番',1],['name','品名'],['qty','数量',1],['note','備考']] },
+  // 出荷の行番号は、同じ行のだぶりを見分けるために取り込み続ける。一覧と CSV には出さない(4つめが 1。2026-10-31)
+  ship: { label:'出荷実績', fields: [['date','出荷日'],['slip','伝票番号'],['lineNo','行番号(だぶり防止)',0,1],['center','納品センター'],['code','品番',1],['name','品名'],['qty','数量',1],['note','備考']] },
   set:  { label:'セット指示書', fields: [['date','作業日'],['no','指示番号・PO'],['setCode','セット品番・JAN',1],['setName','セット名'],['setQty','セット数'],['partCode','部品品番・JAN',1],['partName','部品名'],['partPer','1セットの部品数'],['partQty','部品数(合計)'],['note','備考']] }
 };
 // 見出しの名前から、項目を当てる(はじめの案。画面で直せる)
@@ -9618,13 +9619,13 @@ var CLIENT_GUESS = {
   date: /(出荷|見積|作業|予定)?日(付)?$|^日付|date/i, slip: /伝票|出荷番号|出荷NO|注文番号|受注番号/i, lineNo: /行(番号|NO)$/i,
   no: /番号|NO\.?$/i, code: /^(商品)?(品番|コード|ID)$|商品コード|品番|SKU|JAN/i, name: /品名|商品名/i, qty: /^数量$|数量|個数|出荷数|qty/i, cases: /ケース/i,
   due: /納期|納品日/i, note: /^(備考|メモ|摘要)$/,
-  supplier: /仕入先|メーカー|取引先名/i,
+  supplier: /仕入先|メーカー|取引先名/i, center: /納品センター|センター名|納品先名|出荷先名|配送先名/,
   setCode: /セット.*(品番|コード)/i, setName: /セット.*(名|品名)/i, setQty: /セット.*数/i, partCode: /部品.*(品番|コード)|構成.*(品番|コード)/i, partName: /部品.*名|構成.*名/i, partPer: /^個数$|1セット/i, partQty: /部品.*数|構成.*数/i
 };
 // 見出しの名前がこれと同じなら先に当てる(ロジザードの CSV。入荷日は直接入荷で空のことがあるので入荷確定日を先に)
 var CLIENT_GUESS_FIRST = {
   date: ['入荷確定日','出荷確定日','入荷日','出荷日','作業日'], no: ['入荷管理番号','出荷管理番号','荷主入荷NO','PO','指示番号'], supplier: ['取引先名','仕入先名'],
-  slip: ['出荷伝票NO','荷主出荷NO','伝票番号'], lineNo: ['入荷管理行番号','出荷指示行NO','出荷予定行NO','行番号'], cases: ['ケース数','個口数'],
+  center: ['納品センター','納品先名','出荷先名','配送先名'], slip: ['出荷伝票NO','荷主出荷NO','伝票番号'], lineNo: ['入荷管理行番号','出荷指示行NO','出荷予定行NO','行番号'], cases: ['ケース数','個口数'],
   code: ['商品ID','商品コード','品番'], name: ['商品名','品名'], qty: ['確定数','出荷確定数','出荷数','数量'], note: ['備考'],
   // セット作業指示書(エクセル): PO・セットJAN・商品名・数量・単品JAN・商品名(2つめ)・個数(1セットあたり)
   setCode: ['セットJAN','セット品番'], setName: ['商品名','セット名'], setQty: ['数量','セット数'], partCode: ['単品JAN','部品品番'], partName: ['商品名(2)','部品名'], partPer: ['個数']
@@ -9766,8 +9767,8 @@ function renderClientData(){
     (!d ? '<div class="empty-note">読み込み中…</div>' : !d.rows.length ? '<div class="empty-note">この月の取込はありません</div>' :
       ((kind==='inb' || kind==='ship') ? '' : '<div style="margin:6px 0;font-size:13px;">'+d.imports.slice().reverse().map(function(i){ return '<div style="display:flex;gap:8px;align-items:center;margin:2px 0;"><span>'+esc(fmtDateTime(i.at))+'</span><b>'+esc(i.file)+'</b><span class="sk-minor">'+formatNum(i.count)+'行</span><button type="button" class="ll-btn" data-cd-undo="'+esc(i.id)+'">取り消す</button></div>'; }).join('')+'</div>')+
       (kind==='inb' ? clientInbModeBar(c, d)+clientInbTable(c, d, K) :
-      '<div style="overflow-x:auto;max-height:420px;overflow-y:auto;"><table class="report-table" style="font-size:12px;"><thead><tr>'+K.fields.map(function(fd){ return '<th>'+esc(fd[1])+'</th>'; }).join('')+(kind==='ship' ? '<th></th>' : '')+'</tr></thead><tbody>'+
-        d.rows.slice(0, 300).map(function(r, i){ return '<tr>'+K.fields.map(function(fd){ var v = r[fd[0]]; return clientCellHtml(fd[0], v); }).join('')+(kind==='ship' ? '<td style="white-space:nowrap;"><button type="button" class="log-stop-btn" data-inb-del="'+i+'">削除</button></td>' : '')+'</tr>'; }).join('')+
+      '<div style="overflow-x:auto;max-height:420px;overflow-y:auto;"><table class="report-table" style="font-size:12px;"><thead><tr>'+K.fields.filter(function(fd){ return !fd[3]; }).map(function(fd){ return '<th>'+esc(fd[1])+'</th>'; }).join('')+(kind==='ship' ? '<th></th>' : '')+'</tr></thead><tbody>'+
+        d.rows.slice(0, 300).map(function(r, i){ return '<tr>'+K.fields.filter(function(fd){ return !fd[3]; }).map(function(fd){ var v = r[fd[0]]; return clientCellHtml(fd[0], v); }).join('')+(kind==='ship' ? '<td style="white-space:nowrap;"><button type="button" class="log-stop-btn" data-inb-del="'+i+'">削除</button></td>' : '')+'</tr>'; }).join('')+
       '</tbody></table></div>')+(d.rows.length>300 ? '<div class="sk-minor">はじめの300行(全部は CSV で保存)</div>' : '')+'<div class="sk-minor">全部で '+formatNum(d.rows.length)+'行</div>')+'</div>';
   if(kind==='set' && state.role==='clientHub') dataHtml = '<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:13px;font-weight:700;">取り込んだ行の一覧・取込の取り消し'+(d ? '('+formatNum(d.rows.length)+'行)' : '')+'</summary>'+dataHtml+'</details>';
   return '<div class="panel">'+head+imp+dataHtml+'</div>';
@@ -9913,6 +9914,7 @@ async function clientDoImport(c, mapped){
     if(!r.ok && (addN || updN)) okAll = false;
     added += addN; dup += dupN; upd += updN;
   }
+  if(c.kind==='ship' && !c.cols.center) c.cols.center = ''; // 納品センターの列は無し、と覚える(次から確かめる画面を出さない)
   await tpickKvUpdate(clientMapKey(c.clientId, c.kind), function(cur){ return { headerRow: c.headerRow||1, cols: c.cols, at: now }; });
   var cname = ((state.clientDefs.clients||[]).filter(function(x){ return x.id===c.clientId; })[0] || {}).name || '';
   if(added || upd) await appendAuditLog({ action:'荷主データを取込', target: cname+' / '+CLIENT_KINDS[c.kind].label, before:null, after: file.name+'・'+added+'行'+(upd ? '・上書き '+upd+'行' : '')+'('+months.join('・')+')'+(dup ? '・取り込み済み '+dup+'行' : '') });
@@ -9965,6 +9967,7 @@ function bindClientData(){
       c.cols = {};
       CLIENT_KINDS[c.kind].fields.forEach(function(fd){
         var want = saved && saved.cols && saved.cols[fd[0]];
+        if(fd[0]==='center' && saved && saved.cols && saved.cols.center==='') return; // (なし)を選んだまま
         if(want && headRow.indexOf(want)!==-1){ c.cols[fd[0]] = want; return; }
         var g = CLIENT_GUESS[fd[0]]; if(!g) return;
         var used = Object.keys(c.cols).map(function(k){ return c.cols[k]; });
@@ -9974,7 +9977,8 @@ function bindClientData(){
       });
       // 覚えている対応がそのまま使えるなら、確認の画面を出さずに取り込む(毎回同じ CSV のため)
       var fids = CLIENT_KINDS[c.kind].fields.map(function(fd){ return fd[0]; }); // やめた項目(出荷の箱数など)は比べない
-      var savedOk = saved && saved.cols && Object.keys(saved.cols).every(function(f){ return fids.indexOf(f)===-1 || !saved.cols[f] || c.cols[f]===saved.cols[f]; });
+      var savedOk = saved && saved.cols && Object.keys(saved.cols).every(function(f){ return fids.indexOf(f)===-1 || !saved.cols[f] || c.cols[f]===saved.cols[f]; })
+        && !(c.kind==='ship' && saved.cols.center===undefined); // 納品センターの項目を足す前の対応は、1回だけ列を確かめてもらう(人の名前の列を黙って取り込まないため)
       var mapped0 = clientMapRows(rows, c.headerRow, c.cols, c.kind);
       if(savedOk && !c.forceMap && !mapped0.missingCols.length && mapped0.rows.length){ await clientDoImport(c, mapped0); return; }
     }catch(e){ c.msg = '⚠️ 読めませんでした: '+((e && e.message) || ''); c.file = null; }
@@ -10017,7 +10021,8 @@ function bindClientData(){
   var csv = document.getElementById('cdCsv');
   if(csv) csv.addEventListener('click', function(){
     var K = CLIENT_KINDS[c.kind], cname = ((state.clientDefs.clients||[]).filter(function(x){ return x.id===c.clientId; })[0] || {}).name || '';
-    var rows = [K.fields.map(function(f){ return f[1]; })].concat((c.data.rows||[]).map(function(r){ return K.fields.map(function(f){ return r[f[0]]===undefined ? '' : r[f[0]]; }); }));
+    var csvF = K.fields.filter(function(f){ return !f[3]; });
+    var rows = [csvF.map(function(f){ return f[1]; })].concat((c.data.rows||[]).map(function(r){ return csvF.map(function(f){ return r[f[0]]===undefined ? '' : r[f[0]]; }); }));
     downloadCSV(cname+'_'+K.label+'_'+c.month+'.csv', rows);
   });
   var tb = document.getElementById('cdToBom');

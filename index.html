@@ -10500,9 +10500,12 @@ function renderClientBill(cl){
       '<div style="display:grid;gap:10px;margin-top:10px;max-width:520px;">'+
         '<label class="ch-field"><span>締め日</span><select id="chCloseDay">'+[[0,'月末'],[5,'5日'],[10,'10日'],[15,'15日'],[20,'20日'],[25,'25日']].map(function(x){ return '<option value="'+x[0]+'"'+((Number(cfg.closeDay)||0)===x[0] ? ' selected' : '')+'>'+x[1]+'</option>'; }).join('')+'</select></label>'+
         '<label class="ch-field"><span>発行元(会社名)</span><input type="text" id="chIssuer" value="'+esc(cfg.issuer||'')+'" style="width:100%;"></label>'+
-        '<label class="ch-field"><span>住所・連絡先</span><textarea id="chIssuerAddr" rows="2" style="width:100%;">'+esc(cfg.address||'')+'</textarea></label>'+
+        '<label class="ch-field"><span>住所・連絡先(1行ずつ。例: 〒669-2727 / 住所 / TEL:… / FAX:…)</span><textarea id="chIssuerAddr" rows="4" style="width:100%;">'+esc(cfg.address||'')+'</textarea></label>'+
         '<label class="ch-field"><span>登録番号(インボイス)</span><input type="text" id="chRegNo" value="'+esc(cfg.regNo||'')+'" style="width:100%;"></label>'+
-        '<label class="ch-field"><span>振込先</span><textarea id="chBank" rows="2" style="width:100%;">'+esc(cfg.bank||'')+'</textarea></label>'+
+        '<label class="ch-field"><span>振込先の金融機関・支店</span><textarea id="chBank" rows="2" style="width:100%;">'+esc(cfg.bank||'')+'</textarea></label>'+
+        '<label class="ch-field"><span>口座名義(口座番号も。この端末にだけ残します)</span><input type="text" id="chPvAccount" value="'+esc(clientInvoicePrivate().account||'')+'" style="width:100%;"></label>'+
+        '<label class="ch-field"><span>担当(この端末にだけ残します)</span><input type="text" id="chPvTanto" value="'+esc(clientInvoicePrivate().tanto||'')+'" style="width:100%;"></label>'+
+        '<label class="ch-field"><span>担当のメール(この端末にだけ残します)</span><input type="text" id="chPvMail" value="'+esc(clientInvoicePrivate().mail||'')+'" style="width:100%;"></label>'+
         '<label class="ch-field"><span>人件費に数える作業(作業記録の作業の名前に含む文字)</span><input type="text" id="chLaborKw" value="'+esc(clientLaborKeyword(cfg))+'" style="width:100%;"></label>'+
         '<label class="ch-field"><span>消費税(%)</span><input type="number" id="chTax" value="'+esc(String(cfg.taxRate===undefined ? 10 : cfg.taxRate))+'" style="width:80px;"></label>'+
         '<div><button type="button" class="vc-manage-toggle-btn" id="chBillSave">保存する</button></div>'+
@@ -10510,23 +10513,96 @@ function renderClientBill(cl){
   '</div>';
 }
 /* 請求書・請求見込み・下書きの印刷。B = clientBillCalc の結果か、締めた請求書 */
-function clientInvoicePrint(cl, B, kind){
-  var cfg = state.clientBillCfg || {};
+/* 請求書に付ける明細(2026-10-31): 項目ごとに、請求の数の元になった伝票・納品先・商品を並べる。件数の合計は請求の数え方(clientFeeCounts)と同じ。人件費は出さない */
+function clientInvoiceDetail(F, B){
+  var from = B.from, to = B.to, inR = function(d){ return !!d && d>=from && d<=to; };
+  var n = function(v){ return formatNum(v); }, date = function(d){ return String(d).replace(/-/g,'/'); };
+  var price = function(basis){ var it = (F.items||[]).filter(function(x){ return x.basis===basis; })[0]; return it ? Number(it.price||0) : 0; };
+  var sec = function(title, note, head, rows, foot){
+    if(!rows.length) return '';
+    return '<div class="dsec"><div class="dttl">'+esc(title)+'</div>'+(note ? '<div class="dnote">'+esc(note)+'</div>' : '')+
+      '<table class="dtbl"><thead><tr>'+head.map(function(h){ return '<th>'+esc(h)+'</th>'; }).join('')+'</tr></thead><tbody>'+rows.join('')+'<tr class="dtot">'+foot+'</tr></tbody></table></div>';
+  };
+  // 入庫: 入荷伝票ごと
+  var inb = {}, inbL = [];
+  (F.inb.rows||[]).forEach(function(r){
+    if(!inR(r.date)) return;
+    var k = r.date+'|'+(r.no||''), g = inb[k]; if(!g){ g = inb[k] = { date: r.date, no: r.no||'', sup: r.supplier||'', items: 0, cs: 0, pc: 0, jan: 0 }; inbL.push(g); }
+    var md = clientInbMode(r), q = clientQ(r.qty); g.items++; if(md==='jan') g.jan += q; else if(md==='case') g.cs += clientQ(r.cases); else g.pc += q;
+  });
+  inbL.sort(function(a, b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.no < b.no ? -1 : 1); });
+  var iT = inbL.reduce(function(a, g){ a.i += g.items; a.c += g.cs; a.p += g.pc; a.j += g.jan; return a; }, { i: 0, c: 0, p: 0, j: 0 });
+  var inbHtml = sec('入庫荷役料(入荷伝票ごと)', '単価: ケース ¥'+n(price('inbCase'))+' / ピース ¥'+n(price('inbPiece'))+' / JAN貼り ¥'+n(price('inbJan')), ['入荷日','入荷番号','仕入先','品目','ケース','ピース','JAN貼り'],
+    inbL.map(function(g){ return '<tr><td class="c">'+esc(date(g.date))+'</td><td>'+esc(g.no)+'</td><td>'+esc(g.sup)+'</td><td class="n">'+n(g.items)+'</td><td class="n">'+(g.cs ? n(g.cs) : '')+'</td><td class="n">'+(g.pc ? n(g.pc) : '')+'</td><td class="n">'+(g.jan ? n(g.jan) : '')+'</td></tr>'; }),
+    '<th colspan="3">合計</th><td class="n">'+n(iT.i)+'</td><td class="n">'+n(iT.c)+'</td><td class="n">'+n(iT.p)+'</td><td class="n">'+n(iT.j)+'</td>');
+  // 出庫・梱包: 出荷日・納品先ごと
+  var groups = clientShipGroups(F.ship.rows, F.ship.cases).filter(function(g){ return inR(g.date); });
+  var sT = groups.reduce(function(a, g){ a.s += g.slips; a.p += g.pieces; a.c += clientQ(g.cases); return a; }, { s: 0, p: 0, c: 0 });
+  var shipHtml = sec('出庫荷役料・梱包手数料(出荷日・納品先ごと)', '単価: 出庫 ¥'+n(price('shipPiece'))+'/ピース ・ 梱包 ¥'+n(price('shipCase'))+'/ケース', ['出荷日','納品先','伝票','ピース','ケース'],
+    groups.map(function(g){ return '<tr><td class="c">'+esc(date(g.date))+'</td><td>'+esc(g.center || '納品先なし')+'</td><td class="n">'+n(g.slips)+'</td><td class="n">'+n(g.pieces)+'</td><td class="n">'+(clientQ(g.cases) ? n(g.cases) : '')+'</td></tr>'; }),
+    '<th colspan="2">合計</th><td class="n">'+n(sT.s)+'</td><td class="n">'+n(sT.p)+'</td><td class="n">'+n(sT.c)+'</td>');
+  // 出庫: 商品ごと
+  var prod = {}, prodL = [];
+  (F.ship.rows||[]).forEach(function(r){ if(!inR(r.date)) return; var p = prod[r.code]; if(!p){ p = prod[r.code] = { code: r.code, name: r.name||'', q: 0 }; prodL.push(p); } p.q += clientQ(r.qty); });
+  prodL.sort(function(a, b){ return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+  var prodHtml = sec('出庫の商品ごとの数', '', ['商品コード','商品名','ピース'], prodL.map(function(p){ return '<tr><td>'+esc(p.code)+'</td><td>'+esc(p.name)+'</td><td class="n">'+n(p.q)+'</td></tr>'; }), '<th colspan="2">合計</th><td class="n">'+n(sT.p)+'</td>');
+  // セット: 完了日・商品ごと(伝票より商品のほうが分かりやすいため。2026-10-31)
+  var set = {}, setL = [], seen = {};
+  (F.set.rows||[]).forEach(function(r){
+    if(!r.setCode || !inR(r.done)) return;
+    var k0 = (r.imp||'')+'|'+r.date+'|'+(r.no||'')+'|'+r.setCode; if(seen[k0]) return; seen[k0] = 1;
+    var k = r.done+'|'+r.setCode, g = set[k]; if(!g){ g = set[k] = { done: r.done, code: r.setCode, name: r.setName||'', q: 0 }; setL.push(g); }
+    g.q += clientQ(r.setQty);
+  });
+  setL.sort(function(a, b){ return a.done < b.done ? -1 : a.done > b.done ? 1 : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0); });
+  var setHtml = sec('セット作業(完了日・商品ごと)', '単価: ¥'+n(price('setPiece'))+'/ピース。完了した分だけです', ['完了日','商品コード','商品名','個数'],
+    setL.map(function(g){ return '<tr><td class="c" style="white-space:nowrap;">'+esc(date(g.done))+'</td><td>'+esc(g.code)+'</td><td>'+esc(g.name)+'</td><td class="n">'+n(g.q)+'</td></tr>'; }),
+    '<th colspan="3">合計</th><td class="n">'+n(setL.reduce(function(a, g){ return a + g.q; }, 0))+'</td>');
+  return '<div class="detail"><h2>ご請求明細</h2><div class="dhead">'+esc(B.from.replace(/-/g,'/'))+' 〜 '+esc(B.to.replace(/-/g,'/'))+'</div>'+inbHtml+shipHtml+prodHtml+setHtml+'</div>';
+}
+/* 請求書の担当・メール・口座番号は、この端末にだけ残す(kv は誰でも読めるため。2026-10-31) */
+function clientInvoicePrivate(){ var v = {}; try{ v = JSON.parse(localStorage.getItem('clientInvoicePrivate') || '{}') || {}; }catch(e){} return v; }
+/* 請求書: 営業倉庫のお客様の請求書(Excel「INVOY_請求書」)と同じ形(2026-10-31)。単価・金額は税抜、税額は下の欄。締めた請求書も、この形で出し直す */
+function clientInvoicePrint(cl, B, kind, F){
+  var cfg = state.clientBillCfg || {}, pv = clientInvoicePrivate();
   var title = kind==='first' ? '請 求 見 込 み' : kind==='draft' ? '請 求 書(下 書 き)' : '請 求 書';
   var no = B.no || (B.month.replace('-','')+(kind==='first' ? '-見込み' : '-下書き'));
+  var yen = function(v){ return '¥ '+formatNum(v); };
+  var jpDate = function(d){ var m = String(d).split('-'); return m[0]+'年 '+Number(m[1])+'月 '+Number(m[2])+'日'; };
+  var issued = B.issued || todayStr();
+  var y = Number(B.to.slice(0,4)), mo = Number(B.to.slice(5,7)); // お支払い期限: 締め日の翌月末
+  var due = new Date(y, mo+1, 0), dueStr = due.getFullYear()+'-'+String(due.getMonth()+1).padStart(2,'0')+'-'+String(due.getDate()).padStart(2,'0');
+  var fromTxt = B.from.replace(/-/g,'/').replace(/\/0/g,'/'), toTxt = B.to.slice(0,4)===B.from.slice(0,4) ? Number(B.to.slice(5,7))+'/'+Number(B.to.slice(8,10)) : B.to.replace(/-/g,'/').replace(/\/0/g,'/');
+  var range = fromTxt+'~'+toTxt;
+  var adrLines = String(cfg.address||'').split(/\r?\n/).map(function(x){ return x.trim(); }).filter(Boolean);
+  var isContact = function(x){ return /^(TEL|FAX|電話)/i.test(x); };
+  var fromLines = [cfg.issuer||'(発行元を設定してください)'].concat(cfg.regNo ? ['登録番号:'+cfg.regNo] : []).concat(adrLines.filter(function(x){ return !isContact(x); }))
+    .concat(pv.tanto ? ['','担当 : '+pv.tanto] : ['']).concat(adrLines.filter(isContact)).concat(pv.mail ? ['mail:'+pv.mail] : []);
+  var cells = B.lines.map(function(l){ return '<tr><td class="c">'+esc(range)+'</td><td>'+esc(l.name)+'</td><td class="c"></td><td class="c">'+formatNum(l.qty)+'</td><td class="n">'+yen(l.price)+'</td><td class="n">'+yen(l.amount)+'</td></tr>'; });
+  for(var i=cells.length; i<12; i++) cells.push('<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>');
+  var sum = function(label, v, cls){ return '<tr'+(cls ? ' class="'+cls+'"' : '')+'><th>'+label+'</th><td class="n">'+v+'</td></tr>'; };
+  var account = pv.account || (kind==='first' ? '' : '(口座を「請求」の設定で入れてください)');
   var html = '<div class="inv"><h1>'+title+'</h1>'+
-    '<div class="row"><div class="to"><div class="name">'+esc(cl.name)+' 御中</div><div>'+(kind==='first' ? '対象' : '請求期間')+': '+esc(B.from.replace(/-/g,'/'))+' 〜 '+esc(B.to.replace(/-/g,'/'))+'</div><div>番号: '+esc(no)+'</div><div>発行日: '+esc((B.issued || todayStr()).replace(/-/g,'/'))+'</div></div>'+
-      '<div class="from"><div class="name">'+esc(cfg.issuer||'(発行元を設定してください)')+'</div><div style="white-space:pre-line;">'+esc(cfg.address||'')+'</div>'+(cfg.regNo ? '<div>登録番号: '+esc(cfg.regNo)+'</div>' : '')+'</div></div>'+
-    '<div class="total">'+(kind==='first' ? '見込み金額' : 'ご請求金額')+' <b>¥'+formatNum(B.total)+'</b>(税込)</div>'+
+    '<div class="head"><div class="left"><div class="to">'+esc(cl.name)+'御中</div>'+
+        '<div class="sub">件名:</div><div class="sub">物流委託業務 '+esc(B.month.slice(0,4))+'年 '+Number(B.month.slice(5,7))+'月分</div><div class="sub gap">下記の通り、ご請求申し上げます。</div>'+
+        '<div class="tot"><span>'+(kind==='first' ? '見込み金額(税込) :' : 'ご請求金額(税込) :')+'</span><b>¥ '+formatNum(B.total)+' -</b></div></div>'+
+      '<div class="right"><div class="dt"><span>請求日 :</span><span>'+esc(jpDate(issued))+'</span></div>'+(kind==='first' ? '' : '<div class="dt"><span>お支払い期限 :</span><span>'+esc(jpDate(dueStr))+'</span></div>')+
+        '<div class="from">'+fromLines.map(function(x){ return '<div>'+(x ? esc(x) : '&nbsp;')+'</div>'; }).join('')+'</div></div></div>'+
     (kind==='first' ? '<div class="memo">前半の作業料に、月額・保管料(1か月分)を足した見込みです。確定の金額は締め日の請求書でお知らせします。</div>' : '')+
-    '<table><thead><tr><th>項目</th><th>数量</th><th>単位</th><th>単価</th><th>金額</th></tr></thead><tbody>'+
-      B.lines.map(function(l){ return '<tr><td>'+esc(l.name)+'</td><td class="n">'+formatNum(l.qty)+'</td><td>'+esc(l.unit)+'</td><td class="n">'+formatNum(l.price)+'</td><td class="n">'+formatNum(l.amount)+'</td></tr>'; }).join('')+
-    '</tbody><tfoot><tr><td colspan="4" class="n">小計</td><td class="n">'+formatNum(B.sub)+'</td></tr><tr><td colspan="4" class="n">消費税('+B.tax+'%)</td><td class="n">'+formatNum(B.taxAmt)+'</td></tr>'+
-      (B.freight ? '<tr><td colspan="4" class="n">立替運賃</td><td class="n">'+formatNum(B.freight)+'</td></tr>' : '')+
-      '<tr><td colspan="4" class="n"><b>合計</b></td><td class="n"><b>'+formatNum(B.total)+'</b></td></tr></tfoot></table>'+
-    (cfg.bank && kind!=='first' ? '<div class="bank"><b>お振込先</b><div style="white-space:pre-line;">'+esc(cfg.bank)+'</div></div>' : '')+'</div>';
-  var css = '@page{size:A4 portrait;margin:14mm;} .inv h1{text-align:center;letter-spacing:.5em;font-size:26px;margin:0 0 16px;} .row{display:flex;justify-content:space-between;gap:20px;margin-bottom:14px;font-size:12px;} .name{font-size:17px;font-weight:700;margin-bottom:4px;} .to .name{border-bottom:1px solid #000;padding-bottom:2px;} .from{text-align:right;}'+
-    '.total{font-size:15px;border:2px solid #000;padding:8px 12px;margin:10px 0;display:inline-block;} .total b{font-size:22px;margin-left:10px;} .memo{font-size:11.5px;margin:0 0 8px;} table{width:100%;border-collapse:collapse;font-size:11.5px;} th{background:#eee;border:1px solid #000;padding:4px;} td{border:1px solid #000;padding:3px 6px;} td.n{text-align:right;} tfoot td{font-size:12.5px;} .bank{margin-top:12px;font-size:12px;border:1px solid #000;padding:6px 10px;}';
+    '<table class="items"><thead><tr><th style="width:18%;">取引日</th><th>品目</th><th style="width:9%;">税率区分</th><th style="width:8%;">数量</th><th style="width:13%;">単価(税抜)</th><th style="width:14%;">金額(税抜)</th></tr></thead><tbody>'+cells.join('')+'</tbody></table>'+
+    '<div class="foot"><div class="note">※は軽減税率(8%)対象項目</div><table class="sums">'+
+      sum(B.tax+'%税率 対象小計', yen(B.sub))+sum('8%税率 対象小計', yen(0))+sum(B.tax+'% 税額', yen(B.taxAmt))+sum('8% 税額', yen(0))+
+      (B.freight ? sum('立替運賃(税なし)', yen(B.freight)) : '')+sum('合計(税込)', '¥ '+formatNum(B.total)+' -', 'gt')+'</table></div>'+
+    (kind==='first' ? '' : '<div class="sec">振込先</div><table class="bank"><tr><th>金融機関・支店</th><td>'+esc(cfg.bank||'')+'</td></tr><tr><th>口座名義</th><td>'+esc(account)+'</td></tr></table>')+
+    '<div class="sec">備考</div><div class="rem">いつもご利用いただきありがとうございます。'+(kind==='first' ? '' : '<br><br>※請求書明細をご確認の上、お振込期日までに上記口座へお振込お願いいたします。<br>※お振込み手数料は御社にてご負担いただけますようお願いいたします。')+'</div></div>'+(F ? clientInvoiceDetail(F, B) : '');
+  var css = '@page{size:A4 portrait;margin:12mm 14mm;} body{font-family:"Yu Mincho","MS Mincho","Hiragino Mincho ProN",serif;color:#000;} .inv{font-size:10.5px;} h1{text-align:center;letter-spacing:.3em;font-size:22px;font-weight:700;margin:0;padding:6px 0 8px;border-bottom:2px solid #000;}'+
+    '.head{display:flex;justify-content:space-between;gap:16px;margin:12px 0 14px;} .left{flex:1;} .right{width:36%;} .to{font-size:13px;font-weight:700;border-bottom:1px solid #000;padding-bottom:8px;margin-bottom:22px;} .sub{font-size:10px;line-height:1.6;} .sub.gap{margin-top:12px;} .tot{display:flex;justify-content:space-between;align-items:baseline;margin-top:16px;padding-right:12%;} .tot span{font-size:13.5px;font-weight:700;} .tot b{font-size:17px;}'+
+    '.dt{display:flex;justify-content:flex-end;gap:14px;font-size:10px;line-height:1.7;} .dt span:first-child{font-weight:700;} .from{font-size:10px;line-height:1.55;margin:10px 0 0 12%;} .memo{margin:0 0 8px;}'+
+    'table{border-collapse:collapse;width:100%;} .items th{font-size:11px;padding:6px 4px;border-top:2px solid #000;border-bottom:1px solid #000;} .items th+th,.items td+td{border-left:1px dotted #999;} .items td{font-size:10.5px;padding:3px 6px;height:16px;border-bottom:1px dotted #999;} .items tbody tr:last-child td{border-bottom:2px solid #000;} td.c{text-align:center;} td.n{text-align:right;white-space:nowrap;}'+
+    '.foot{display:flex;justify-content:space-between;align-items:flex-start;} .note{font-size:10px;padding-top:3px;} .sums{width:27%;} .sums th{font-size:10.5px;text-align:center;padding:5px 4px;white-space:nowrap;} .sums td{font-size:10.5px;padding:5px 6px;} .sums tr{border-bottom:1px dotted #999;} .sums tr.gt{border-top:1px solid #000;border-bottom:2px solid #000;} .sums tr.gt th,.sums tr.gt td{font-size:12px;font-weight:700;padding:7px 4px;}'+
+    '.sec{font-size:12px;font-weight:700;margin-top:18px;padding:4px 10px;border-top:2px solid #000;border-bottom:1px solid #000;} .bank{border-bottom:2px solid #000;} .bank th{width:15%;font-weight:400;font-size:10.5px;padding:4px;} .bank td{font-size:10.5px;padding:4px 8px;border-left:1px dotted #999;} .bank tr+tr{border-top:1px dotted #999;} .rem{font-size:10.5px;line-height:1.65;padding:5px 10px 10px;border-bottom:2px solid #000;}'+
+    '.detail{page-break-before:always;font-size:10px;} .detail h2{text-align:center;letter-spacing:.2em;font-size:17px;margin:0;padding-bottom:6px;border-bottom:2px solid #000;} .dhead{text-align:right;font-size:10px;margin:5px 0 10px;} .dsec{margin-bottom:16px;} .dttl{font-size:12px;font-weight:700;margin-bottom:2px;} .dnote{font-size:9.5px;margin-bottom:3px;}'+
+    '.dtbl th{font-size:10px;padding:4px;border-top:1px solid #000;border-bottom:1px solid #000;} .dtbl td{font-size:10px;padding:3px 6px;border-bottom:1px dotted #999;} .dtbl tr{page-break-inside:avoid;} .dtbl tr.dtot th,.dtbl tr.dtot td{font-weight:700;border-top:1px solid #000;border-bottom:2px solid #000;padding:4px 6px;}';
   printHtmlDoc((kind==='first' ? '請求見込み_' : '請求書_')+cl.name+'_'+no, html, css);
 }
 /* セット指示書: 作業指示(セット指示書の取込)から、完成品の合計と構成部品の合計を作り直し、JAN のバーコードつきで印刷 */
@@ -10734,9 +10810,9 @@ function bindClientHub(){
   if(bp) bp.addEventListener('click', function(){
     var month = c.month || todayStr().slice(0,7), per = c.billPer==='first' ? 'first' : 'month', F = clientFeeData(cl, month); if(!F) return;
     var inv = per==='month' ? clientInvoiceOf(cl.id, month) : null;
-    clientInvoicePrint(cl, inv || clientBillCalc(F, month, per), per==='first' ? 'first' : inv ? 'invoice' : 'draft');
+    clientInvoicePrint(cl, inv || clientBillCalc(F, month, per), per==='first' ? 'first' : inv ? 'invoice' : 'draft', F);
   });
-  document.querySelectorAll('[data-inv-print]').forEach(function(el){ el.addEventListener('click', function(){ var inv = clientInvoiceOf(cl.id, el.getAttribute('data-inv-print')); if(inv) clientInvoicePrint(cl, inv, 'invoice'); }); });
+  document.querySelectorAll('[data-inv-print]').forEach(function(el){ el.addEventListener('click', function(){ var inv = clientInvoiceOf(cl.id, el.getAttribute('data-inv-print')); if(inv) clientInvoicePrint(cl, inv, 'invoice', clientFeeData(cl, inv.month)); }); });
   // 締めて請求書にする / 締めを取り消す
   var ic = document.getElementById('chInvClose');
   if(ic) ic.addEventListener('click', async function(){
@@ -10801,6 +10877,7 @@ function bindClientHub(){
     var v = { laborKeyword: ((document.getElementById('chLaborKw')||{}).value || '').trim() || 'モビイクス', closeDay: Number(document.getElementById('chCloseDay').value)||0, issuer: document.getElementById('chIssuer').value.trim(), address: document.getElementById('chIssuerAddr').value.trim(), regNo: document.getElementById('chRegNo').value.trim(), bank: document.getElementById('chBank').value.trim(), taxRate: Number(document.getElementById('chTax').value)||10, at: new Date().toISOString() };
     var ok = await persistKey('client-bill-settings', v);
     if(!ok){ showToast('⚠️ 保存できませんでした'); return; }
+    try{ localStorage.setItem('clientInvoicePrivate', JSON.stringify({ account: document.getElementById('chPvAccount').value.trim(), tanto: document.getElementById('chPvTanto').value.trim(), mail: document.getElementById('chPvMail').value.trim() })); }catch(e){}
     state.clientBillCfg = v; showToast('保存しました'); render();
   });
   var smo = document.getElementById('chSetMonth'); if(smo) smo.addEventListener('change', function(){ if(smo.value){ c.month = smo.value; c.setImp = undefined; c.data = null; render(); } });

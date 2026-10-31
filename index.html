@@ -14855,7 +14855,7 @@ function renderStockTab(){
   var tab = state.stockTab || 'summary';
   if(tab==='blocks' || tab==='missing') tab = 'summary'; // 概要にまとめた
   if(tab==='slot') tab = 'coop'; // 配置(D ロケの整理)は終わったので、生協の入れ替えに替えた(2026-10-16)
-  var tabs = [['summary','概要'],['outlook','将来在庫'],['back','外部から戻す'],['storage','保管料の試算'],['locs','ロケーション'],['coop','生協の入れ替え']].map(function(t){
+  var tabs = [['summary','概要'],['outlook','将来在庫'],['back','外部から戻す'],['move','丹南へ移す'],['storage','保管料の試算'],['locs','ロケーション'],['coop','生協の入れ替え']].map(function(t){
     return '<button type="button" class="vc-tab-btn'+(tab===t[0]?' active':'')+'" data-stock-tab="'+t[0]+'">'+t[1]+'</button>';
   }).join('');
   var prev = null; // 7日前(なければいちばん古い)の記録と比べる
@@ -14917,6 +14917,8 @@ function renderStockTab(){
     body = renderStockOutlook(st);
   }else if(tab==='back'){
     body = renderStockBack(st);
+  }else if(tab==='move'){
+    body = renderStockMove(st);
   }else if(tab==='storage'){
     body = renderStorageSim(st);
   }else if(tab==='locs'){
@@ -15885,6 +15887,107 @@ function stockBackCompute(st){
   rows.sort(function(a, b){ return (b.short/b.est) - (a.short/a.est) || b.short - a.short; });
   return { rows: rows, end: end, sel: sel, all: Object.keys(wh.warehouses||{}).sort() };
 }
+/* 在庫 →「丹南へ移す」(2026-10-31): 高屋がいっぱいのとき、将来在庫で余る物を丹南へ持っていくリスト。
+   余り = 高屋の在庫(引当を除く)− 期間内の高屋の見積もり(将来在庫と同じ数え方。需要予測を含む)。入荷予定は足さない(入荷が遅れても足りるように)。
+   移す数 = 余りと、棚(ブロック A〜E)にある数の少ないほうを、ケース単位に切り捨て。AA・S・SET などの出荷の場所からは移さない。入数の分からない品番と 97〜99 で始まる品番は入れない。才数の多い順 */
+var STOCK_MOVE_BLOCKS = ['A','B','C','D','E'];
+function stockMoveCompute(st){
+  var ol = st.outlook, lzP = st.lz && st.lz.products, pm = st.pm || {};
+  if(!ol || !lzP) return null;
+  var months = state.stockMoveMonths===undefined ? 2 : state.stockMoveMonths, today = todayStr(), end = '';
+  if(months){ var d = new Date(today+'T00:00:00'); d.setMonth(d.getMonth()+months); end = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+  var isT = function(x){ var w = String(x.warehouse||'').trim(); return !w || outlookSiteOfWarehouse(w)==='takaya'; };
+  var est = {}, arr = {};
+  outlookEstimateLines(ol).lines.forEach(function(x){ if(isT(x) && x.date>=today && (!end || x.date<=end)) est[x.code] = (est[x.code]||0) + (Number(x.qty)||0); });
+  outlookArrivals(ol).forEach(function(x){ if(isT(x) && (!end || x.date<=end)) arr[x.code] = (arr[x.code]||0) + (Number(x.qty)||0); });
+  var site = SHUKEI_SITES.takaya, tan = SHUKEI_SITES.tannan, rows = [], noPack = 0;
+  Object.keys(lzP).forEach(function(code){
+    if(isDummyProductCode(code) || billingIsMaterial(code) || billingIsBareCode(code)) return;
+    var P = lzP[code], free = 0, shelf = 0, locs = [], tannan = 0;
+    site.stockBlocks.forEach(function(b){
+      var x = (P.blocks||{})[b]; if(!x) return;
+      Object.keys(x.locQty||{}).forEach(function(l){
+        var q = (Number(x.locQty[l])||0) - (Number((x.locAlloc||{})[l])||0); if(q<=0) return;
+        free += q;
+        if(STOCK_MOVE_BLOCKS.indexOf(b)!==-1){ shelf += q; locs.push({ loc: b+':'+l, q: q }); }
+      });
+    });
+    tan.stockBlocks.forEach(function(b){ var x = (P.blocks||{})[b]; if(x) tannan += Number(x.qty)||0; });
+    if(free<=0) return;
+    var e = est[code]||0, surplus = free - e, can = Math.min(surplus, shelf);
+    if(can<=0) return;
+    var m = pm[code] || {}, pack = m.packQty ? Number(m.packQty) : null;
+    if(!pack){ noPack++; return; }
+    var cases = Math.floor(can/pack);
+    if(cases<1) return;
+    var saiKnown = m.cubicVolume!==null && m.cubicVolume!==undefined && m.cubicVolume!=='', sai = saiKnown ? Number(m.cubicVolume) : 1;
+    locs.sort(function(a, b){ return b.q - a.q; });
+    rows.push({ code: code, name: P.name||m.name||'', free: free, est: e, arr: arr[code]||0, surplus: surplus, pack: pack, cases: cases, qty: cases*pack, cube: cases*sai, saiKnown: saiKnown, locs: locs, tannan: tannan, noEst: !e });
+  });
+  rows.sort(function(a, b){ return b.cube - a.cube || b.qty - a.qty; });
+  var cum = 0, target = Number(state.stockMoveTarget)||0;
+  rows.forEach(function(r){ r.pick = !target || cum < target; cum += r.cube; r.cum = cum; });
+  var pick = rows.filter(function(r){ return r.pick; });
+  var c = st.calc || {}, cap = st.capacity || {}, free = 0;
+  tan.stockBlocks.forEach(function(b){ var v = stockCapSai(cap[b]); if(v>0) free += Math.max(0, v - ((c.blocks && c.blocks[b] && c.blocks[b].cube)||0)); });
+  return { rows: rows, pick: pick, end: end, months: months, noPack: noPack, tanFree: free,
+    cube: pick.reduce(function(a, r){ return a + r.cube; }, 0), cases: pick.reduce(function(a, r){ return a + r.cases; }, 0), unknownSai: pick.filter(function(r){ return !r.saiKnown; }).length };
+}
+function stockMoveLocText(r, full){ return r.locs.slice(0, full ? 8 : 3).map(function(l){ return l.loc+' '+formatNum(l.q); }).join(' / ')+(!full && r.locs.length>3 ? ' ほか' : ''); }
+function renderStockMove(st){
+  if(!st.outlook) return '<div class="empty-note">見積もり・入荷予定がまだありません(管理 → 在庫・kintone取込 → kintoneの同期)。</div>';
+  var R = stockMoveCompute(st);
+  if(!R) return '<div class="empty-note">読み込み中…</div>';
+  var target = Number(state.stockMoveTarget)||0;
+  var over = R.tanFree>0 && R.cube>R.tanFree;
+  var rows = R.rows.map(function(r){
+    return '<tr'+(r.pick ? '' : ' style="opacity:.45;"')+'><td><b>'+esc(r.code)+'</b><div class="sk-minor">'+esc(r.name)+'</div></td><td class="num">'+formatNum(r.free)+'</td><td class="num">'+(r.noEst ? '<span class="sk-minor">なし</span>' : formatNum(r.est))+'</td><td class="num">'+(r.arr ? formatNum(r.arr) : '')+'</td><td class="num">'+formatNum(r.surplus)+'</td>'+
+      '<td class="num"><b>'+formatNum(r.cases)+'</b> ケース<div class="sk-minor">'+formatNum(r.qty)+'個・入数'+formatNum(r.pack)+'</div></td><td class="num">'+stockFmtCube(r.cube)+(r.saiKnown ? '' : '<div class="sk-minor">才数不明</div>')+'</td><td style="white-space:nowrap;font-size:12px;">'+esc(stockMoveLocText(r))+'</td><td class="num">'+(r.tannan ? formatNum(r.tannan) : '')+'</td></tr>';
+  }).join('') || '<tr><td colspan="9" class="empty-note">移せる品番はありません</td></tr>';
+  return '<div class="panel-title" style="font-size:16px;">丹南へ移すリスト</div>'+
+    '<div class="pool-hint" style="margin:0 0 8px;">高屋の在庫(引当を除く)から、'+(R.months ? '今日〜'+esc(R.end.slice(5).replace('-','/'))+' の' : '今日以降の全部の')+'高屋の見積もり(将来在庫と同じ数え方。需要予測を含む)を引いて余る分を、棚(ブロック A〜E)からケース単位で移します。<b>入荷予定は足していません</b>。才数の多い順です。</div>'+
+    '<div class="ch-row" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin:0 0 10px;">'+
+      '<label style="display:flex;flex-direction:column;gap:4px;"><span style="font-size:11px;color:var(--slate-500);">高屋に残す見積もりの期間</span><select id="stockMoveMonths">'+[[1,'1か月'],[2,'2か月'],[3,'3か月'],[6,'6か月'],[0,'全部']].map(function(x){ return '<option value="'+x[0]+'"'+(R.months===x[0] ? ' selected' : '')+'>'+x[1]+'</option>'; }).join('')+'</select></label>'+
+      '<label style="display:flex;flex-direction:column;gap:4px;"><span style="font-size:11px;color:var(--slate-500);">空けたい才数(空なら全部)</span><input type="number" min="0" id="stockMoveTarget" value="'+(target||'')+'" style="width:120px;"></label>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="stockMovePrint">印刷</button><button type="button" class="vc-manage-toggle-btn" id="stockMoveCsv">CSVで保存</button><button type="button" class="add-btn" id="stockMoveSend"'+(R.pick.length ? '' : ' disabled')+'>🧾 高屋の出荷集計表へ('+R.pick.length+'品番)</button></div>'+
+    '<div class="vca-cards"><div class="vca-card"><div class="vca-card-label">移す品番</div><div class="vca-card-val">'+formatNum(R.pick.length)+'</div></div><div class="vca-card"><div class="vca-card-label">ケース</div><div class="vca-card-val">'+formatNum(R.cases)+'</div></div>'+
+      '<div class="vca-card"><div class="vca-card-label">空く才数</div><div class="vca-card-val">'+stockFmtCube(R.cube)+'</div><div class="vca-card-sub">40ft 約'+stockFt40(R.cube)+'本'+(R.unknownSai ? '・才数不明 '+R.unknownSai+'品番は1才で計算' : '')+'</div></div>'+
+      '<div class="vca-card"><div class="vca-card-label">丹南の空き(容量から)</div><div class="vca-card-val">'+stockFmtCube(R.tanFree)+'</div><div class="vca-card-sub">'+(over ? '<b style="color:#B42318;">丹南に入りきりません</b>' : '入れた容量の範囲で計算')+'</div></div></div>'+
+    (R.noPack ? '<div class="pool-hint" style="margin:0 0 6px;">入数の分からない '+R.noPack+'品番は、ケースに直せないので入れていません。</div>' : '')+
+    '<div style="overflow:auto;max-height:560px;" data-keep-scroll="stockMove"><table class="report-table"><thead><tr><th>品番 / 商品名</th><th class="num">高屋の在庫</th><th class="num">見積もり</th><th class="num">入荷予定</th><th class="num">余り</th><th class="num">移す数</th><th class="num">才数</th><th>棚(多い順)</th><th class="num">丹南の在庫</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+function bindStockMove(){
+  var mo = document.getElementById('stockMoveMonths'); if(mo) mo.addEventListener('change', function(){ state.stockMoveMonths = Number(mo.value); render(); });
+  var tg = document.getElementById('stockMoveTarget'); if(tg) tg.addEventListener('change', function(){ state.stockMoveTarget = Number(tg.value)||0; render(); });
+  var csv = document.getElementById('stockMoveCsv');
+  if(csv) csv.addEventListener('click', function(){
+    var R = stockMoveCompute(state.stockData || {}); if(!R) return;
+    var rows = [['品番','商品名','高屋の在庫(引当除く)','見積もり','入荷予定','余り','移すケース','移す数','入数','才数','棚','丹南の在庫']];
+    R.pick.forEach(function(r){ rows.push([r.code, r.name, r.free, r.est, r.arr, r.surplus, r.cases, r.qty, r.pack, Math.round(r.cube*10)/10, stockMoveLocText(r, true), r.tannan]); });
+    downloadCSV('丹南へ移す_'+todayStr()+'.csv', rows);
+  });
+  var pr = document.getElementById('stockMovePrint');
+  if(pr) pr.addEventListener('click', function(){
+    var R = stockMoveCompute(state.stockData || {}); if(!R) return;
+    var html = '<h1>丹南へ移すリスト</h1><div class="meta">'+esc(dateLabelFromStr(todayStr()))+' ・ '+(R.months ? R.months+'か月の見積もりを残す' : '全部の見積もりを残す')+' ・ '+formatNum(R.pick.length)+'品番 ・ '+formatNum(R.cases)+'ケース ・ '+stockFmtCube(R.cube)+'才</div>'+
+      '<table><thead><tr><th>品番</th><th>商品名</th><th>ケース</th><th>個</th><th>才</th><th>棚(多い順)</th><th>済</th></tr></thead><tbody>'+R.pick.map(function(r){ return '<tr><td class="c">'+esc(r.code)+'</td><td>'+esc(r.name)+'</td><td class="n"><b>'+formatNum(r.cases)+'</b></td><td class="n">'+formatNum(r.qty)+'</td><td class="n">'+stockFmtCube(r.cube)+'</td><td>'+esc(stockMoveLocText(r, true))+'</td><td></td></tr>'; }).join('')+'</tbody></table>';
+    printHtmlDoc('丹南へ移す_'+todayStr(), html, 'h1{font-size:18px;margin:0 0 2px;} .meta{font-size:11px;margin-bottom:6px;} table{width:100%;border-collapse:collapse;font-size:11px;} th{background:#eee;border:1px solid #000;padding:3px;} td{border:1px solid #000;padding:3px 5px;} td.n{text-align:right;white-space:nowrap;} td.c{white-space:nowrap;font-weight:700;} tr{page-break-inside:avoid;}');
+  });
+  var se = document.getElementById('stockMoveSend');
+  if(se) se.addEventListener('click', async function(){
+    var R = stockMoveCompute(state.stockData || {}); if(!R) return;
+    var note = '丹南へ移す '+todayStr().slice(5).replace('-','/');
+    var dr = loadShukeiDraft('takaya'), have = {};
+    dr.rows.forEach(function(r){ have[r.code+'|'+r.note] = true; });
+    var add = R.pick.filter(function(r){ return !have[r.code+'|'+note]; });
+    if(!add.length){ showToast('この品番は、もう出荷集計表に入っています'); return; }
+    if(!await appConfirm('高屋の出荷集計表に '+add.length+'品番を追加します'+(dr.rows.length ? '(今入っている'+dr.rows.length+'行のあとに)' : '')+'。よろしいですか?')) return;
+    add.forEach(function(r){ dr.rows.push({ vc:'', code: r.code, qty: String(r.qty), note: note }); });
+    saveShukeiDraft('takaya', { requester: dr.requester, rows: dr.rows });
+    state.shukeiDraft = null;
+    showToast('高屋の出荷集計表に '+add.length+'品番を追加しました');
+  });
+}
 function renderStockBack(st){
   if(!state.yayoiWh && !state.yayoiWhLoading){
     state.yayoiWhLoading = true;
@@ -15932,6 +16035,7 @@ function bindStockBack(){
 }
 function bindStockTab(){
   bindStockBack();
+  bindStockMove();
   var dg = document.getElementById('stockDiag');
   if(dg) dg.addEventListener('toggle', function(e){ if(e.target===dg) state.stockDiagOpen = dg.open; });
   document.querySelectorAll('[data-sd-key]').forEach(function(el){

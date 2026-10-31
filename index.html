@@ -12167,6 +12167,156 @@ async function loadVcAllocData(){
   ]);
   return { order: r[0], dests: r[1], stock: r[2] };
 }
+/* ---------- 入出庫指示(2026-10-31。いまは入庫だけ) ----------
+   エクセル「入庫情報出力」の代わり: 入庫予定日と品番・数量から、CX への入庫予定ファイル KNYUY541.txt(タブ区切り・見出しつき・全29列)を作る。各自の PC で使う(入力はその PC に残す)。
+   品番の情報は kv「cx-inbound-master」= { source, syncedAt / uploadedAt, items: { 品番: [商品名, 入数, JAN] } }。ふだんは sync-product-master が kintone の商品台帳から作る(source: 'kintone')。
+   kintone に JAN が無いときだけ、エクセルの「客先情報」シートから取り込む(この3つだけ。単価は kv に入れない)。
+   商品コードの列は JAN(客先品番は使わない。エクセルの 1.8 と同じ)。 */
+var CX_IN_MASTER_KEY = 'cx-inbound-master', CX_IN_DRAFT_KEY = 'cxInboundDraft';
+var CX_IN_SUPPLIER = '0367608', CX_IN_CENTER = '3308';
+var CX_IN_HEAD = ['伝票番号','行番号','入庫予定日','入庫実績日','仕入先コード','商品コード','商品名カナ','規格名カナ','JANコード','ＣＳ荷姿入数','ＢＬ荷姿入数','入庫予定総PS数','入庫予定ＣＳ数','入庫予定ＢＬ数','入庫予定ＰＳ数','入庫実績総ＰＳ数','入庫実績ＣＳ数','入庫実績ＢＬ数','入庫実績端数','予定製造日','予定賞味期限日','入庫限界製造日','入庫限界賞味期限日','実績製造日','実績賞味期限日','FILLER','任意区分','作成年月日','物流センターコード'];
+function cxInDraft(){
+  if(!state.cxIn){
+    var v = {}; try{ v = JSON.parse(localStorage.getItem(CX_IN_DRAFT_KEY) || '{}') || {}; }catch(e){}
+    state.cxIn = { date: v.date || '', lines: v.lines || '' };
+  }
+  return state.cxIn;
+}
+function cxInSaveDraft(){ try{ localStorage.setItem(CX_IN_DRAFT_KEY, JSON.stringify(state.cxIn)); }catch(e){} }
+/* 1行 = 品番と数量(タブ・空白・カンマ区切り。エクセルからの貼り付けも可) */
+function cxInParse(text, items){
+  return String(text||'').split(/\r?\n/).map(function(l){ return l.normalize('NFKC').trim(); }).filter(Boolean).map(function(l){
+    var m = l.split(/[\t ,]+/), code = m[0] || '', qty = Number(String(m[1]||'').replace(/,/g,'')), it = items[code], r = { code: code, qty: qty, name: it ? it[0] : '', pack: it ? it[1] : null, jan: it ? it[2] : '', err: '', warn: '' };
+    if(!it) r.err = '客先情報に無い品番';
+    else if(!/^\d{13}$/.test(r.jan)) r.err = 'JAN なし';
+    if(!(qty>0) || Math.floor(qty)!==qty) r.err = (r.err ? r.err+'・' : '')+'数量を確かめてください';
+    else if(r.pack>0 && qty % r.pack) r.warn = 'カートン単位ではありません';
+    return r;
+  });
+}
+/* ファイルの中身(エクセルの script シートと同じ。番号の前の空白も同じ) */
+function cxInFileText(rows, date, today){
+  var ymd = function(d){ return ' '+String(d).replace(/-/g,''); };
+  var cell = function(v){ v = String(v).replace(/[\t\r\n]/g,' '); return /[",]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; };
+  var out = [CX_IN_HEAD.join('\t')], blank = new Array(CX_IN_HEAD.length).join('\t');
+  rows.forEach(function(r, i){
+    out.push([' 1', ' '+(i+1), ymd(date), '', CX_IN_SUPPLIER, ' '+r.jan, cell(r.name), '', r.jan, '', '', ' '+r.qty, '', '', '', '0', '0', '0', '0', '00000000', '00000000', '00000000', '00000000', '00000000', '00000000', '', '', ymd(today), ' '+CX_IN_CENTER].join('\t'));
+  });
+  while(out.length<33) out.push(blank); // エクセルの出力と同じく、33行まで空の行を続ける
+  return out.join('\r\n')+'\r\n';
+}
+/* Shift_JIS(CP932)にする。ブラウザに書き出す部品が無いので、TextDecoder から逆引きの表を作る。表せない文字は ? にして返す */
+function cxInSjis(text){
+  if(!cxInSjis.map){
+    var map = {}, dec = new TextDecoder('shift-jis'), add = function(bytes){ var c = dec.decode(new Uint8Array(bytes)); if(c.length===1 && c!=='\uFFFD' && map[c]===undefined) map[c] = bytes; };
+    for(var a=0; a<256; a++){
+      if(a<0x80 || (a>=0xA1 && a<=0xDF)) add([a]);
+      else if((a>=0x81 && a<=0x9F) || (a>=0xE0 && a<=0xFC)) for(var b=0x40; b<=0xFC; b++){ if(b!==0x7F) add([a, b]); }
+    }
+    cxInSjis.map = map;
+  }
+  var out = [], bad = [];
+  Array.from(text).forEach(function(c){ var m = cxInSjis.map[c]; if(m) out.push.apply(out, m); else { out.push(0x3F); bad.push(c); } });
+  return { bytes: new Uint8Array(out), bad: bad };
+}
+/* 客先情報 → { 品番: [商品名, 入数, JAN] }。見出しの名前で列を探す。単価などほかの列は読まない */
+function cxInMasterFromRows(rows){
+  var h = (rows[0] || []).map(function(x){ return String(x||'').trim(); }), ix = {};
+  [['code','商品コード'],['name','商品名'],['pack','入数'],['jan','JANコード']].forEach(function(f){ ix[f[0]] = h.indexOf(f[1]); });
+  if(ix.code<0 || ix.name<0 || ix.pack<0 || ix.jan<0) return null;
+  var items = {};
+  rows.slice(1).forEach(function(r){
+    var code = String(r[ix.code]===undefined || r[ix.code]===null ? '' : r[ix.code]).normalize('NFKC').trim(); if(!code) return;
+    items[code] = [String(r[ix.name]||'').trim(), Number(r[ix.pack])||null, String(r[ix.jan]===undefined || r[ix.jan]===null ? '' : r[ix.jan]).trim()];
+  });
+  return items;
+}
+async function cxInImportMaster(file){
+  state.cxInMsg = '読み込んでいます…'; render();
+  try{
+    var X = await clientLoadXlsx();
+    var wb = X.read(await file.arrayBuffer(), { type: 'array' });
+    var ws = wb.Sheets['客先情報'];
+    if(!ws){ state.cxInMsg = '⚠️ 「客先情報」のシートがありません。入庫情報出力のエクセルか、客先情報のファイルを選んでください'; render(); return; }
+    var items = cxInMasterFromRows(X.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' }));
+    if(!items || !Object.keys(items).length){ state.cxInMsg = '⚠️ 商品コード・商品名・入数・JANコードの列が見つかりませんでした'; render(); return; }
+    var v = { uploadedAt: new Date().toISOString(), file: file.name, items: items };
+    var ok = await persistKey(CX_IN_MASTER_KEY, v);
+    if(ok===false){ state.cxInMsg = '⚠️ 保存できませんでした'; render(); return; }
+    state.cxInMaster = v;
+    state.cxInMsg = '「'+file.name+'」から '+formatNum(Object.keys(items).length)+'品番を取り込みました(商品名・入数・JAN だけ)';
+    await appendAuditLog({ action:'入庫指示の客先情報を取込', target:'入出庫指示', before:null, after: file.name+'・'+Object.keys(items).length+'品番' });
+  }catch(e){ state.cxInMsg = '⚠️ 読めませんでした: '+((e && e.message) || ''); }
+  render();
+}
+function cxInTableHtml(rows){
+  var tot = rows.reduce(function(a, r){ return a + (r.qty>0 ? r.qty : 0); }, 0), bad = rows.filter(function(r){ return r.err; }).length;
+  return '<div class="pool-hint" style="margin:8px 0 6px;">'+formatNum(rows.length)+'行・合計 <b>'+formatNum(tot)+'</b> 個'+(bad ? ' ・ <b style="color:#B42318;">直す行 '+bad+'件</b>' : '')+'</div>'+
+    '<div style="overflow-x:auto;max-height:420px;overflow-y:auto;"><table class="report-table" style="font-size:13px;"><thead><tr><th>行</th><th>品番</th><th>商品名</th><th class="num">数量</th><th class="num">入数</th><th class="num">ケース</th><th>JAN</th><th>確認</th></tr></thead><tbody>'+
+    (rows.map(function(r, i){ return '<tr><td class="num">'+(i+1)+'</td><td><b>'+esc(r.code)+'</b></td><td>'+esc(r.name)+'</td><td class="num">'+(r.qty>0 ? formatNum(r.qty) : '')+'</td><td class="num">'+(r.pack ? formatNum(r.pack) : '')+'</td><td class="num">'+(r.pack && r.qty>0 ? (Math.round(r.qty/r.pack*10)/10).toLocaleString('ja-JP') : '')+'</td><td>'+esc(r.jan)+'</td><td style="'+(r.err ? 'color:#B42318;font-weight:700;' : 'color:#B54708;')+'">'+esc(r.err || r.warn)+'</td></tr>'; }).join('') || '<tr><td colspan="8" class="empty-note">品番と数量を入れると、ここに出ます</td></tr>')+'</tbody></table></div>';
+}
+function renderCxOrder(){
+  var D = cxInDraft();
+  if(!state.cxInMaster && !state.cxInMasterLoading){
+    state.cxInMasterLoading = true;
+    loadKeyJson(CX_IN_MASTER_KEY, function(){ return { items: {} }; }).then(function(v){ state.cxInMaster = v; state.cxInMasterLoading = false; render(); }).catch(function(){ state.cxInMasterLoading = false; });
+  }
+  var M = state.cxInMaster, n = M && M.items ? Object.keys(M.items).length : 0, rows = M ? cxInParse(D.lines, M.items || {}) : [];
+  var fromKintone = M && M.source==='kintone';
+  var master = hasManagerSession() && M && !fromKintone
+    ? '<div class="ll-form-group shukei-drop" data-cxin-drop="1" style="margin:12px 0 0;"><div class="ll-form-group-title">客先情報の取り込み(kintone から JAN を読めないときだけ)</div>'+
+        '<div class="pool-hint" style="margin:0 0 6px;">入庫情報出力のエクセル(.xlsm)か客先情報(.xlsx)を選ぶか、この枠にドラッグ&ドロップしてください。「客先情報」シートの商品名・入数・JAN だけを取り込みます(単価は取り込みません)。</div>'+
+        '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 ファイルを選んで取り込む<input type="file" id="cxInFile" accept=".xlsx,.xlsm,.xls" style="display:none;"></label><span class="shukei-drop-hint">またはファイルをこの枠にドラッグ&ドロップ</span>'+
+        (state.cxInMsg ? '<div class="vc-import-status" style="margin-top:6px;">'+esc(state.cxInMsg)+'</div>' : '')+'</div>'
+    : '';
+  return '<div class="mgr-wrap client-hub"><div class="vc-tabs hub-tabs" style="margin:0 0 14px;"><button type="button" class="vc-tab-btn active">入庫指示</button></div>'+
+    '<div class="panel"><div class="panel-title">入庫指示(CX への入庫予定ファイル)</div>'+
+    '<div class="pool-hint" style="margin:0 0 10px;">入庫予定日と品番・数量を入れて、KNYUY541.txt を保存します(同じ名前のファイルに上書きできます)。商品の情報: '+(!M ? '読み込み中…' : n ? formatNum(n)+'品番'+(fromKintone ? '(kintone の商品台帳 '+esc(fmtDateTime(M.syncedAt))+')' : M.uploadedAt ? '(客先情報 '+esc(fmtDateTime(M.uploadedAt))+' 取込)' : '') : '<b style="color:#B42318;">まだありません</b>(kintone の商品台帳を同期すると入ります)')+'</div>'+
+    '<div class="ch-row"><label class="ch-field"><span>作成日</span><input type="text" value="'+esc(todayStr().replace(/-/g,'/'))+'" disabled style="width:120px;"></label>'+
+      '<label class="ch-field"><span>入庫予定日</span><input type="date" id="cxInDate" value="'+esc(D.date)+'"></label>'+
+      '<button type="button" class="add-btn" id="cxInSave">💾 KNYUY541.txt を保存</button><button type="button" class="ll-btn" id="cxInClear">新規入力(入力を消す)</button></div>'+
+    '<label class="ch-field" style="display:flex;"><span>品番と数量(1行に1品番。例: 605-57 350。エクセルの2列を貼り付けられます)</span><textarea id="cxInLines" rows="8" style="width:100%;max-width:420px;font-family:monospace;">'+esc(D.lines)+'</textarea></label>'+
+    '<div id="cxInTable">'+cxInTableHtml(rows)+'</div>'+master+'</div></div>';
+}
+function bindCxOrder(){
+  var D = cxInDraft(), get = function(id){ return document.getElementById(id); };
+  var dt = get('cxInDate'); if(dt) dt.addEventListener('change', function(){ D.date = dt.value; cxInSaveDraft(); });
+  var ta = get('cxInLines');
+  if(ta) ta.addEventListener('input', function(){ D.lines = ta.value; cxInSaveDraft(); var box = get('cxInTable'); if(box) box.innerHTML = cxInTableHtml(cxInParse(D.lines, (state.cxInMaster && state.cxInMaster.items) || {})); });
+  var cl = get('cxInClear');
+  if(cl) cl.addEventListener('click', async function(){ if(D.lines && !await appConfirm('入力を消します。よろしいですか?')) return; D.date = ''; D.lines = ''; cxInSaveDraft(); render(); });
+  var sv = get('cxInSave');
+  if(sv) sv.addEventListener('click', async function(){
+    var rows = cxInParse(D.lines, (state.cxInMaster && state.cxInMaster.items) || {});
+    if(!D.date){ await appAlert('入庫予定日を入れてください'); return; }
+    if(!rows.length){ await appAlert('品番と数量を入れてください'); return; }
+    var bad = rows.filter(function(r){ return r.err; });
+    if(bad.length){ await appAlert('直す行が '+bad.length+'件あります: '+bad.slice(0, 5).map(function(r){ return r.code+'('+r.err+')'; }).join('、')); return; }
+    var warn = rows.filter(function(r){ return r.warn; });
+    if(warn.length && !await appConfirm('カートン単位ではない行が '+warn.length+'件あります('+warn.slice(0, 5).map(function(r){ return r.code; }).join('、')+')。続けますか?')) return;
+    var today = todayStr(), enc = cxInSjis(cxInFileText(rows, D.date, today));
+    // 保存先を選んで同じ名前に上書きする(ふつうのダウンロードだと 2回目から「KNYUY541 (1).txt」になるため)。選べないブラウザはダウンロード
+    var blob = new Blob([enc.bytes], { type: 'text/plain' }), saved = false;
+    if(window.showSaveFilePicker){
+      try{
+        var h = await window.showSaveFilePicker({ suggestedName: 'KNYUY541.txt', id: 'cxInbound', startIn: 'desktop', types: [{ description: 'テキスト', accept: { 'text/plain': ['.txt'] } }] });
+        var w = await h.createWritable(); await w.write(blob); await w.close(); saved = true;
+      }catch(e){ if(e && e.name==='AbortError') return; }
+    }
+    if(!saved){
+      var url = URL.createObjectURL(blob), a = document.createElement('a');
+      a.href = url; a.download = 'KNYUY541.txt'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    }
+    try{ await appendAuditLog({ action:'入庫指示のファイルを保存', target:'入出庫指示', before:null, after: '入庫予定日 '+D.date+'・'+rows.length+'行' }); }catch(e){} // 閲覧専用のアカウントでは記録できなくても、ファイルは保存する
+    showToast('KNYUY541.txt を保存しました('+rows.length+'行)'+(enc.bad.length ? '。商品名の文字 '+enc.bad.slice(0, 5).join('')+' は ? になりました' : ''));
+  });
+  var fi = get('cxInFile'); if(fi) fi.addEventListener('change', function(){ if(fi.files && fi.files[0]) cxInImportMaster(fi.files[0]); });
+  document.querySelectorAll('[data-cxin-drop]').forEach(function(zone){
+    ['dragenter','dragover'].forEach(function(ev){ zone.addEventListener(ev, function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; zone.classList.add('is-dragover'); }); });
+    zone.addEventListener('dragleave', function(e){ if(!zone.contains(e.relatedTarget)) zone.classList.remove('is-dragover'); });
+    zone.addEventListener('drop', function(e){ e.preventDefault(); zone.classList.remove('is-dragover'); var f = e.dataTransfer && e.dataTransfer.files; if(f && f[0]) cxInImportMaster(f[0]); });
+  });
+}
 function renderVcAlloc(){
   var tab = state.vcAllocTab || 'dash';
   if(tab==='data') tab = 'dash'; // 取込はデータ更新の画面へ移した
@@ -15810,7 +15960,7 @@ function isUserBusy(){
 /* ---------- 開いている画面をアドレス(#のあと)に残す ----------
    再読み込みしてもトップ画面に戻らず、同じ画面(と画面内のタブ・作業記録で選んでいる人)を開き直すため。
    例: #role=adminHub&tab=financial / #role=input&staff=<スタッフID> / #role=shukei&site=tannan&tab=diff */
-var VIEW_URL_ROLES = ['input','report','monitor','achievements','history','adminHub','settingsHub','shukei','vcAlloc','dataHub','billing','stock','clientHub'];
+var VIEW_URL_ROLES = ['input','report','monitor','achievements','history','adminHub','settingsHub','shukei','vcAlloc','cxOrder','dataHub','billing','stock','clientHub'];
 function viewStateToHash(){
   if(!state.role) return '';
   var q = { role: state.role };
@@ -15931,6 +16081,7 @@ function render(){
   else if(state.role==='settingsHub') html += renderSettingsHub();
   else if(state.role==='shukei') html += renderShukei();
   else if(state.role==='vcAlloc') html += renderVcAlloc();
+  else if(state.role==='cxOrder') html += renderCxOrder();
   else if(state.role==='dataHub') html += renderDataHub();
   else if(state.role==='billing') html += renderBilling();
   else if(state.role==='stock') html += renderStockTab();
@@ -15950,6 +16101,7 @@ function render(){
   if(state.role==='settingsHub') bindSettingsHub();
   if(state.role==='shukei') bindShukei();
   if(state.role==='vcAlloc') bindVcAlloc();
+  if(state.role==='cxOrder') bindCxOrder();
   if(state.role==='dataHub') bindDataHub();
   if(state.role==='billing') bindBilling();
   if(state.role==='stock') bindStockTab();
@@ -16375,12 +16527,13 @@ var COMMON_NAV_ITEMS = [
   { role:'monitor', label:'モニター', ic:'📡' },
   { role:'shukei', label:'出荷集計表', ic:'🧾' },
   { role:'vcAlloc', label:'VC引当', ic:'📦' },
+  { role:'cxOrder', label:'入出庫指示', ic:'🚚' },
   { role:'stock', label:'在庫', ic:'🏢' }
 ];
 /* サイドバーのまとまり(トップのカードの並びと同じ)。管理の項目は鍵の印(ログインしていないとき) */
 var NAV_GROUPS = [
   { label:'現場', items:[ { role:'input' }, { role:'monitor' } ] },
-  { label:'事務所', items:[ { role:'report' }, { role:'shukei' }, { role:'vcAlloc' }, { role:'stock' } ] },
+  { label:'事務所', items:[ { role:'report' }, { role:'shukei' }, { role:'vcAlloc' }, { role:'cxOrder' }, { role:'stock' } ] },
   { label:'管理', items:[ { role:'adminHub', tab:'data', label:'作業量CSV取込', ic:'data', lock:true }, { role:'adminHub', tab:'stockData', label:'在庫・kintone取込', ic:'database', lock:true }, { role:'adminHub', lock:true }, { role:'adminHub', tab:'setBom', label:'セット構成', ic:'listChecks', lock:true }, { role:'clientHub', label:'荷主ページ', ic:'truck', lock:true }, { role:'settingsHub', lock:true }, { href:'factory.html', label:'生産管理', ic:'factory', lock:true } ] }
 ];
 var ADMIN_NAV_ITEMS = [
@@ -16401,6 +16554,7 @@ var LL_ICONS = {
   monitor:'<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>',
   calendar:'<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>',
   shukei:'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 9v12"/>',
+  cxOrder:'<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>',
   vcAlloc:'<path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><path d="m3.3 7 7.703 4.734a2 2 0 0 0 1.994 0L20.7 7"/>',
   stock:'<path d="M22 8.35V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8.35A2 2 0 0 1 3.26 6.5l8-3.2a2 2 0 0 1 1.48 0l8 3.2A2 2 0 0 1 22 8.35Z"/><path d="M6 18h12"/><path d="M6 14h12"/><rect width="12" height="12" x="6" y="10"/>',
   adminHub:'<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
@@ -16437,7 +16591,7 @@ document.addEventListener('click', function(ev){
   document.querySelectorAll('[data-theme-toggle]').forEach(function(x){ x.innerHTML = themeToggleInner(t==='dark'); });
 });
 function renderTopbar(){
-  var roleLabel = {clientHub:'荷主ページ', manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'出荷集計表(高屋・丹南)', vcAlloc:'VC引当', stock:'在庫'}[state.role] || (state.role ? '' : 'ホーム');
+  var roleLabel = {cxOrder:'入出庫指示', clientHub:'荷主ページ', manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'出荷集計表(高屋・丹南)', vcAlloc:'VC引当', stock:'在庫'}[state.role] || (state.role ? '' : 'ホーム');
   var lockBtn = (hasManagerSession() && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="ログアウトする">🔓 ログアウト</button>' : '';
   // 共通ナビゲーション: どのページからでも他の主要ページへ直接移動できるようにする。
   // 管理者専用項目(管理者/設定)は、実際にログイン済みの場合のみ表示する

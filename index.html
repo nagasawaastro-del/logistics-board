@@ -12998,6 +12998,9 @@ var BILLING_STORAGE_METHOD = '3期制（末／10／20＋入)';
 var BILLING_MOVE_DEST = { 21:'RSL', 13:'CX尾道', 8:'CX桶川', 5:'桶川', 9:'CX小野' };
 // 数字3桁だけの品番(資材・袋など。例: 996)は請求の対象にしない(作業明細の作業コードは別)
 function billingIsBareCode(code){ return /^\d{3}$/.test(String(code||'').trim()); }
+// 97・98・99 で始まる品番(商品サンプル・ユニリンク依頼、992・993 の段ボール・ガムテープなどの資材、送料・経費)は保管料に入れない(2026-10-31)
+function billingIsMaterial(code){ return /^9[789]/.test(String(code||'').trim()); }
+var BILLING_NO_INBOUND = ['993-31','993-32']; // 不織布の部材: 保管料に加えて入庫料にも入れない(2026-10-31)
 function billingIsCoop(name){ return /コープ|生協|パルシステム/.test(String(name||'')); }
 /* 請求の金額は1行ずつ円未満を四捨五入して整数にする(合計は整数の金額の合計)。小数の誤差(例: 2.675×…)で丸めが狂わないよう、先に小数第6位でそろえる */
 function billingYen(v){ var n = Number(v); if(!isFinite(n)) return 0; return Math.round(Math.round(n*1e6)/1e6); }
@@ -13090,9 +13093,10 @@ function computeBilling(files, pm){
     var st = stockCases[code] || [0,0,0], b = buy[code]||0, mi = moveIn[code]||0;
     var total = st[0]+st[1]+st[2]+b+mi;
     if(!total) return;
+    if(billingIsMaterial(code) && (!(b+mi) || BILLING_NO_INBOUND.indexOf(code)!==-1)) return; // 資材は保管料に入れない(入庫料だけ下で見る)
     var s = sai(code, names[code]);
     var calc = total*s;
-    if(calc) storage.push([code, names[code]||'', BILLING_STORAGE_METHOD, st[0], st[1], st[2], b, mi, s, calc, BILLING_RATES.storage, billingYen(calc*BILLING_RATES.storage)]);
+    if(calc && !billingIsMaterial(code)) storage.push([code, names[code]||'', BILLING_STORAGE_METHOD, st[0], st[1], st[2], b, mi, s, calc, BILLING_RATES.storage, billingYen(calc*BILLING_RATES.storage)]);
     if(b+mi) inbound.push([code, names[code]||'', b, mi, s, (b+mi)*s, BILLING_RATES.inbound, billingYen((b+mi)*s*BILLING_RATES.inbound)]);
   });
   // --- 出庫(売上明細): 返品・数量0以下・送料や経費(998-・999-)を除き、得意先で生協と生協以外に分ける ---
@@ -15183,6 +15187,7 @@ function computeStorageSim(st, opt){
       if(x.locAlloc) Object.keys(x.locAlloc).forEach(function(l){ q -= Number(x.locAlloc[l])||0; });
     });
     if(q<=0) return;
+    if(billingIsMaterial(code)) return; // 資材は請求の保管料に入れないので、試算にも入れない
     var m = pm[code] || {}, pack = m.packQty ? Number(m.packQty) : null;
     var saiKnown = m.cubicVolume!==null && m.cubicVolume!==undefined && m.cubicVolume!=='';
     var sai = saiKnown ? Number(m.cubicVolume) : 1;

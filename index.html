@@ -15927,10 +15927,14 @@ function stockMoveCompute(st){
   rows.sort(function(a, b){ return b.cube - a.cube || b.qty - a.qty; });
   var cum = 0, target = Number(state.stockMoveTarget)||0;
   rows.forEach(function(r){ r.pick = !target || cum < target; cum += r.cube; r.cum = cum; });
-  var pick = rows.filter(function(r){ return r.pick; });
+  // 出荷集計表へ送るのは ☑ を付けた品番だけ(数が多いため。2026-10-31)。印刷・CSV は ☑ があれば ☑ だけ、無ければ全部
+  var sel = state.stockMoveSel || {};
+  rows.forEach(function(r){ r.checked = !!sel[r.code]; });
+  var checked = rows.filter(function(r){ return r.checked; });
+  var pick = checked.length ? checked : rows.filter(function(r){ return r.pick; });
   var c = st.calc || {}, cap = st.capacity || {}, free = 0;
   tan.stockBlocks.forEach(function(b){ var v = stockCapSai(cap[b]); if(v>0) free += Math.max(0, v - ((c.blocks && c.blocks[b] && c.blocks[b].cube)||0)); });
-  return { rows: rows, pick: pick, end: end, months: months, noPack: noPack, tanFree: free,
+  return { rows: rows, pick: pick, checked: checked, end: end, months: months, noPack: noPack, tanFree: free,
     cube: pick.reduce(function(a, r){ return a + r.cube; }, 0), cases: pick.reduce(function(a, r){ return a + r.cases; }, 0), unknownSai: pick.filter(function(r){ return !r.saiKnown; }).length };
 }
 function stockMoveLocText(r, full){ return r.locs.slice(0, full ? 8 : 3).map(function(l){ return l.loc+' '+formatNum(l.q); }).join(' / ')+(!full && r.locs.length>3 ? ' ほか' : ''); }
@@ -15941,20 +15945,21 @@ function renderStockMove(st){
   var target = Number(state.stockMoveTarget)||0;
   var over = R.tanFree>0 && R.cube>R.tanFree;
   var rows = R.rows.map(function(r){
-    return '<tr'+(r.pick ? '' : ' style="opacity:.45;"')+'><td><b>'+esc(r.code)+'</b><div class="sk-minor">'+esc(r.name)+'</div></td><td class="num">'+formatNum(r.free)+'</td><td class="num">'+(r.noEst ? '<span class="sk-minor">なし</span>' : formatNum(r.est))+'</td><td class="num">'+(r.arr ? formatNum(r.arr) : '')+'</td><td class="num">'+formatNum(r.surplus)+'</td>'+
+    return '<tr'+(r.pick || r.checked ? '' : ' style="opacity:.45;"')+'><td><input type="checkbox" data-move-pick="'+esc(r.code)+'" aria-label="'+esc(r.code)+'を選ぶ"'+(r.checked ? ' checked' : '')+'></td><td><b>'+esc(r.code)+'</b><div class="sk-minor">'+esc(r.name)+'</div></td><td class="num">'+formatNum(r.free)+'</td><td class="num">'+(r.noEst ? '<span class="sk-minor">なし</span>' : formatNum(r.est))+'</td><td class="num">'+(r.arr ? formatNum(r.arr) : '')+'</td><td class="num">'+formatNum(r.surplus)+'</td>'+
       '<td class="num"><b>'+formatNum(r.cases)+'</b> ケース<div class="sk-minor">'+formatNum(r.qty)+'個・入数'+formatNum(r.pack)+'</div></td><td class="num">'+stockFmtCube(r.cube)+(r.saiKnown ? '' : '<div class="sk-minor">才数不明</div>')+'</td><td style="white-space:nowrap;font-size:12px;">'+esc(stockMoveLocText(r))+'</td><td class="num">'+(r.tannan ? formatNum(r.tannan) : '')+'</td></tr>';
-  }).join('') || '<tr><td colspan="9" class="empty-note">移せる品番はありません</td></tr>';
+  }).join('') || '<tr><td colspan="10" class="empty-note">移せる品番はありません</td></tr>';
   return '<div class="panel-title" style="font-size:16px;">丹南へ移すリスト</div>'+
     '<div class="pool-hint" style="margin:0 0 8px;">高屋の在庫(引当を除く)から、'+(R.months ? '今日〜'+esc(R.end.slice(5).replace('-','/'))+' の' : '今日以降の全部の')+'高屋の見積もり(将来在庫と同じ数え方。需要予測を含む)を引いて余る分を、棚(ブロック A〜E)からケース単位で移します。<b>入荷予定は足していません</b>。才数の多い順です。</div>'+
     '<div class="ch-row" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin:0 0 10px;">'+
       '<label style="display:flex;flex-direction:column;gap:4px;"><span style="font-size:11px;color:var(--slate-500);">高屋に残す見積もりの期間</span><select id="stockMoveMonths">'+[[1,'1か月'],[2,'2か月'],[3,'3か月'],[6,'6か月'],[0,'全部']].map(function(x){ return '<option value="'+x[0]+'"'+(R.months===x[0] ? ' selected' : '')+'>'+x[1]+'</option>'; }).join('')+'</select></label>'+
       '<label style="display:flex;flex-direction:column;gap:4px;"><span style="font-size:11px;color:var(--slate-500);">空けたい才数(空なら全部)</span><input type="number" min="0" id="stockMoveTarget" value="'+(target||'')+'" style="width:120px;"></label>'+
-      '<button type="button" class="vc-manage-toggle-btn" id="stockMovePrint">印刷</button><button type="button" class="vc-manage-toggle-btn" id="stockMoveCsv">CSVで保存</button><button type="button" class="add-btn" id="stockMoveSend"'+(R.pick.length ? '' : ' disabled')+'>🧾 高屋の出荷集計表へ('+R.pick.length+'品番)</button></div>'+
-    '<div class="vca-cards"><div class="vca-card"><div class="vca-card-label">移す品番</div><div class="vca-card-val">'+formatNum(R.pick.length)+'</div></div><div class="vca-card"><div class="vca-card-label">ケース</div><div class="vca-card-val">'+formatNum(R.cases)+'</div></div>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="stockMovePrint">印刷</button><button type="button" class="vc-manage-toggle-btn" id="stockMoveCsv">CSVで保存</button><button type="button" class="add-btn" id="stockMoveSend"'+(R.checked.length ? '' : ' disabled')+'>🧾 ☑を高屋の出荷集計表へ('+R.checked.length+'品番)</button>'+
+      (target ? '<button type="button" class="ll-btn" id="stockMoveCheckTarget">空けたい才数まで☑</button>' : '')+(R.checked.length ? '<button type="button" class="ll-btn" id="stockMoveClear">☑を全部外す</button>' : '')+'</div>'+
+    '<div class="vca-cards"><div class="vca-card"><div class="vca-card-label">'+(R.checked.length ? '☑の品番' : '移せる品番')+'</div><div class="vca-card-val">'+formatNum(R.pick.length)+'</div></div><div class="vca-card"><div class="vca-card-label">ケース</div><div class="vca-card-val">'+formatNum(R.cases)+'</div></div>'+
       '<div class="vca-card"><div class="vca-card-label">空く才数</div><div class="vca-card-val">'+stockFmtCube(R.cube)+'</div><div class="vca-card-sub">40ft 約'+stockFt40(R.cube)+'本'+(R.unknownSai ? '・才数不明 '+R.unknownSai+'品番は1才で計算' : '')+'</div></div>'+
       '<div class="vca-card"><div class="vca-card-label">丹南の空き(容量から)</div><div class="vca-card-val">'+stockFmtCube(R.tanFree)+'</div><div class="vca-card-sub">'+(over ? '<b style="color:#B42318;">丹南に入りきりません</b>' : '入れた容量の範囲で計算')+'</div></div></div>'+
     (R.noPack ? '<div class="pool-hint" style="margin:0 0 6px;">入数の分からない '+R.noPack+'品番は、ケースに直せないので入れていません。</div>' : '')+
-    '<div style="overflow:auto;max-height:560px;" data-keep-scroll="stockMove"><table class="report-table"><thead><tr><th>品番 / 商品名</th><th class="num">高屋の在庫</th><th class="num">見積もり</th><th class="num">入荷予定</th><th class="num">余り</th><th class="num">移す数</th><th class="num">才数</th><th>棚(多い順)</th><th class="num">丹南の在庫</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    '<div style="overflow:auto;max-height:560px;" data-keep-scroll="stockMove"><table class="report-table"><thead><tr><th></th><th>品番 / 商品名</th><th class="num">高屋の在庫</th><th class="num">見積もり</th><th class="num">入荷予定</th><th class="num">余り</th><th class="num">移す数</th><th class="num">才数</th><th>棚(多い順)</th><th class="num">丹南の在庫</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 function bindStockMove(){
   var mo = document.getElementById('stockMoveMonths'); if(mo) mo.addEventListener('change', function(){ state.stockMoveMonths = Number(mo.value); render(); });
@@ -15975,18 +15980,24 @@ function bindStockMove(){
   });
   var se = document.getElementById('stockMoveSend');
   if(se) se.addEventListener('click', async function(){
-    var R = stockMoveCompute(state.stockData || {}); if(!R) return;
+    var R = stockMoveCompute(state.stockData || {}); if(!R || !R.checked.length) return;
     var note = '丹南へ移す '+todayStr().slice(5).replace('-','/');
     var dr = loadShukeiDraft('takaya'), have = {};
     dr.rows.forEach(function(r){ have[r.code+'|'+r.note] = true; });
-    var add = R.pick.filter(function(r){ return !have[r.code+'|'+note]; });
+    var add = R.checked.filter(function(r){ return !have[r.code+'|'+note]; });
     if(!add.length){ showToast('この品番は、もう出荷集計表に入っています'); return; }
     if(!await appConfirm('高屋の出荷集計表に '+add.length+'品番を追加します'+(dr.rows.length ? '(今入っている'+dr.rows.length+'行のあとに)' : '')+'。よろしいですか?')) return;
     add.forEach(function(r){ dr.rows.push({ vc:'', code: r.code, qty: String(r.qty), note: note }); });
     saveShukeiDraft('takaya', { requester: dr.requester, rows: dr.rows });
     state.shukeiDraft = null;
+    state.stockMoveSel = {};
     showToast('高屋の出荷集計表に '+add.length+'品番を追加しました');
+    render();
   });
+  document.querySelectorAll('[data-move-pick]').forEach(function(el){ el.addEventListener('change', function(){ state.stockMoveSel = state.stockMoveSel || {}; var c = el.getAttribute('data-move-pick'); if(el.checked) state.stockMoveSel[c] = true; else delete state.stockMoveSel[c]; render(); }); });
+  var ck = document.getElementById('stockMoveCheckTarget');
+  if(ck) ck.addEventListener('click', function(){ var R = stockMoveCompute(state.stockData || {}); if(!R) return; var sel = {}, target = Number(state.stockMoveTarget)||0, cum = 0; R.rows.forEach(function(r){ if(cum<target){ sel[r.code] = true; cum += r.cube; } }); state.stockMoveSel = sel; render(); });
+  var cl = document.getElementById('stockMoveClear'); if(cl) cl.addEventListener('click', function(){ state.stockMoveSel = {}; render(); });
 }
 function renderStockBack(st){
   if(!state.yayoiWh && !state.yayoiWhLoading){

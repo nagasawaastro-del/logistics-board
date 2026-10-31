@@ -864,6 +864,8 @@ details[open] > .reg-group-summary::before{transform:rotate(90deg);}
 .sk-pick .sk-check{text-align:center;font-size:16px;width:1%;}
 /* 見出しと数字の位置をそろえる(数字の列は見出しも右寄せ) */
 .shukei-table th.num{text-align:right;}
+.shukei-table td.sk-cause{color:#B54708;font-size:12px;font-weight:700;}
+html[data-app-theme="dark"] .shukei-table td.sk-cause{color:#FDB022;}
 .sk-pick th.sk-no{text-align:right;}
 .sk-pick td.num .shukei-in{text-align:right;}
 /* 備考: 画面は入力欄と「↓」を1行に、印刷では長い備考を折り返す */
@@ -8991,6 +8993,27 @@ function shukeiSortRowsBy(siteKey, rows, data, pm, key, dir){
 function shukeiSortMark(sort, key){
   return (sort && sort.key===key) ? '<span class="no-print">'+(sort.dir==='desc'?' ▼':' ▲')+'</span>' : '';
 }
+/* 差異の要因の目安(2026-10-31): 弥生のほうが多く、その拠点で最近(同期の14日前まで)仕入を計上した数の合計以内なら「未入庫かも」。ちょうど同じ数なら「未入庫の可能性が高い」。
+   kv「arrival-recent-received」= { syncedAt, lines: [[品番, 発注番号, 仕入日, 数, 倉庫コード]] } kintone の同期のときに作る */
+var ARRIVAL_RECENT_KEY = 'arrival-recent-received';
+function shukeiDiffCause(siteKey, code, diff){
+  var R = state.shukeiRecvRecent;
+  if(!(diff>0) || !R || !R.byCode) return '';
+  var L = (R.byCode[code] || []).filter(function(x){ return !x[4] || outlookSiteOfWarehouse(x[4])===siteKey; });
+  var sum = L.reduce(function(a, x){ return a + (Number(x[3])||0); }, 0);
+  if(!L.length || diff > sum) return '';
+  var dt = L.slice().sort(function(a, b){ return a[2] < b[2] ? 1 : -1; });
+  return (diff===sum ? '未入庫の可能性が高い' : '未入庫かも')+'(発注 '+dt.slice(0, 3).map(function(x){ return x[1]+'・'+x[2].slice(5).replace('-','/')+' 仕入 '+formatNum(x[3])+'個'; }).join('、')+(dt.length>3 ? ' ほか'+(dt.length-3)+'件' : '')+')';
+}
+function shukeiRecvRecentLoad(){
+  if(state.shukeiRecvLoading || state.shukeiRecvRecent) return;
+  state.shukeiRecvLoading = true;
+  loadKeyJson(ARRIVAL_RECENT_KEY, function(){ return { lines: [] }; }).then(function(v){
+    var by = {}; ((v && v.lines) || []).forEach(function(x){ (by[x[0]] = by[x[0]] || []).push(x); });
+    state.shukeiRecvRecent = { syncedAt: v && v.syncedAt, byCode: by };
+    state.shukeiRecvLoading = false; render();
+  }).catch(function(){ state.shukeiRecvLoading = false; });
+}
 /* 在庫差異: 弥生に登録された商品ごとに、弥生の在庫 − ロジザードの在庫(拠点の区画の合計) */
 function shukeiStockDiffRows(siteKey, data, pm){
   var site = SHUKEI_SITES[siteKey];
@@ -9002,7 +9025,7 @@ function shukeiStockDiffRows(siteKey, data, pm){
     if(lz) site.stockBlocks.forEach(function(b){ if(lz.blocks[b]) logi += lz.blocks[b].qty; });
     var m = pm ? pm[code] : null;
     var packQty = y.packQty || (m && m.packQty) || null;
-    return { code: code, name: y.name, yayoi: y.stock, logi: logi, diff: y.stock - logi,
+    return { code: code, name: y.name, yayoi: y.stock, logi: logi, diff: y.stock - logi, cause: shukeiDiffCause(siteKey, code, y.stock - logi),
       cases: packQty ? Math.ceil(logi/packQty) : null, cubic: (m && typeof m.cubicVolume==='number') ? m.cubicVolume : null };
   });
 }
@@ -9168,6 +9191,7 @@ function renderShukeiSheet(siteKey, site, data, draft){
 function renderShukeiDiff(siteKey, site, data){
   if(!data.yayoi || !data.logizard) return '<div class="vc-warning-box">元データが未登録です(ロジザードの在庫・弥生の在庫)。「📥 データ更新」から貼り付けてください。</div>';
   ensureShukeiProductMaster(Object.keys(data.yayoi.products||{}));
+  shukeiRecvRecentLoad();
   var all = shukeiStockDiffRows(siteKey, data, state.shukeiPm);
   var onlyDiff = state.shukeiDiffOnly!==false;
   var diffSort = state.shukeiDiffSort;
@@ -9182,8 +9206,8 @@ function renderShukeiDiff(siteKey, site, data){
   var rows = list.map(function(r){
     return '<tr><td class="no-print">'+(r.diff!==0 ? '<input type="checkbox" data-shukei-diffpick="'+esc(r.code)+'"'+(picked(r)?' checked':'')+'>' : '')+'</td><td>'+esc(r.code)+'</td><td>'+esc(r.name)+'</td><td class="num">'+formatNum(r.yayoi)+'</td><td class="num">'+formatNum(r.logi)+'</td>'+
       '<td class="num" style="'+(r.diff!==0?'color:var(--rust-600);font-weight:700;':'')+'">'+(r.diff>0?'+':'')+formatNum(r.diff)+'</td>'+
-      '<td class="num">'+(r.cases===null?'':formatNum(r.cases))+'</td><td class="num">'+(r.cubic===null?'要計測':formatCubic(r.cubic))+'</td></tr>';
-  }).join('') || '<tr><td colspan="8" class="empty-note">'+(onlyDiff?'差異のある商品はありません':'商品がありません')+'</td></tr>';
+      '<td class="num">'+(r.cases===null?'':formatNum(r.cases))+'</td><td class="num">'+(r.cubic===null?'要計測':formatCubic(r.cubic))+'</td><td class="sk-cause">'+esc(r.cause)+'</td></tr>';
+  }).join('') || '<tr><td colspan="9" class="empty-note">'+(onlyDiff?'差異のある商品はありません':'商品がありません')+'</td></tr>';
   return '<div class="no-print" style="display:flex;gap:12px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">'+
       '<label><input type="checkbox" id="shukeiDiffOnly"'+(onlyDiff?' checked':'')+'> 差異のある商品だけ表示</label>'+
       '<span class="pool-hint" style="margin:0;">'+formatNum(all.filter(function(r){ return r.diff!==0; }).length)+'件に差異 / 全'+formatNum(all.length)+'件</span>'+
@@ -9194,8 +9218,8 @@ function renderShukeiDiff(siteKey, site, data){
       '<span class="pool-hint" style="margin:0;">出荷集計表に、品番・数量(差異の数)・備考(弥生とロジの在庫)を1行ずつ追加します。棚番を見て現物を確かめるのに使えます。</span>'+
     '</div>'+
     '<div class="shukei-print-head"><span class="shukei-site-badge">'+esc(site.name)+'</span><b>在庫差異</b> ・ '+esc(dateLabelFromStr(todayStr()))+'</div>'+
-    '<div style="overflow-x:auto;max-height:560px;overflow-y:auto;" data-keep-scroll="shukeiDiff"><table class="report-table shukei-table"><thead><tr><th class="no-print" title="出荷集計表へ送る商品"><input type="checkbox" id="shukeiDiffPickAll"'+(nPick && nPick===list.filter(function(r){ return r.diff!==0; }).length ? ' checked' : '')+'></th>'+dh('商品コード','code')+dh('商品名','name')+dh('弥生('+site.name+')','yayoi')+dh('ロジザード','logi')+dh('差異(弥生−ロジ)','diff')+dh('ケース数(ロジ)','cases')+dh('才数','cubic')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
-    '<div class="pool-hint no-print" style="margin-top:6px;">ロジザードは'+esc(site.name)+'の区画('+esc(site.stockBlocks.join('・'))+')の在庫の合計、ケース数はロジザードの在庫 ÷ 入数 の切り上げ、才数はkintoneの商品台帳の値です。</div>';
+    '<div style="overflow-x:auto;max-height:560px;overflow-y:auto;" data-keep-scroll="shukeiDiff"><table class="report-table shukei-table"><thead><tr><th class="no-print" title="出荷集計表へ送る商品"><input type="checkbox" id="shukeiDiffPickAll"'+(nPick && nPick===list.filter(function(r){ return r.diff!==0; }).length ? ' checked' : '')+'></th>'+dh('商品コード','code')+dh('商品名','name')+dh('弥生('+site.name+')','yayoi')+dh('ロジザード','logi')+dh('差異(弥生−ロジ)','diff')+dh('ケース数(ロジ)','cases')+dh('才数','cubic')+dh('要因(目安)','cause')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div class="pool-hint no-print" style="margin-top:6px;">ロジザードは'+esc(site.name)+'の区画('+esc(site.stockBlocks.join('・'))+')の在庫の合計、ケース数はロジザードの在庫 ÷ 入数 の切り上げ、才数はkintoneの商品台帳の値です。要因は目安です: 弥生のほうが多く、差異が最近14日の仕入の数以内なら「未入庫かも」(ちょうど同じ数なら「未入庫の可能性が高い」)。現物を確かめてください。仕入の情報は kintone の同期のときの物です'+(state.shukeiRecvRecent && state.shukeiRecvRecent.syncedAt ? '('+esc(fmtDateTime(state.shukeiRecvRecent.syncedAt))+')' : '')+'。</div>';
 }
 /* ---------- トータルピッキングリスト(2026-10-19) ----------
    ロジザードの出荷の CSV(作業量CSV取込と同じ物)から、品番・ロケーションごとの合計(引当数)を作り、
@@ -15743,8 +15767,8 @@ var CSV_EXPORTERS = {
     var siteKey = state.shukeiSite || 'takaya', site = SHUKEI_SITES[siteKey];
     var list = shukeiStockDiffRows(siteKey, state.shukeiData || {}, state.shukeiPm);
     if(state.shukeiDiffOnly) list = list.filter(function(r){ return r.diff!==0; });
-    var rows = [['商品コード','商品名','弥生('+site.name+')','ロジザード','差異(弥生−ロジ)','ケース数(ロジ)','才数']];
-    list.forEach(function(r){ rows.push([r.code, r.name, r.yayoi, r.logi, r.diff, r.cases===null ? '' : r.cases, r.cubic===null ? '' : r.cubic]); });
+    var rows = [['商品コード','商品名','弥生('+site.name+')','ロジザード','差異(弥生−ロジ)','ケース数(ロジ)','才数','要因(目安)']];
+    list.forEach(function(r){ rows.push([r.code, r.name, r.yayoi, r.logi, r.diff, r.cases===null ? '' : r.cases, r.cubic===null ? '' : r.cubic, r.cause]); });
     downloadCSV('在庫差異_'+site.name+'_'+todayStr()+'.csv', rows);
   },
   // 請求: 表ごと(保管料・入庫料・生協出庫・生協以外・移動出庫・明細1)と請求書鑑の金額

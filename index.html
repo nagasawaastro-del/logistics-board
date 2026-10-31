@@ -1543,8 +1543,10 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .cd-map label span{ min-width:7em; }
 .cd-map select{ flex:1; min-width:0; }
 .tpick-cam{ position:fixed; left:50%; bottom:10px; transform:translateX(-50%); z-index:3000; width:min(560px, 96vw); background:#101828; border-radius:14px; overflow:hidden; box-shadow:0 20px 40px rgba(0,0,0,.4); }
+/* カメラの窓は画面の下に重なるので、窓の高さの分だけ一覧の下を空ける(最後の行まで窓の上に出して押せるように。2026-10-31) */
+body.tpick-cam-on .modal-card{ padding-bottom:calc(var(--tpick-cam-h, 380px) + 24px); }
 .tpick-cam-view{ position:relative; }
-.tpick-cam video{ width:100%; height:min(30vh, 230px); object-fit:cover; display:block; background:#000; }
+.tpick-cam video{ width:100%; height:min(36vh, 300px); object-fit:cover; display:block; background:#000; }
 .tpick-cam-next{ padding:8px 12px 6px; color:#fff; border-bottom:1px solid #344054; }
 .tpick-cam-next:empty{ display:none; }
 .tpick-cam-next .tcn-head{ font-size:12px; color:#98A2B3; }
@@ -1554,7 +1556,7 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .tpick-cam-next .tcn-qty{ font-size:26px; font-weight:800; color:#A6F4C5; margin-left:auto; }
 .tpick-cam-next .tcn-name{ font-size:13px; color:#D0D5DD; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .tpick-cam-next .tcn-done{ font-size:18px; font-weight:800; color:#A6F4C5; padding:4px 0; }
-.tpick-cam-guide{ position:absolute; left:10%; right:10%; top:20%; bottom:20%; border:3px solid rgba(254,200,75,.95); border-radius:8px; pointer-events:none; box-shadow:0 0 0 999px rgba(0,0,0,.28); }
+.tpick-cam-guide{ position:absolute; left:5%; right:5%; top:10%; bottom:10%; border:3px solid rgba(254,200,75,.95); border-radius:8px; pointer-events:none; box-shadow:0 0 0 999px rgba(0,0,0,.18); }
 .tpick-cam-view{ overflow:hidden; }
 .tpick-cam-res{ position:absolute; left:0; right:0; bottom:0; padding:10px 12px; font-size:18px; font-weight:800; color:#fff; text-align:center; display:none; }
 .tpick-cam-res.is-ok{ display:block; background:rgba(18,183,106,.92); }
@@ -11391,6 +11393,8 @@ function tpickCamResult(c, ok, text){
 }
 function tpickCamStop(why){
   var c = tpickCam; tpickCam = null;
+  document.body.classList.remove('tpick-cam-on');
+  if(c && c.camRo) c.camRo.disconnect();
   if(!c) return;
   // 記録はまとめて1件(開いていた間の段階・読めた数・違った数。2026-10-26。前は段階ごとに書いていた)
   try{
@@ -11426,7 +11430,7 @@ async function tpickNativeDetector(){
 }
 /* 読んだバーコードが、画面の黄色い枠(映像のまん中)の中にあるか。映像は上下を切って見せているため、
    見えていない所や隣の商品のバーコードを読まないように(2026-10-29。読み違いが多かった) */
-var TPICK_GUIDE_W = 0.8, TPICK_GUIDE_H = 0.6; // 枠の大きさ(見えている広さに対して。CSS の .tpick-cam-guide と合わせる)
+var TPICK_GUIDE_W = 0.9, TPICK_GUIDE_H = 0.8; // 2026-10-31 に広げた(0.8・0.6 だと読みにくかった)。 // 枠の大きさ(見えている広さに対して。CSS の .tpick-cam-guide と合わせる)
 function tpickCamInGuide(video, bb){
   if(!bb) return true;
   var vw = video.videoWidth, vh = video.videoHeight, ew = video.clientWidth, eh = video.clientHeight;
@@ -11454,7 +11458,11 @@ async function tpickCamStart(test, preStream){
   box.innerHTML = (test ? '' : '<div class="tpick-cam-next"></div>')+'<div class="tpick-cam-view"><video playsinline muted style="display:none;"></video><div class="tpick-cam-guide" style="display:none;"></div><div class="tpick-cam-res"></div></div>'+
     '<div class="tpick-cam-bar">'+(test ? '' : '<label><input type="checkbox" id="tpickCamCont"'+(state.tpickCamCont!==false ? ' checked' : '')+'> 続けて読む</label>')+'<span class="tpick-cam-msg">カメラを起動しています…</span><button type="button" class="ll-btn" id="tpickCamZoom" style="display:none;">🔍 1倍</button><button type="button" class="ll-btn" id="tpickCamTorch" style="display:none;">💡 ライト</button><button type="button" class="ll-btn" id="tpickCamClose">やめる</button></div>';
   document.body.appendChild(box);
-  var c = tpickCam = { box: box, lastCode: '', lastAt: 0, test: !!test, startAt: Date.now(), nOk: 0, nNg: 0 };
+  document.body.classList.add('tpick-cam-on');
+  var camH = function(){ document.documentElement.style.setProperty('--tpick-cam-h', box.offsetHeight+'px'); };
+  camH();
+  var camRo = window.ResizeObserver ? new ResizeObserver(camH) : null; if(camRo) camRo.observe(box);
+  var c = tpickCam = { camRo: camRo, box: box, lastCode: '', lastAt: 0, test: !!test, startAt: Date.now(), nOk: 0, nNg: 0 };
   tpickCamNextRefresh(c);
   var inPick = function(){ return test || (state.modal && state.modal.kind==='tpickBatch'); };
   var msg = box.querySelector('.tpick-cam-msg');
@@ -11555,6 +11563,12 @@ async function tpickCamStart(test, preStream){
   try{ await Promise.race([video.play().then(function(){ played = true; }), new Promise(function(res){ setTimeout(function(){ if(!played) tpickCamLog('映像の再生', '3秒で始まらない'); res(); }, 3000); })]); }catch(e){ tpickCamLog('映像の再生', (e && (e.name+' '+e.message)) || ''); }
   var contEl = box.querySelector('#tpickCamCont'); if(contEl) contEl.addEventListener('change', function(ev){ state.tpickCamCont = ev.target.checked; resetIdle(); });
   var guideMsg = 'バーコードを黄色い枠に入れてください(ぼやけるときは少し離す)';
+  // 枠の外のバーコードを見つけたら知らせる(黙って読まないと、読めていないように見えるため。2026-10-31)
+  function outOfGuide(){
+    if(!msg || c.outMsg) return;
+    msg.style.color = '#FEC84B'; msg.textContent = 'バーコードは見えています。枠の中へ動かしてください';
+    c.outMsg = setTimeout(function(){ c.outMsg = null; if(tpickCam===c){ msg.style.color = ''; msg.textContent = guideMsg; } }, 1500);
+  }
   function resetIdle(){ clearTimeout(c.idleTimer); c.idleTimer = setTimeout(function(){ if(tpickCam===c){ tpickCamStop('読まなかった'); showToast('2分読まなかったので、カメラを止めました'); } }, (state.tpickCamCont!==false || test) ? 120000 : 30000); }
   resetIdle();
   async function onCode(v){
@@ -11585,6 +11599,7 @@ async function tpickCamStart(test, preStream){
       try{
         var found = (await det.detect(video)) || [];
         var hit = found.filter(function(f){ return tpickCamInGuide(video, f.boundingBox); })[0]; // 枠の外のバーコードは読まない
+        if(!hit && found.length) outOfGuide();
         if(hit && await onCode(hit.rawValue)) return;
       }catch(e){}
       c.loop = setTimeout(tick, 180);
@@ -11609,7 +11624,7 @@ async function tpickCamStart(test, preStream){
       if(!result) return;
       try{ // 枠の外のバーコードは読まない
         var pts = (result.getResultPoints ? result.getResultPoints() : []) || [], xs = pts.map(function(q){ return q.getX ? q.getX() : q.x; }), ys = pts.map(function(q){ return q.getY ? q.getY() : q.y; });
-        if(xs.length && !tpickCamInGuide(video, { x: Math.min.apply(null, xs), y: Math.min.apply(null, ys), width: Math.max.apply(null, xs) - Math.min.apply(null, xs), height: Math.max.apply(null, ys) - Math.min.apply(null, ys) })) return;
+        if(xs.length && !tpickCamInGuide(video, { x: Math.min.apply(null, xs), y: Math.min.apply(null, ys), width: Math.max.apply(null, xs) - Math.min.apply(null, xs), height: Math.max.apply(null, ys) - Math.min.apply(null, ys) })){ outOfGuide(); return; }
       }catch(e){}
       onCode(result.getText ? result.getText() : String(result.text||''));
     });

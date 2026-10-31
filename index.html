@@ -9791,9 +9791,9 @@ function renderClientData(){
     (!d ? '<div class="empty-note">読み込み中…</div>' : !d.rows.length ? '<div class="empty-note">この月の取込はありません</div>' :
       ((kind==='inb' || kind==='ship') ? '' : '<div style="margin:6px 0;font-size:13px;">'+d.imports.slice().reverse().map(function(i){ return '<div style="display:flex;gap:8px;align-items:center;margin:2px 0;"><span>'+esc(fmtDateTime(i.at))+'</span><b>'+esc(i.file)+'</b><span class="sk-minor">'+formatNum(i.count)+'行</span><button type="button" class="ll-btn" data-cd-undo="'+esc(i.id)+'">取り消す</button></div>'; }).join('')+'</div>')+
       (kind==='inb' ? clientInbModeBar(c, d)+clientInbTable(c, d, K) :
-      (kind==='ship' ? clientShipCaseTable(d) : '')+'<div style="overflow-x:auto;max-height:420px;overflow-y:auto;"><table class="report-table" style="font-size:12px;"><thead><tr>'+K.fields.filter(function(fd){ return !fd[3]; }).map(function(fd){ return '<th>'+esc(fd[1])+'</th>'; }).join('')+(kind==='ship' ? '<th></th>' : '')+'</tr></thead><tbody>'+
+      (kind==='ship' ? clientShipCaseTable(d)+clientFoldOpen('shipRows', '出荷の明細(商品コードごと・'+formatNum(d.rows.length)+'行)') : '')+'<div style="overflow-x:auto;max-height:420px;overflow-y:auto;"><table class="report-table" style="font-size:12px;"><thead><tr>'+K.fields.filter(function(fd){ return !fd[3]; }).map(function(fd){ return '<th>'+esc(fd[1])+'</th>'; }).join('')+(kind==='ship' ? '<th></th>' : '')+'</tr></thead><tbody>'+
         d.rows.slice(0, 300).map(function(r, i){ return '<tr>'+K.fields.filter(function(fd){ return !fd[3]; }).map(function(fd){ var v = r[fd[0]]; return clientCellHtml(fd[0], v); }).join('')+(kind==='ship' ? '<td style="white-space:nowrap;"><button type="button" class="log-stop-btn" data-inb-del="'+i+'">削除</button></td>' : '')+'</tr>'; }).join('')+
-      '</tbody></table></div>')+(d.rows.length>300 ? '<div class="sk-minor">はじめの300行(全部は CSV で保存)</div>' : '')+'<div class="sk-minor">全部で '+formatNum(d.rows.length)+'行</div>')+'</div>';
+      '</tbody></table></div>'+(kind==='ship' ? '</details>' : ''))+(d.rows.length>300 ? '<div class="sk-minor">はじめの300行(全部は CSV で保存)</div>' : '')+'<div class="sk-minor">全部で '+formatNum(d.rows.length)+'行</div>')+'</div>';
   if(kind==='set' && state.role==='clientHub') dataHtml = '<details style="margin-top:4px;"><summary style="cursor:pointer;font-size:13px;font-weight:700;">取り込んだ行の一覧・取込の取り消し'+(d ? '('+formatNum(d.rows.length)+'行)' : '')+'</summary>'+dataHtml+'</details>';
   return '<div class="panel">'+head+imp+dataHtml+'</div>';
 }
@@ -9820,8 +9820,9 @@ function clientInbTable(c, d, K){
     var I = clientInbSlipInfo(c, d, sl), r0 = d.rows[sl.idx[0]];
     var sel = '<select data-inb-slip-mode="'+esc(sl.key)+'" style="font-size:12px;">'+(I.mode==='mix' ? '<option value="" selected>品目ごと</option>' : '')+CLIENT_INB_MODES.map(function(m){ return '<option value="'+m[0]+'"'+(I.mode===m[0] ? ' selected' : '')+'>'+esc(m[1].replace(/\(.*\)/,''))+'</option>'; }).join('')+'</select>';
     var cs = I.hasCase ? '<span style="white-space:nowrap;">ケース(個口)数 <input type="number" min="0" data-inb-slip-cases="'+esc(sl.key)+'" value="'+(I.cases ? I.cases : '')+'" style="width:64px;font-size:12px;'+(I.miss ? 'border-color:#B42318;' : '')+'" placeholder="個口"></span>' : '';
-    var head = '<tr class="inb-slip"><td colspan="'+(cols.length+2)+'" style="background:var(--panel-alt,#F2F4F7);"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><b>📦 '+esc(sl.no || '(番号なし)')+'</b><span class="sk-minor">'+esc(r0.date||'')+(r0.supplier ? ' ・ '+esc(r0.supplier) : '')+' ・ '+sl.idx.length+'品目</span>'+sel+cs+(I.miss ? '<span style="color:#B42318;font-size:12px;">ケース数を入れてください</span>' : '')+'</div></td></tr>';
-    var rows = sl.idx.map(function(i){
+    var open = !!(c.inbOpen && c.inbOpen[sl.key]);
+    var head = '<tr class="inb-slip"><td colspan="'+(cols.length+2)+'" style="background:var(--panel-alt,#F2F4F7);"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><button type="button" class="ll-btn" data-inb-open="'+esc(sl.key)+'" aria-expanded="'+open+'" style="min-height:0;padding:2px 8px;font-size:12px;">'+(open ? '▾ 閉じる' : '▸ 明細')+'</button><b>📦 '+esc(sl.no || '(番号なし)')+'</b><span class="sk-minor">'+esc(r0.date||'')+(r0.supplier ? ' ・ '+esc(r0.supplier) : '')+' ・ '+sl.idx.length+'品目</span>'+sel+cs+(I.miss ? '<span style="color:#B42318;font-size:12px;">ケース数を入れてください</span>' : '')+'</div></td></tr>';
+    var rows = !open ? '' : sl.idx.map(function(i){
       var r = d.rows[i], e = clientInbEdit(c, i, r);
       var ms = sl.idx.length>1 ? '<select data-inb-mode="'+i+'" style="font-size:12px;">'+CLIENT_INB_MODES.map(function(m){ return '<option value="'+m[0]+'"'+(e.mode===m[0] ? ' selected' : '')+'>'+esc(m[1].replace(/\(.*\)/,''))+'</option>'; }).join('')+'</select>' : '';
       return '<tr><td>'+ms+'</td>'+cols.map(function(fd){ return clientCellHtml(fd[0], r[fd[0]]); }).join('')+'<td style="white-space:nowrap;"><button type="button" class="log-stop-btn" data-inb-del="'+i+'">削除</button></td></tr>';
@@ -9836,6 +9837,7 @@ function clientInbModeBar(c, d){
   return '<div class="sk-minor" style="margin:6px 0 2px;">入荷伝票(入荷番号)ごとに、区分と<b>ケース(個口)数</b>を入れます(何品目入っていても1個口なら 1)。伝票の中で品目ごとに区分を変えることもできます。</div>'+
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 6px;">'+
     '<button type="button" class="add-btn" id="cdInbSave"'+(n ? '' : ' disabled')+'>区分を保存する'+(n ? '('+n+'行)' : '')+'</button>'+
+    '<button type="button" class="ll-btn" data-inb-open-all="1">明細を全部開く</button><button type="button" class="ll-btn" data-inb-open-all="0">全部閉じる</button>'+
     (miss ? '<span style="color:#B42318;font-size:12px;">ケース数が入っていない伝票が '+miss+'件あります(作業料に入りません)</span>' : '')+'</div>';
 }
 /* 明細の削除(入荷・出荷。この行だけ消す。2026-10-24) */
@@ -9958,6 +9960,9 @@ function bindClientData(){
   if(sel) sel.addEventListener('change', function(){ c.clientId = sel.value; c.data = null; c.file = null; c.cols = null; c.inbEdits = {}; render(); });
   if(c.kind==='inb') bindClientInbModes(c);
   if(c.kind==='inb' || c.kind==='ship') bindClientRowDelete(c);
+  document.querySelectorAll('[data-cd-fold]').forEach(function(el){ el.addEventListener('toggle', function(){ c.fold = c.fold || {}; c.fold[el.getAttribute('data-cd-fold')] = el.open; }); });
+  document.querySelectorAll('[data-inb-open]').forEach(function(el){ el.addEventListener('click', function(){ c.inbOpen = c.inbOpen || {}; var k = el.getAttribute('data-inb-open'); c.inbOpen[k] = !c.inbOpen[k]; render(); }); });
+  document.querySelectorAll('[data-inb-open-all]').forEach(function(el){ el.addEventListener('click', function(){ c.inbOpen = {}; if(el.getAttribute('data-inb-open-all')==='1' && c.data) clientInbSlips(c.data.rows).forEach(function(sl){ c.inbOpen[sl.key] = true; }); render(); }); });
   // 梱包のケース数(出荷日・納品先ごと。その場で保存。2026-10-31)
   document.querySelectorAll('[data-ship-case]').forEach(function(el){ el.addEventListener('change', async function(){
     var k = el.getAttribute('data-ship-case'), v = el.value==='' ? 0 : Number(el.value);
@@ -10195,14 +10200,18 @@ function clientShipCaseHtml(F){
   var m = clientShipCaseMiss(F);
   return m.length ? '<div class="vc-warning-box" style="margin:0 0 10px;">梱包の<b>ケース数が入っていない納品先 '+m.length+'件</b>があります('+esc(m.slice(0, 3).map(function(g){ return g.date.slice(5).replace('-','/')+' '+(g.center || '納品先なし'); }).join('、'))+(m.length>3 ? ' ほか' : '')+')。出荷実績のタブで入れてください。</div>' : '';
 }
+/* 商品コードの明細の折りたたみ(はじめは閉じる。開いたかどうかは画面を描き直しても残す。2026-10-31) */
+function clientFoldOpen(id, title){
+  var c = clientDataState();
+  return '<details class="cd-fold" data-cd-fold="'+esc(id)+'"'+(c.fold && c.fold[id] ? ' open' : '')+' style="margin:0 0 8px;"><summary style="cursor:pointer;font-size:13px;font-weight:700;padding:6px 0;">'+esc(title)+'</summary>';
+}
 function clientShipCaseTable(d){
   var G = clientShipGroups(d.rows, d.shipCases), tot = G.reduce(function(a, g){ return a + clientQ(g.cases); }, 0), miss = G.filter(function(g){ return !(clientQ(g.cases)>0); }).length;
   if(!G.length) return '';
   return '<div class="stf-section-title" style="margin-top:6px;">梱包のケース数(出荷日・納品先ごと)</div>'+
     '<div class="sk-minor" style="margin:0 0 6px;">合計 <b>'+formatNum(tot)+'</b> ケース(梱包手数料に入ります)'+(miss ? ' ・ <span style="color:#B42318;">未入力 '+miss+'件</span>' : '')+'</div>'+
     '<div style="overflow:auto;max-height:360px;margin-bottom:12px;" data-keep-scroll="shipCases"><table class="report-table" style="font-size:13px;"><thead><tr><th>出荷日</th><th>納品センター</th><th class="num">伝票</th><th class="num">ピース</th><th class="num">ケース数</th></tr></thead><tbody>'+
-    G.map(function(g){ return '<tr><td>'+esc(g.date.replace(/-/g,'/'))+'</td><td>'+(g.center ? esc(g.center) : '<span class="sk-minor">納品先なし</span>')+'</td><td class="num">'+formatNum(g.slips)+'</td><td class="num">'+formatNum(g.pieces)+'</td><td class="num"><input type="number" min="0" step="1" data-ship-case="'+esc(g.key)+'" value="'+(clientQ(g.cases)>0 ? g.cases : '')+'" style="width:80px;text-align:right;"></td></tr>'; }).join('')+'</tbody></table></div>'+
-    '<div class="stf-section-title">出荷の明細</div>';
+    G.map(function(g){ return '<tr><td>'+esc(g.date.replace(/-/g,'/'))+'</td><td>'+(g.center ? esc(g.center) : '<span class="sk-minor">納品先なし</span>')+'</td><td class="num">'+formatNum(g.slips)+'</td><td class="num">'+formatNum(g.pieces)+'</td><td class="num"><input type="number" min="0" step="1" data-ship-case="'+esc(g.key)+'" value="'+(clientQ(g.cases)>0 ? g.cases : '')+'" style="width:80px;text-align:right;"></td></tr>'; }).join('')+'</tbody></table></div>';
 }
 /* 未完了で請求に入っていないセットの数 */
 function clientSetUndoneHtml(F){
@@ -10630,7 +10639,7 @@ function renderClientSetSheet(cl){
       '<label class="ch-field"><span>使い始める位置(1〜30)</span><input type="number" min="1" max="30" id="chJanStart" value="'+esc(String(clientJanCfg().start))+'" style="width:90px;"></label>'+
       '<span class="ch-note">A4・3列×10段(28455)。ずれの直しはこの端末で覚えます。使い始める位置は、使いかけのシートの何枚目からか(左上から右へ数える)</span></div></details>'+
     '<div class="sub-switch" style="margin:0 0 8px;">'+[['order','作業の順(完成品と部品)'],['slips','伝票ごとの完了日('+S.slips.length+')'],['fin','作るもの('+T.fin.length+')'],['parts','使うもの('+T.parts.length+')']].map(function(x){ return '<button type="button" class="sub-switch-btn'+(view===x[0] ? ' active' : '')+'" data-set-view="'+x[0]+'">'+esc(x[1])+'</button>'; }).join('')+'</div>'+
-    (view==='slips' ? slipView : view==='parts' ? tbl(T.parts) : view==='fin' ? tbl(T.fin) : orderTbl)+
+    (view==='slips' ? slipView : clientFoldOpen('setList:'+view, '商品コードの明細('+(view==='parts' ? T.parts.length : T.fin.length)+'品番)'+(view==='order' ? '・作る数を直す' : ''))+(view==='parts' ? tbl(T.parts) : view==='fin' ? tbl(T.fin) : orderTbl)+'</details>')+
     '<div class="pool-hint" style="margin-top:8px;">並びは商品名の順(指示書・JAN ラベルも同じ順)。品番が13桁ならそれを JAN に、そうでなければロジザードの在庫の JAN を使います。</div>'+
   '</div>';
 }

@@ -10526,8 +10526,13 @@ function yamatoPdfParse(lines){
 function clientFreightPdfSum(list){ return (list||[]).reduce(function(a, x){ return a + (Number(x.sub)||0); }, 0); }
 function clientFreightPdfHtml(F, closed){
   var L = F.manual.freightPdfs || [], sumAll = clientFreightPdfSum(L), hand = L.length && sumAll!==Math.round(Number(F.manual.freight)||0);
-  return '<div class="stf-section-title" style="margin-top:12px;">運賃の立替(ヤマトの請求明細書 PDF)</div>'+
-    (closed ? '' : '<div style="margin-bottom:8px;"><input type="file" id="chFreightPdf" accept="application/pdf,.pdf" multiple style="display:none;"><button type="button" class="add-btn" id="chFreightPdfBtn">📄 PDF を取り込む</button> <span class="sk-minor">運賃等(税抜)を「運賃の立替」に入れます。同じ明細書をもう一度入れても二重になりません</span></div>')+
+  var msg = clientDataState().freightMsg, month = F.P && clientDataState().month;
+  return (closed ? '<div class="stf-section-title" style="margin-top:12px;">運賃の立替(ヤマトの請求明細書)</div>' : '<div class="ll-form-group shukei-drop" data-freight-drop="1" style="margin:12px 0 10px;">'+
+      '<div class="ll-form-group-title">運賃の立替(ヤマトの請求明細書)の取り込み</div>'+
+      '<div class="pool-hint" style="margin:0 0 6px;">ヤマトの Web請求書の請求明細書(PDF)を選ぶか、この枠にドラッグ&ドロップしてください(複数可)。運賃等(税抜)を「運賃の立替」に入れます。同じ明細書は、2回取り込んでもだぶりません。</div>'+
+      '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 PDF を選んで取り込む<input type="file" id="chFreightPdf" accept="application/pdf,.pdf" multiple style="display:none;"></label>'+
+      '<span class="shukei-drop-hint">またはファイルをこの枠にドラッグ&ドロップ</span>'+
+      (msg && msg.month===month ? '<div class="vc-import-status" style="margin-top:6px;">'+esc(msg.text)+'</div>' : '')+'</div>')+
     (L.length ? '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>請求日</th><th>請求書No.</th><th class="num">個数</th><th class="num">運賃等(税抜)</th><th></th></tr></thead><tbody>'+
       L.map(function(x, i){ return '<tr><td>'+esc(x.date.replace(/-/g,'/'))+'</td><td>'+esc(x.no||'')+'</td><td class="num">'+formatNum(x.qty)+'</td><td class="num"><b>'+formatNum(x.sub)+'</b></td><td>'+(closed ? '' : '<button type="button" class="ll-btn" data-freight-del="'+i+'">消す</button>')+'</td></tr>'; }).join('')+'</tbody></table></div>'+
       (hand ? '<div style="color:#B42318;font-size:13px;margin-top:4px;">「運賃の立替」の金額を手で直しています(PDF の合計は '+formatNum(sumAll)+' 円)。</div>' : '')+
@@ -10981,12 +10986,13 @@ function bindClientHub(){
     if(ok) state.cdCache[key] = { v: v, saved: true };
     return ok;
   };
-  var fpb = document.getElementById('chFreightPdfBtn'), fpi = document.getElementById('chFreightPdf');
-  if(fpb && fpi){
-    fpb.addEventListener('click', function(){ fpi.click(); });
-    fpi.addEventListener('change', async function(){
-      var files = [].slice.call(fpi.files||[]); fpi.value = '';
+  var fpi = document.getElementById('chFreightPdf');
+  if(fpi){
+    var freightMsg = function(text){ c.freightMsg = { month: c.month, text: text }; render(); };
+    var importFreight = async function(files){
       if(!files.length) return;
+      var notPdf = files.filter(function(f){ return !/\.pdf$/i.test(f.name); })[0];
+      if(notPdf){ freightMsg('⚠️ '+notPdf.name+' は PDF ではありません。'); return; }
       var month = c.month || todayStr().slice(0,7), cur = clientManual(cl.id, month) || {}, list = (cur.freightPdfs||[]).slice(), P = clientFeeData(cl, month).P;
       var before = Math.round(Number((document.getElementById('chFreight')||{}).value)||0), prevSum = clientFreightPdfSum(list), i = 0;
       try{
@@ -10996,13 +11002,19 @@ function bindClientHub(){
           list = list.filter(function(x){ return !(x.no===d.no && x.date===d.date); });
           list.push(d);
         }
-      }catch(e){ showToast('⚠️ '+files[i].name+': '+e.message); return; }
+      }catch(e){ freightMsg('⚠️ '+files[i].name+': '+e.message); return; }
       list.sort(function(a, b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.no < b.no ? -1 : 1); });
       var next = clientFreightPdfSum(list);
       if(before && before!==prevSum && before!==next && !(await appConfirm('「運賃の立替」の '+formatNum(before)+' 円を、PDF の合計 '+formatNum(next)+' 円に置き換えますか?'))) return;
-      if(!(await saveFreightPdfs(list, next))){ showToast('⚠️ 保存できませんでした'); return; }
+      if(!(await saveFreightPdfs(list, next))){ freightMsg('⚠️ 保存できませんでした'); return; }
       await appendAuditLog({ action:'荷主の立替運賃を PDF から取り込んだ', target: cl.name+' / '+month, before: before, after: next });
-      showToast('立替運賃を '+formatNum(next)+' 円にしました'); render();
+      freightMsg('取り込みました: 運賃の立替 '+formatNum(next)+' 円(税抜)');
+    };
+    fpi.addEventListener('change', function(){ var files = [].slice.call(fpi.files||[]); fpi.value = ''; importFreight(files); });
+    document.querySelectorAll('[data-freight-drop]').forEach(function(zone){
+      ['dragenter','dragover'].forEach(function(ev){ zone.addEventListener(ev, function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; zone.classList.add('is-dragover'); }); });
+      zone.addEventListener('dragleave', function(e){ if(!zone.contains(e.relatedTarget)) zone.classList.remove('is-dragover'); });
+      zone.addEventListener('drop', function(e){ e.preventDefault(); zone.classList.remove('is-dragover'); importFreight([].slice.call((e.dataTransfer && e.dataTransfer.files) || [])); });
     });
   }
   document.querySelectorAll('[data-freight-del]').forEach(function(el){ el.addEventListener('click', async function(){

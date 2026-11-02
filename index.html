@@ -258,6 +258,24 @@ input,select{font-family:inherit;}
 }
 .date-nav-btn:hover{border-color:var(--amber-500);}
 .date-nav-input{border:1px solid var(--paper-line);border-radius:10px;padding:9px 12px;font-size:14px;font-family:var(--font-mono);}
+@media (pointer:fine){ input[type=date],input[type=month]{cursor:pointer;} }
+.dp-pop{position:fixed;z-index:100000;width:264px;padding:10px;background:var(--paper-50);color:var(--ink-text);border:1px solid var(--paper-line);border-radius:10px;box-shadow:var(--shadow-lg);font-size:13px;}
+.dp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+.dp-nav{width:30px;height:30px;border:1px solid var(--paper-line);border-radius:8px;background:transparent;color:inherit;font-size:16px;line-height:1;cursor:pointer;}
+.dp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center;}
+.dp-months{grid-template-columns:repeat(4,1fr);gap:4px;}
+.dp-w{font-size:11px;color:var(--slate-500);padding:3px 0;}
+.dp-cell{height:32px;border:1px solid transparent;border-radius:8px;background:transparent;color:inherit;font-size:13px;cursor:pointer;}
+.dp-cell:hover:not(:disabled),.dp-nav:hover{background:var(--paper-200);}
+.dp-cell:disabled{opacity:.3;cursor:default;}
+.dp-w.is-sun,.dp-cell.is-sun{color:#D92D20;}
+.dp-w.is-sat,.dp-cell.is-sat{color:#1570EF;}
+.dp-cell.is-today{border-color:#6172F3;font-weight:700;}
+.dp-cell.is-sel,.dp-cell.is-sel:hover:not(:disabled){background:#444CE7;color:#fff;}
+.dp-foot{display:flex;justify-content:space-between;margin-top:6px;}
+.dp-link{border:0;background:transparent;color:#6172F3;font-size:12px;padding:4px 6px;cursor:pointer;}
+.dp-link:disabled{opacity:.3;cursor:default;}
+@media print{ .dp-pop{display:none;} }
 .date-nav-today-badge{background:var(--green-500);color:#fff;font-size:11px;font-weight:700;padding:4px 12px;border-radius:12px;}
 .date-nav-today-btn{background:var(--ink-900);color:#fff;border:none;border-radius:12px;padding:8px 16px;font-size:12px;font-weight:600;}
 
@@ -25105,6 +25123,85 @@ function startPolling(){
 }
 // 画面がふたたび見えたら、すぐ最新に読み直す(見えていない間は4秒更新を止めている)
 document.addEventListener('visibilitychange', function(){ if(!document.hidden && pollHandle) pollTick(); });
+/* 日付・月を選ぶカレンダー(2026-11-02)。ブラウザのカレンダーが出ない PC があるので、マウスの PC ではアプリのカレンダーを出す。
+   タブレット・スマホはいつもの OS の画面のまま。手で打つのも今までどおり */
+function setupDatePopup(){
+  if(!window.matchMedia || !window.matchMedia('(pointer:fine)').matches) return;
+  var pop = null, cur = null, ym = null;
+  var pad = function(n){ return String(n).padStart(2,'0'); };
+  var close = function(){ if(pop) pop.remove(); pop = null; cur = null; };
+  var allowed = function(v){
+    var min = cur.getAttribute('min'), max = cur.getAttribute('max');
+    return !(min && v<min) && !(max && v>max);
+  };
+  var pick = function(v){
+    var el = cur; close();
+    if(!el || !document.contains(el)) return;
+    el.value = v;
+    el.dispatchEvent(new Event('input', { bubbles:true }));
+    el.dispatchEvent(new Event('change', { bubbles:true }));
+  };
+  var draw = function(){
+    var isMonth = cur.getAttribute('type')==='month', now = new Date(), val = cur.value, html;
+    var today = now.getFullYear()+'-'+pad(now.getMonth()+1)+(isMonth ? '' : '-'+pad(now.getDate()));
+    var cell = function(v, text, cls){ return '<button type="button" class="dp-cell '+cls+(v===val ? ' is-sel' : '')+(v===today ? ' is-today' : '')+'" data-dp-pick="'+v+'"'+(allowed(v) ? '' : ' disabled')+'>'+text+'</button>'; };
+    if(isMonth){
+      html = '<div class="dp-grid dp-months">';
+      for(var m=1; m<=12; m++) html += cell(ym.y+'-'+pad(m), m+'月', '');
+      html += '</div>';
+    }else{
+      html = '<div class="dp-grid"><span class="dp-w is-sun">日</span><span class="dp-w">月</span><span class="dp-w">火</span><span class="dp-w">水</span><span class="dp-w">木</span><span class="dp-w">金</span><span class="dp-w is-sat">土</span>';
+      var first = new Date(ym.y, ym.m-1, 1).getDay(), days = new Date(ym.y, ym.m, 0).getDate();
+      for(var b=0; b<first; b++) html += '<span></span>';
+      for(var d=1; d<=days; d++){
+        var w = (first+d-1)%7;
+        html += cell(ym.y+'-'+pad(ym.m)+'-'+pad(d), d, w===0 ? 'is-sun' : w===6 ? 'is-sat' : '');
+      }
+      html += '</div>';
+    }
+    pop.innerHTML = '<div class="dp-head"><button type="button" class="dp-nav" data-dp-move="-1" aria-label="前へ">‹</button><b>'+ym.y+'年'+(isMonth ? '' : ym.m+'月')+'</b><button type="button" class="dp-nav" data-dp-move="1" aria-label="次へ">›</button></div>'+html+
+      '<div class="dp-foot"><button type="button" class="dp-link" data-dp-pick="">消す</button><button type="button" class="dp-link" data-dp-pick="'+today+'"'+(allowed(today) ? '' : ' disabled')+'>'+(isMonth ? '今月' : '今日')+'</button></div>';
+  };
+  var place = function(){
+    var r = cur.getBoundingClientRect(), h = pop.offsetHeight, w = pop.offsetWidth;
+    pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth-w-8))+'px';
+    pop.style.top = (r.bottom+4+h <= window.innerHeight ? r.bottom+4 : Math.max(8, r.top-h-4))+'px';
+  };
+  var open = function(el){
+    close();
+    cur = el;
+    var p = /^(\d{4})-(\d{2})/.exec(el.value||''), now = new Date();
+    ym = p ? { y:+p[1], m:+p[2] } : { y:now.getFullYear(), m:now.getMonth()+1 };
+    pop = document.createElement('div');
+    pop.className = 'dp-pop';
+    // 押してもフォーカスを入力欄に残す(残さないと定期の描き直しで入力欄が作り直される)
+    pop.addEventListener('mousedown', function(e){ e.preventDefault(); });
+    pop.addEventListener('click', function(e){
+      var mv = e.target.closest('[data-dp-move]'), pk = e.target.closest('[data-dp-pick]');
+      if(mv){
+        var n = +mv.getAttribute('data-dp-move');
+        if(cur.getAttribute('type')==='month') ym.y += n;
+        else { var t = new Date(ym.y, ym.m-1+n, 1); ym = { y:t.getFullYear(), m:t.getMonth()+1 }; }
+        draw();
+      }else if(pk && !pk.disabled) pick(pk.getAttribute('data-dp-pick'));
+    });
+    document.body.appendChild(pop);
+    draw(); place();
+  };
+  document.addEventListener('click', function(e){
+    var t = e.target, type = t && t.tagName==='INPUT' ? t.getAttribute('type') : '';
+    if(pop && pop.contains(t)) return;
+    if((type==='date' || type==='month') && !t.disabled && !t.readOnly){
+      e.preventDefault(); // ブラウザのカレンダーと2つ出ないように
+      if(t===cur) close(); else open(t);
+      return;
+    }
+    close();
+  }, true);
+  document.addEventListener('keydown', function(e){ if(pop) close(); }, true);
+  window.addEventListener('resize', close);
+  window.addEventListener('scroll', function(e){ if(pop && !pop.contains(e.target)) close(); }, true);
+}
 function setupGlobalFocusTracking(){
   var FIELD_TAGS = {INPUT:1, SELECT:1, TEXTAREA:1};
   document.addEventListener('focusin', function(e){
@@ -25435,6 +25532,7 @@ async function init(){
   startTicker();
 }
 setupGlobalFocusTracking();
+setupDatePopup();
 init();
 
 })();

@@ -10265,7 +10265,7 @@ function clientFeeLines(items, days, manual, withFixed){
   }).filter(function(x){ return x; });
 }
 function clientSum(lines){ return lines.reduce(function(a, l){ return a + l.amount; }, 0); }
-function clientBasisLabel(b){ var x = CLIENT_FEE_BASIS.filter(function(y){ return y[0]===b; })[0]; return x ? x[1] : b; }
+function clientBasisLabel(b){ if(b==='freight') return 'ヤマトの請求明細書の運賃等(税抜)'; var x = CLIENT_FEE_BASIS.filter(function(y){ return y[0]===b; })[0]; return x ? x[1] : b; }
 /* ダッシュボード・請求で使うデータ(そろわなければ null) */
 /* 請求の期間: 請求月 month と締め日(0 = 月末)。20日締めなら 前の月の21日〜その月の20日。mid = 半月の見込みの終わり */
 function clientAddDays(d, n){ var t = new Date(d+'T00:00:00'); t.setDate(t.getDate()+n); return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0'); }
@@ -10447,14 +10447,75 @@ function clientBillSettings(){
 function clientInvoicesKey(id){ return 'client-invoices:'+id; }
 function clientInvoices(id){ return clientOnce(clientInvoicesKey(id), function(){ return { list: [] }; }); }
 function clientInvoiceOf(id, month){ var v = clientInvoices(id); return v ? (v.list || []).filter(function(x){ return x.month===month; })[0] || null : null; }
-/* 期間の明細・小計・税・立替運賃・合計(per = 'first' は半月の見込み) */
+/* 期間の明細・小計・税・合計(per = 'first' は半月の見込み)。立替運賃は税抜の明細の1行にして、ほかの項目と一緒に最後に税を足す(2026-11-02) */
 function clientBillCalc(F, month, per){
   var P = F.P, cfg = F.cfg, to = per==='first' ? P.mid : P.to;
   var lines = clientFeeLines(F.items, clientFeeCounts(F.inb, F.ship, F.set, P.from, to), F.manual, true).filter(function(l){ return l.qty || l.amount; })
     .map(function(l){ return { name: l.it.name, unit: l.it.unit || '', price: Number(l.it.price||0), qty: l.qty, amount: l.amount, basis: l.it.basis }; });
-  var tax = Number(cfg.taxRate===undefined ? 10 : cfg.taxRate), sub = clientSum(lines), taxAmt = Math.floor(sub * tax / 100);
   var freight = Math.round(Number(F.manual.freight)||0);
-  return { month: month, per: per, from: P.from, to: to, label: per==='first' ? P.from.replace(/-/g,'/')+' 〜 '+to.replace(/-/g,'/')+'(半月の見込み)' : P.label, lines: lines, tax: tax, sub: sub, taxAmt: taxAmt, freight: freight, total: sub + taxAmt + freight };
+  if(freight){
+    var fPdfs = F.manual.freightPdfs || [], fByPdf = clientFreightPdfSum(fPdfs)===freight;
+    lines.push({ name: '立替運賃(ヤマト運輸)', unit: fByPdf ? '個' : '', price: 0, qty: fByPdf ? fPdfs.reduce(function(a, x){ return a + (Number(x.qty)||0); }, 0) : 1, amount: freight, basis: 'freight' });
+  }
+  var tax = Number(cfg.taxRate===undefined ? 10 : cfg.taxRate), sub = clientSum(lines), taxAmt = Math.floor(sub * tax / 100);
+  return { month: month, per: per, from: P.from, to: to, label: per==='first' ? P.from.replace(/-/g,'/')+' 〜 '+to.replace(/-/g,'/')+'(半月の見込み)' : P.label, lines: lines, tax: tax, sub: sub, taxAmt: taxAmt, total: sub + taxAmt };
+}
+/* ヤマトの請求明細書(Web請求書の PDF)を読む(2026-11-02)。部品は使うときだけ読み込む。明細の合計と PDF の合計が合わなければ取り込まない */
+var PDFJS_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/';
+function clientLoadPdfjs(){
+  if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if(clientLoadPdfjs.p) return clientLoadPdfjs.p;
+  clientLoadPdfjs.p = new Promise(function(res, rej){
+    var sc = document.createElement('script'); sc.src = PDFJS_BASE+'build/pdf.min.js';
+    sc.onload = function(){ if(!window.pdfjsLib){ rej(new Error('PDF を読む部品を読めませんでした')); return; } window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE+'build/pdf.worker.min.js'; res(window.pdfjsLib); };
+    sc.onerror = function(){ clientLoadPdfjs.p = null; rej(new Error('PDF を読む部品を読み込めませんでした(通信を確かめてください)')); };
+    document.head.appendChild(sc);
+  });
+  return clientLoadPdfjs.p;
+}
+async function yamatoPdfLines(file){
+  var lib = await clientLoadPdfjs(), doc = await lib.getDocument({ data: await file.arrayBuffer(), cMapUrl: PDFJS_BASE+'cmaps/', cMapPacked: true }).promise, out = [];
+  for(var n=1; n<=doc.numPages; n++){
+    var tc = await (await doc.getPage(n)).getTextContent(), rows = [];
+    tc.items.forEach(function(it){
+      if(!String(it.str).trim()) return;
+      var y = it.transform[5], r = rows.filter(function(x){ return Math.abs(x.y-y)<2.5; })[0];
+      if(!r){ r = { y: y, items: [] }; rows.push(r); }
+      r.items.push(it);
+    });
+    rows.sort(function(a, b){ return b.y-a.y; }).forEach(function(r){ out.push(r.items.sort(function(a, b){ return a.transform[4]-b.transform[4]; }).map(function(it){ return it.str.trim(); }).join(' ').normalize('NFKC')); });
+  }
+  return out;
+}
+function yamatoPdfParse(lines){
+  var num = function(x){ return Number(String(x).replace(/,/g,''))||0; };
+  var rows = [], head = { date: '', no: '' }, tot = null;
+  lines.forEach(function(t){
+    var m = t.match(/(\d(?:\s*\d){3})\s*(\d{4}-\d{4}-\d{4})\s*(.*?)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)\s*$/);
+    if(m){ var w = m[3].trim().split(/\s+/); rows.push({ md: m[1].replace(/\s/g,''), no: m[2], size: /^\d+$/.test(w[0]) ? w.shift() : '', kind: w.shift()||'', to: w.join(' '), qty: num(m[4]), amount: num(m[8]) }); return; }
+    if(/合計\s*\(\s*税込\s*\)/.test(t)){ var v = t.match(/[\d,]+/g)||[]; if(v.length>=6) tot = { qty: num(v[0]), total: num(v[1]), sub: num(v[1])-num(v[5]), tax: num(v[5]) }; return; }
+    var d = t.match(/(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/);
+    if(d && !head.date) head.date = d[1]+'-'+d[2].padStart(2,'0')+'-'+d[3].padStart(2,'0');
+    var c = t.match(/請求書\s*N\s*o\s*\.?\s*(\d+)/);
+    if(c && !head.no) head.no = c[1];
+  });
+  if(!rows.length || !tot || !head.date) throw new Error('ヤマトの請求明細書として読めませんでした');
+  var sum = rows.reduce(function(a, r){ return a + r.amount; }, 0), qty = rows.reduce(function(a, r){ return a + r.qty; }, 0);
+  if(sum!==tot.sub || qty!==tot.qty) throw new Error('明細の合計('+formatNum(qty)+'個 '+formatNum(sum)+'円)が PDF の合計('+formatNum(tot.qty)+'個 '+formatNum(tot.sub)+'円)と合いません');
+  var by = Number(head.date.slice(0,4)), bm = Number(head.date.slice(5,7));
+  return { no: head.no, date: head.date, count: rows.length, qty: qty, sub: tot.sub, tax: tot.tax, total: tot.total,
+    rows: rows.map(function(r){ var mo = Number(r.md.slice(0,2)); return [(mo>bm ? by-1 : by)+'-'+r.md.slice(0,2)+'-'+r.md.slice(2), r.no, r.size, r.kind, r.to, r.qty, r.amount]; }) };
+}
+function clientFreightPdfSum(list){ return (list||[]).reduce(function(a, x){ return a + (Number(x.sub)||0); }, 0); }
+function clientFreightPdfHtml(F, closed){
+  var L = F.manual.freightPdfs || [], sumAll = clientFreightPdfSum(L), hand = L.length && sumAll!==Math.round(Number(F.manual.freight)||0);
+  return '<div class="stf-section-title" style="margin-top:12px;">運賃の立替(ヤマトの請求明細書 PDF)</div>'+
+    (closed ? '' : '<div style="margin-bottom:8px;"><input type="file" id="chFreightPdf" accept="application/pdf,.pdf" multiple style="display:none;"><button type="button" class="add-btn" id="chFreightPdfBtn">📄 PDF を取り込む</button> <span class="sk-minor">運賃等(税抜)を「運賃の立替」に入れます。同じ明細書をもう一度入れても二重になりません</span></div>')+
+    (L.length ? '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>請求日</th><th>請求書No.</th><th class="num">個数</th><th class="num">運賃等(税抜)</th><th></th></tr></thead><tbody>'+
+      L.map(function(x, i){ return '<tr><td>'+esc(x.date.replace(/-/g,'/'))+'</td><td>'+esc(x.no||'')+'</td><td class="num">'+formatNum(x.qty)+'</td><td class="num"><b>'+formatNum(x.sub)+'</b></td><td>'+(closed ? '' : '<button type="button" class="ll-btn" data-freight-del="'+i+'">消す</button>')+'</td></tr>'; }).join('')+'</tbody></table></div>'+
+      (hand ? '<div style="color:#B42318;font-size:13px;margin-top:4px;">「運賃の立替」の金額を手で直しています(PDF の合計は '+formatNum(sumAll)+' 円)。</div>' : '')+
+      '<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:13px;font-weight:700;">送り状ごとの明細を見る</summary><div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>受付日</th><th>原票No.</th><th>サイズ</th><th>種類</th><th>届け先</th><th class="num">個数</th><th class="num">運賃等</th></tr></thead><tbody>'+
+      L.map(function(x){ return x.rows.map(function(r){ return '<tr><td>'+esc(r[0].slice(5).replace('-','/'))+'</td><td>'+esc(r[1])+'</td><td>'+esc(r[2])+'</td><td>'+esc(r[3])+'</td><td>'+esc(r[4])+'</td><td class="num">'+formatNum(r[5])+'</td><td class="num">'+formatNum(r[6])+'</td></tr>'; }).join(''); }).join('')+'</tbody></table></div></details>' : '');
 }
 function renderClientBill(cl){
   var c = clientDataState(), month = c.month || todayStr().slice(0,7), per = c.billPer==='first' ? 'first' : 'month';
@@ -10462,7 +10523,7 @@ function renderClientBill(cl){
   if(!F || !invs) return '<div class="panel"><div class="empty-note">読み込み中…</div></div>';
   var cfg = F.cfg, B = clientBillCalc(F, month, per), mq = F.manual.qty || {}, inv = clientInvoiceOf(cl.id, month);
   var show = (per==='month' && inv) ? inv : B; // 締めた月は、締めたときの内容を出す
-  var rows = show.lines.map(function(l){ return '<tr><td>'+esc(l.name)+'</td><td class="num">'+formatNum(l.qty)+'</td><td>'+esc(l.unit)+'</td><td class="num">'+formatNum(l.price)+'</td><td class="num">'+formatNum(l.amount)+'</td><td class="sk-minor">'+esc(clientBasisLabel(l.basis))+'</td></tr>'; }).join('') || '<tr><td colspan="6" class="empty-note">この期間の請求はまだありません</td></tr>';
+  var rows = show.lines.map(function(l){ return '<tr><td>'+esc(l.name)+'</td><td class="num">'+formatNum(l.qty)+'</td><td>'+esc(l.unit)+'</td><td class="num">'+(l.basis==='freight' ? '' : formatNum(l.price))+'</td><td class="num">'+formatNum(l.amount)+'</td><td class="sk-minor">'+esc(clientBasisLabel(l.basis))+'</td></tr>'; }).join('') || '<tr><td colspan="6" class="empty-note">この期間の請求はまだありません</td></tr>';
   var fixedItems = F.items.filter(function(it){ return !clientFeeDaily(it.basis); });
   var manualInputs = fixedItems.map(function(it){
     var v = mq[it.id]===undefined ? (it.basis==='monthly' ? 1 : '') : mq[it.id];
@@ -10491,12 +10552,13 @@ function renderClientBill(cl){
       '<div class="sub-switch" style="margin:0;">'+[['first','半月の見込み'],['month','締め日(請求書)']].map(function(x){ return '<button type="button" class="sub-switch-btn'+(per===x[0] ? ' active' : '')+'" data-bill-per="'+x[0]+'">'+x[1]+'</button>'; }).join('')+'</div>'+
       '<button type="button" class="add-btn" id="chBillPrint">🖨 '+(per==='first' ? '請求見込みを印刷・PDF' : inv ? '請求書を印刷・PDF' : '下書きを印刷・PDF')+'</button></div>'+
     clientSetUndoneHtml(F)+clientShipCaseHtml(F)+closeBox+
-    '<div class="kpi-row">'+kpiTile('小計(税抜)', clientYen(show.sub), '', esc(show.label))+kpiTile('消費税('+show.tax+'%)', clientYen(show.taxAmt), '', '')+(show.freight ? kpiTile('立替運賃', clientYen(show.freight), '', '') : '')+kpiTile('合計', clientYen(show.total), '', per==='first' ? '月額・保管料は1か月分で入れています' : inv ? '締め済み' : 'まだ締めていません')+'</div>'+
+    '<div class="kpi-row">'+kpiTile('小計(税抜)', clientYen(show.sub), '', esc(show.label))+kpiTile('消費税('+show.tax+'%)', clientYen(show.taxAmt), '', '')+kpiTile('合計', clientYen(show.total), '', per==='first' ? '月額・保管料は1か月分で入れています' : inv ? '締め済み' : 'まだ締めていません')+'</div>'+
     '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>項目</th><th class="num">数量</th><th>単位</th><th class="num">単価</th><th class="num">金額</th><th>数え方</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div class="stf-section-title" style="margin-top:12px;">この請求月に手で入れる数('+esc(month)+')'+(inv ? ' <span class="sk-minor">締め済みのため直せません</span>' : '')+'</div>'+
     '<div class="ch-grid">'+manualInputs+
-      '<label class="ch-field"><span>運賃の立替(円・税なしで足す)</span><div><input type="number" step="1" id="chFreight" value="'+esc(String(F.manual.freight||''))+'" style="width:120px;"'+(inv ? ' disabled' : '')+'> <span class="ch-note">円</span></div></label>'+
+      '<label class="ch-field"><span>運賃の立替(円・税抜。税は最後の集計で足します)</span><div><input type="number" step="1" id="chFreight" value="'+esc(String(F.manual.freight||''))+'" style="width:120px;"'+(inv ? ' disabled' : '')+'> <span class="ch-note">円</span></div></label>'+
       (inv ? '' : '<div><button type="button" class="vc-manage-toggle-btn" id="chManSave">保存する</button></div>')+'</div>'+
+    clientFreightPdfHtml(F, !!inv)+
     histHtml+
     '<details style="margin-top:10px;"><summary style="cursor:pointer;font-weight:700;font-size:14px;">締め日・請求書の発行元・消費税(設定)</summary>'+
       '<div style="display:grid;gap:10px;margin-top:10px;max-width:520px;">'+
@@ -10560,7 +10622,12 @@ function clientInvoiceDetail(F, B){
   var setHtml = sec('セット作業(完了日・商品ごと)', '単価: ¥'+n(price('setPiece'))+'/ピース。完了した分だけです', ['完了日','商品コード','商品名','個数'],
     setL.map(function(g){ return '<tr><td class="c" style="white-space:nowrap;">'+esc(date(g.done))+'</td><td>'+esc(g.code)+'</td><td>'+esc(g.name)+'</td><td class="n">'+n(g.q)+'</td></tr>'; }),
     '<th colspan="3">合計</th><td class="n">'+n(setL.reduce(function(a, g){ return a + g.q; }, 0))+'</td>');
-  return '<div class="detail"><h2>ご請求明細</h2><div class="dhead">'+esc(B.from.replace(/-/g,'/'))+' 〜 '+esc(B.to.replace(/-/g,'/'))+'</div>'+inbHtml+shipHtml+prodHtml+setHtml+'</div>';
+  // 立替運賃: ヤマトの請求明細書から取り込んだ送り状ごと
+  var fp = (B.lines||[]).some(function(l){ return l.basis==='freight'; }) ? (F.manual.freightPdfs||[]) : [], fT = fp.reduce(function(a, x){ a.q += x.qty; a.s += x.sub; return a; }, { q: 0, s: 0 });
+  var freightHtml = sec('立替運賃(ヤマト運輸の送り状ごと)', '税抜の金額です。消費税は請求書の最後の集計で足しています', ['受付日','原票No.','サイズ','種類','届け先','個数','運賃等'],
+    fp.reduce(function(a, x){ return a.concat(x.rows.map(function(r){ return '<tr><td class="c">'+esc(date(r[0]))+'</td><td>'+esc(r[1])+'</td><td class="c">'+esc(r[2])+'</td><td>'+esc(r[3])+'</td><td>'+esc(r[4])+'</td><td class="n">'+n(r[5])+'</td><td class="n">'+n(r[6])+'</td></tr>'; })); }, []),
+    '<th colspan="5">合計(税抜)</th><td class="n">'+n(fT.q)+'</td><td class="n">'+n(fT.s)+'</td>');
+  return '<div class="detail"><h2>ご請求明細</h2><div class="dhead">'+esc(B.from.replace(/-/g,'/'))+' 〜 '+esc(B.to.replace(/-/g,'/'))+'</div>'+inbHtml+shipHtml+prodHtml+setHtml+freightHtml+'</div>';
 }
 /* 請求書の担当・メール・口座番号は、この端末にだけ残す(kv は誰でも読めるため。2026-10-31) */
 function clientInvoicePrivate(){ var v = {}; try{ v = JSON.parse(localStorage.getItem('clientInvoicePrivate') || '{}') || {}; }catch(e){} return v; }
@@ -10580,7 +10647,7 @@ function clientInvoicePrint(cl, B, kind, F){
   var isContact = function(x){ return /^(TEL|FAX|電話)/i.test(x); };
   var fromLines = [cfg.issuer||'(発行元を設定してください)'].concat(cfg.regNo ? ['登録番号:'+cfg.regNo] : []).concat(adrLines.filter(function(x){ return !isContact(x); }))
     .concat(pv.tanto ? ['','担当 : '+pv.tanto] : ['']).concat(adrLines.filter(isContact)).concat(pv.mail ? ['mail:'+pv.mail] : []);
-  var cells = B.lines.map(function(l){ return '<tr><td class="c">'+esc(range)+'</td><td>'+esc(l.name)+'</td><td class="c"></td><td class="c">'+formatNum(l.qty)+'</td><td class="n">'+yen(l.price)+'</td><td class="n">'+yen(l.amount)+'</td></tr>'; });
+  var cells = B.lines.map(function(l){ return '<tr><td class="c">'+esc(range)+'</td><td>'+esc(l.name)+'</td><td class="c"></td><td class="c">'+formatNum(l.qty)+'</td><td class="n">'+(l.basis==='freight' ? '' : yen(l.price))+'</td><td class="n">'+yen(l.amount)+'</td></tr>'; });
   for(var i=cells.length; i<12; i++) cells.push('<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>');
   var sum = function(label, v, cls){ return '<tr'+(cls ? ' class="'+cls+'"' : '')+'><th>'+label+'</th><td class="n">'+v+'</td></tr>'; };
   var account = pv.account || (kind==='first' ? '' : '(口座を「請求」の設定で入れてください)');
@@ -10594,7 +10661,7 @@ function clientInvoicePrint(cl, B, kind, F){
     '<table class="items"><thead><tr><th style="width:18%;">取引日</th><th>品目</th><th style="width:9%;">税率区分</th><th style="width:8%;">数量</th><th style="width:13%;">単価(税抜)</th><th style="width:14%;">金額(税抜)</th></tr></thead><tbody>'+cells.join('')+'</tbody></table>'+
     '<div class="foot"><div class="note">※は軽減税率(8%)対象項目</div><table class="sums">'+
       sum(B.tax+'%税率 対象小計', yen(B.sub))+sum('8%税率 対象小計', yen(0))+sum(B.tax+'% 税額', yen(B.taxAmt))+sum('8% 税額', yen(0))+
-      (B.freight ? sum('立替運賃(税なし)', yen(B.freight)) : '')+sum('合計(税込)', '¥ '+formatNum(B.total)+' -', 'gt')+'</table></div>'+
+      sum('合計(税込)', '¥ '+formatNum(B.total)+' -', 'gt')+'</table></div>'+
     (kind==='first' ? '' : '<div class="sec">振込先</div><table class="bank"><tr><th>金融機関・支店</th><td>'+esc(cfg.bank||'')+'</td></tr><tr><th>口座名義</th><td>'+esc(account)+'</td></tr></table>')+
     '<div class="sec">備考</div><div class="rem">いつもご利用いただきありがとうございます。'+(kind==='first' ? '' : '<br><br>※請求書明細をご確認の上、お振込期日までに上記口座へお振込お願いいたします。<br>※お振込み手数料は御社にてご負担いただけますようお願いいたします。')+'</div></div>'+(F ? clientInvoiceDetail(F, B) : '');
   var css = '@page{size:A4 portrait;margin:12mm 14mm;} body{font-family:"Yu Mincho","MS Mincho","Hiragino Mincho ProN",serif;color:#000;} .inv{font-size:10.5px;} h1{text-align:center;letter-spacing:.3em;font-size:22px;font-weight:700;margin:0;padding:6px 0 8px;border-bottom:2px solid #000;}'+
@@ -10848,11 +10915,54 @@ function bindClientHub(){
   if(ms) ms.addEventListener('click', async function(){
     var month = c.month || todayStr().slice(0,7), key = clientManualKey(cl.id, month), qty = {};
     document.querySelectorAll('[data-man-q]').forEach(function(el){ if(el.value!=='') qty[el.getAttribute('data-man-q')] = Number(el.value)||0; });
-    var v = { qty: qty, freight: Number((document.getElementById('chFreight')||{}).value)||0, at: new Date().toISOString() };
+    var cur = clientManual(cl.id, month) || {};
+    var v = { qty: qty, freight: Number((document.getElementById('chFreight')||{}).value)||0, freightPdfs: cur.freightPdfs || [], at: new Date().toISOString() };
     var ok = await persistKey(key, v);
     if(!ok){ showToast('⚠️ 保存できませんでした'); return; }
     state.cdCache[key] = { v: v, saved: true }; showToast('保存しました'); render();
   });
+  // 請求: ヤマトの請求明細書 PDF(まだ保存していない入力も一緒に残す)
+  var saveFreightPdfs = async function(list, nextFreight){
+    var month = c.month || todayStr().slice(0,7), key = clientManualKey(cl.id, month), qty = {};
+    document.querySelectorAll('[data-man-q]').forEach(function(el){ if(el.value!=='') qty[el.getAttribute('data-man-q')] = Number(el.value)||0; });
+    var v = { qty: qty, freight: nextFreight, freightPdfs: list, at: new Date().toISOString() };
+    var ok = await persistKey(key, v);
+    if(ok) state.cdCache[key] = { v: v, saved: true };
+    return ok;
+  };
+  var fpb = document.getElementById('chFreightPdfBtn'), fpi = document.getElementById('chFreightPdf');
+  if(fpb && fpi){
+    fpb.addEventListener('click', function(){ fpi.click(); });
+    fpi.addEventListener('change', async function(){
+      var files = [].slice.call(fpi.files||[]); fpi.value = '';
+      if(!files.length) return;
+      var month = c.month || todayStr().slice(0,7), cur = clientManual(cl.id, month) || {}, list = (cur.freightPdfs||[]).slice(), P = clientFeeData(cl, month).P;
+      var before = Math.round(Number((document.getElementById('chFreight')||{}).value)||0), prevSum = clientFreightPdfSum(list), i = 0;
+      try{
+        for(; i<files.length; i++){
+          var d = yamatoPdfParse(await yamatoPdfLines(files[i]));
+          if((d.date<P.from || d.date>P.to) && !(await appConfirm(files[i].name+' の請求日は '+d.date.replace(/-/g,'/')+' です。請求月 '+month+' に入れますか?'))) continue;
+          list = list.filter(function(x){ return !(x.no===d.no && x.date===d.date); });
+          list.push(d);
+        }
+      }catch(e){ showToast('⚠️ '+files[i].name+': '+e.message); return; }
+      list.sort(function(a, b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : (a.no < b.no ? -1 : 1); });
+      var next = clientFreightPdfSum(list);
+      if(before && before!==prevSum && before!==next && !(await appConfirm('「運賃の立替」の '+formatNum(before)+' 円を、PDF の合計 '+formatNum(next)+' 円に置き換えますか?'))) return;
+      if(!(await saveFreightPdfs(list, next))){ showToast('⚠️ 保存できませんでした'); return; }
+      await appendAuditLog({ action:'荷主の立替運賃を PDF から取り込んだ', target: cl.name+' / '+month, before: before, after: next });
+      showToast('立替運賃を '+formatNum(next)+' 円にしました'); render();
+    });
+  }
+  document.querySelectorAll('[data-freight-del]').forEach(function(el){ el.addEventListener('click', async function(){
+    var month = c.month || todayStr().slice(0,7), cur = clientManual(cl.id, month) || {}, list = (cur.freightPdfs||[]).slice(), d = list[Number(el.getAttribute('data-freight-del'))];
+    if(!d || !(await appConfirm(d.date.replace(/-/g,'/')+' の明細書('+formatNum(d.total)+' 円)を消しますか?'))) return;
+    list.splice(Number(el.getAttribute('data-freight-del')), 1);
+    var next = clientFreightPdfSum(list);
+    if(!(await saveFreightPdfs(list, next))){ showToast('⚠️ 保存できませんでした'); return; }
+    await appendAuditLog({ action:'荷主の立替運賃の PDF を消した', target: cl.name+' / '+month, before: d.total, after: next });
+    render();
+  }); });
   // 料金表(見積書)
   if(tab==='rates' && c.ratesEdit){
     var E = c.ratesEdit;

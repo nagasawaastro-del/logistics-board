@@ -9597,7 +9597,7 @@ function setBomStockFor0(code, need){
   var st = logiStockOf(code);
   if(!st) return { text: '在庫なし', locs: '', short: true, allShort: true, st: null };
   var short = st.tk < need, allShort = st.tk + st.tn < need;
-  var tkLocs = setBomLocText(st, 2), tnLocs = setBomLocTextSite(st, 'tannan', 2);
+  var tkLocs = setBomLocText(st, 3), tnLocs = setBomLocTextSite(st, 'tannan', 2);
   if(!short) return { text: '在庫 '+formatNum(st.tk), locs: tkLocs, short: false, allShort: false, st: st };
   return { text: '高屋 '+formatNum(st.tk)+' 不足'+(st.tn>0 ? ' ・ 丹南 '+formatNum(st.tn) : '')+(allShort ? ' 全体でも不足' : ''),
     locs: tkLocs+(st.tn>0 && tnLocs ? (tkLocs ? ' / ' : '')+'丹南 '+tnLocs : ''), short: true, allShort: allShort, st: st };
@@ -9661,10 +9661,9 @@ function setBomExpand(items){
   return { sets: list, totals: tOrder.map(function(k){ return totals[k]; }), missing: list.filter(function(S){ return !S.comps; }).map(function(S){ return S.code; }), stockIn: stockIn };
 }
 function setBomLocText(st, max){
-  // 部品のロケーションは、高屋のブロックの棚だけ(2026-10-23。丹南の棚は出さない)
-  var takaya = SHUKEI_SITES.takaya.stockBlocks;
-  var locs = st ? st.locs.filter(function(l){ return takaya.indexOf(String(l.blk||'').toUpperCase())!==-1; }) : [];
-  if(!locs.length) return st && st.locs.length ? '高屋に棚なし' : '';
+  // 部品のロケーションは、AA と S の 1-1 以降(パートさんが取る棚)だけ(2026-11-03。前は高屋の棚すべて。丹南の棚は出さない)
+  var locs = st ? st.locs.filter(function(l){ return tpickIsPart(l.blk, l.loc); }) : [];
+  if(!locs.length) return st && st.locs.length ? 'AA・S1-1以降に棚なし' : '';
   return locs.slice(0, max||3).map(function(l){ return l.blk+' '+tpickLocText(l.loc)+'('+formatNum(l.qty)+')'; }).join(' ')+(locs.length>(max||3) ? ' ほか'+(locs.length-(max||3)) : '');
 }
 /* 部品の表(画面と印刷で同じ形)。print=true なら印刷用(済の欄つき) */

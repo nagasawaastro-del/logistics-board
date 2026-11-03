@@ -21401,7 +21401,7 @@ function renderInput(){
     breakBanner = '<div class="break-banner">'+
       '<div class="break-banner-title">🍽 休憩中</div>'+
       '<div class="break-banner-timer" data-live-timer="'+log.start+'">'+fmtElapsed(breakElapsed)+'</div>'+
-      '<div class="break-banner-sub">'+esc(state.breakSettings.start)+'〜'+esc(state.breakSettings.end)+' は自動で休憩になります。作業をタップすると休憩を終えて再開します。</div>'+
+      '<div class="break-banner-sub">'+esc(state.breakSettings.start)+'〜'+esc(state.breakSettings.end)+' は自動で休憩になります。作業をタップすると休憩を終えて再開します。休憩が終わると、休憩前の作業(完了していなければ)を自動で再開します。</div>'+
     '</div>';
   }
   // 旧「次のおすすめ」「本日の作業指示」表示(legacyMaybeShowNextSuggestion 用)は廃止。作業指示は上の workInstructionBanner だけ
@@ -21730,6 +21730,10 @@ function bindInput(){
 /* 自動休憩(checkAutoBreak)で作業記録が閉じられた「休憩前の作業」。休憩のあとにまだ何の作業も始めていない場合だけ返す。
    (最後の記録が休憩で、その直前の作業記録が休憩の開始と同時に終わっている) */
 function preBreakTaskOf(day, staffId){
+  var prev = preBreakLogOf(day, staffId);
+  return prev ? prev.taskId : null;
+}
+function preBreakLogOf(day, staffId){
   var logs = ((day && day.logs)||[]).filter(function(l){ return l.staffId===staffId; })
     .sort(function(a,b){ return new Date(a.start).getTime()-new Date(b.start).getTime(); });
   var last = logs[logs.length-1];
@@ -21738,7 +21742,7 @@ function preBreakTaskOf(day, staffId){
   for(var i=logs.length-2; i>=0; i--){ if(logs[i].taskId!=='BREAK'){ prev = logs[i]; break; } }
   if(!prev || !prev.end) return null;
   if(Math.abs(new Date(prev.end).getTime()-new Date(last.start).getTime()) > 60000) return null;
-  return prev.taskId;
+  return prev;
 }
 /* 休憩前の作業から抜けるときの完了判定(通常の作業終了と同じ decideCompletionOnLeave を使う。完了のルールは変えない)。
    ・休憩前の作業に戻る・既に完了の記録がある → 何もしない(二重に記録しない)
@@ -22979,6 +22983,7 @@ async function checkAutoBreak(){
     if(inBreak){
       if(!day.autoBreakStarted[s.id] && workLogs.length){
         workLogs.forEach(function(log){
+          if(log.activeSubcat) log.breakSubcat = log.activeSubcat; // 休憩明けに同じ内訳で再開するため
           finalizeActiveSubTimer(log);
           log.end = new Date().toISOString();
           if(log.quantity==null && !log.breakdown) log.quantity = 0;
@@ -22992,10 +22997,26 @@ async function checkAutoBreak(){
       }
     }else if(afterBreak){
       if(!day.autoBreakEnded[s.id] && breakLogs.length){
+        // 休憩明けに作業を押し忘れると計測が抜けるため、休憩前の作業が完了していなければ自動で再開する(2026-11-03)
+        var pre = preBreakLogOf(day, s.id);
+        var nowIso = new Date().toISOString();
         breakLogs.forEach(function(log){
-          log.end = new Date().toISOString();
+          log.end = nowIso;
           log.quantity = null;
         });
+        if(pre && pre.taskId!=='BREAK' && tasksForToday().some(function(t){ return t.id===pre.taskId; }) &&
+           !taskFullyCompleted(day, pre.taskId) && staffShiftEndMs(s.id, day, state.shiftSettings) > now.getTime()+5*60000){
+          var entry = {id:uid(), staffId:s.id, taskId:pre.taskId, start:nowIso, end:null, quantity:null, autoResumed:true};
+          ['taskName','foldPlanId','foldPlanLabel','foldPlanLineId'].forEach(function(k){ if(pre[k]) entry[k] = pre[k]; });
+          var task = taskById(pre.taskId);
+          if(task.subcategories && task.subcategories.length){
+            var names = task.subcategories.map(subcatName);
+            entry.activeSubcat = names.indexOf(pre.breakSubcat)>=0 ? pre.breakSubcat : names[0];
+            entry.activeSubcatStart = nowIso;
+            entry.subTimes = {};
+          }
+          day.logs.push(entry);
+        }
         day.autoBreakEnded[s.id] = true;
         changed = true;
       }

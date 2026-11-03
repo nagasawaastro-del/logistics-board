@@ -10643,6 +10643,11 @@ function renderClientBill(cl){
         '<label class="ch-field"><span>口座名義(口座番号も。この端末にだけ残します)</span><input type="text" id="chPvAccount" value="'+esc(clientInvoicePrivate().account||'')+'" style="width:100%;"></label>'+
         '<label class="ch-field"><span>担当(この端末にだけ残します)</span><input type="text" id="chPvTanto" value="'+esc(clientInvoicePrivate().tanto||'')+'" style="width:100%;"></label>'+
         '<label class="ch-field"><span>担当のメール(この端末にだけ残します)</span><input type="text" id="chPvMail" value="'+esc(clientInvoicePrivate().mail||'')+'" style="width:100%;"></label>'+
+        '<div class="ch-field"><span>角印(請求書の会社名に重ねます。この端末にだけ残します)</span><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">'+
+          (clientInvoiceSeal() ? '<img src="'+clientInvoiceSeal()+'" alt="角印" style="width:64px;height:64px;object-fit:contain;background:#fff;border:1px solid var(--paper-line);border-radius:6px;">' : '<span class="sk-minor">まだありません</span>')+
+          '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 画像を選ぶ<input type="file" id="chSealFile" accept="image/png,image/jpeg" style="display:none;"></label>'+
+          (clientInvoiceSeal() ? '<button type="button" class="ll-btn" id="chSealDel">消す</button>' : '')+'</div>'+
+          '<span class="sk-minor">背景が透明な PNG がきれいに出ます</span></div>'+
         '<label class="ch-field"><span>人件費に数える作業(作業記録の作業の名前に含む文字)</span><input type="text" id="chLaborKw" value="'+esc(clientLaborKeyword(cfg))+'" style="width:100%;"></label>'+
         '<label class="ch-field"><span>消費税(%)</span><input type="number" id="chTax" value="'+esc(String(cfg.taxRate===undefined ? 10 : cfg.taxRate))+'" style="width:80px;"></label>'+
         '<div><button type="button" class="vc-manage-toggle-btn" id="chBillSave">保存する</button></div>'+
@@ -10704,6 +10709,27 @@ function clientInvoiceDetail(F, B){
 }
 /* 請求書の担当・メール・口座番号は、この端末にだけ残す(kv は誰でも読めるため。2026-10-31) */
 function clientInvoicePrivate(){ var v = {}; try{ v = JSON.parse(localStorage.getItem('clientInvoicePrivate') || '{}') || {}; }catch(e){} return v; }
+/* 角印の画像(2026-11-03)。悪用されないよう、kv(誰でも読める)にもアプリのファイルにも置かず、この端末にだけ残す */
+function clientInvoiceSeal(){ try{ return localStorage.getItem('clientInvoiceSeal') || ''; }catch(e){ return ''; } }
+/* 選んだ画像を 400px 以内の PNG(背景が透明なまま)にして返す */
+function clientSealFromFile(file){
+  return new Promise(function(res, rej){
+    var fr = new FileReader();
+    fr.onerror = function(){ rej(new Error('画像を読めませんでした')); };
+    fr.onload = function(){
+      var img = new Image();
+      img.onerror = function(){ rej(new Error('画像を読めませんでした(PNG か JPEG を選んでください)')); };
+      img.onload = function(){
+        var k = Math.min(1, 400 / Math.max(img.width, img.height)), cv = document.createElement('canvas');
+        cv.width = Math.round(img.width*k); cv.height = Math.round(img.height*k);
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        res(cv.toDataURL('image/png'));
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
 /* 請求書: 営業倉庫のお客様の請求書(Excel「INVOY_請求書」)と同じ形(2026-10-31)。単価・金額は税抜、税額は下の欄。締めた請求書も、この形で出し直す */
 function clientInvoicePrint(cl, B, kind, F){
   var cfg = state.clientBillCfg || {}, pv = clientInvoicePrivate();
@@ -10724,12 +10750,13 @@ function clientInvoicePrint(cl, B, kind, F){
   for(var i=cells.length; i<12; i++) cells.push('<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>');
   var sum = function(label, v, cls){ return '<tr'+(cls ? ' class="'+cls+'"' : '')+'><th>'+label+'</th><td class="n">'+v+'</td></tr>'; };
   var account = pv.account || (kind==='first' ? '' : '(口座を「請求」の設定で入れてください)');
+  var seal = kind==='first' ? '' : clientInvoiceSeal();
   var html = '<div class="inv"><h1>'+title+'</h1>'+
     '<div class="head"><div class="left"><div class="to">'+esc(cl.name)+'御中</div>'+
         '<div class="sub">件名:</div><div class="sub">物流委託業務 '+esc(B.month.slice(0,4))+'年 '+Number(B.month.slice(5,7))+'月分</div><div class="sub gap">下記の通り、ご請求申し上げます。</div>'+
         '<div class="tot"><span>'+(kind==='first' ? '見込み金額(税込) :' : 'ご請求金額(税込) :')+'</span><b>¥ '+formatNum(B.total)+' -</b></div></div>'+
       '<div class="right"><div class="dt"><span>請求日 :</span><span>'+esc(jpDate(issued))+'</span></div>'+(kind==='first' ? '' : '<div class="dt"><span>お支払い期限 :</span><span>'+esc(jpDate(dueStr))+'</span></div>')+
-        '<div class="from">'+fromLines.map(function(x){ return '<div>'+(x ? esc(x) : '&nbsp;')+'</div>'; }).join('')+'</div></div></div>'+
+        '<div class="from">'+(seal ? '<img class="seal" src="'+seal+'" alt="">' : '')+fromLines.map(function(x){ return '<div>'+(x ? esc(x) : '&nbsp;')+'</div>'; }).join('')+'</div></div></div>'+
     (kind==='first' ? '<div class="memo">前半の作業料に、月額・保管料(1か月分)を足した見込みです。確定の金額は締め日の請求書でお知らせします。</div>' : '')+
     '<table class="items"><thead><tr><th style="width:18%;">取引日</th><th>品目</th><th style="width:9%;">税率区分</th><th style="width:8%;">数量</th><th style="width:13%;">単価(税抜)</th><th style="width:14%;">金額(税抜)</th></tr></thead><tbody>'+cells.join('')+'</tbody></table>'+
     '<div class="foot"><div class="note">※は軽減税率(8%)対象項目</div><table class="sums">'+
@@ -10739,7 +10766,7 @@ function clientInvoicePrint(cl, B, kind, F){
     '<div class="sec">備考</div><div class="rem">いつもご利用いただきありがとうございます。'+(kind==='first' ? '' : '<br><br>※請求書明細をご確認の上、お振込期日までに上記口座へお振込お願いいたします。<br>※お振込み手数料は御社にてご負担いただけますようお願いいたします。')+'</div></div>'+(F ? clientInvoiceDetail(F, B) : '');
   var css = '@page{size:A4 portrait;margin:12mm 14mm;} body{font-family:"Yu Mincho","MS Mincho","Hiragino Mincho ProN",serif;color:#000;} .inv{font-size:10.5px;} h1{text-align:center;letter-spacing:.3em;font-size:22px;font-weight:700;margin:0;padding:6px 0 8px;border-bottom:2px solid #000;}'+
     '.head{display:flex;justify-content:space-between;gap:16px;margin:12px 0 14px;} .left{flex:1;} .right{width:36%;} .to{font-size:13px;font-weight:700;border-bottom:1px solid #000;padding-bottom:8px;margin-bottom:22px;} .sub{font-size:10px;line-height:1.6;} .sub.gap{margin-top:12px;} .tot{display:flex;justify-content:space-between;align-items:baseline;margin-top:16px;padding-right:12%;} .tot span{font-size:13.5px;font-weight:700;} .tot b{font-size:17px;}'+
-    '.dt{display:flex;justify-content:flex-end;gap:14px;font-size:10px;line-height:1.7;} .dt span:first-child{font-weight:700;} .from{font-size:10px;line-height:1.55;margin:10px 0 0 12%;} .memo{margin:0 0 8px;}'+
+    '.dt{display:flex;justify-content:flex-end;gap:14px;font-size:10px;line-height:1.7;} .dt span:first-child{font-weight:700;} .from{position:relative;font-size:10px;line-height:1.55;margin:10px 0 0 12%;} .from .seal{position:absolute;right:0;top:-3mm;width:22mm;height:22mm;object-fit:contain;mix-blend-mode:multiply;} .memo{margin:0 0 8px;}'+
     'table{border-collapse:collapse;width:100%;} .items th{font-size:11px;padding:6px 4px;border-top:2px solid #000;border-bottom:1px solid #000;} .items th+th,.items td+td{border-left:1px dotted #999;} .items td{font-size:10.5px;padding:3px 6px;height:16px;border-bottom:1px dotted #999;} .items tbody tr:last-child td{border-bottom:2px solid #000;} td.c{text-align:center;} td.n{text-align:right;white-space:nowrap;}'+
     '.foot{display:flex;justify-content:space-between;align-items:flex-start;} .note{font-size:10px;padding-top:3px;} .sums{width:27%;} .sums th{font-size:10.5px;text-align:center;padding:5px 4px;white-space:nowrap;} .sums td{font-size:10.5px;padding:5px 6px;} .sums tr{border-bottom:1px dotted #999;} .sums tr.gt{border-top:1px solid #000;border-bottom:2px solid #000;} .sums tr.gt th,.sums tr.gt td{font-size:12px;font-weight:700;padding:7px 4px;}'+
     '.sec{font-size:12px;font-weight:700;margin-top:18px;padding:4px 10px;border-top:2px solid #000;border-bottom:1px solid #000;} .bank{border-bottom:2px solid #000;} .bank th{width:15%;font-weight:400;font-size:10.5px;padding:4px;} .bank td{font-size:10.5px;padding:4px 8px;border-left:1px dotted #999;} .bank tr+tr{border-top:1px dotted #999;} .rem{font-size:10.5px;line-height:1.65;padding:5px 10px 10px;border-bottom:2px solid #000;}'+
@@ -11098,6 +11125,19 @@ function bindClientHub(){
       showToast('料金表を保存しました'); render();
     });
   }
+  var sealIn = document.getElementById('chSealFile');
+  if(sealIn) sealIn.addEventListener('change', async function(){
+    var f = sealIn.files && sealIn.files[0]; sealIn.value = ''; if(!f) return;
+    try{ var url = await clientSealFromFile(f); localStorage.setItem('clientInvoiceSeal', url); showToast('角印を入れました(この端末だけ)'); }
+    catch(e){ showToast('⚠️ '+((e && e.message) || '角印を入れられませんでした')); }
+    render();
+  });
+  var sealDel = document.getElementById('chSealDel');
+  if(sealDel) sealDel.addEventListener('click', async function(){
+    if(!await appConfirm('この端末の角印を消しますか?')) return;
+    try{ localStorage.removeItem('clientInvoiceSeal'); }catch(e){}
+    showToast('角印を消しました'); render();
+  });
   var bs = document.getElementById('chBillSave');
   if(bs) bs.addEventListener('click', async function(){
     var v = { laborKeyword: ((document.getElementById('chLaborKw')||{}).value || '').trim() || 'モビイクス', closeDay: Number(document.getElementById('chCloseDay').value)||0, issuer: document.getElementById('chIssuer').value.trim(), address: document.getElementById('chIssuerAddr').value.trim(), regNo: document.getElementById('chRegNo').value.trim(), bank: document.getElementById('chBank').value.trim(), taxRate: Number(document.getElementById('chTax').value)||10, at: new Date().toISOString() };

@@ -1562,10 +1562,11 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .cd-map select{ flex:1; min-width:0; }
 .tpick-cam{ position:fixed; left:50%; bottom:10px; transform:translateX(-50%); z-index:3000; width:min(560px, 96vw); background:#101828; border-radius:14px; overflow:hidden; box-shadow:0 20px 40px rgba(0,0,0,.4); }
 /* カメラの窓は画面の下に重なるので、窓の高さの分だけ一覧の下を空ける(最後の行まで窓の上に出して押せるように。2026-10-31) */
-body.tpick-cam-on .modal-card{ padding-bottom:calc(var(--tpick-cam-h, 380px) + 24px); }
+body.tpick-cam-on .modal-card{ padding-bottom:calc(var(--tpick-cam-h, 280px) + 24px); }
+.tpick-cnt{ color:#DC6803; font-size:.8em; }
 .tpick-cam-view{ position:relative; }
-.tpick-cam video{ width:100%; height:min(36vh, 300px); object-fit:cover; display:block; background:#000; }
-.tpick-cam-next{ padding:8px 12px 6px; color:#fff; border-bottom:1px solid #344054; }
+.tpick-cam video{ width:100%; height:min(20vh, 170px); object-fit:cover; display:block; background:#000; } /* 2026-11-03 低く(一覧も見えるように) */
+.tpick-cam-next{ padding:5px 12px 4px; color:#fff; border-bottom:1px solid #344054; }
 .tpick-cam-next:empty{ display:none; }
 .tpick-cam-next .tcn-head{ font-size:12px; color:#98A2B3; }
 .tpick-cam-next .tcn-main{ display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
@@ -1579,7 +1580,7 @@ body.tpick-cam-on .modal-card{ padding-bottom:calc(var(--tpick-cam-h, 380px) + 2
 .tpick-cam-res{ position:absolute; left:0; right:0; bottom:0; padding:10px 12px; font-size:18px; font-weight:800; color:#fff; text-align:center; display:none; }
 .tpick-cam-res.is-ok{ display:block; background:rgba(18,183,106,.92); }
 .tpick-cam-res.is-ng{ display:block; background:rgba(240,68,56,.94); font-size:15px; }
-.tpick-cam-bar{ display:flex; gap:10px; align-items:center; padding:8px 10px; color:#fff; font-size:14px; }
+.tpick-cam-bar{ display:flex; gap:8px; align-items:center; padding:5px 10px; color:#fff; font-size:14px; }
 .tpick-cam-bar .tpick-cam-msg{ flex:1; color:#D0D5DD; font-size:12px; }
 .tpick-cam-bar .ll-btn{ background:#fff; }
 .tpick-cam-bar label{ white-space:nowrap; }
@@ -6497,8 +6498,8 @@ async function carryWvImport(fromDateStr, toDateStr, importId){
         if(bid.split(':')[0]!==importId) return;
         var p = progFrom.batches[bid];
         if(p.doneAt){ cur.batches[bid] = p; return; } // 完了した番号はそのまま
-        var hasMarks = Object.keys(p.done||{}).length || Object.keys(p.short||{}).length;
-        if(hasMarks) cur.batches[bid] = { done: p.done||{}, short: p.short||{}, carriedBy: p.staffName||'' }; // 受け持ちは外す(だれでも続きから)
+        var hasMarks = Object.keys(p.done||{}).length || Object.keys(p.short||{}).length || Object.keys(p.cnt||{}).length;
+        if(hasMarks) cur.batches[bid] = { done: p.done||{}, short: p.short||{}, cnt: p.cnt||{}, carriedBy: p.staffName||'' }; // 受け持ちは外す(だれでも続きから)
       });
       return cur;
     });
@@ -11540,6 +11541,7 @@ async function tpickHandleScan(raw){
   if(!codes.length && b.items.some(function(it){ return it.c===code; })) codes = [code]; // 品番そのもののバーコード
   if(!codes.length){ tpickBeep(false); return tpickScanResult(false, '登録されていないバーコードです('+code+')。ロジザードの在庫を取り込み直すと読めることがあります'); }
   var done = p.done || {}, short = p.short || {};
+  // 1回読むごとに1個と数え、指示数に届いたら「済」(2026-11-03。前は1個目で済になり、数のまちがいが起きやすかった)
   var hit = -1, already = false;
   b.items.forEach(function(it, i){
     if(codes.indexOf(it.c)===-1) return;
@@ -11550,18 +11552,19 @@ async function tpickHandleScan(raw){
     tpickBeep(false);
     return tpickScanResult(false, already ? (codes[0]+' はもう済です') : ('この番号にない品番です('+codes.join('・')+')'));
   }
-  var me = state.activeStaffId, key = String(hit);
+  var me = state.activeStaffId, key = String(hit), it = b.items[hit], n = 0;
   var r = await tpickProg(m.batchId, function(cur){
     if(!cur || cur.staffId!==me) return false;
-    var d = Object.assign({}, cur.done||{}); d[key] = 1;
-    return Object.assign({}, cur, { done: d });
+    var cnt = Object.assign({}, cur.cnt||{}), d = Object.assign({}, cur.done||{});
+    n = cnt[key] = Math.min(it.qty, (cnt[key]||0) + 1);
+    if(n>=it.qty) d[key] = 1;
+    return Object.assign({}, cur, { done: d, cnt: cnt });
   });
   if(!r.ok){ tpickBeep(false); return tpickScanResult(false, '⚠️ 保存できませんでした。もう一度読んでください'); }
   tpickBeep(true);
-  var it = b.items[hit];
-  state.tpickDoneFlash = { at: Date.now(), to: 'done' };
+  if(n>=it.qty) state.tpickDoneFlash = { at: Date.now(), to: 'done' };
   render();
-  var res = tpickScanResult(true, '✓ '+it.c+' '+formatNum(it.qty)+'個 済');
+  var res = tpickScanResult(true, n>=it.qty ? '✓ '+it.c+' '+formatNum(n)+' / '+formatNum(it.qty)+'個 済' : '✓ '+it.c+' '+formatNum(n)+' / '+formatNum(it.qty)+'個(あと '+formatNum(it.qty-n)+')');
   if(tpickCam) tpickCamNextRefresh(tpickCam);
   return res;
 }
@@ -11590,9 +11593,9 @@ function tpickCamNextInfo(){
   var m = state.modal; if(!m || m.kind!=='tpickBatch') return null;
   var t = state.tpk || {}, b = tpickBatchesForTask(t.tp, state.workVolume, m.taskId).filter(function(x){ return x.id===m.batchId; })[0];
   if(!b) return null;
-  var p = tpickProgOf(b.id) || {}, done = p.done || {}, short = p.short || {}, rest = [];
-  b.items.forEach(function(it, i){ if(!done[i] && !short[i]) rest.push(it); });
-  return { next: rest[0] || null, rest: rest.length, total: b.items.length };
+  var p = tpickProgOf(b.id) || {}, done = p.done || {}, short = p.short || {}, cnt = p.cnt || {}, rest = [], got = 0;
+  b.items.forEach(function(it, i){ if(!done[i] && !short[i]){ if(!rest.length) got = cnt[i]||0; rest.push(it); } });
+  return { next: rest[0] || null, got: got, rest: rest.length, total: b.items.length };
 }
 function tpickCamNextRefresh(c){
   var el = c && c.box && c.box.querySelector('.tpick-cam-next'); if(!el || c.test) return;
@@ -11605,7 +11608,7 @@ function tpickCamNextRefresh(c){
   }
   var it = x.next;
   el.innerHTML = '<div class="tcn-head">次に取る ・ のこり '+x.rest+' / '+x.total+'行</div>'+
-    '<div class="tcn-main"><span class="tcn-loc">'+esc(it.b)+' '+esc(tpickLocText(it.l))+'</span><span class="tcn-code">'+esc(it.c)+'</span><span class="tcn-qty">×'+formatNum(it.qty)+'</span></div>'+
+    '<div class="tcn-main"><span class="tcn-loc">'+esc(it.b)+' '+esc(tpickLocText(it.l))+'</span><span class="tcn-code">'+esc(it.c)+'</span><span class="tcn-qty">'+(x.got ? formatNum(x.got)+' / '+formatNum(it.qty) : '×'+formatNum(it.qty))+'</span></div>'+
     '<div class="tcn-name">'+esc(it.n||'')+'</div>';
 }
 function tpickCamResult(c, ok, text){
@@ -11685,7 +11688,7 @@ async function tpickCamStart(test, preStream){
   var camH = function(){ document.documentElement.style.setProperty('--tpick-cam-h', box.offsetHeight+'px'); };
   camH();
   var camRo = window.ResizeObserver ? new ResizeObserver(camH) : null; if(camRo) camRo.observe(box);
-  var c = tpickCam = { camRo: camRo, box: box, lastCode: '', lastAt: 0, test: !!test, startAt: Date.now(), nOk: 0, nNg: 0 };
+  var c = tpickCam = { camRo: camRo, box: box, lastCode: '', lastAt: 0, lastSeen: 0, test: !!test, startAt: Date.now(), nOk: 0, nNg: 0 };
   tpickCamNextRefresh(c);
   var inPick = function(){ return test || (state.modal && state.modal.kind==='tpickBatch'); };
   var msg = box.querySelector('.tpick-cam-msg');
@@ -11796,8 +11799,10 @@ async function tpickCamStart(test, preStream){
   resetIdle();
   async function onCode(v){
     var now = Date.now();
-    if(!v || (v===c.lastCode && now - c.lastAt < 2500)) return false; // 同じ物を続けて読まない
-    c.lastCode = v; c.lastAt = now; resetIdle();
+    if(!v) return false;
+    // 同じ物が枠に映ったままのあいだは数えない。いったん枠から外して(1.2秒)、次の1個を入れると数える(2026-11-03)
+    if(v===c.lastCode && now - c.lastSeen < 1200){ c.lastSeen = now; return false; }
+    c.lastCode = v; c.lastAt = c.lastSeen = now; resetIdle();
     if(test){ // 試すだけ: 読めた番号と品名を出す(済にはしない)
       await logiStockLoad();
       var codes = (tpickJanIndex() || {})[v] || [], st = codes.length ? logiStockOf(codes[0]) : null;
@@ -11857,7 +11862,7 @@ function renderTpickBatchModal(m){
   var t = state.tpk || {};
   var b = tpickBatchesForTask(t.tp, state.workVolume, m.taskId).filter(function(x){ return x.id===m.batchId; })[0];
   if(!b) return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card"><div class="empty-note">この番号は見つかりませんでした(取込が削除された可能性があります)</div><div class="modal-actions"><button type="button" class="modal-cancel" id="tpickBack">戻る</button></div></div></div>';
-  var st = tpickBatchState(b), p = st.p || {}, mine = p.staffId===state.activeStaffId, done = p.done || {}, short = p.short || {};
+  var st = tpickBatchState(b), p = st.p || {}, mine = p.staffId===state.activeStaffId, done = p.done || {}, short = p.short || {}, cnt = p.cnt || {};
   var canEdit = mine && !p.doneAt;
   // 済・欠品にした行は、下の「ピッキング済み」へ移す(上には、まだ取っていない行だけ。2026-10-21)
   var prevB = null, prevL = null;
@@ -11870,7 +11875,7 @@ function renderTpickBatchModal(m){
       '<span class="tpick-chk">'+(isDone ? '✓' : sh ? '!' : '')+'</span>'+
       '<span class="tpick-loc">'+(showL ? '<b>'+esc(it.b)+'</b> '+esc(tpickLocText(it.l)) : '')+'</span>'+
       '<span class="tpick-code"><b>'+esc(it.c)+'</b><span class="muted">'+esc(it.n)+'</span></span>'+
-      '<span class="tpick-qty">'+(sh ? '欠品 '+formatNum(sh.got)+'/'+formatNum(it.qty) : formatNum(it.qty))+'</span></button>';
+      '<span class="tpick-qty">'+(sh ? '欠品 '+formatNum(sh.got)+'/'+formatNum(it.qty) : (!isDone && cnt[i]) ? '<span class="tpick-cnt">'+formatNum(cnt[i])+'/</span>'+formatNum(it.qty) : formatNum(it.qty))+'</span></button>';
     return canEdit ? '<div class="tpick-line">'+item+'<button type="button" class="tpick-short-btn" data-tpick-short="'+i+'">'+(sh ? '戻す' : '欠品')+'</button></div>' : item;
   };
   var todoIdx = [], doneIdx = [];
@@ -11890,14 +11895,14 @@ function renderTpickBatchModal(m){
   var sIt = (canEdit && m.shortIdx!=null) ? b.items[m.shortIdx] : null;
   var shortHtml = sIt ? '<div class="tpick-short-box"><div><b style="color:#B42318;">欠品</b> ・ '+esc(sIt.b)+' '+esc(tpickLocText(sIt.l))+' ・ <b>'+esc(sIt.c)+'</b> '+esc(sIt.n)+'</div>'+
     '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px;">指示数 <b style="font-size:20px;">'+formatNum(sIt.qty)+'</b> → 取れた数 '+
-    '<input type="number" id="tpickShortGot" inputmode="numeric" min="0" max="'+Math.max(0, sIt.qty-1)+'" value="0" style="width:96px;font-size:20px;padding:6px 8px;">'+
+    '<input type="number" id="tpickShortGot" inputmode="numeric" min="0" max="'+Math.max(0, sIt.qty-1)+'" value="'+Math.min(sIt.qty-1, (cnt[m.shortIdx]||0))+'" style="width:96px;font-size:20px;padding:6px 8px;">'+
     '<button type="button" class="modal-confirm tpick-claim" id="tpickShortOk">欠品にする</button><button type="button" class="ll-btn" id="tpickShortCancel">やめる</button></div>'+
     '<div class="muted" style="margin-top:6px;font-size:12px;">全く無いときは 0。事務所の「今日の状況 → トータルピッキング」に欠品として出ます。</div></div>' : '';
   return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card tpick-modal">'+
     '<div class="modal-task-name">'+esc(b.label)+' ・ '+b.items.length+'行 ・ '+formatNum(b.qty)+'個</div>'+
     '<div class="pool-hint" style="margin:4px 0 8px;">'+(mine ? (p.doneAt ? '完了しました' : '取った行を押すと「済」になります(もう一度押すと戻ります)。足りないときは右の「欠品」') : (p.staffId ? esc(p.staffName||'')+'さんが受け持っています(見るだけ)' : '受け持っていません(見るだけ)'))+' ・ 済 '+nDone+'/'+b.items.length+'</div>'+
     shortHtml+
-    (canEdit ? '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px;"><button type="button" class="add-btn" id="tpickScanBtn">📷 バーコードを読む</button><span class="pool-hint" style="margin:0;">読むと、その品番の行が「済」になります。スキャナーならそのまま読めます。手で押しても済にできます</span></div>' : '')+
+    (canEdit ? '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px;"><button type="button" class="add-btn" id="tpickScanBtn">📷 バーコードを読む</button><span class="pool-hint" style="margin:0;">1個ずつ読みます(読むたびに1個。指示数まで読むと「済」)。同じ品番の次の1個は、いったん枠から外してから読みます。スキャナーならそのまま読めます。手で押すと数えずに済にできます</span></div>' : '')+
     tabsHtml+
     '<div class="tpick-items">'+rows+'</div>'+
     '<div class="modal-actions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">'+
@@ -11951,9 +11956,10 @@ function bindTpickModals(m){
       var r = await tpickProg(m.batchId, function(cur){
         if(!cur || cur.staffId!==me) return false;
         var d = Object.assign({}, cur.done||{}), sh = Object.assign({}, cur.short||{});
-        if(sh[i]){ delete sh[i]; delete d[i]; } // 欠品の行を押したら、未に戻す
-        else if(d[i]) delete d[i]; else d[i] = 1;
-        return Object.assign({}, cur, { done: d, short: sh });
+        var cn = Object.assign({}, cur.cnt||{});
+        if(sh[i]){ delete sh[i]; delete d[i]; delete cn[i]; } // 欠品の行を押したら、未に戻す
+        else if(d[i]){ delete d[i]; delete cn[i]; } else d[i] = 1;
+        return Object.assign({}, cur, { done: d, short: sh, cnt: cn });
       });
       await wait;
       busy = false;

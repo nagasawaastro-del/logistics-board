@@ -6421,7 +6421,39 @@ async function moveWvImportDate(fromDateStr, toDateStr, importId, extra){
     data.imports.push(imp);
     data.batches = data.batches.concat(movedBatches);
   });
+  // 日付変更・今日の作業に変更では、トータルピッキングも移す(2026-11-03。前は元の日に残り、移した先で「トータル: 使う」もタブレットの番号も出なかった)。
+  // 繰越(extra あり)は carryWvImport が枝番を付けて写す
+  if(!extra && !(await tpickMoveImport(fromDateStr, toDateStr, importId))) return { ok:true, imp: imp, warn:'取込は移しましたが、トータルピッキングを移せませんでした' };
   return { ok:true, imp: imp };
+}
+/* トータルピッキング(tpick・tpick-prog)の取込1つ分を、別の日付へ移す。元の日に無ければ何もしない */
+async function tpickMoveImport(fromDateStr, toDateStr, importId){
+  var tpFrom = await loadKeyJson('tpick:'+fromDateStr, function(){ return {}; }) || {};
+  var ent = tpFrom.imports && tpFrom.imports[importId];
+  if(!ent) return true;
+  var progFrom = await loadKeyJson('tpick-prog:'+fromDateStr, function(){ return {}; }) || {};
+  var mine = function(bid){ return bid.split(':')[0]===importId; };
+  var w1 = await tpickKvUpdate('tpick:'+toDateStr, function(cur){ cur.imports = cur.imports || {}; cur.imports[importId] = ent; return cur; });
+  if(!w1.ok) return false;
+  var w2 = await tpickKvUpdate('tpick-prog:'+toDateStr, function(cur){
+    cur.batches = cur.batches || {};
+    Object.keys((progFrom && progFrom.batches) || {}).filter(mine).forEach(function(bid){ cur.batches[bid] = progFrom.batches[bid]; });
+    return cur;
+  });
+  if(!w2.ok) return false;
+  // 写せたら元の日から消す(消せなくても、元の日では取込が無いので出ない)
+  await tpickKvUpdate('tpick:'+fromDateStr, function(cur){ if(!cur.imports || !cur.imports[importId]) return false; delete cur.imports[importId]; return cur; });
+  await tpickKvUpdate('tpick-prog:'+fromDateStr, function(cur){
+    var ks = Object.keys(cur.batches || {}).filter(mine);
+    if(!ks.length) return false;
+    ks.forEach(function(bid){ delete cur.batches[bid]; });
+    return cur;
+  });
+  [fromDateStr, toDateStr].forEach(function(d){
+    if(state.tpk && state.tpk.date===d) state.tpk.at = 0; // 読み直す
+    if(state.tpkHist && state.tpkHist.date===d) state.tpkHist.at = 0;
+  });
+  return true;
 }
 
 /* ---------- 取込を次の日へ繰り越す(2026-10-21) ----------
@@ -18132,7 +18164,7 @@ function bindCsvImportPanel(){
       var result = await moveWvImportDate(viewDate, todayStr(), importId);
       if(!result.ok){ showToast(result.msg); return; }
       await appendAuditLog({ action:'CSV取込を今日の作業に変更', target: taskById(result.imp.taskId).name+' / '+result.imp.fileName, before: viewDate, after: todayStr() });
-      showToast(taskById(result.imp.taskId).name+'のCSVを今日の作業に変更しました');
+      showToast(result.warn ? '⚠️ '+result.warn : taskById(result.imp.taskId).name+'のCSVを今日の作業に変更しました');
       render();
     });
   });
@@ -18330,7 +18362,7 @@ function bindCsvImportPanel(){
       var result = await moveWvImportDate(viewDate, newDate, importId);
       if(!result.ok){ showToast(result.msg); return; }
       await appendAuditLog({ action:'作業量取込の日付変更', target: taskById(result.imp.taskId).name+' / '+result.imp.fileName, before: viewDate, after: newDate });
-      showToast('取込の対象日付を'+newDate+'に変更しました');
+      showToast(result.warn ? '⚠️ '+result.warn : '取込の対象日付を'+newDate+'に変更しました');
       render();
     });
   });

@@ -9711,14 +9711,14 @@ var CLIENT_KINDS = {
   inb:  { label:'入荷実績', fields: [['date','入荷日'],['no','入荷番号・発注番号'],['lineNo','行番号'],['supplier','仕入先',1],['code','品番',1],['name','品名'],['qty','数量',1],['cases','ケース数'],['note','備考']] },
   // 出荷の行番号は、同じ行のだぶりを見分けるために取り込み続ける。4つめが 1 の項目は、一覧・CSV・列を選ぶ画面に出さず、見出しの名前で自動で当てる(2026-10-31。手で別の列を選ぶとだぶるため)
   ship: { label:'出荷実績', fields: [['date','出荷日'],['slip','伝票番号'],['lineNo','行番号',0,1],['center','納品センター'],['code','品番',1],['name','品名'],['qty','数量',1],['note','備考']] },
-  set:  { label:'セット指示書', fields: [['date','作業日'],['no','指示番号・PO'],['setCode','セット品番・JAN',1],['setName','セット名'],['setQty','セット数'],['partCode','部品品番・JAN',1],['partName','部品名'],['partPer','1セットの部品数'],['partQty','部品数(合計)'],['note','備考']] }
+  set:  { label:'セット指示書', fields: [['date','作業日'],['no','指示番号・PO'],['center','出荷先センター'],['setCode','セット品番・JAN',1],['setName','セット名'],['setQty','セット数'],['partCode','部品品番・JAN',1],['partName','部品名'],['partPer','1セットの部品数'],['partQty','部品数(合計)'],['note','備考']] }
 };
 // 見出しの名前から、項目を当てる(はじめの案。画面で直せる)
 var CLIENT_GUESS = {
   date: /(出荷|見積|作業|予定)?日(付)?$|^日付|date/i, slip: /伝票|出荷番号|出荷NO|注文番号|受注番号/i, lineNo: /行(番号|NO)$/i,
   no: /番号|NO\.?$/i, code: /^(商品)?(品番|コード|ID)$|商品コード|品番|SKU|JAN/i, name: /品名|商品名/i, qty: /^数量$|数量|個数|出荷数|qty/i, cases: /ケース/i,
   due: /納期|納品日/i, note: /^(備考|メモ|摘要)$/,
-  supplier: /仕入先|メーカー|取引先名/i, center: /納品センター|センター名|納品先名|出荷先名|配送先名/,
+  supplier: /仕入先|メーカー|取引先名/i, center: /納品センター|センター名|納品先名|出荷先名|配送先名|出荷先\s*センター/,
   setCode: /セット.*(品番|コード)/i, setName: /セット.*(名|品名)/i, setQty: /セット.*数/i, partCode: /部品.*(品番|コード)|構成.*(品番|コード)/i, partName: /部品.*名|構成.*名/i, partPer: /^個数$|1セット/i, partQty: /部品.*数|構成.*数/i
 };
 // 見出しの名前がこれと同じなら先に当てる(ロジザードの CSV。入荷日は直接入荷で空のことがあるので入荷確定日を先に)
@@ -9974,10 +9974,10 @@ async function clientDoImport(c, mapped){
   var inbMode = c.kind==='inb' ? (c.inbMode || 'piece') : '';
   if(c.kind==='set'){ var wd = c.setWorkDate || todayStr(); mapped.rows.forEach(function(r){ if(!r.date) r.date = wd; }); c.setFrom = c.setTo = mapped.rows.length ? mapped.rows[0].date : wd; c.setImp = impId; }
   mapped.rows.forEach(function(r){ var m = (r.date || todayStr()).slice(0,7); (byMonth[m] = byMonth[m] || []).push(Object.assign({ imp: impId }, r, inbMode ? { mode: inbMode } : {})); });
-  var months = Object.keys(byMonth).sort(), okAll = true, added = 0, dup = 0, upd = 0, remN = 0, dupFix = 0;
+  var months = Object.keys(byMonth).sort(), okAll = true, added = 0, dup = 0, upd = 0, remN = 0, dupFix = 0, fill = 0;
   for(var i=0; i<months.length; i++){
     var m = months[i], list = byMonth[m], addN = 0, dupN = 0;
-    var updN = 0;
+    var updN = 0, fillM = 0;
     var r = await tpickKvUpdate(clientDataKey(c.clientId, c.kind, m), function(cur){
       cur.imports = cur.imports || []; cur.rows = cur.rows || [];
       if(c.kind==='inb' || c.kind==='ship'){ // 入荷・出荷は毎回上書き(2026-10-24): 同じ伝票の同じ行は新しい内容に。入荷は画面で入れた区分・ケース(個口)数は残す
@@ -10007,23 +10007,25 @@ async function clientDoImport(c, mapped){
         dupFix += n1 - cur.rows.length;
         return cur;
       }
-      var strong = {}, weak = {};
-      cur.rows.forEach(function(x){ var k = clientRowKeys(c.kind, x); if(k.strong) strong[k.strong] = 1; else weak[k.weak] = 1; });
-      var fresh = list.filter(function(x){ var k = clientRowKeys(c.kind, x); var d = k.strong ? strong[k.strong] : weak[k.weak]; if(d) return false; if(k.strong) strong[k.strong] = 1; else weak[k.weak] = 1; return true; });
-      addN = fresh.length; dupN = list.length - fresh.length;
-      if(!fresh.length) return false; // 全部取り込み済み: 何も書かない
+      var strong = {}, weak = {}, noCenter = {}, fillN = 0;
+      cur.rows.forEach(function(x){ var k = clientRowKeys(c.kind, x); if(k.strong) strong[k.strong] = 1; else weak[k.weak] = 1; if(c.kind==='set' && !x.center) (noCenter[k.weak] = noCenter[k.weak] || []).push(x); });
+      // セット指示書: 出荷先センターを取り込む前の行は、同じ指示を取り込み直すとセンターだけ入れる(2026-11-04)
+      var fresh = list.filter(function(x){ var k = clientRowKeys(c.kind, x); var d = k.strong ? strong[k.strong] : weak[k.weak]; if(d){ var o = x.center && noCenter[k.weak] && noCenter[k.weak].shift(); if(o){ o.center = x.center; fillN++; } return false; } if(k.strong) strong[k.strong] = 1; else weak[k.weak] = 1; return true; });
+      addN = fresh.length; dupN = list.length - fresh.length; fillM = fillN;
+      if(!fresh.length && !fillN) return false; // 全部取り込み済み: 何も書かない
+      if(!fresh.length) return cur;
       cur.imports.push({ id: impId, at: now, file: file.name, count: fresh.length, dup: dupN, by: who });
       cur.rows = cur.rows.concat(fresh);
       return cur;
     });
-    if(!r.ok && (addN || updN)) okAll = false;
-    added += addN; dup += dupN; upd += updN;
+    if(!r.ok && (addN || updN || fillM)) okAll = false;
+    added += addN; dup += dupN; upd += updN; fill += fillM;
   }
   if(c.kind==='ship' && !c.cols.center) c.cols.center = ''; // 納品センターの列は無し、と覚える(次から確かめる画面を出さない)
   await tpickKvUpdate(clientMapKey(c.clientId, c.kind), function(cur){ return { headerRow: c.headerRow||1, cols: c.cols, at: now }; });
   var cname = ((state.clientDefs.clients||[]).filter(function(x){ return x.id===c.clientId; })[0] || {}).name || '';
-  if(added || upd) await appendAuditLog({ action:'荷主データを取込', target: cname+' / '+CLIENT_KINDS[c.kind].label, before:null, after: file.name+'・'+added+'行'+(upd ? '・上書き '+upd+'行' : '')+'('+months.join('・')+')'+(dup ? '・取り込み済み '+dup+'行' : '') });
-  c.msg = !okAll ? '⚠️ 一部の月を保存できませんでした' : (c.kind==='inb' || c.kind==='ship') ? '「'+file.name+'」を取り込みました: 新しい行 '+added+'行・上書き '+upd+'行('+months.join('・')+')'+(mapped.skipped ? '。仕入先などが空の '+mapped.skipped+'行は入れていません' : '')+(remN ? '。前に入っていた仕入先が空の '+remN+'行を消しました' : '')+(dupFix ? '。だぶっていた古い行 '+dupFix+'行をまとめました' : '') : added ? '「'+file.name+'」から '+added+'行を取り込みました('+months.join('・')+')'+(dup ? '。前に取り込んだ '+dup+'行は入れていません' : '') : '「'+file.name+'」は全部取り込み済みでした('+dup+'行)。何も足していません';
+  if(added || upd || fill) await appendAuditLog({ action:'荷主データを取込', target: cname+' / '+CLIENT_KINDS[c.kind].label, before:null, after: file.name+'・'+added+'行'+(upd ? '・上書き '+upd+'行' : '')+(fill ? '・出荷先センターを入れた '+fill+'行' : '')+'('+months.join('・')+')'+(dup ? '・取り込み済み '+dup+'行' : '') });
+  c.msg = !okAll ? '⚠️ 一部の月を保存できませんでした' : (c.kind==='inb' || c.kind==='ship') ? '「'+file.name+'」を取り込みました: 新しい行 '+added+'行・上書き '+upd+'行('+months.join('・')+')'+(mapped.skipped ? '。仕入先などが空の '+mapped.skipped+'行は入れていません' : '')+(remN ? '。前に入っていた仕入先が空の '+remN+'行を消しました' : '')+(dupFix ? '。だぶっていた古い行 '+dupFix+'行をまとめました' : '') : added ? '「'+file.name+'」から '+added+'行を取り込みました('+months.join('・')+')'+(dup ? '。前に取り込んだ '+dup+'行は入れていません' : '')+(fill ? '。前に取り込んだ '+fill+'行に出荷先センターを入れました' : '') : fill ? '「'+file.name+'」は取り込み済みでした。前に取り込んだ '+fill+'行に出荷先センターを入れました' : '「'+file.name+'」は全部取り込み済みでした('+dup+'行)。何も足していません';
   showToast(c.msg);
   c.file = null; c.data = null; if(state.cdCache) Object.keys(state.cdCache).forEach(function(k){ if(k.indexOf('client-data:')===0) delete state.cdCache[k]; });
   c.month = months.slice(-1)[0] || c.month; c.forceMap = false;
@@ -10824,8 +10826,8 @@ function clientSetTotals(rows, from, to){
     if(!r.setCode) return;
     var sq = typeof r.setQty==='number' ? r.setQty : (clientNum(r.setQty)||0);
     var key = r.setCode+'|'+(r.no||'')+'|'+d; // 同じ指示の同じセットは1回だけ数える(部品の行ごとにセット数が繰り返されるため)
-    var F = fin[r.setCode] || (fin[r.setCode] = { code: r.setCode, name: r.setName||'', qty: 0, orig: 0, slips: 0, doneSlips: 0, seen: {} });
-    if(!F.seen[key]){ F.seen[key] = 1; F.qty += sq; F.orig += r.setOrig===undefined ? sq : r.setOrig; F.slips++; if(r.done) F.doneSlips++; }
+    var F = fin[r.setCode] || (fin[r.setCode] = { code: r.setCode, name: r.setName||'', qty: 0, orig: 0, slips: 0, doneSlips: 0, seen: {}, dest: {} });
+    if(!F.seen[key]){ F.seen[key] = 1; F.qty += sq; F.orig += r.setOrig===undefined ? sq : r.setOrig; F.slips++; if(r.done) F.doneSlips++; var ce = String(r.center||'').trim(); F.dest[ce] = (F.dest[ce]||0) + sq; }
     if(r.partCode){
       var pq = typeof r.partQty==='number' ? r.partQty : (clientNum(r.partQty)||0);
       var Pp = parts[r.partCode] || (parts[r.partCode] = { code: r.partCode, name: r.partName||'', qty: 0 }); Pp.qty += pq;
@@ -10841,7 +10843,11 @@ function clientSetTotals(rows, from, to){
   var byName = function(a, b){ var x = a.name || a.code, y = b.name || b.code; return x < y ? -1 : x > y ? 1 : (a.code < b.code ? -1 : 1); };
   var finL = Object.keys(fin).map(function(k){ return fin[k]; }).sort(byName);
   finL.forEach(function(F){ F.comp = Object.keys(comp[F.code] || {}).map(function(k){ return comp[F.code][k]; }).sort(byName); });
-  return { fin: finL, parts: Object.keys(parts).map(function(k){ return parts[k]; }).sort(byName) };
+  // 出荷先センターごと(2026-11-04): 組んだらその場でセンターの箱に入れる(種まき)。センターの無い指示は '' にまとめる
+  var dests = {};
+  finL.forEach(function(F){ Object.keys(F.dest).forEach(function(ce){ var q = F.dest[ce]; if(!q) return; var D = dests[ce] || (dests[ce] = { center: ce, qty: 0, items: [] }); D.qty += q; D.items.push({ code: F.code, name: F.name, qty: q, F: F }); }); });
+  var destL = Object.keys(dests).sort(function(a, b){ return !a ? 1 : !b ? -1 : a < b ? -1 : a > b ? 1 : 0; }).map(function(k){ return dests[k]; });
+  return { fin: finL, parts: Object.keys(parts).map(function(k){ return parts[k]; }).sort(byName), dests: destL, hasCenter: destL.some(function(D){ return D.center; }) };
 }
 /* どのセット指示書で作るか: 取込(ファイル)ごと(はじめは新しい取込)か、作業日の範囲(2026-10-24) */
 function clientSetSel(cl){
@@ -10903,6 +10909,10 @@ function renderClientSetSheet(cl){
       '<label class="ch-field"><span>完了日</span><input type="date" id="chSetBulkDate" value="'+esc(c.setBulkDate || todayStr())+'"></label><button type="button" class="ll-btn" id="chSetBulk"'+(nDone===S.slips.length ? ' disabled' : '')+'>未完了を全部この日で完了にする</button></div>'+
     '<div style="overflow:auto;max-height:520px;" data-keep-scroll="setSlips"><table class="report-table" style="font-size:13px;"><thead><tr><th>伝票(指示番号・PO)</th><th>作業日</th><th class="num">品番</th><th class="num">個数</th><th>完了日</th></tr></thead><tbody>'+
     (S.slips.map(function(x){ return '<tr><td><b>'+esc(x.no || '(番号なし)')+'</b></td><td>'+esc(String(x.date).replace(/-/g,'/'))+'</td><td class="num">'+formatNum(x.codes)+'</td><td class="num">'+formatNum(x.qty)+'</td><td><input type="date" data-set-done="'+esc(x.no)+'" value="'+esc(x.done)+'" style="width:140px;"></td></tr>'; }).join('') || '<tr><td colspan="5" class="empty-note">ありません</td></tr>')+'</tbody></table></div>';
+  // 出荷先センターごと(2026-11-04): 組んだらその場でセンターの箱へ入れるための一覧
+  var destView = '<div class="pool-hint" style="margin:0 0 8px;">組んだ完成品は、その場で出荷先センターごとの箱に入れてください(「📦 出荷先センターの札」を箱に付けます)。梱包のときに探し直さずに済みます。</div>'+
+    '<div style="overflow:auto;max-height:520px;"><table class="report-table" style="font-size:13px;"><thead><tr><th>出荷先センター</th><th class="num">個数</th><th>入れる完成品</th></tr></thead><tbody>'+
+    (T.dests || []).map(function(D){ return '<tr><td style="font-size:18px;"><b>'+esc(D.center || 'センターなし')+'</b></td><td class="num"><b>'+formatNum(D.qty)+'</b></td><td>'+D.items.map(function(it){ return esc(nameOf(it.code, it.name))+' <b>×'+formatNum(it.qty)+'</b>'; }).join('<br>')+'</td></tr>'; }).join('')+'</tbody></table></div>';
   var impOpts = S.imps.map(function(i){ return '<option value="'+esc(i.id)+'"'+(S.mode===i.id ? ' selected' : '')+'>'+esc(fmtDateTime(i.at)+' '+i.file+'('+i.count+'行)')+'</option>'; }).join('')+'<option value=""'+(S.mode ? '' : ' selected')+'>作業日の範囲で選ぶ</option>';
   return '<div class="panel">'+
     '<div class="panel-title">セット指示書の作り直し</div>'+
@@ -10914,6 +10924,7 @@ function renderClientSetSheet(cl){
     '<div class="ch-row" style="margin-bottom:6px;">'+
       '<button type="button" class="add-btn" id="chSetPrint">🖨 セット指示書を印刷・PDF</button>'+
       '<button type="button" class="add-btn" id="chJanPrint">🏷️ JANラベル(28455)を印刷・PDF</button>'+
+      (T.hasCenter ? '<button type="button" class="add-btn" id="chSetDestPrint">📦 出荷先センターの札を印刷・PDF</button>' : '')+
       '<button type="button" class="add-btn" id="chSetBomCsv" title="ロジザードZEROの「セット構成マスタ」の取込用(セット構成区分 03 = セットで扱う)">📤 ロジザードのセット構成マスタCSV</button>'+
       '<span class="ch-note">作るもの <b>'+T.fin.length+'品番・'+formatNum(totalSets)+'個</b>(ラベル '+formatNum(totalSets)+'枚)・ 使うもの '+T.parts.length+'品番</span>'+
     '</div>'+
@@ -10923,11 +10934,32 @@ function renderClientSetSheet(cl){
       '<label class="ch-field"><span>使い始める位置(1〜30)</span><input type="number" min="1" max="30" id="chJanStart" value="'+esc(String(clientJanCfg().start))+'" style="width:90px;"></label>'+
       '<label class="ch-field" style="flex-direction:row;align-items:center;gap:6px;"><input type="checkbox" id="chJanMark"'+(clientJanCfg().mark ? ' checked' : '')+'><span>右上に入数と JAN 下4桁を大きく出す</span></label>'+
       '<span class="ch-note">A4・3列×10段(28455)。ずれの直しはこの端末で覚えます。使い始める位置は、使いかけのシートの何枚目からか(左上から右へ数える)</span></div></details>'+
-    '<div class="sub-switch" style="margin:0 0 8px;">'+[['order','作業の順(完成品と部品)'],['slips','伝票ごとの完了日('+S.slips.length+')'],['fin','作るもの('+T.fin.length+')'],['parts','使うもの('+T.parts.length+')']].map(function(x){ return '<button type="button" class="sub-switch-btn'+(view===x[0] ? ' active' : '')+'" data-set-view="'+x[0]+'">'+esc(x[1])+'</button>'; }).join('')+'</div>'+
+    '<div class="sub-switch" style="margin:0 0 8px;">'+[['order','作業の順(完成品と部品)'],['slips','伝票ごとの完了日('+S.slips.length+')'],['fin','作るもの('+T.fin.length+')'],['parts','使うもの('+T.parts.length+')']].concat(T.hasCenter ? [['dest','出荷先センターごと('+T.dests.length+')']] : []).map(function(x){ return '<button type="button" class="sub-switch-btn'+(view===x[0] ? ' active' : '')+'" data-set-view="'+x[0]+'">'+esc(x[1])+'</button>'; }).join('')+'</div>'+
     (S.otherCount ? '<div class="pool-hint" style="margin:0 0 8px;">この取込のうち <b>'+S.otherCount+'伝票</b> は、ほかの月に完了しているので出していません。そのため、ここでは作る数を直せません(完了日を入れる前の月か、すべて出る月で直してください)。</div>' : '')+
-    (view==='slips' ? slipView : clientFoldOpen('setList:'+view, '商品コードの明細('+(view==='parts' ? T.parts.length : T.fin.length)+'品番)'+(view==='order' ? '・作る数を直す' : ''))+(view==='parts' ? tbl(T.parts) : view==='fin' ? tbl(T.fin) : orderTbl)+'</details>')+
+    (view==='dest' && T.hasCenter ? destView : view==='slips' ? slipView : clientFoldOpen('setList:'+view, '商品コードの明細('+(view==='parts' ? T.parts.length : T.fin.length)+'品番)'+(view==='order' ? '・作る数を直す' : ''))+(view==='parts' ? tbl(T.parts) : view==='fin' ? tbl(T.fin) : orderTbl)+'</details>')+
     '<div class="pool-hint" style="margin-top:8px;">並びは商品名の順(指示書・JAN ラベルも同じ順)。品番が13桁ならそれを JAN に、そうでなければロジザードの在庫の JAN を使います。</div>'+
   '</div>';
+}
+/* 完成品をどの出荷先センターに何個(例: FSZ1×3・KIX7×2)。センターの無い指示は「センターなし」 */
+function clientSetDestText(F){
+  return Object.keys(F.dest || {}).filter(function(k){ return F.dest[k]; }).sort(function(a, b){ return !a ? 1 : !b ? -1 : a < b ? -1 : a > b ? 1 : 0; }).map(function(k){ return (k || 'センターなし')+'×'+formatNum(F.dest[k]); }).join('・');
+}
+/* 出荷先センターの札(2026-11-04)。センターごとに1ページ: センターを大きく、入れる完成品と数。組んだらその場でセンターの箱へ入れる(種まき) */
+function clientSetDestPrint(cl){
+  var S = clientSetSel(cl); if(!S) return;
+  var T = S.T, from = S.mode ? todayStr() : S.from;
+  if(!T.hasCenter){ appAlert('出荷先センターの入った指示書がありません(指示書を取り込み直すと、出荷先センターが入ります)'); return; }
+  var nameOf = function(code, n){ if(n) return n; var st = logiStockOf(code); return st ? st.name : ''; };
+  var html = T.dests.map(function(D){
+    var rows = D.items.map(function(it, i){ var j = clientJan(it.code), mk = j ? clientJanMark(it.F, j) : null;
+      return '<tr><td class="no">'+(i+1)+'</td><td><div class="nm1">'+esc(nameOf(it.code, it.name))+'</div><div class="cd">'+esc(it.code)+'</div></td><td class="mk">'+(mk ? '<b>'+esc(mk.big)+'</b><i>'+esc(mk.tail)+'</i>' : '')+'</td><td class="q">'+formatNum(it.qty)+'</td><td class="chk"></td></tr>'; }).join('');
+    return '<div class="pg"><div class="ce">'+esc(D.center || 'センターなし')+'</div><div class="meta">'+esc(cl.name)+' ・ '+esc(S.label)+' ・ '+D.items.length+'品番・<b>'+formatNum(D.qty)+'個</b></div>'+
+      '<table><thead><tr><th>No</th><th>完成品</th><th>入数・下4桁</th><th>個数</th><th>済</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }).join('');
+  var css = '@page{size:A4 portrait;margin:8mm;} .pg{page-break-after:always;} .pg:last-child{page-break-after:auto;} .ce{font-family:Arial,Helvetica,sans-serif;font-size:72px;font-weight:700;letter-spacing:.05em;border:4px solid #000;border-radius:8px;text-align:center;padding:6px 0;margin-bottom:6px;} .meta{font-size:13px;margin-bottom:8px;}'+
+    'table{width:100%;border-collapse:collapse;font-size:12px;} th{background:#eee;border:1px solid #000;padding:3px;} td{border:1px solid #000;padding:4px 6px;vertical-align:middle;} tr{page-break-inside:avoid;}'+
+    'td.no{width:24px;text-align:center;font-weight:700;} td.mk{width:70px;text-align:center;line-height:1.1;font-family:Arial,Helvetica,sans-serif;} td.mk b{display:block;font-size:16px;} td.mk i{font-style:normal;font-weight:700;font-size:12px;} td.q{width:56px;text-align:right;font-size:20px;font-weight:700;} td.chk{width:30px;} .nm1{font-size:12px;font-weight:700;} .cd{font-size:10px;color:#475467;}';
+  printHtmlDoc('出荷先センターの札_'+cl.name+'_'+from, html, css);
 }
 /* 作業の順の表(完成品ごとに、部品と数)。左に使う部品、右に作る完成品(2026-10-30 に入れ替え)。print = 印刷用(バーコードつき)。editable = 画面で作る数と完了日を直せる(2026-10-31) */
 function clientSetOrderTable(T, nameOf, print, editable){
@@ -10936,7 +10968,8 @@ function clientSetOrderTable(T, nameOf, print, editable){
     no++;
     var comp = (F.comp && F.comp.length) ? F.comp : [null], k = comp.length, j = clientJan(F.code);
     var from = label + 1; if(j) label += F.qty; // JAN の分からないセットはラベルに入らない
-    var head = '<td rowspan="'+k+'" class="fin"><div class="nm1">'+esc(nameOf(F.code, F.name))+'</div><div class="cd">'+esc(F.code)+'</div>'+(print && j ? '<div class="bcs">'+ean13Svg(j, 22)+'</div>' : '')+'</td>'+
+    var dt = T.hasCenter ? clientSetDestText(F) : '';
+    var head = '<td rowspan="'+k+'" class="fin"><div class="nm1">'+esc(nameOf(F.code, F.name))+'</div><div class="cd">'+esc(F.code)+'</div>'+(dt ? '<div class="dst">→ '+esc(dt)+'</div>' : '')+(print && j ? '<div class="bcs">'+ean13Svg(j, 22)+'</div>' : '')+'</td>'+
       '<td rowspan="'+k+'" class="q">'+(editable ? '<input type="number" min="0" step="1" data-set-qty="'+esc(F.code)+'" value="'+F.qty+'" style="width:76px;text-align:right;">'+(F.qty!==F.orig ? '<div class="cd">元 '+formatNum(F.orig)+'</div>' : '') : formatNum(F.qty))+'</td>';
     var tail = '<td rowspan="'+k+'" class="lbl">'+(!j ? 'JANなし' : F.qty ? from+(F.qty>1 ? '〜'+label : '') : '')+'</td>'+(print ? '<td rowspan="'+k+'" class="chk"></td>' : '<td rowspan="'+k+'" class="lbl">'+F.doneSlips+' / '+F.slips+'伝票</td>');
     return comp.map(function(p, i){
@@ -10960,7 +10993,7 @@ function clientSetSheetPrint(cl){
   var css = '@page{size:A4 portrait;margin:8mm;} h1{font-size:20px;letter-spacing:.2em;margin:0 0 2px;} .meta{font-size:11px;margin-bottom:4px;} .memo{font-size:11px;margin-bottom:6px;} h2{font-size:14px;margin:10px 0 4px;border-left:4px solid #000;padding-left:6px;} h2.pb{page-break-before:always;}'+
     'table{width:100%;border-collapse:collapse;font-size:11px;} th{background:#eee;border:1px solid #000;padding:3px;font-size:10.5px;} td{border:1px solid #000;padding:3px 5px;vertical-align:middle;}'+
     'td.no{width:22px;text-align:center;font-weight:700;} td.fin{width:36%;} td.q{width:46px;text-align:right;font-size:18px;font-weight:700;} td.pt{} td.per{width:44px;text-align:right;} td.pq{width:50px;text-align:right;font-size:15px;font-weight:700;} td.lbl{width:54px;text-align:center;font-size:10px;} td.chk{width:26px;}'+
-    'tr.sub td{border-top:1px dashed #98A2B3;} .nm1{font-size:11.5px;font-weight:700;} .nm2{font-size:11px;} .cd{font-size:9.5px;color:#475467;} .bcs svg{height:30px;width:auto;display:block;margin-top:2px;} tbody{page-break-inside:auto;} tr{page-break-inside:avoid;}'+
+    'tr.sub td{border-top:1px dashed #98A2B3;} .nm1{font-size:11.5px;font-weight:700;} .nm2{font-size:11px;} .cd{font-size:9.5px;color:#475467;} .dst{font-size:11px;font-weight:700;margin-top:1px;} .bcs svg{height:30px;width:auto;display:block;margin-top:2px;} tbody{page-break-inside:auto;} tr{page-break-inside:avoid;}'+
     'table.parts td.pq{font-size:14px;}';
   printHtmlDoc('セット作業指示書_'+cl.name+'_'+from, html, css);
 }
@@ -11238,6 +11271,7 @@ function bindClientHub(){
   var sp = document.getElementById('chSetPrint'); if(sp) sp.addEventListener('click', function(){ clientSetSheetPrint(cl); });
   var jp = document.getElementById('chJanPrint'); if(jp) jp.addEventListener('click', function(){ clientJanLabelPrint(cl); });
   var bc = document.getElementById('chSetBomCsv'); if(bc) bc.addEventListener('click', function(){ clientSetBomCsv(cl); });
+  var dp = document.getElementById('chSetDestPrint'); if(dp) dp.addEventListener('click', function(){ clientSetDestPrint(cl); });
   ['chJanDx','chJanDy','chJanStart'].forEach(function(id){ var el = document.getElementById(id); if(el) el.addEventListener('change', function(){ var v = clientJanCfg(); v[{ chJanDx:'dx', chJanDy:'dy', chJanStart:'start' }[id]] = Number(el.value)||0; try{ localStorage.setItem('janLabelCfg', JSON.stringify(v)); }catch(e){} }); });
   var jm = document.getElementById('chJanMark'); if(jm) jm.addEventListener('change', function(){ var v = clientJanCfg(); v.mark = jm.checked; try{ localStorage.setItem('janLabelCfg', JSON.stringify(v)); }catch(e){} });
 }

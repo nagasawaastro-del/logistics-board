@@ -10920,6 +10920,7 @@ function renderClientSetSheet(cl){
       '<div class="ch-row" style="margin-top:8px;"><label class="ch-field"><span>右へずらす(mm)</span><input type="number" step="0.5" id="chJanDx" value="'+esc(String(clientJanCfg().dx))+'" style="width:90px;"></label>'+
       '<label class="ch-field"><span>下へずらす(mm)</span><input type="number" step="0.5" id="chJanDy" value="'+esc(String(clientJanCfg().dy))+'" style="width:90px;"></label>'+
       '<label class="ch-field"><span>使い始める位置(1〜30)</span><input type="number" min="1" max="30" id="chJanStart" value="'+esc(String(clientJanCfg().start))+'" style="width:90px;"></label>'+
+      '<label class="ch-field" style="flex-direction:row;align-items:center;gap:6px;"><input type="checkbox" id="chJanMark"'+(clientJanCfg().mark ? ' checked' : '')+'><span>右上に入数と JAN 下4桁を大きく出す</span></label>'+
       '<span class="ch-note">A4・3列×10段(28455)。ずれの直しはこの端末で覚えます。使い始める位置は、使いかけのシートの何枚目からか(左上から右へ数える)</span></div></details>'+
     '<div class="sub-switch" style="margin:0 0 8px;">'+[['order','作業の順(完成品と部品)'],['slips','伝票ごとの完了日('+S.slips.length+')'],['fin','作るもの('+T.fin.length+')'],['parts','使うもの('+T.parts.length+')']].map(function(x){ return '<button type="button" class="sub-switch-btn'+(view===x[0] ? ' active' : '')+'" data-set-view="'+x[0]+'">'+esc(x[1])+'</button>'; }).join('')+'</div>'+
     (S.otherCount ? '<div class="pool-hint" style="margin:0 0 8px;">この取込のうち <b>'+S.otherCount+'伝票</b> は、ほかの月に完了しているので出していません。そのため、ここでは作る数を直せません(完了日を入れる前の月か、すべて出る月で直してください)。</div>' : '')+
@@ -10963,7 +10964,13 @@ function clientSetSheetPrint(cl){
   printHtmlDoc('セット作業指示書_'+cl.name+'_'+from, html, css);
 }
 /* JAN ラベル(A4・3列×10段 = 28455)。完成品を指示書と同じ順に、数の枚数だけ。見本(デスクトップの JANラベル_28455.pdf)と同じ位置 */
-function clientJanCfg(){ var v = {}; try{ v = JSON.parse(localStorage.getItem('janLabelCfg') || '{}') || {}; }catch(e){} return { dx: Number(v.dx)||0, dy: Number(v.dy)||0, start: Math.min(30, Math.max(1, Math.floor(Number(v.start)||1))) }; }
+function clientJanCfg(){ var v = {}; try{ v = JSON.parse(localStorage.getItem('janLabelCfg') || '{}') || {}; }catch(e){} return { dx: Number(v.dx)||0, dy: Number(v.dy)||0, start: Math.min(30, Math.max(1, Math.floor(Number(v.start)||1))), mark: v.mark !== false }; }
+/* ラベル右上の目印(2026-11-04): 入数(部品1種なら ×入数、2種以上なら 計○)と JAN の下4桁。入数違いのセット・末尾だけ違う JAN の取り違えを防ぐ */
+function clientJanMark(F, jan){
+  var comp = F.comp || [], sum = comp.reduce(function(a, c){ return a + (Number(c.per)||0); }, 0);
+  var big = !comp.length ? '単品' : !Number.isInteger(sum) ? '' : comp.length===1 ? '×'+formatNum(sum) : '計'+formatNum(sum);
+  return { big: big, tail: String(jan).slice(-4) };
+}
 function clientJanLabelSvg(code){
   // ean13Svg と同じ線の並び。下に数字(先頭1桁は左、6桁ずつ左右)。縦横は外側の CSS で mm に合わせる
   var d = String(code||'').replace(/\D/g,'');
@@ -10988,20 +10995,23 @@ function clientJanLabelPrint(cl){
   var T = S.T, from = S.mode ? todayStr() : S.from;
   var nameOf = function(code, n){ if(n) return n; var st = logiStockOf(code); return st ? st.name : ''; };
   var labels = [], noJan = [];
-  T.fin.forEach(function(F){ var j = clientJan(F.code); if(!j){ noJan.push(F.code); return; } for(var i=0; i<F.qty; i++) labels.push({ jan: j, name: nameOf(F.code, F.name) }); });
+  var cfg = clientJanCfg();
+  T.fin.forEach(function(F){ var j = clientJan(F.code); if(!j){ noJan.push(F.code); return; } var mk = cfg.mark ? clientJanMark(F, j) : null; for(var i=0; i<F.qty; i++) labels.push({ jan: j, name: nameOf(F.code, F.name), mk: mk }); });
   if(!labels.length){ appAlert('印刷するラベルがありません(作業日の範囲と、セット指示書の取込を確かめてください)'); return; }
-  var cfg = clientJanCfg(), COLX = [27.3, 84.4, 141.5], TOP = 21.8, PITCH = 25.4, PER = 30;
+  var COLX = [27.3, 84.4, 141.5], TOP = 21.8, PITCH = 25.4, PER = 30;
   var slots = new Array(cfg.start - 1).fill(null).concat(labels), pages = [];
   for(var p=0; p<slots.length; p+=PER) pages.push(slots.slice(p, p+PER));
   var html = pages.map(function(pg){
     return '<div class="pg">'+pg.map(function(l, i){
       if(!l) return '';
       var x = COLX[i % 3] + cfg.dx, y = TOP + Math.floor(i / 3) * PITCH + cfg.dy;
-      return '<div class="lb" style="left:'+x.toFixed(2)+'mm;top:'+y.toFixed(2)+'mm;"><div class="nm"><span>'+esc(l.name)+'</span></div><div class="bc">'+clientJanLabelSvg(l.jan)+'</div></div>';
+      var mk = l.mk ? '<div class="mk">'+(l.mk.big ? '<b>'+esc(l.mk.big)+'</b>' : '')+'<i>'+esc(l.mk.tail)+'</i></div>' : '';
+      return '<div class="lb" style="left:'+x.toFixed(2)+'mm;top:'+y.toFixed(2)+'mm;"><div class="nm'+(mk ? ' nmk' : '')+'"><span>'+esc(l.name)+'</span></div>'+mk+'<div class="bc">'+clientJanLabelSvg(l.jan)+'</div></div>';
     }).join('')+'</div>';
   }).join('');
   var css = '@page{size:A4 portrait;margin:0;} html,body{margin:0;padding:0;} .pg{position:relative;width:210mm;height:297mm;overflow:hidden;page-break-after:always;} .pg:last-child{page-break-after:auto;}'+
-    '.lb{position:absolute;width:38.5mm;height:23.5mm;} .nm{font-size:2.2mm;line-height:1.15;height:8.2mm;overflow:hidden;font-family:"Noto Sans JP","Yu Gothic",sans-serif;word-break:break-all;display:flex;flex-direction:column;justify-content:flex-end;} .nm span{display:block;max-height:7.6mm;overflow:hidden;} .bc{position:absolute;left:1.9mm;top:8.6mm;width:37.7mm;height:14.8mm;} .bc svg{width:100%;height:100%;display:block;}';
+    '.lb{position:absolute;width:38.5mm;height:23.5mm;} .nm{font-size:2.2mm;line-height:1.15;height:8.2mm;overflow:hidden;font-family:"Noto Sans JP","Yu Gothic",sans-serif;word-break:break-all;display:flex;flex-direction:column;justify-content:flex-end;} .nm span{display:block;max-height:7.6mm;overflow:hidden;} .nm.nmk{margin-right:13mm;}'+
+    '.mk{position:absolute;right:0;top:0;width:12.4mm;height:8.2mm;box-sizing:border-box;border:0.3mm solid #000;border-radius:1mm;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;font-family:Arial,Helvetica,sans-serif;} .mk b{font-size:3.6mm;white-space:nowrap;} .mk i{font-style:normal;font-weight:700;font-size:2.5mm;letter-spacing:0.2mm;margin-top:0.4mm;} .bc{position:absolute;left:1.9mm;top:8.6mm;width:37.7mm;height:14.8mm;} .bc svg{width:100%;height:100%;display:block;}';
   if(noJan.length) showToast('JAN の分からないセットが '+noJan.length+'品番あります(ラベルに入れていません)');
   printHtmlDoc('JANラベル_28455_'+cl.name+'_'+from, html, css);
 }
@@ -11203,6 +11213,7 @@ function bindClientHub(){
   var sp = document.getElementById('chSetPrint'); if(sp) sp.addEventListener('click', function(){ clientSetSheetPrint(cl); });
   var jp = document.getElementById('chJanPrint'); if(jp) jp.addEventListener('click', function(){ clientJanLabelPrint(cl); });
   ['chJanDx','chJanDy','chJanStart'].forEach(function(id){ var el = document.getElementById(id); if(el) el.addEventListener('change', function(){ var v = clientJanCfg(); v[{ chJanDx:'dx', chJanDy:'dy', chJanStart:'start' }[id]] = Number(el.value)||0; try{ localStorage.setItem('janLabelCfg', JSON.stringify(v)); }catch(e){} }); });
+  var jm = document.getElementById('chJanMark'); if(jm) jm.addEventListener('change', function(){ var v = clientJanCfg(); v.mark = jm.checked; try{ localStorage.setItem('janLabelCfg', JSON.stringify(v)); }catch(e){} });
 }
 /* 管理 →「セット構成」: 登録済みの SET の一覧(探す・直す・消す)と、新しい SET 品番の登録(2026-10-22) */
 function renderSetBomAdmin(){

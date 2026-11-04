@@ -10914,6 +10914,7 @@ function renderClientSetSheet(cl){
     '<div class="ch-row" style="margin-bottom:6px;">'+
       '<button type="button" class="add-btn" id="chSetPrint">🖨 セット指示書を印刷・PDF</button>'+
       '<button type="button" class="add-btn" id="chJanPrint">🏷️ JANラベル(28455)を印刷・PDF</button>'+
+      '<button type="button" class="add-btn" id="chSetBomCsv" title="ロジザードZEROの「セット構成マスタ」の取込用(セット構成区分 03 = セットで扱う)">📤 ロジザードのセット構成マスタCSV</button>'+
       '<span class="ch-note">作るもの <b>'+T.fin.length+'品番・'+formatNum(totalSets)+'個</b>(ラベル '+formatNum(totalSets)+'枚)・ 使うもの '+T.parts.length+'品番</span>'+
     '</div>'+
     '<details style="margin:0 0 10px;"><summary style="cursor:pointer;font-size:13px;">JANラベルの印刷の設定(ずれの直し・使い始める位置)</summary>'+
@@ -11014,6 +11015,30 @@ function clientJanLabelPrint(cl){
     '.mk{position:absolute;right:0;top:0;width:12.4mm;height:8.2mm;box-sizing:border-box;border:0.3mm solid #000;border-radius:1mm;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;font-family:Arial,Helvetica,sans-serif;} .mk b{font-size:3.6mm;white-space:nowrap;} .mk i{font-style:normal;font-weight:700;font-size:2.5mm;letter-spacing:0.2mm;margin-top:0.4mm;} .bc{position:absolute;left:1.9mm;top:8.6mm;width:37.7mm;height:14.8mm;} .bc svg{width:100%;height:100%;display:block;}';
   if(noJan.length) showToast('JAN の分からないセットが '+noJan.length+'品番あります(ラベルに入れていません)');
   printHtmlDoc('JANラベル_28455_'+cl.name+'_'+from, html, css);
+}
+/* ロジザードZERO のセット構成マスタ(インポート 05・ファイルID 2090)の CSV(2026-11-04)。いま選んでいる指示書の完成品ごとに、部品1種 = 1行。
+   セット構成区分は 03(セットで扱う: 完成品の在庫を持ち、セット在庫作成で部品を引き落とす)。上書き更新でバーコードが消えないよう、完成品の JAN も入れる。
+   単品(部品の無い完成品)と、組数が整数にならないもの(1個をばらして何個もできる)は出さない。文字は Shift_JIS・CR+LF・見出しあり */
+function clientSetBomCsv(cl){
+  var S = clientSetSel(cl); if(!S) return;
+  var T = S.T, from = S.mode ? todayStr() : S.from, rows = [], skip = [];
+  var nm = function(s){ return String(s||'').replace(/&/g,'＆').replace(/</g,'＜').replace(/>/g,'＞').slice(0, 200); };
+  T.fin.forEach(function(F){
+    var comp = F.comp || [];
+    if(!comp.length) return;
+    if(comp.some(function(c){ return !Number.isInteger(Number(c.per)) || Number(c.per) < 1; })){ skip.push(F.code); return; }
+    var name = nm(F.name || (logiStockOf(F.code) || {}).name || F.code), jan = clientJan(F.code) || '';
+    comp.forEach(function(c){ rows.push([F.code, c.code, '', '', '', '', name, Number(c.per), '03', '0', jan]); });
+  });
+  if(!rows.length){ appAlert('出せるセットがありません(部品の無い単品か、組数が整数にならないものだけです)'); return; }
+  var head = ['セット構成ID','商品ID','在庫キー1','在庫キー2','在庫キー3','在庫キー4','セット構成名称','組数','セット構成区分','有効無効フラグ','バーコード'];
+  var text = [head].concat(rows).map(function(r){ return r.map(csvEscape).join(','); }).join('\r\n')+'\r\n';
+  var sj = cxInSjis(text), blob = new Blob([sj.bytes], { type: 'text/csv' }), url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = 'ロジザード_セット構成マスタ_'+cl.name+'_'+from+'.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ if(a.parentNode) a.parentNode.removeChild(a); URL.revokeObjectURL(url); }, 200);
+  var sets = {}; rows.forEach(function(r){ sets[r[0]] = 1; });
+  showToast('セット構成マスタ: '+Object.keys(sets).length+'品番・'+rows.length+'行'+(skip.length ? '(組数が整数にならない '+skip.length+'品番は出していません)' : '')+(sj.bad.length ? '。Shift_JIS にできない文字 '+sj.bad.length+'字は ? にしました' : ''));
 }
 function bindClientHub(){
   var c = clientDataState(), cl = clientCur();
@@ -11212,6 +11237,7 @@ function bindClientHub(){
   if(stt) stt.addEventListener('change', function(){ c.setTo = stt.value; render(); });
   var sp = document.getElementById('chSetPrint'); if(sp) sp.addEventListener('click', function(){ clientSetSheetPrint(cl); });
   var jp = document.getElementById('chJanPrint'); if(jp) jp.addEventListener('click', function(){ clientJanLabelPrint(cl); });
+  var bc = document.getElementById('chSetBomCsv'); if(bc) bc.addEventListener('click', function(){ clientSetBomCsv(cl); });
   ['chJanDx','chJanDy','chJanStart'].forEach(function(id){ var el = document.getElementById(id); if(el) el.addEventListener('change', function(){ var v = clientJanCfg(); v[{ chJanDx:'dx', chJanDy:'dy', chJanStart:'start' }[id]] = Number(el.value)||0; try{ localStorage.setItem('janLabelCfg', JSON.stringify(v)); }catch(e){} }); });
   var jm = document.getElementById('chJanMark'); if(jm) jm.addEventListener('change', function(){ var v = clientJanCfg(); v.mark = jm.checked; try{ localStorage.setItem('janLabelCfg', JSON.stringify(v)); }catch(e){} });
 }

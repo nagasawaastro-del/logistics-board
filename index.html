@@ -6393,9 +6393,19 @@ function resolveTaskIdForDate(taskId, toDateStr){
   if(src.workDate===toDateStr && !src.archived) return { taskId: src.id, msg:null };
   return { taskId:null, msg:'「'+src.name+'」は'+(src.workDate||'日付未設定')+'だけの単発作業のため、'+toDateStr+'へは移動できません。移動先の日付に作業を作成してから、取込の紐付けを変更してください' };
 }
+/* 入力された日付を YYYY-MM-DD に。2026/11/6・11/6・11-6 も受け付ける(年が無ければ今年)。読めなければ元のまま */
+function normalizeDateInput(v){
+  var t = String(v||'').trim().replace(/[０-９／－]/g, function(c){ return String.fromCharCode(c.charCodeAt(0)-0xFEE0); });
+  var m = t.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/) || t.match(/^()(\d{1,2})[\/\-.](\d{1,2})$/);
+  if(!m) return t;
+  return (m[1] || String(new Date().getFullYear()))+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0');
+}
 async function moveWvImportDate(fromDateStr, toDateStr, importId, extra){
+  toDateStr = normalizeDateInput(toDateStr);
   if(fromDateStr===toDateStr) return { ok:false, msg:'同じ日付です' };
   if(!/^\d{4}-\d{2}-\d{2}$/.test(String(toDateStr||''))) return { ok:false, msg:'日付の形式が正しくありません(例: 2026-09-10)' };
+  // 明日などの繰り返し作業がまだ作られていないと「作業がまだありません」で止まっていた(2026-11-05)。先に作っておく
+  await ensureTemplateTasksForDate(toDateStr);
   var fromData = await loadWorkVolume(fromDateStr) || emptyWorkVolume(); // 付け替え先を確かめるため(保存はサーバーの今の内容に足す)
   var imp = (fromData.imports||[]).find(function(i){ return i.id===importId; });
   if(!imp) return { ok:false, msg:'取込が見つかりません' };
@@ -9380,10 +9390,12 @@ async function tpickPrintSaved(taskId, bids, src, skipBomCheck){
 }
 /* 取込ごとに、トータルピッキングを「使わない」にする/戻す(VC で使わないときなど。2026-10-21)。
    使わない取込の分は、タブレット・今日の状況の番号・取込のあとの印刷に出さない */
-async function tpickSetOff(dateStr, importId, off){
+async function tpickSetOff(dateStr, importId, off, field){
+  field = field || 'off'; // 'offPart' = パートさん用だけ使わない(2026-11-05)
   var r = await tpickKvUpdate('tpick:'+dateStr, function(cur){
     if(!cur.imports || !cur.imports[importId]) return false;
-    cur.imports[importId] = Object.assign({}, cur.imports[importId], { off: !!off });
+    var patch = {}; patch[field] = !!off;
+    cur.imports[importId] = Object.assign({}, cur.imports[importId], patch);
     return cur;
   });
   if(r.ok){
@@ -9401,8 +9413,10 @@ function tpickAfterImportGroups(m){
   return tids.map(function(tid){
     var bs = tpickBatchesForTask(m.tp, m.wv, tid).filter(function(b){ return mine[b.id.split(':')[0]]; });
     var ids = (m.importIds||[]).filter(function(id){ var e = m.tp.imports[id]; return e && e.taskId===tid && !e.off; });
-    return { taskId: tid, importIds: ids, office: bs.filter(function(b){ return b.who==='office'; }), liftA: bs.filter(function(b){ return b.who==='liftA'; }), lift: bs.filter(function(b){ return b.who==='lift'; }), part: bs.filter(function(b){ return b.who==='part'; }) };
-  }).filter(function(g){ return g.office.length || g.liftA.length || g.lift.length || g.part.length; });
+    var hasPart = function(id){ return (m.tp.imports[id].items||[]).some(function(it){ return tpickWhoOf(it)==='part'; }); };
+    var partOff = ids.filter(function(id){ return m.tp.imports[id].offPart && hasPart(id); });
+    return { taskId: tid, importIds: ids, partOn: ids.filter(function(id){ return !m.tp.imports[id].offPart && hasPart(id); }), partOff: partOff, office: bs.filter(function(b){ return b.who==='office'; }), liftA: bs.filter(function(b){ return b.who==='liftA'; }), lift: bs.filter(function(b){ return b.who==='lift'; }), part: bs.filter(function(b){ return b.who==='part'; }) };
+  }).filter(function(g){ return g.office.length || g.liftA.length || g.lift.length || g.part.length || g.partOff.length; });
 }
 /* SET の部品の不足と未登録(取込のすぐあとの画面で知らせる。2026-10-22)。items: 事務所用の行 */
 function setBomWarnHtml(items){
@@ -9428,11 +9442,13 @@ function renderTpickAfterImportModal(m){
   var body = groups.map(function(g){
     return '<div class="panel" style="margin:0 0 10px;padding:12px 14px;"><div class="panel-title" style="font-size:15px;margin:0 0 8px;">'+esc(taskById(g.taskId).name)+'</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+btn(g.taskId, g.liftA, 'リフトマン用(A)', true)+btn(g.taskId, g.lift, 'リフトマン用(A以外)', true)+btn(g.taskId, g.office, '事務所用 SET・ZZZ', true)+btn(g.taskId, g.part, 'パートさん用', false)+
+      (g.partOn.length ? '<button type="button" class="ll-btn" data-tpaf-part="'+esc(g.partOn.join(','))+'|1" title="パートさん用の番号をタブレットに出しません(リフトマン用・事務所用はそのまま)">パートさん用は使わない</button>' : '')+
+      (g.partOff.length ? '<span class="muted" style="font-size:12px;align-self:center;">パートさん用: 使わない</span><button type="button" class="ll-btn" data-tpaf-part="'+esc(g.partOff.join(','))+'|0">使うに戻す</button>' : '')+
       '<button type="button" class="ll-btn" style="margin-left:auto;color:var(--slate-500);" data-tpaf-off="'+esc(g.importIds.join(','))+'" title="この作業ではトータルピッキングを使わない(タブレットにも出しません。今日の状況で戻せます)">この取込は使わない</button></div></div>';
   }).join('') || '<div class="empty-note">この取込には、トータルピッキングの行がありません</div>';
   return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card" style="max-width:640px;">'+
     '<div class="modal-task-name">✅ 取り込みました ・ トータルピッキングを印刷</div>'+
-    '<div class="pool-hint" style="margin:4px 0 12px;">'+esc(m.fileName||'')+' の分です。番号は作業記録(タブレット)・今日の状況と同じです。パートさん用はふだんタブレットで取ります。あとからでも、管理 → 今日の状況の「🧾 トータルピッキング」で印刷できます。</div>'+
+    '<div class="pool-hint" style="margin:4px 0 12px;">'+esc(m.fileName||'')+' の分です。番号は作業記録(タブレット)・今日の状況と同じです。パートさん用はふだんタブレットで取ります。パートさんがトータルピッキングを使わないときは「パートさん用は使わない」(タブレットに番号を出しません)。あとからでも、管理 → 今日の状況の「🧾 トータルピッキング」で印刷できます。</div>'+
     setBomWarnHtml(offItems)+
     body+
     '<div class="modal-actions" style="margin-top:12px;"><button type="button" class="modal-cancel" id="tpafClose">閉じる</button></div>'+
@@ -9454,6 +9470,19 @@ function bindTpickAfterImportModal(m){
       showToast('この取込はトータルピッキングを使わないにしました(今日の状況で戻せます)');
       state.modal = Object.assign({}, m, { tp: last.value });
       if(!tpickAfterImportGroups(state.modal).length) state.modal = null;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-tpaf-part]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var p = el.getAttribute('data-tpaf-part').split('|'), ids = p[0].split(',').filter(Boolean), off = p[1]==='1';
+      el.disabled = true;
+      var last = null;
+      for(var i=0; i<ids.length; i++){ last = await tpickSetOff(m.date, ids[i], off, 'offPart'); if(!last.ok) break; }
+      if(!last || !last.ok){ el.disabled = false; showToast('⚠️ 保存できませんでした。もう一度押してください'); return; }
+      showToast(off ? 'パートさん用のトータルピッキングを使わないにしました(タブレットに出しません)' : 'パートさん用のトータルピッキングを使うに戻しました');
+      state.tpkHist = null;
+      state.modal = Object.assign({}, m, { tp: last.value });
       render();
     });
   });
@@ -11579,6 +11608,7 @@ function tpickBatchesForTask(tp, wv, taskId, withOff){
   ids.forEach(function(id){
     var imp = tp.imports[id];
     ['part','liftA','lift','office'].forEach(function(who){
+      if(who==='part' && imp.offPart && !withOff) return; // パートさん用を使わない取込(2026-11-05)
       var items = (imp.items||[]).filter(function(it){ return tpickWhoOf(it)===who; });
       var size = who==='office' ? Math.max(items.length, 1) : TPICK_BATCH_ROWS; // 事務所の分は取込ごとに1枚
       for(var i=0; i<items.length; i+=size){
@@ -18498,6 +18528,18 @@ function bindCsvImportPanel(){
       render();
     });
   });
+  document.querySelectorAll('[data-wv-tp-part]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var p = el.getAttribute('data-wv-tp-part').split('|'), date = state.wvTargetDate || todayStr();
+      el.disabled = true;
+      var r = await tpickSetOff(date, p[0], p[1]==='1', 'offPart');
+      el.disabled = false;
+      if(!r.ok){ showToast('⚠️ 保存できませんでした。もう一度押してください'); return; }
+      state.tpkHist = { date: date, at: Date.now(), tp: r.value };
+      showToast(p[1]==='1' ? 'この取込のパートさん用トータルピッキングを使わないにしました' : 'この取込のパートさん用トータルピッキングを使うに戻しました');
+      render();
+    });
+  });
   document.querySelectorAll('[data-wv-tp-off]').forEach(function(el){
     el.addEventListener('click', async function(){
       var p = el.getAttribute('data-wv-tp-off').split('|'), date = state.wvTargetDate || todayStr();
@@ -18516,7 +18558,7 @@ function bindCsvImportPanel(){
       var viewDate = state.wvTargetDate || todayStr();
       var newDate = prompt('終わらなかった分を続ける日付(繰越先)を入力してください。トータルピッキングの番号に枝番が付きます(例: パート3 → パート3-1)', nextWorkDateStr(viewDate));
       if(!newDate) return;
-      newDate = newDate.trim();
+      newDate = normalizeDateInput(newDate);
       el.disabled = true;
       var result = await carryWvImport(viewDate, newDate, importId);
       el.disabled = false;
@@ -18530,8 +18572,9 @@ function bindCsvImportPanel(){
     el.addEventListener('click', async function(){
       var importId = el.getAttribute('data-wv-import-move');
       var viewDate = state.wvTargetDate || todayStr();
-      var newDate = prompt('移動先の日付を入力してください(例: 2026-09-10)', viewDate);
+      var newDate = prompt('移動先の日付を入力してください(例: 2026-09-10)', nextWorkDateStr(viewDate));
       if(!newDate) return;
+      newDate = normalizeDateInput(newDate);
       var result = await moveWvImportDate(viewDate, newDate, importId);
       if(!result.ok){ showToast(result.msg); return; }
       await appendAuditLog({ action:'作業量取込の日付変更', target: taskById(result.imp.taskId).name+' / '+result.imp.fileName, before: viewDate, after: newDate });
@@ -19520,7 +19563,10 @@ function renderCsvImportPanel(){
     var e = tpHist && tpHist.imports && tpHist.imports[imp.id];
     if(!e) return '';
     return e.off ? '<button type="button" class="vc-manage-toggle-btn" data-wv-tp-off="'+esc(imp.id)+'|0" title="トータルピッキングを使わないにしています。押すと使うに戻します" style="opacity:.7;">トータル: 使わない</button> '
-      : '<button type="button" class="vc-manage-toggle-btn" data-wv-tp-off="'+esc(imp.id)+'|1" title="押すと、この取込のトータルピッキングを使わないにします(タブレット・今日の状況に出しません)">トータル: 使う</button> ';
+      : '<button type="button" class="vc-manage-toggle-btn" data-wv-tp-off="'+esc(imp.id)+'|1" title="押すと、この取込のトータルピッキングを使わないにします(タブレット・今日の状況に出しません)">トータル: 使う</button> '+
+        ((e.items||[]).some(function(it){ return tpickWhoOf(it)==='part'; }) ? (e.offPart
+          ? '<button type="button" class="vc-manage-toggle-btn" data-wv-tp-part="'+esc(imp.id)+'|0" title="パートさん用を使わないにしています。押すと使うに戻します" style="opacity:.7;">パート: 使わない</button> '
+          : '<button type="button" class="vc-manage-toggle-btn" data-wv-tp-part="'+esc(imp.id)+'|1" title="押すと、パートさん用の番号をタブレットに出しません(リフトマン用・事務所用はそのまま)">パート: 使う</button> ') : '');
   };
   var wvImportRows = wvActiveImports(wvViewData).slice().sort(function(a,b){
     return new Date(b.importedAt) - new Date(a.importedAt);
@@ -24264,10 +24310,12 @@ function bindAutoMapPreviewModal(m){
   if(confirmBtn){
     confirmBtn.addEventListener('click', async function(){
       var d = state.autoMapPreviewData;
+      if(!d || d.confirming) return; // 保存中の二度押しで同じCSVが2回入っていた(2026-11-05)
       if(!d.taskPlans.length){
         showToast('自動紐付けできた作業枠がないため、確定できません');
         return;
       }
+      d.confirming = true; confirmBtn.disabled = true; confirmBtn.textContent = '保存しています…';
       var movedN = Object.keys(d.snOverrides || {}).length;
       if(movedN) await appendAuditLog({ action:'CSV取込で作業を切り替えた', target: d.fileName, before:null, after: movedN+'件('+Object.keys(d.snOverrides).slice(0,10).map(function(sn){ return sn+'→'+taskById(d.snOverrides[sn]).name; }).join('・')+(movedN>10 ? ' ほか' : '')+')' });
       var newImports = []; // サーバーの今の内容に足して保存する(この端末の古い内容で上書きしない)
@@ -24293,7 +24341,18 @@ function bindAutoMapPreviewModal(m){
           deletedAt: null, deletedBy: null, deleteReason: null
         });
       }
-      var wvRes = await wvUpdate(d.targetDate, function(data){ data.imports = data.imports.concat(newImports); });
+      var already = false;
+      var wvRes = await wvUpdate(d.targetDate, function(data){
+        // ほかの PC・二度押しで、同じファイルがもう入っていたら足さない
+        already = wvActiveImports(data).some(function(x){ return x.fileFingerprint===d.fingerprint && x.fileSize===d.fileSize && x.fileName===d.fileName; });
+        if(already) return false; // 書かない
+        data.imports = data.imports.concat(newImports);
+      });
+      if(already){
+        state.autoMapPreviewData = null; state.modal = null;
+        showToast('このファイルはもう取り込まれていました(二重には入れていません)');
+        render(); return;
+      }
       var saveOk = wvRes.ok;
       state.gateDataStatus = null; // トップページの「データの更新状況」を読み直す
       var tpSaved = null;

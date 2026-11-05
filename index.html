@@ -11074,6 +11074,7 @@ function clientSetBomCsv(cl){
   showToast('セット構成マスタ: '+Object.keys(sets).length+'品番・'+rows.length+'行'+(skip.length ? '(組数が整数にならない '+skip.length+'品番は出していません)' : '')+(sj.bad.length ? '。Shift_JIS にできない文字 '+sj.bad.length+'字は ? にしました' : ''));
 }
 function bindClientHub(){
+  if(!hasManagerSession()){ bindManagerLoginForm(); return; } // ログイン画面(これが無く、ログインを押しても何も起きなかった。2026-11-05)
   var c = clientDataState(), cl = clientCur();
   document.querySelectorAll('[data-client-tab]').forEach(function(el){ el.addEventListener('click', function(){ state.clientTab = el.getAttribute('data-client-tab'); render(); }); });
   var tab = state.clientTab || 'dash';

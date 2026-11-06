@@ -11010,6 +11010,11 @@ function clientSetPrintImp(cl, kind, impId){
 function clientSetDestText(F){
   return Object.keys(F.dest || {}).filter(function(k){ return F.dest[k]; }).sort(function(a, b){ return !a ? 1 : !b ? -1 : a < b ? -1 : a > b ? 1 : 0; }).map(function(k){ return (k || 'センターなし')+'×'+formatNum(F.dest[k]); }).join('・');
 }
+/* 指示書の「割り振り」の列: センターごとに1行(センター・個数・チェックの□) */
+function clientSetDestLines(F){
+  return Object.keys(F.dest || {}).filter(function(k){ return F.dest[k]; }).sort(function(a, b){ return !a ? 1 : !b ? -1 : a < b ? -1 : a > b ? 1 : 0; })
+    .map(function(k){ return '<div class="dl"><span class="dc">'+esc(k || 'センターなし')+'</span><b>'+formatNum(F.dest[k])+'</b><span class="bx"></span></div>'; }).join('');
+}
 /* 出荷先センターの札(2026-11-04)。センターごとに1ページ: センターを大きく、入れる完成品と数。組んだらその場でセンターの箱へ入れる(種まき) */
 function clientSetDestPrint(cl){
   var S = clientSetSel(cl); if(!S) return;
@@ -11034,9 +11039,10 @@ function clientSetOrderTable(T, nameOf, print, editable){
     no++;
     var comp = (F.comp && F.comp.length) ? F.comp : [null], k = comp.length, j = clientJan(F.code);
     var from = label + 1; if(j) label += F.qty; // JAN の分からないセットはラベルに入らない
-    var dt = T.hasCenter ? clientSetDestText(F) : '';
+    var dt = T.hasCenter && !print ? clientSetDestText(F) : ''; // 印刷は「割り振り」の列に出す(2026-11-06)
     var head = '<td rowspan="'+k+'" class="fin"><div class="nm1">'+esc(nameOf(F.code, F.name))+'</div><div class="cd">'+esc(F.code)+'</div>'+(dt ? '<div class="dst">→ '+esc(dt)+'</div>' : '')+(print && j ? '<div class="bcs">'+ean13Svg(j, 22)+'</div>' : '')+'</td>'+
-      '<td rowspan="'+k+'" class="q">'+(editable ? '<input type="number" min="0" step="1" data-set-qty="'+esc(F.code)+'" value="'+F.qty+'" style="width:76px;text-align:right;">'+(F.qty!==F.orig ? '<div class="cd">元 '+formatNum(F.orig)+'</div>' : '') : formatNum(F.qty))+'</td>';
+      '<td rowspan="'+k+'" class="q">'+(editable ? '<input type="number" min="0" step="1" data-set-qty="'+esc(F.code)+'" value="'+F.qty+'" style="width:76px;text-align:right;">'+(F.qty!==F.orig ? '<div class="cd">元 '+formatNum(F.orig)+'</div>' : '') : formatNum(F.qty))+'</td>'+
+      (print && T.hasCenter ? '<td rowspan="'+k+'" class="dsts">'+clientSetDestLines(F)+'</td>' : '');
     var tail = '<td rowspan="'+k+'" class="lbl">'+(!j ? 'JANなし' : F.qty ? from+(F.qty>1 ? '〜'+label : '') : '')+'</td>'+(print ? '<td rowspan="'+k+'" class="chk"></td>' : '<td rowspan="'+k+'" class="lbl">'+F.doneSlips+' / '+F.slips+'伝票</td>');
     return comp.map(function(p, i){
       var part = p ? '<td class="pt"><div class="nm2">'+esc(nameOf(p.code, p.name))+'</div><div class="cd">'+esc(p.code)+'</div></td><td class="per">×'+formatNum(p.per)+'</td><td class="pq">'+formatNum(p.qty)+'</td>'
@@ -11044,7 +11050,8 @@ function clientSetOrderTable(T, nameOf, print, editable){
       return '<tr class="'+(i===0 ? 'top' : 'sub')+'">'+(i===0 ? '<td rowspan="'+k+'" class="no">'+no+'</td>' : '')+part+(i===0 ? head+tail : '')+'</tr>';
     }).join('');
   }).join('');
-  return '<table class="'+(print ? '' : 'report-table')+' setorder"><thead><tr><th>No</th><th>使う部品</th><th>1セット</th><th>使う数</th><th>作る完成品</th><th>作る数</th><th>シール</th><th>'+(print ? '済' : '完了')+'</th></tr></thead><tbody>'+(body || '<tr><td colspan="8">ありません</td></tr>')+'</tbody></table>';
+  var dc = print && T.hasCenter;
+  return '<table class="'+(print ? '' : 'report-table')+' setorder"><thead><tr><th>No</th><th>使う部品</th><th>1セット</th><th>使う数</th><th>作る完成品</th><th>作る数</th>'+(dc ? '<th>割り振り(センター・個数)</th>' : '')+'<th>シール</th><th>'+(print ? '済' : '完了')+'</th></tr></thead><tbody>'+(body || '<tr><td colspan="'+(dc ? 9 : 8)+'">ありません</td></tr>')+'</tbody></table>';
 }
 function clientSetSheetPrint(cl){
   var S = clientSetSel(cl); if(!S) return;
@@ -11053,14 +11060,17 @@ function clientSetSheetPrint(cl){
   var totalSets = T.fin.reduce(function(a, x){ return a + x.qty; }, 0);
   var partRows = T.parts.map(function(x){ return '<tr><td><div class="nm2">'+esc(nameOf(x.code, x.name))+'</div><div class="cd">'+esc(x.code)+'</div></td><td class="pq">'+formatNum(x.qty)+'</td><td class="chk"></td></tr>'; }).join('');
   var html = '<h1>セット作業指示書</h1><div class="meta">'+esc(cl.name)+' ・ '+esc(S.label)+' ・ 作るセット '+formatNum(totalSets)+'個('+T.fin.length+'品番) ・ 作成 '+esc(fmtDateTime(new Date().toISOString()))+'</div>'+
-    '<div class="memo">上から順に作ってください。「シール」は JAN ラベルの何枚目か(ラベルも同じ順に並んでいます)。</div>'+
+    '<div class="memo">上から順に作ってください。「シール」は JAN ラベルの何枚目か(ラベルも同じ順に並んでいます)。'+(T.hasCenter ? '組んだら「割り振り」のセンターの箱に、書いてある個数ずつ入れてください。' : '')+'</div>'+
     clientSetOrderTable(T, nameOf, true)+
+    (T.hasCenter ? '<h2>出荷先センターごとの割り振り(合計)</h2><table class="dtab"><thead><tr><th>センター</th><th>個数</th><th>入れる完成品と個数</th></tr></thead><tbody>'+
+      T.dests.map(function(D){ return '<tr><td class="ce">'+esc(D.center || 'センターなし')+'</td><td class="pq">'+formatNum(D.qty)+'</td><td>'+D.items.map(function(it){ return '<span class="dn">No'+(T.fin.indexOf(it.F)+1)+'</span> '+esc(nameOf(it.code, it.name))+' <b>×'+formatNum(it.qty)+'</b>'; }).join('<br>')+'</td></tr>'; }).join('')+'</tbody></table>' : '')+
     '<h2 class="pb">使う部品の合計(集めるとき用)</h2><table class="parts"><thead><tr><th>部品</th><th>合計</th><th>済</th></tr></thead><tbody>'+partRows+'</tbody></table>';
   var css = '@page{size:A4 portrait;margin:8mm;} h1{font-size:20px;letter-spacing:.2em;margin:0 0 2px;} .meta{font-size:11px;margin-bottom:4px;} .memo{font-size:11px;margin-bottom:6px;} h2{font-size:14px;margin:10px 0 4px;border-left:4px solid #000;padding-left:6px;} h2.pb{page-break-before:always;}'+
     'table{width:100%;border-collapse:collapse;font-size:11px;} th{background:#eee;border:1px solid #000;padding:3px;font-size:10.5px;} td{border:1px solid #000;padding:3px 5px;vertical-align:middle;}'+
     'td.no{width:22px;text-align:center;font-weight:700;} td.fin{width:36%;} td.q{width:46px;text-align:right;font-size:18px;font-weight:700;} td.pt{} td.per{width:44px;text-align:right;} td.pq{width:50px;text-align:right;font-size:15px;font-weight:700;} td.lbl{width:54px;text-align:center;font-size:10px;} td.chk{width:26px;}'+
     'tr.sub td{border-top:1px dashed #98A2B3;} .nm1{font-size:11.5px;font-weight:700;} .nm2{font-size:11px;} .cd{font-size:9.5px;color:#475467;} .dst{font-size:11px;font-weight:700;margin-top:1px;} .bcs svg{height:30px;width:auto;display:block;margin-top:2px;} tbody{page-break-inside:auto;} tr{page-break-inside:avoid;}'+
-    'table.parts td.pq{font-size:14px;}';
+    'table.parts td.pq{font-size:14px;} td.dsts{width:120px;padding:2px 4px;} .dl{display:flex;align-items:center;gap:4px;font-family:Arial,Helvetica,sans-serif;line-height:1.35;} .dl .dc{flex:1;font-size:12px;font-weight:700;} .dl b{font-size:14px;min-width:22px;text-align:right;} .dl .bx{width:9px;height:9px;border:1px solid #000;display:inline-block;}'+
+    'table.dtab td.ce{width:110px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:700;} table.dtab td.pq{width:50px;} .dn{display:inline-block;min-width:30px;font-weight:700;border:1px solid #000;border-radius:3px;text-align:center;font-size:10px;padding:0 2px;}';
   printHtmlDoc('セット作業指示書_'+cl.name+'_'+from+clientSetFileTag(S), html, css);
 }
 /* JAN ラベル(A4・3列×10段 = 28455)。完成品を指示書と同じ順に、数の枚数だけ。見本(デスクトップの JANラベル_28455.pdf)と同じ位置 */

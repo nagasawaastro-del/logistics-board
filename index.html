@@ -10945,38 +10945,45 @@ function renderClientSetSheet(cl){
   var destView = '<div class="pool-hint" style="margin:0 0 8px;">組んだ完成品は、その場で出荷先センターごとの箱に入れてください(「📦 出荷先センターの札」を箱に付けます)。梱包のときに探し直さずに済みます。</div>'+
     '<div style="overflow:auto;max-height:520px;"><table class="report-table" style="font-size:13px;"><thead><tr><th>出荷先センター</th><th class="num">個数</th><th>入れる完成品</th></tr></thead><tbody>'+
     (T.dests || []).map(function(D){ return '<tr><td style="font-size:18px;"><b>'+esc(D.center || 'センターなし')+'</b></td><td class="num"><b>'+formatNum(D.qty)+'</b></td><td>'+D.items.map(function(it){ return esc(nameOf(it.code, it.name))+' <b>×'+formatNum(it.qty)+'</b>'; }).join('<br>')+'</td></tr>'; }).join('')+'</tbody></table></div>';
-  // 取込ごとに用意(2026-11-06): 何ファイルかまとめて取り込んだときに、取込(ファイル)の区切りで指示書・JANラベル・センターの札を出す
-  var perImp = S.imps.length > 1 ? clientSetPerImp(cl) : [];
-  var perImpHtml = !perImp.length ? '' : clientFoldOpen('setPerImp', '取込ごとに指示書・ラベルを用意('+perImp.length+'件)')+
-    '<div class="pool-hint" style="margin:6px 0;">取り込んだファイルの区切りで、それぞれの指示書・JANラベル・センターの札を出します'+(S.df ? '(「'+(S.df==='done' ? '完了済みだけ' : '未完了だけ')+'」の分)' : '')+'。</div>'+
-    '<div style="overflow:auto;"><table class="report-table" style="font-size:13px;"><thead><tr><th>取込</th><th>ファイル</th><th class="num">伝票</th><th class="num">作る数</th><th>完了</th><th></th></tr></thead><tbody>'+
-    perImp.map(function(x){ return '<tr'+(x.id===S.mode ? ' style="background:var(--slate-50,#f8fafc);"' : '')+'><td>'+esc(fmtDateTime(x.at))+'</td><td>'+esc(x.file)+(x.id===S.mode ? ' <span class="sk-minor">(上で表示中)</span>' : '')+'</td><td class="num">'+formatNum(x.slips)+'</td><td class="num"><b>'+formatNum(x.qty)+'</b></td><td>'+x.done+' / '+x.slips+'</td>'+
-      '<td style="white-space:nowrap;">'+(x.qty ? '<button type="button" class="ll-btn" data-setimp-print="sheet|'+esc(x.id)+'">🖨 指示書</button> <button type="button" class="ll-btn" data-setimp-print="jan|'+esc(x.id)+'">🏷️ ラベル '+formatNum(x.labels)+'枚</button>'+(x.hasCenter ? ' <button type="button" class="ll-btn" data-setimp-print="dest|'+esc(x.id)+'">📦 札</button>' : '') : '<span class="sk-minor">作るものなし</span>')+'</td></tr>'; }).join('')+
-    '</tbody></table></div></details>';
-  var impOpts = S.imps.map(function(i){ return '<option value="'+esc(i.id)+'"'+(S.mode===i.id ? ' selected' : '')+'>'+esc(fmtDateTime(i.at)+' '+i.file+'('+i.count+'行)')+'</option>'; }).join('')+'<option value=""'+(S.mode ? '' : ' selected')+'>作業日の範囲で選ぶ</option>';
+  // ① 取り込んだファイルを選ぶ → ② そのファイルの指示書・ラベル・完了(2026-11-06 に画面を整理。前は選ぶ所と出す所が何か所もあり、ややこしかった)
+  var perImp = clientSetPerImp(cl);
+  var stPill = function(x){ var t = !x.allSlips ? ['—','#667085'] : !x.undone ? ['完了','#067647'] : x.undone===x.allSlips ? ['未完了','#B54708'] : ['途中','#175CD3']; return '<span style="display:inline-block;padding:1px 8px;border-radius:10px;border:1px solid '+t[1]+';color:'+t[1]+';font-size:12px;font-weight:700;">'+t[0]+'</span>'; };
+  var fileList = '<div style="overflow:auto;"><table class="report-table" style="font-size:13px;"><thead><tr><th></th><th>取込</th><th>ファイル</th><th class="num">伝票</th><th class="num">作る数</th><th>完了</th></tr></thead><tbody>'+
+    (perImp.map(function(x){ var on = x.id===S.mode;
+      return '<tr data-setimp-sel="'+esc(x.id)+'" style="cursor:pointer;'+(on ? 'background:rgba(99,102,241,.12);font-weight:700;' : '')+'"><td><input type="radio" name="chSetImpSel"'+(on ? ' checked' : '')+' tabindex="-1"></td><td>'+esc(fmtDateTime(x.at))+'</td><td>'+esc(x.file)+'</td><td class="num">'+formatNum(x.allSlips)+'</td><td class="num">'+formatNum(x.qty)+'</td><td>'+stPill(x)+' <span class="sk-minor">'+(x.allSlips - x.undone)+' / '+x.allSlips+'</span></td></tr>'; }).join('') || '<tr><td colspan="6" class="empty-note">この月の取込はありません</td></tr>')+
+    '</tbody></table></div>'+
+    '<div style="margin-top:6px;font-size:12px;">'+(S.mode ? '<button type="button" class="vc-manage-toggle-btn" data-setimp-sel="">ファイルではなく、作業日の範囲で選ぶ</button>'
+      : '<b>作業日の範囲で選んでいます</b> <label class="ch-field" style="display:inline-flex;"><span>から</span><input type="date" id="chSetFrom" value="'+esc(S.from)+'"></label> <label class="ch-field" style="display:inline-flex;"><span>まで</span><input type="date" id="chSetTo" value="'+esc(S.to)+'"></label>'+(perImp.length ? ' <button type="button" class="vc-manage-toggle-btn" data-setimp-sel="'+esc(perImp[0].id)+'">ファイルで選ぶ</button>' : ''))+'</div>';
+  var cur = perImp.filter(function(x){ return x.id===S.mode; })[0];
+  var dfSw = '<div class="sub-switch" style="margin:0;">'+[['','全部'],['undone','未完了だけ'],['done','完了済みだけ']].map(function(x){ return '<button type="button" class="sub-switch-btn'+(S.df===x[0] ? ' active' : '')+'" data-set-df="'+x[0]+'">'+esc(x[1])+'</button>'; }).join('')+'</div>';
+  var stepBox = 'border:1px solid var(--slate-200,#e4e7ec);border-radius:10px;padding:12px 14px;margin:0 0 12px;';
+  var stepHead = function(n, t){ return '<div style="font-weight:700;margin:0 0 8px;"><span style="display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:50%;background:#4F46E5;color:#fff;font-size:12px;margin-right:6px;">'+n+'</span>'+t+'</div>'; };
   return '<div class="panel">'+
     '<div class="panel-title">セット指示書の作り直し</div>'+
-    '<div class="ch-row" style="margin-bottom:8px;">'+
-      '<label class="ch-field"><span>月(完了日で絞ります。未完了も出ます)</span><input type="month" id="chSetMonth" value="'+esc(S.month)+'"></label>'+
-      '<label class="ch-field"><span>どの指示書で作るか(取込ごと)</span><select id="chSetImp" style="max-width:420px;">'+impOpts+'</select></label>'+
-      (S.mode ? '' : '<label class="ch-field"><span>作業日(から)</span><input type="date" id="chSetFrom" value="'+esc(S.from)+'"></label><label class="ch-field"><span>作業日(まで)</span><input type="date" id="chSetTo" value="'+esc(S.to)+'"></label>')+
-    '</div>'+
-    '<div class="ch-row" style="margin-bottom:6px;">'+
-      '<button type="button" class="add-btn" id="chSetPrint">🖨 セット指示書を印刷・PDF</button>'+
-      '<button type="button" class="add-btn" id="chJanPrint">🏷️ JANラベル(28455)を印刷・PDF</button>'+
-      (T.hasCenter ? '<button type="button" class="add-btn" id="chSetDestPrint">📦 出荷先センターの札を印刷・PDF</button>' : '')+
-      '<button type="button" class="add-btn" id="chSetBomCsv" title="ロジザードZEROの「セット構成マスタ」の取込用(セット構成区分 03 = セットで扱う)">📤 ロジザードのセット構成マスタCSV</button>'+
-      '<span class="ch-note">作るもの <b>'+T.fin.length+'品番・'+formatNum(totalSets)+'個</b>(ラベル '+formatNum(totalSets)+'枚)・ 使うもの '+T.parts.length+'品番</span>'+
-    '</div>'+
-    perImpHtml+
-    '<details style="margin:0 0 10px;"><summary style="cursor:pointer;font-size:13px;">JANラベルの印刷の設定(ずれの直し・使い始める位置)</summary>'+
+    '<div style="'+stepBox+'">'+stepHead(1, '取り込んだファイルを選ぶ')+
+      '<div class="ch-row" style="margin-bottom:8px;"><label class="ch-field"><span>月(完了日で絞ります。未完了も出ます)</span><input type="month" id="chSetMonth" value="'+esc(S.month)+'"></label></div>'+
+      fileList+'</div>'+
+    '<div style="'+stepBox+'">'+stepHead(2, esc(cur ? cur.file : S.label)+' を出す')+
+      '<div class="ch-row" style="margin:0 0 8px;align-items:center;"><span class="ch-note">出すもの</span>'+dfSw+
+        (S.df ? '<span class="ch-note">'+(S.df==='done' ? '完了済み' : '未完了')+'の伝票だけを出します'+(S.mode ? '(作る数は「全部」で直します)' : '')+'</span>' : '')+'</div>'+
+      '<div class="ch-row" style="margin-bottom:6px;">'+
+        '<button type="button" class="add-btn" id="chSetPrint">🖨 指示書を印刷・PDF</button>'+
+        '<button type="button" class="add-btn" id="chJanPrint">🏷️ JANラベル '+formatNum(T.fin.reduce(function(a, F){ return a + (clientJan(F.code) ? F.qty : 0); }, 0))+'枚を印刷・PDF</button>'+
+        (T.hasCenter ? '<button type="button" class="add-btn" id="chSetDestPrint">📦 出荷先センターの札</button>' : '')+
+        '<button type="button" class="ll-btn" id="chSetBomCsv" title="ロジザードZEROの「セット構成マスタ」の取込用(セット構成区分 03 = セットで扱う)">📤 ロジザードのセット構成マスタCSV</button>'+
+        '<span class="ch-note">作るもの <b>'+T.fin.length+'品番・'+formatNum(totalSets)+'個</b> ・ 使うもの '+T.parts.length+'品番</span>'+
+      '</div>'+
+      (cur ? '<div class="ch-row" style="margin:4px 0 6px;align-items:flex-end;"><label class="ch-field"><span>完了日</span><input type="date" id="chSetImpDate" value="'+esc(c.setBulkDate || todayStr())+'"></label>'+
+        (cur.undone ? '<button type="button" class="ll-btn" data-setimp-done="'+esc(cur.id)+'|1">✅ このファイルの未完了 '+cur.undone+'伝票を完了にする</button>' : '<span class="ch-note" style="color:#067647;">✓ このファイルは全部完了しています</span>')+
+        (cur.allSlips && cur.undone<cur.allSlips ? '<button type="button" class="ll-btn" style="color:var(--slate-500);" data-setimp-done="'+esc(cur.id)+'|0">未完了に戻す</button>' : '')+
+        '<span class="ch-note">1伝票ずつは下の「伝票ごとの完了日」で</span></div>' : '')+
+      '<details style="margin:0 0 10px;"><summary style="cursor:pointer;font-size:13px;">JANラベルの印刷の設定(ずれの直し・使い始める位置)</summary>'+
       '<div class="ch-row" style="margin-top:8px;"><label class="ch-field"><span>右へずらす(mm)</span><input type="number" step="0.5" id="chJanDx" value="'+esc(String(clientJanCfg().dx))+'" style="width:90px;"></label>'+
       '<label class="ch-field"><span>下へずらす(mm)</span><input type="number" step="0.5" id="chJanDy" value="'+esc(String(clientJanCfg().dy))+'" style="width:90px;"></label>'+
       '<label class="ch-field"><span>使い始める位置(1〜30)</span><input type="number" min="1" max="30" id="chJanStart" value="'+esc(String(clientJanCfg().start))+'" style="width:90px;"></label>'+
       '<label class="ch-field" style="flex-direction:row;align-items:center;gap:6px;"><input type="checkbox" id="chJanMark"'+(clientJanCfg().mark ? ' checked' : '')+'><span>右上に入数と JAN 下4桁を大きく出す</span></label>'+
       '<span class="ch-note">A4・3列×10段(28455)。ずれの直しはこの端末で覚えます。使い始める位置は、使いかけのシートの何枚目からか(左上から右へ数える)</span></div></details>'+
-    '<div class="ch-row" style="margin:0 0 8px;align-items:center;"><span class="ch-note">出すもの</span><div class="sub-switch" style="margin:0;">'+[['','全部'],['undone','未完了だけ'],['done','完了済みだけ']].map(function(x){ return '<button type="button" class="sub-switch-btn'+(S.df===x[0] ? ' active' : '')+'" data-set-df="'+x[0]+'">'+esc(x[1])+'</button>'; }).join('')+'</div>'+
-      (S.df ? '<span class="ch-note">一覧・印刷・JANラベル・センターの札も'+(S.df==='done' ? '完了済み' : '未完了')+'の伝票だけです'+(S.mode ? '(作る数は「全部」で直します)' : '')+'</span>' : '')+'</div>'+
+    '</div>'+
     '<div class="sub-switch" style="margin:0 0 8px;">'+[['order','作業の順(完成品と部品)'],['slips','伝票ごとの完了日('+S.slips.length+')'],['fin','作るもの('+T.fin.length+')'],['parts','使うもの('+T.parts.length+')']].concat(T.hasCenter ? [['dest','出荷先センターごと('+T.dests.length+')']] : []).map(function(x){ return '<button type="button" class="sub-switch-btn'+(view===x[0] ? ' active' : '')+'" data-set-view="'+x[0]+'">'+esc(x[1])+'</button>'; }).join('')+'</div>'+
     (S.otherCount ? '<div class="pool-hint" style="margin:0 0 8px;">この取込のうち <b>'+S.otherCount+'伝票</b> は、ほかの月に完了しているので出していません。そのため、ここでは作る数を直せません(完了日を入れる前の月か、すべて出る月で直してください)。</div>' : '')+
     (view==='dest' && T.hasCenter ? destView : view==='slips' ? slipView : clientFoldOpen('setList:'+view, '商品コードの明細('+(view==='parts' ? T.parts.length : T.fin.length)+'品番)'+(view==='order' ? '・作る数を直す' : ''))+(view==='parts' ? tbl(T.parts) : view==='fin' ? tbl(T.fin) : orderTbl)+'</details>')+
@@ -10985,13 +10992,15 @@ function renderClientSetSheet(cl){
 }
 /* 取込ごとの数(取込ごとに指示書・ラベルを用意する一覧用)。選んでいる取込を一時的に切り替えて数える */
 function clientSetPerImp(cl){
-  var c = clientDataState(), keep = c.setImp, base = clientSetSel(cl); if(!base) return [];
+  var c = clientDataState(), keep = c.setImp, keepDf = c.setDoneFilter, base = clientSetSel(cl); if(!base) return [];
   var out = base.imps.map(function(i){
     c.setImp = i.id; var S = clientSetSel(cl); if(!S) return null;
     var qty = S.T.fin.reduce(function(a, F){ return a + F.qty; }, 0), labels = S.T.fin.reduce(function(a, F){ return a + (clientJan(F.code) ? F.qty : 0); }, 0);
-    return { id: i.id, at: i.at, file: i.file, slips: S.slips.length, done: S.slips.filter(function(x){ return x.done; }).length, qty: qty, labels: labels, hasCenter: S.T.hasCenter };
+    c.setDoneFilter = ''; var A = clientSetSel(cl); c.setDoneFilter = keepDf; // 完了・未完了の切り替えは、絞り込みに関係なくそのファイルの全部の伝票で
+    var undone = A ? A.slips.filter(function(x){ return !x.done; }).length : 0;
+    return { id: i.id, at: i.at, file: i.file, slips: S.slips.length, done: S.slips.filter(function(x){ return x.done; }).length, qty: qty, labels: labels, hasCenter: S.T.hasCenter, allSlips: A ? A.slips.length : 0, undone: undone };
   }).filter(Boolean);
-  c.setImp = keep;
+  c.setImp = keep; c.setDoneFilter = keepDf;
   return out;
 }
 /* 印刷の名前(PDF のファイル名)に付ける取込のファイル名。取込ごとに出すと同じ名前になるため(2026-11-06) */
@@ -11315,8 +11324,9 @@ function bindClientHub(){
   });
   var smo = document.getElementById('chSetMonth'); if(smo) smo.addEventListener('change', function(){ if(smo.value){ c.month = smo.value; c.setImp = undefined; c.data = null; render(); } });
   // 完了日(伝票ごと)・作る数(完成品ごと)の保存(2026-10-31)
-  var setEdit = async function(change, target, label){
-    var S = clientSetSel(cl); if(!S || !S.mode) return;
+  var setEdit = async function(change, target, label, impId){
+    var keepImp = c.setImp; if(impId) c.setImp = impId; // ファイルごとの一覧から(2026-11-06)
+    var S = clientSetSel(cl); c.setImp = keepImp; if(!S || !S.mode) return;
     var key = clientDataKey(cl.id, 'set', S.docMonth); // 完了日で絞るので、前の月の指示書のこともある
     var r = await tpickKvUpdate(key, function(cur){ change(cur, S.mode); return cur; });
     if(!r.ok){ showToast('⚠️ 保存できませんでした'); render(); return; }
@@ -11341,6 +11351,22 @@ function bindClientHub(){
     setEdit(setDone(nos, d), nos.length+'伝票', '完了日 '+d);
   });
   var simp = document.getElementById('chSetImp'); if(simp) simp.addEventListener('change', function(){ c.setImp = simp.value; render(); });
+  var sid = document.getElementById('chSetImpDate'); if(sid) sid.addEventListener('change', function(){ c.setBulkDate = sid.value; });
+  document.querySelectorAll('[data-setimp-sel]').forEach(function(el){ el.addEventListener('click', function(){ c.setImp = el.getAttribute('data-setimp-sel'); render(); }); });
+  document.querySelectorAll('[data-setimp-done]').forEach(function(el){ el.addEventListener('click', async function(){
+    var p = el.getAttribute('data-setimp-done').split('|'), on = p[1]==='1', d = on ? ((sid && sid.value) || todayStr()) : '';
+    var keepImp = c.setImp, keepDf = c.setDoneFilter; c.setImp = p[0]; c.setDoneFilter = '';
+    var S = clientSetSel(cl); c.setImp = keepImp; c.setDoneFilter = keepDf; if(!S || S.mode!==p[0]) return;
+    var im = S.imps.filter(function(i){ return i.id===p[0]; })[0] || {};
+    var nos = S.slips.filter(function(x){ return on ? !x.done : !!x.done; }).map(function(x){ return x.no; });
+    if(!nos.length) return;
+    if(!await appConfirm('「'+(im.file||'')+'」の'+(on ? '未完了の '+nos.length+'伝票を、完了日 '+d.replace(/-/g,'/')+' にします' : '完了日の入った '+nos.length+'伝票を、未完了に戻します')+'。よろしいですか?')) return;
+    el.disabled = true;
+    var keepDf2 = c.setDoneFilter; c.setDoneFilter = '';
+    try{ await setEdit(setDone(nos, d), (im.file||'')+' '+nos.length+'伝票', on ? '完了日 '+d : '完了日を消した', p[0]); }
+    finally{ c.setDoneFilter = keepDf2; render(); }
+    showToast(on ? nos.length+'伝票を完了にしました' : nos.length+'伝票を未完了に戻しました');
+  }); });
   document.querySelectorAll('[data-set-view]').forEach(function(el){ el.addEventListener('click', function(){ c.setView = el.getAttribute('data-set-view'); render(); }); });
   document.querySelectorAll('[data-set-df]').forEach(function(el){ el.addEventListener('click', function(){ c.setDoneFilter = el.getAttribute('data-set-df'); render(); }); });
   var sf = document.getElementById('chSetFrom'), stt = document.getElementById('chSetTo');

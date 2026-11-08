@@ -2583,6 +2583,7 @@ var state = {
   finPriceOpen: false,
   taskPriority: null,
   productivityMaster: null,
+  productivityManual: null, // 管理者が決めた人員配置用の生産性(kv productivity-manual)
   staffingSuggestion: null,
   staffingSuggestionLoaded: false,
   customerTaskMapping: null,
@@ -3039,7 +3040,7 @@ function storageKeyLabel(key){
     ['task-templates', '繰り返し作業'], ['work-volume-config', '作業量設定'], ['work-volume:', 'CSV取込データ'],
     ['vc-case-ledger:', 'ケース数'], ['audit-log:', '操作履歴'], ['break-settings', '休憩設定'],
     ['shift-settings', '勤務時間設定'], ['staffing-settings', '人員配置の設定'], ['achievement-settings', '目標設定'], ['jp-holidays', '祝日データ'],
-    ['task-priority:', '作業の優先度'], ['productivity-master', '生産性データ'], ['staffing-suggestion:', '配置案'],
+    ['task-priority:', '作業の優先度'], ['productivity-manual', '生産性(管理者の設定)'], ['productivity-master', '生産性データ'], ['staffing-suggestion:', '配置案'],
     ['customer-task-mapping', '得意先・作業枠マスター'], ['shipper-no-registry', '荷主出荷番号の取込記録'],
     ['pending-assignment-suggestions:', '次の配置候補'], ['reassignment-alerts:', '配置変更指示'],
     ['csv-import-fingerprints', 'CSV重複チェック記録'], ['vc-import-attempts:', 'CSV取込の試行記録'],
@@ -3681,7 +3682,7 @@ async function appendAuditLog(entry){
   list.push({
     id: uid(),
     at: new Date().toISOString(),
-    actor: state.activeStaffId ? (staffById(state.activeStaffId).name) : '管理者',
+    actor: state.activeStaffId ? (staffById(state.activeStaffId).name) : hasManagerSession() ? '管理者' : 'ログインなし', // 作業量CSV取込はログインなしでも使える(2026-11-09)
     action: entry.action,
     target: entry.target,
     before: entry.before===undefined ? null : entry.before,
@@ -3779,7 +3780,21 @@ function isHolidayOffForStaff(staff, dateStr){
 async function loadTaskPriority(dateStr){
   return loadKeyJson('task-priority:'+dateStr, function(){ return {}; });
 }
+/* 管理者が決める生産性(2026-11-09): { 生産性のキー: { rate: 1人1時間あたりの数, basis: 'pieces'|'count'|'lines', at, by } }。
+   生産性データ(productivity-master)は実績から毎回作り直すので、別のキーに持つ。人員配置・次の作業の計算では、これがあれば実績より先に使う */
+var PRODUCTIVITY_MANUAL_KEY = 'productivity-manual';
+async function loadProductivityManual(){
+  try{ var man = await loadKeyJson(PRODUCTIVITY_MANUAL_KEY, function(){ return {}; }); if(!isUnverified(man)) state.productivityManual = man || {}; }catch(e){}
+  return state.productivityManual;
+}
+function productivityManualFor(key, basis){
+  var man = state.productivityManual && state.productivityManual[key];
+  if(!man || !(Number(man.rate)>0)) return null;
+  if((man.basis||'pieces')!==(basis||'pieces')) return null; // 基準(ピース・件・明細)を変えたら使わない
+  return man;
+}
 async function loadProductivityMaster(){
+  await loadProductivityManual();
   var data = await loadKeyJson('productivity-master', function(){ return {}; });
   if(isUnverified(data)) return data; // 読み込み失敗: 移行も保存もしない
   try{
@@ -3916,6 +3931,10 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume, caseL
     m.taskAverage.totalQty += qty;
     m.taskAverage.totalHours += taskHours;
     m.taskAverage.sampleCount += 1;
+    // 日ごとの実績(生産性管理で毎日の生産性を見るため。2026-11-09): { 日付: { q: ピース, h: 時間, b: { count, lines } } }
+    if(!m.daily) m.daily = {};
+    var dd = m.daily[dateStr] || (m.daily[dateStr] = { q:0, h:0, b:{} });
+    dd.q += qty; dd.h += taskHours;
     // 人員配置の基準が件数・明細数の作業用に、同じ作業時間で件数・明細数の生産性も集計する
     // (ピース数は上の taskAverage。マスタは毎回ゼロから作り直すため二重加算にはならない)
     if(!m.byBasis) m.byBasis = {};
@@ -3925,6 +3944,7 @@ function updateProductivityMasterFromDay(master, dateStr, day, workVolume, caseL
       var bq = qtyForBasis(wvTotals, b);
       if(!bq) return;
       basisQtys[b] = bq;
+      dd.b[b] = (dd.b[b]||0) + bq;
       if(!m.byBasis[b]) m.byBasis[b] = { totalQty:0, totalHours:0, sampleCount:0 };
       m.byBasis[b].totalQty += bq;
       m.byBasis[b].totalHours += taskHours;
@@ -4127,6 +4147,8 @@ function basisUnitLabel(basis, isVc){
 function productivityRateFor(master, taskId, staffId, basis){
   var key = resolveProductivityKey(taskId);
   var m = master && master[key];
+  var man = productivityManualFor(key, basis);
+  if(man) return { rate: Number(man.rate), basis:'manual', sampleCount: (m && m.taskAverage && m.taskAverage.sampleCount) || 0 }; // 管理者が決めた生産性(個人の実績より先)
   if(!m) return { rate:null, basis:'none', sampleCount:0 };
   if(basis && basis!=='pieces'){
     var sb = staffId && m.byStaff && m.byStaff[staffId] && m.byStaff[staffId].byBasis && m.byStaff[staffId].byBasis[basis];
@@ -5032,7 +5054,7 @@ function computeTodayStaffingPlan(ctx){
       plannedQty: planned, primaryCount: totals.primaryCount, completedQty: completed, completedAt: comp ? comp.at : null,
       remainingQty: remaining, remainingRecordedQty: remainingRecorded, estimatedDoneQty: estimatedDone,
       rate: rate, rateBasis: avg.basis, sampleCount: avg.sampleCount,
-      lowSample: !!rate && (avg.sampleCount||0) < STAFFING_LOW_SAMPLE_DAYS, // 生産性の実績日数が少なく、見込みの精度が低い
+      lowSample: !!rate && avg.basis!=='manual' && (avg.sampleCount||0) < STAFFING_LOW_SAMPLE_DAYS, // 生産性の実績日数が少なく、見込みの精度が低い
       remainTimeMin: remainTimeMin, perPersonQty: perPersonQty,
       workers: workers, plannedWorkers: plannedWorkers, currentCount: workers.length, capacity: capacity, breakCapacity: breakCapacity,
       shortageQty: shortage, neededPeople: neededPeople,
@@ -5911,6 +5933,7 @@ function requestFreshTodayData(){
       var pm = await loadKeyJson('productivity-master', function(){ return {}; });
       if(!isUnverified(pm)) state.productivityMaster = migrateProductivityMasterToTemplateKeys(pm).master;
     }catch(e){}
+    await loadProductivityManual();
     try{
       var meta = await loadProductivityMeta();
       if(!isUnverified(meta)) state.productivityMeta = meta;
@@ -7134,56 +7157,122 @@ function resolveProductivityDisplayInfo(key){
   }
   return { valid:false, name:'(削除済み)', color:'#999' };
 }
+/* 生産性管理(2026-11-09): 作業ごとに、毎日の生産性(実績)を見ながら、人員配置・次の作業の計算に使う生産性を管理者が決める。
+   決めた数は kv productivity-manual に持つ(生産性データは実績から毎回作り直すため)。「実績に戻す」で実績の生産性に戻る */
+function productivityTaskObj(key){
+  return state.backlog.find(function(bt){ return bt.id===key; }) || (state.templates||[]).find(function(t){ return t.id===key; }) || null;
+}
 function renderProductivityTab(){
   if(state.productivityMaster===null){
     loadProductivityMaster().then(function(d){ state.productivityMaster = d; render(); });
     return '<div class="empty-note">読み込み中...</div>';
   }
-  var master = state.productivityMaster||{};
-  // 表示対象は「現在の作業マスタ(単発作業)またはテンプレート(繰り返し作業)に
-  // 存在し、有効(archivedでない)な作業」だけに限定する。1つの繰り返し作業は
-  // テンプレートIDに統合されているため、1作業=1行で表示される。
-  // 過去の実績データ・生産性データそのものは削除せず、ここでは表示から除外するだけ。
-  var allKeys = Object.keys(master);
-  var keyInfo = {};
-  allKeys.forEach(function(key){ keyInfo[key] = resolveProductivityDisplayInfo(key); });
-  var taskKeys = allKeys.filter(function(key){ return keyInfo[key].valid; });
-  var orphanedCount = allKeys.length - taskKeys.length;
-  var rows = taskKeys.map(function(key){
-    var m = master[key];
-    var info = keyInfo[key];
-    var avgRate = (m.taskAverage && m.taskAverage.totalHours>0) ? (m.taskAverage.totalQty/m.taskAverage.totalHours) : null;
+  if(state.productivityManual===null){
+    loadProductivityManual().then(function(){ if(state.productivityManual===null) state.productivityManual = {}; render(); });
+    return '<div class="empty-note">読み込み中...</div>';
+  }
+  var master = state.productivityMaster||{}, manual = state.productivityManual||{};
+  // 出す作業: 生産性データがある有効な作業 + 有効な繰り返し作業(実績がまだ無くても、生産性を決められるように)
+  var keys = Object.keys(master).filter(function(k){ return resolveProductivityDisplayInfo(k).valid; });
+  (state.templates||[]).forEach(function(t){ if(t.archived!==true && keys.indexOf(t.id)===-1) keys.push(t.id); });
+  Object.keys(manual).forEach(function(k){ if(keys.indexOf(k)===-1 && resolveProductivityDisplayInfo(k).valid) keys.push(k); });
+  var orphanedCount = Object.keys(master).filter(function(k){ return !resolveProductivityDisplayInfo(k).valid; }).length;
+  function hasData(k){ var m = master[k]; return (m && m.taskAverage && m.taskAverage.sampleCount) ? 1 : 0; }
+  keys.sort(function(a, b){ return hasData(b) - hasData(a) || resolveProductivityDisplayInfo(a).name.localeCompare(resolveProductivityDisplayInfo(b).name, 'ja'); });
+  var anyDaily = keys.some(function(k){ return master[k] && master[k].daily; });
+  var rows = keys.map(function(key){
+    var m = master[key] || {}, info = resolveProductivityDisplayInfo(key), obj = productivityTaskObj(key);
+    var basis = staffingBasisOf(obj), unit = basisUnitLabel(basis, false);
+    var ta = basis==='pieces' ? m.taskAverage : (m.byBasis && m.byBasis[basis]);
+    var avgRate = (ta && ta.totalHours>0) ? ta.totalQty/ta.totalHours : null, samples = (ta && ta.sampleCount) || 0;
+    var man = productivityManualFor(key, basis), manOther = (manual[key] && !man) ? manual[key] : null;
+    var used = man ? '<b style="color:var(--blue-700,#175CD3);">管理者の設定 '+Number(man.rate).toFixed(1)+esc(unit)+'/人時</b>'
+      : avgRate ? '実績 '+avgRate.toFixed(1)+esc(unit)+'/人時(作業全体・'+samples+'日)'+(samples<STAFFING_LOW_SAMPLE_DAYS ? ' <span style="color:var(--warning-600);">⚠ 実績が少ない</span>' : '')
+      : '<span style="color:var(--warning-600);">未設定(実績がまだありません。決めると人員配置に使えます)</span>';
+    // 毎日の生産性(新しい日から最大14日)
+    var days = Object.keys(m.daily||{}).sort().reverse().slice(0, 14);
+    function qOf(x){ return basis==='pieces' ? x.q : ((x.b||{})[basis]||0); }
+    var dailyHtml = days.length ? '<div style="overflow-x:auto;margin-top:8px;"><table class="report-table prod-daily" style="font-size:12px;white-space:nowrap;width:auto;"><thead><tr><th>日付</th>'+
+        days.map(function(d){ return '<th class="num">'+esc(d.slice(5).replace('-','/'))+'</th>'; }).join('')+'</tr></thead><tbody>'+
+        '<tr><th>生産性('+esc(unit)+'/人時)</th>'+days.map(function(d){ var x = m.daily[d], q = qOf(x); return '<td class="num"><b>'+(x.h>0 && q ? (q/x.h).toFixed(1) : '-')+'</b></td>'; }).join('')+'</tr>'+
+        '<tr><th>作業量('+esc(unit)+')</th>'+days.map(function(d){ return '<td class="num">'+formatNum(Math.round(qOf(m.daily[d])))+'</td>'; }).join('')+'</tr>'+
+        '<tr><th>作業時間(人時)</th>'+days.map(function(d){ return '<td class="num">'+m.daily[d].h.toFixed(1)+'</td>'; }).join('')+'</tr>'+
+      '</tbody></table></div>'
+      : '<div class="pool-hint" style="margin:6px 0 0;">'+(m.taskAverage ? '毎日の生産性は、次に生産性データを更新したあとに出ます' : '実績はまだありません')+'</div>';
     var staffRows = Object.keys(m.byStaff||{}).map(function(sid){
-      var s = m.byStaff[sid];
-      var rate = s.totalHours>0 ? s.totalQty/s.totalHours : null;
-      var enough = s.sampleCount>=PRODUCTIVITY_MIN_SAMPLES;
-      return '<div class="checklist-item-action">'+esc(staffById(sid).name)+': '+(rate?rate.toFixed(1):'-')+'/h(サンプル'+s.sampleCount+'日'+(enough?'':'・配置には未反映(5日未満)')+')</div>';
-    }).join('') || '<div class="checklist-item-action">個人別の実績はまだありません</div>';
-    var subcatNames = Object.keys(m.bySubcat||{});
-    var subcatRows = subcatNames.length ? '<div class="task-tile-live-counters" style="margin-top:10px;">'+
-      '<div class="task-tile-live-title">内訳ごとの生産性(単位が違うため合計しません)'+(m.subcatHoursTotal ? ' ・ 親作業総作業時間(内訳時間の合計) '+m.subcatHoursTotal.toFixed(1)+'時間' : '')+'</div>'+
-      subcatNames.map(function(scName){
-        var sr = subcatProductivityRateFor(master, key, scName);
-        var ta = m.bySubcat[scName].taskAverage || {};
-        return '<div class="checklist-item-action">'+esc(scName)+': '+(sr.rate?sr.rate.toFixed(1):'-')+esc(sr.unit||'')+'/時(作業量 '+formatNum(ta.totalQty)+esc(sr.unit||'')+' ÷ 作業時間 '+(ta.totalHours||0).toFixed(1)+'時間・サンプル'+sr.sampleCount+'日)</div>';
-      }).join('')+
-    '</div>' : '';
-    return '<div class="checklist-item">'+
-      '<div class="checklist-item-title">'+esc(info.name)+' — 作業全体の標準生産性: '+(avgRate?avgRate.toFixed(1)+'/h':'不明')+'(サンプル'+((m.taskAverage&&m.taskAverage.sampleCount)||0)+'日)</div>'+
-      staffRows+
-      subcatRows+
+      var st = m.byStaff[sid], rate = st.totalHours>0 ? st.totalQty/st.totalHours : null;
+      return '<div class="checklist-item-action">'+esc(staffById(sid).name)+': '+(rate?rate.toFixed(1):'-')+'/h(サンプル'+st.sampleCount+'日'+(st.sampleCount>=PRODUCTIVITY_MIN_SAMPLES?'':'・5日未満')+')</div>';
+    }).join('');
+    var subcatRows = Object.keys(m.bySubcat||{}).map(function(scName){
+      var sr = subcatProductivityRateFor(master, key, scName), t2 = m.bySubcat[scName].taskAverage || {};
+      return '<div class="checklist-item-action">'+esc(scName)+': '+(sr.rate?sr.rate.toFixed(1):'-')+esc(sr.unit||'')+'/時(作業量 '+formatNum(t2.totalQty)+esc(sr.unit||'')+' ÷ 作業時間 '+(t2.totalHours||0).toFixed(1)+'時間・サンプル'+sr.sampleCount+'日)</div>';
+    }).join('');
+    var more = (staffRows || subcatRows) ? '<details style="margin-top:6px;"><summary class="pool-hint" style="cursor:pointer;margin:0;">個人別・内訳の生産性 ▾</summary>'+
+      (staffRows ? '<div class="pool-hint" style="margin:4px 0 2px;">個人別(1人だけで作業した日だけ。管理者が決めた作業では、人員配置に使いません)</div>'+staffRows : '')+
+      (subcatRows ? '<div class="pool-hint" style="margin:6px 0 2px;">内訳ごと(表示だけ。単位が違うため合計しません)</div>'+subcatRows : '')+'</details>' : '';
+    return '<div class="checklist-item" data-prod-key="'+esc(key)+'">'+
+      '<div class="checklist-item-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+esc(info.color||'#999')+';"></span>'+esc(info.name)+
+        '<span class="pool-hint" style="margin:0;font-weight:400;">基準: '+esc(unit)+'</span></div>'+
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px;font-size:13px;">'+
+        '<span>人員配置に使う生産性: '+used+'</span>'+
+        '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">'+
+          '<label style="font-size:12px;">決める <input type="number" min="0" step="0.1" data-prod-rate="'+esc(key)+'" value="'+(man ? esc(String(Number(man.rate))) : '')+'" placeholder="'+(avgRate ? avgRate.toFixed(1) : '')+'" style="width:84px;text-align:right;"> '+esc(unit)+'/人時</label>'+
+          '<button type="button" class="vc-manage-toggle-btn" data-prod-save="'+esc(key)+'" data-prod-basis="'+basis+'">保存</button>'+
+          ((man || manOther) ? '<button type="button" class="vc-manage-toggle-btn" data-prod-clear="'+esc(key)+'">実績に戻す</button>' : '')+
+        '</span></div>'+
+      (manOther ? '<div class="pool-hint" style="margin:2px 0 0;color:var(--warning-600);">前に決めた '+Number(manOther.rate).toFixed(1)+'/人時 は、基準('+esc(basisUnitLabel(manOther.basis||'pieces', false))+')が今と違うため使っていません</div>' : '')+
+      ((man && man.at) ? '<div class="pool-hint" style="margin:2px 0 0;">'+esc(fmtDateTime(man.at))+' に決めた'+(avgRate ? '(実績は '+avgRate.toFixed(1)+')' : '')+'</div>' : '')+
+      dailyHtml+more+
     '</div>';
-  }).join('') || '<div class="empty-note">まだ生産性データがありません。下のボタンで実績から作成してください。</div>';
+  }).join('') || '<div class="empty-note">作業がありません。</div>';
 
   return '<div class="mgr-wrap"><div class="panel">'+
-    '<div class="panel-title">生産性</div>'+
-    '<div class="pool-hint" style="margin-bottom:10px;">作業種別×作業者ごとの生産性実績です。繰り返し作業は日をまたいで1作業として集計されます。複数人が同時に従事した日は個人の実績には使われません(作業全体の標準値のみ更新されます)。個人の実績が5日未満の場合、人員配置では作業全体の標準値が使われます。表示対象は、現在の作業マスタに存在する有効な作業のみです。</div>'+
-    (orphanedCount>0 ? '<div class="pool-hint" style="margin-bottom:10px;color:var(--warning-600);">⚠️ 現在の作業マスタに存在しない生産性データが'+orphanedCount+'件あります(削除・アーカイブ済みの作業など)。実績自体は保持されていますが、この画面・人員配置には反映されません。</div>' : '')+
+    '<div class="panel-title">生産性管理</div>'+
+    '<div class="pool-hint" style="margin-bottom:10px;">作業ごとに、毎日の生産性(作業量 ÷ 作業時間)を見ながら、<b>人員配置・次の作業の指示・完了予定の計算に使う生産性</b>を決められます。'+
+      '決めた作業は、実績(作業全体・個人)の代わりにその数を使います。「実績に戻す」と、今までどおり直近30日の実績から計算します(個人の実績が5日以上ある人は個人の実績、それ以外は作業全体の実績)。</div>'+
+    (orphanedCount>0 ? '<div class="pool-hint" style="margin-bottom:10px;color:var(--warning-600);">⚠️ 現在の作業マスタに存在しない生産性データが'+orphanedCount+'件あります(削除・アーカイブ済みの作業など)。この画面・人員配置には出しません。</div>' : '')+
+    ((!anyDaily && keys.some(hasData)) ? '<div class="pool-hint" style="margin-bottom:10px;">毎日の生産性は、下の「生産性データを最新の実績で更新する」を押すと出ます。</div>' : '')+
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;"><button type="button" class="add-btn" id="staffingRefreshProductivityBtn">生産性データを最新の実績で更新する</button>'+csvButton('productivity')+'</div>'+
     rows+
   '</div></div>';
 }
+async function saveProductivityManual(key, val, basis){
+  var cur = await loadKeyJson(PRODUCTIVITY_MANUAL_KEY, function(){ return {}; });
+  if(isUnverified(cur)){ showToast('読み込めなかったため保存していません。もう一度お試しください'); return false; }
+  cur = cur || {};
+  var before = cur[key] ? Number(cur[key].rate) : null;
+  if(val===null) delete cur[key];
+  else cur[key] = { rate: val, basis: basis || 'pieces', at: new Date().toISOString() };
+  var ok = await persistKey(PRODUCTIVITY_MANUAL_KEY, cur);
+  if(ok===false){ showToast('保存できませんでした'); return false; }
+  state.productivityManual = cur;
+  await appendAuditLog({ action:'生産性の設定', target: resolveProductivityDisplayInfo(key).name, before: before, after: val===null ? '実績に戻す' : val });
+  return true;
+}
 function bindProductivityTab(){
+  document.querySelectorAll('[data-prod-save]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var key = el.getAttribute('data-prod-save');
+      var inp = Array.prototype.filter.call(document.querySelectorAll('[data-prod-rate]'), function(x){ return x.getAttribute('data-prod-rate')===key; })[0];
+      var raw = String(inp ? inp.value : '').normalize('NFKC').trim();
+      if(raw===''){ showToast('数を入れてください(実績に戻すときは「実績に戻す」)'); return; }
+      var v = Number(raw);
+      if(!(v>0 && isFinite(v))){ showToast('0より大きい数を入れてください'); return; }
+      v = Math.round(v*10)/10;
+      el.disabled = true;
+      if(await saveProductivityManual(key, v, el.getAttribute('data-prod-basis'))) showToast('生産性を '+v+' に決めました(人員配置に使います)');
+      render();
+    });
+  });
+  document.querySelectorAll('[data-prod-clear]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var key = el.getAttribute('data-prod-clear');
+      if(!await appConfirm('「'+resolveProductivityDisplayInfo(key).name+'」の生産性を、実績から計算する形に戻します。よろしいですか?')) return;
+      el.disabled = true;
+      if(await saveProductivityManual(key, null)) showToast('実績の生産性に戻しました');
+      render();
+    });
+  });
   var staffingRefreshProductivityBtn = document.getElementById('staffingRefreshProductivityBtn');
   if(staffingRefreshProductivityBtn){
     staffingRefreshProductivityBtn.addEventListener('click', async function(){
@@ -7524,7 +7613,7 @@ function renderStaffing(){
       '完了数量(記録) '+formatNum(c.completedQty)+esc(c.unit)+(c.completedAt?'('+fmtClock(c.completedAt)+'に完了扱い)':''),
       '推定処理数量 '+formatNum(Math.round(c.estimatedDoneQty||0))+esc(c.unit)+'(作業記録の時間 × 生産性から推定。実績の記録ではありません)',
       '残作業量(推定) '+formatNum(Math.round(c.remainingQty))+esc(c.unit)+'(記録上の残り '+formatNum(c.remainingRecordedQty)+esc(c.unit)+')',
-      '生産性 '+(c.rate ? c.rate.toFixed(1)+esc(c.unit)+'/人時('+(c.rateBasis==='taskAverage'?'作業全体の実績':'個人実績')+'・サンプル'+c.sampleCount+'日)'+(c.lowSample ? ' '+esc(staffingLowSampleText(c)) : '') : '未設定(実績不足のため計算できません)'),
+      '生産性 '+(c.rate ? c.rate.toFixed(1)+esc(c.unit)+'/人時('+(c.rateBasis==='manual' ? '管理者の設定' : (c.rateBasis==='taskAverage'?'作業全体の実績':'個人実績')+'・サンプル'+c.sampleCount+'日')+')'+(c.lowSample ? ' '+esc(staffingLowSampleText(c)) : '') : '未設定(実績不足のため計算できません)'),
       '現在人数 '+c.currentCount+'人'+(workersText?'('+workersText+')':'')+(c.plannedWorkers.length?' + 確定済みで未開始 '+c.plannedWorkers.length+'人('+plannedText+')':''),
       '現在時刻 '+esc(nowText)+' / '+limitText+' / 残り時間 '+fmtMinutesJa(c.remainTimeMin),
       '1人あたり処理可能数量 '+(c.perPersonQty!==null?formatNum(Math.round(c.perPersonQty))+esc(c.unit):'―'),
@@ -16870,7 +16959,7 @@ function isUserBusy(){
 /* ---------- 開いている画面をアドレス(#のあと)に残す ----------
    再読み込みしてもトップ画面に戻らず、同じ画面(と画面内のタブ・作業記録で選んでいる人)を開き直すため。
    例: #role=adminHub&tab=financial / #role=input&staff=<スタッフID> / #role=shukei&site=tannan&tab=diff */
-var VIEW_URL_ROLES = ['input','report','monitor','achievements','history','adminHub','settingsHub','shukei','vcAlloc','cxOrder','dataHub','billing','stock','clientHub'];
+var VIEW_URL_ROLES = ['input','report','monitor','achievements','history','adminHub','settingsHub','shukei','vcAlloc','cxOrder','dataHub','billing','stock','clientHub','wvImport'];
 function viewStateToHash(){
   if(!state.role) return '';
   var q = { role: state.role };
@@ -16978,6 +17067,7 @@ function render(){
   if(state.role==='dataHub'){ state.role = 'adminHub'; state.adminHubTab = 'stockData'; }
   if(state.role==='billing'){ state.role = 'adminHub'; state.adminHubTab = 'billing'; }
   if(state.role==='adminHub' && state.adminHubTab==='stock'){ state.role = 'stock'; } // 在庫は誰でも見られる画面に移した
+  if(state.role==='adminHub' && (state.adminHubTab==='data' || state.adminHubTab==='csvImport')){ state.role = 'wvImport'; state.adminHubTab = 'today'; } // 作業量CSV取込は誰でも使える画面に移した(2026-11-09)
   var html = '';
   if(state.role !== 'monitor'){
     html += renderTopbar();
@@ -16995,6 +17085,7 @@ function render(){
   else if(state.role==='dataHub') html += renderDataHub();
   else if(state.role==='billing') html += renderBilling();
   else if(state.role==='stock') html += renderStockTab();
+  else if(state.role==='wvImport') html += '<div class="mgr-wrap">'+renderCsvImportPanel()+'</div>';
   else if(state.role==='clientHub') html += renderClientHub();
   if(state.modal) html += renderModal();
   html += renderInstructionAlert();
@@ -17015,6 +17106,7 @@ function render(){
   if(state.role==='dataHub') bindDataHub();
   if(state.role==='billing') bindBilling();
   if(state.role==='stock') bindStockTab();
+  if(state.role==='wvImport') bindCsvImportPanel();
   if(state.role==='clientHub') bindClientHub();
   bindCsvButtons();
   document.querySelectorAll('[data-go-datahub]').forEach(function(el){
@@ -17438,13 +17530,14 @@ var COMMON_NAV_ITEMS = [
   { role:'shukei', label:'出荷集計表', ic:'🧾' },
   { role:'vcAlloc', label:'VC引当', ic:'📦' },
   { role:'cxOrder', label:'入出庫指示', ic:'🚚' },
-  { role:'stock', label:'在庫', ic:'🏢' }
+  { role:'stock', label:'在庫', ic:'🏢' },
+  { role:'wvImport', label:'作業量CSV取込', ic:'📥' } // だれでも取り込める(2026-11-09。前は管理の中)
 ];
 /* サイドバーのまとまり(トップのカードの並びと同じ)。管理の項目は鍵の印(ログインしていないとき) */
 var NAV_GROUPS = [
   { label:'現場', items:[ { role:'input' }, { role:'monitor' } ] },
-  { label:'事務所', items:[ { role:'report' }, { role:'shukei' }, { role:'vcAlloc' }, { role:'cxOrder' }, { role:'stock' } ] },
-  { label:'管理', items:[ { role:'adminHub', tab:'data', label:'作業量CSV取込', ic:'data', lock:true }, { role:'adminHub', tab:'stockData', label:'在庫・kintone取込', ic:'database', lock:true }, { role:'adminHub', lock:true }, { role:'adminHub', tab:'setBom', label:'セット構成', ic:'listChecks', lock:true }, { role:'clientHub', label:'荷主ページ', ic:'truck', lock:true }, { role:'settingsHub', lock:true }, { href:'factory.html', label:'生産管理', ic:'factory', lock:true } ] }
+  { label:'事務所', items:[ { role:'wvImport', ic:'data' }, { role:'report' }, { role:'shukei' }, { role:'vcAlloc' }, { role:'cxOrder' }, { role:'stock' } ] },
+  { label:'管理', items:[ { role:'adminHub', tab:'stockData', label:'在庫・kintone取込', ic:'database', lock:true }, { role:'adminHub', lock:true }, { role:'adminHub', tab:'setBom', label:'セット構成', ic:'listChecks', lock:true }, { role:'clientHub', label:'荷主ページ', ic:'truck', lock:true }, { role:'settingsHub', lock:true }, { href:'factory.html', label:'生産管理', ic:'factory', lock:true } ] }
 ];
 var ADMIN_NAV_ITEMS = [
   { role:'adminHub', label:'管理', ic:'👤' },
@@ -17501,7 +17594,7 @@ document.addEventListener('click', function(ev){
   document.querySelectorAll('[data-theme-toggle]').forEach(function(x){ x.innerHTML = themeToggleInner(t==='dark'); });
 });
 function renderTopbar(){
-  var roleLabel = {cxOrder:'入出庫指示', clientHub:'荷主ページ', manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'出荷集計表(高屋・丹南)', vcAlloc:'VC引当', stock:'在庫'}[state.role] || (state.role ? '' : 'ホーム');
+  var roleLabel = {wvImport:'作業量CSV取込', cxOrder:'入出庫指示', clientHub:'荷主ページ', manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'出荷集計表(高屋・丹南)', vcAlloc:'VC引当', stock:'在庫'}[state.role] || (state.role ? '' : 'ホーム');
   var lockBtn = (hasManagerSession() && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="ログアウトする">🔓 ログアウト</button>' : '';
   // 共通ナビゲーション: どのページからでも他の主要ページへ直接移動できるようにする。
   // 管理者専用項目(管理者/設定)は、実際にログイン済みの場合のみ表示する
@@ -17686,10 +17779,9 @@ function renderDailyChecklist(){
 // 管理のタブ。subs があるタブは、画面の中で切り替える(今日の状況・人員配置 / 作業記録・生産性)
 var ADMIN_HUB_TABS = [
   { key:'today', label:'今日・人員配置', subs:[['today','今日の状況'],['staffing','人員配置']] },
-  { key:'logMgmt', label:'実績・生産性', subs:[['logMgmt','作業記録'],['productivity','生産性']] },
+  { key:'logMgmt', label:'実績・生産性', subs:[['logMgmt','作業記録'],['productivity','生産性管理']] },
   { key:'financial', label:'収支' },
   { key:'billing', label:'請求' },
-  { key:'data', label:'作業量CSV取込' },
   { key:'stockData', label:'在庫・kintone取込' }, // 作業量CSV取込とそれ以外を分けた(2026-10-22)
   { key:'setBom', label:'セット構成' }
 ];

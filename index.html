@@ -16984,7 +16984,7 @@ function isUserBusy(){
 /* ---------- 開いている画面をアドレス(#のあと)に残す ----------
    再読み込みしてもトップ画面に戻らず、同じ画面(と画面内のタブ・作業記録で選んでいる人)を開き直すため。
    例: #role=adminHub&tab=financial / #role=input&staff=<スタッフID> / #role=shukei&site=tannan&tab=diff */
-var VIEW_URL_ROLES = ['input','report','monitor','achievements','history','adminHub','settingsHub','shukei','vcAlloc','cxOrder','dataHub','billing','stock','clientHub','wvImport'];
+var VIEW_URL_ROLES = ['input','report','monitor','achievements','history','adminHub','settingsHub','shukei','vcAlloc','cxOrder','dataHub','billing','stock','clientHub','wvImport','jodLabel'];
 function viewStateToHash(){
   if(!state.role) return '';
   var q = { role: state.role };
@@ -17111,6 +17111,7 @@ function render(){
   else if(state.role==='billing') html += renderBilling();
   else if(state.role==='stock') html += renderStockTab();
   else if(state.role==='wvImport') html += '<div class="mgr-wrap">'+renderCsvImportPanel()+'</div>';
+  else if(state.role==='jodLabel') html += '<div class="mgr-wrap">'+renderJodLabel()+'</div>';
   else if(state.role==='clientHub') html += renderClientHub();
   if(state.modal) html += renderModal();
   html += renderInstructionAlert();
@@ -17132,6 +17133,7 @@ function render(){
   if(state.role==='billing') bindBilling();
   if(state.role==='stock') bindStockTab();
   if(state.role==='wvImport') bindCsvImportPanel();
+  if(state.role==='jodLabel') bindJodLabel();
   if(state.role==='clientHub') bindClientHub();
   bindCsvButtons();
   document.querySelectorAll('[data-go-datahub]').forEach(function(el){
@@ -17556,12 +17558,13 @@ var COMMON_NAV_ITEMS = [
   { role:'vcAlloc', label:'VC引当', ic:'📦' },
   { role:'cxOrder', label:'入出庫指示', ic:'🚚' },
   { role:'stock', label:'在庫', ic:'🏢' },
-  { role:'wvImport', label:'作業量CSV取込', ic:'📥' } // だれでも取り込める(2026-11-09。前は管理の中)
+  { role:'wvImport', label:'作業量CSV取込', ic:'📥' }, // だれでも取り込める(2026-11-09。前は管理の中)
+  { role:'jodLabel', label:'JODラベル', ic:'🏷️' } // 発注データの CSV からラベルを印刷(2026-11-09)
 ];
 /* サイドバーのまとまり(トップのカードの並びと同じ)。管理の項目は鍵の印(ログインしていないとき) */
 var NAV_GROUPS = [
   { label:'現場', items:[ { role:'input' }, { role:'monitor' } ] },
-  { label:'事務所', items:[ { role:'wvImport', ic:'data' }, { role:'report' }, { role:'shukei' }, { role:'vcAlloc' }, { role:'cxOrder' }, { role:'stock' } ] },
+  { label:'事務所', items:[ { role:'wvImport', ic:'data' }, { role:'jodLabel', ic:'tag' }, { role:'report' }, { role:'shukei' }, { role:'vcAlloc' }, { role:'cxOrder' }, { role:'stock' } ] },
   { label:'管理', items:[ { role:'adminHub', tab:'stockData', label:'在庫・kintone取込', ic:'database', lock:true }, { role:'adminHub', lock:true }, { role:'adminHub', tab:'setBom', label:'セット構成', ic:'listChecks', lock:true }, { role:'clientHub', label:'荷主ページ', ic:'truck', lock:true }, { role:'settingsHub', lock:true }, { href:'factory.html', label:'生産管理', ic:'factory', lock:true } ] }
 ];
 var ADMIN_NAV_ITEMS = [
@@ -17594,6 +17597,7 @@ var LL_ICONS = {
   activity:'<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
   users:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   listChecks:'<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>',
+  tag:'<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/>',
   database:'<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>',
   alert:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   lock:'<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
@@ -17619,7 +17623,7 @@ document.addEventListener('click', function(ev){
   document.querySelectorAll('[data-theme-toggle]').forEach(function(x){ x.innerHTML = themeToggleInner(t==='dark'); });
 });
 function renderTopbar(){
-  var roleLabel = {wvImport:'作業量CSV取込', cxOrder:'入出庫指示', clientHub:'荷主ページ', manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'出荷集計表(高屋・丹南)', vcAlloc:'VC引当', stock:'在庫'}[state.role] || (state.role ? '' : 'ホーム');
+  var roleLabel = {wvImport:'作業量CSV取込', jodLabel:'JODラベル', cxOrder:'入出庫指示', clientHub:'荷主ページ', manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'出荷集計表(高屋・丹南)', vcAlloc:'VC引当', stock:'在庫'}[state.role] || (state.role ? '' : 'ホーム');
   var lockBtn = (hasManagerSession() && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="ログアウトする">🔓 ログアウト</button>' : '';
   // 共通ナビゲーション: どのページからでも他の主要ページへ直接移動できるようにする。
   // 管理者専用項目(管理者/設定)は、実際にログイン済みの場合のみ表示する
@@ -19744,6 +19748,118 @@ function renderManager(){
   '</div>';
 }
 
+/* 発注ラベル(2026-11-09): 発注データの CSV(JODH○○○.CSV。ﾒｰｶｰｺｰﾄﾞ・商品ｺｰﾄﾞ・品名・色柄・ﾒｰｶｰ品番・当日発注残…)を取り込んで、
+   A4 の 21面(3列×7段)にラベルを印刷する。1枚 = 「ﾒｰｶｰｺｰﾄﾞ-00」「商品ｺｰﾄﾞ」「品名 色柄」「ﾒｰｶｰ品番」。
+   枚数 = 数量(1ピース1枚)+ ケースに貼る分(1 + 入数を超えるごとに1。入数は商品台帳でﾒｰｶｰ品番を引く。分からなければ1)。CSV の並び順。
+   取り込んだ中身はこの端末の画面の中だけ(保存しない・通信しない。入数を商品台帳から読むだけ) */
+var JOD_QTY_COLS = [['zan','当日発注残'],['today','当日発注数']];
+function jodParseRows(rows){
+  var norm = function(s){ return String(s||'').normalize('NFKC').replace(/\s+/g,''); };
+  var hi = -1;
+  for(var i=0; i<Math.min(rows.length, 5); i++){ if(rows[i].some(function(h){ return norm(h)==='商品コード'; })){ hi = i; break; } }
+  if(hi<0) return { error: '「商品ｺｰﾄﾞ」の列が見つかりません(発注データの CSV か確かめてください)' };
+  var H = rows[hi].map(norm), col = function(n, d){ var k = H.indexOf(n); return k>=0 ? k : d; };
+  var C = { mk: col('メーカーコード', 0), code: col('商品コード', 2), name: col('品名', 3), color: col('色柄', 4), pn: col('メーカー品番', 5), zan: col('当日発注残', 6), today: col('当日発注数', 10) };
+  var clean = function(s){ return String(s||'').replace(/^[\s　]+|[\s　]+$/g,''); };
+  var num = function(s){ var n = Number(String(s||'').normalize('NFKC').replace(/,/g,'')); return isFinite(n) ? Math.max(0, Math.floor(n)) : 0; };
+  var out = [];
+  rows.slice(hi+1).forEach(function(r){
+    var code = clean(r[C.code]); if(!code) return;
+    out.push({ mk: clean(r[C.mk]), code: code, name: clean(r[C.name]), color: clean(r[C.color]), pn: clean(r[C.pn]), zan: num(r[C.zan]), today: num(r[C.today]) });
+  });
+  return { rows: out };
+}
+function jodPackOf(r){ var pm = state.shukeiPm && state.shukeiPm[r.pn]; return pm && pm.packQty>0 ? pm.packQty : null; }
+function jodRowCount(r, qcol){
+  var q = r[qcol] || 0, pack = jodPackOf(r), cases = q>0 ? (pack ? Math.ceil(q / pack) : 1) : 0;
+  return { qty: q, pack: pack, cases: cases, auto: q + cases };
+}
+function jodLabelCount(r, i, qcol){ var J = state.jodLabel, ov = J && J.over && J.over[i]; return (ov!==undefined && ov!==null && ov!=='') ? Math.max(0, Math.floor(Number(ov)||0)) : jodRowCount(r, qcol).auto; }
+function renderJodLabel(){
+  var J = state.jodLabel || (state.jodLabel = { file: null, rows: null, qcol: 'zan', start: 1, over: {}, msg: '' });
+  var html = '<div class="panel"><div class="panel-title">JODラベル</div>'+
+    '<div class="pool-hint" style="margin:0 0 10px;">発注データの CSV(JODH○○○.CSV)を取り込むと、A4 の 21面(3列×7段)のラベルに印刷します。<b>枚数 = 数量(1ピースに1枚)+ ケースに貼る分</b>(1枚。入数を超えるごとに1枚足す。入数は商品台帳でﾒｰｶｰ品番を引きます)。CSV の並び順で出します。<b>商品の区切り</b>が分かるよう、右上に「何枚目/その商品の枚数」を小さく入れ、商品の1枚目は黒地にします。取り込んだ中身は保存しません。</div>'+
+    '<div class="ll-form-group shukei-drop" data-jod-drop="1" style="margin:0 0 10px;">'+
+      '<div class="ll-form-group-title">発注データの取り込み</div>'+
+      '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 CSVを選んで取り込む<input type="file" id="jodFile" accept=".csv,.txt" style="display:none;"></label>'+
+      '<span class="shukei-drop-hint">またはCSVファイルをこの枠にドラッグ&ドロップ</span>'+
+      (J.msg ? '<div class="vc-import-status" style="margin-top:6px;">'+esc(J.msg)+'</div>' : '')+
+    '</div>';
+  if(!J.rows) return html+'</div>';
+  ensureShukeiProductMaster(J.rows.map(function(r){ return r.pn; }).filter(Boolean));
+  var total = 0, nNoPack = 0;
+  var body = J.rows.map(function(r, i){
+    var c = jodRowCount(r, J.qcol), n = jodLabelCount(r, i, J.qcol), ov = J.over[i];
+    total += n; if(c.qty>0 && !c.pack) nNoPack++;
+    return '<tr'+(c.qty ? '' : ' style="color:#98A2B3;"')+'><td class="sk-no">'+(i+1)+'</td><td class="sk-code">'+esc(r.code)+'</td><td>'+esc(r.name)+(r.color ? ' <span class="sk-minor">'+esc(r.color)+'</span>' : '')+'</td><td>'+esc(r.pn)+'</td>'+
+      '<td class="num"><b>'+formatNum(c.qty)+'</b></td><td class="num">'+(c.pack ? formatNum(c.pack) : (c.qty ? '<span class="sk-minor" style="color:#B54708;">不明</span>' : ''))+'</td><td class="num">'+(c.qty ? formatNum(c.cases) : '')+'</td>'+
+      '<td class="num"><input type="number" min="0" data-jod-over="'+i+'" value="'+(ov!==undefined && ov!=='' ? esc(String(ov)) : '')+'" placeholder="'+c.auto+'" style="width:64px;text-align:right;border:1px solid var(--paper-line);border-radius:6px;padding:3px 5px;'+(ov!==undefined && ov!=='' ? 'background:#FFFAEB;font-weight:700;' : '')+'"></td></tr>';
+  }).join('');
+  var start = Math.min(21, Math.max(1, Math.floor(Number(J.start)||1))), pages = Math.ceil((total + start - 1) / 21);
+  html += '<div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin:0 0 10px;">'+
+      '<div style="display:flex;flex-direction:column;gap:3px;"><span style="font-size:11px;color:var(--slate-500);">ファイル</span><div style="padding:8px 0;font-size:14px;font-weight:700;">'+esc(J.file||'')+'('+formatNum(J.rows.length)+'行)</div></div>'+
+      '<label style="display:flex;flex-direction:column;gap:3px;"><span style="font-size:11px;color:var(--slate-500);">数量に使う列</span><select id="jodQcol" style="border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:14px;">'+JOD_QTY_COLS.map(function(q){ return '<option value="'+q[0]+'"'+(J.qcol===q[0] ? ' selected' : '')+'>'+q[1]+'</option>'; }).join('')+'</select></label>'+
+      '<label style="display:flex;flex-direction:column;gap:3px;"><span style="font-size:11px;color:var(--slate-500);">1枚目に使う位置(1〜21・左上から横へ)</span><input type="number" id="jodStart" min="1" max="21" value="'+start+'" style="border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:14px;width:90px;"></label>'+
+      '<button type="button" class="add-btn" id="jodPrint"'+(total ? '' : ' disabled')+'>🖨 ラベルを印刷('+formatNum(total)+'枚・'+formatNum(pages)+'ページ)</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" id="jodClear">取り込みをやめる</button>'+
+    '</div>'+
+    (nNoPack ? '<div class="pool-hint" style="margin:0 0 8px;color:#B54708;">入数の分からない品番が '+nNoPack+' あります(ケースの分は1枚にしています。違うときは「枚数」を直してください)。</div>' : '')+
+    '<div class="pool-hint" style="margin:0 0 6px;">「枚数」は空なら自動(数量+ケース数)。数を入れると、その行はその枚数で印刷します。</div>'+
+    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th class="sk-no">No</th><th>商品ｺｰﾄﾞ</th><th>品名・色柄</th><th>ﾒｰｶｰ品番</th><th class="num">数量</th><th class="num">入数</th><th class="num">ケース</th><th class="num">枚数</th></tr></thead><tbody>'+body+
+      '<tr class="sk-total"><td></td><td colspan="6">合計</td><td class="num">'+formatNum(total)+'</td></tr></tbody></table></div>';
+  return html+'</div>';
+}
+function jodNameSize(t){
+  var w = 0; String(t).split('').forEach(function(ch){ w += /[\x20-\x7e｡-ﾟ]/.test(ch) ? 0.55 : 1; });
+  return Math.min(4.1, 64 / Math.max(1, w)).toFixed(2); // mm。ラベルの幅(70mm)に収める
+}
+function jodPrint(){
+  var J = state.jodLabel; if(!J || !J.rows) return;
+  var labels = [];
+  J.rows.forEach(function(r, i){
+    var n = jodLabelCount(r, i, J.qcol), nm = r.name+(r.color ? ' '+r.color : '');
+    for(var k=0; k<n; k++) labels.push({ a: r.mk+'-00', b: r.code, c: nm, d: r.pn, k: k+1, n: n }); // k/n: 商品の区切りの印
+  });
+  if(!labels.length){ appAlert('印刷するラベルがありません'); return; }
+  var start = Math.min(21, Math.max(1, Math.floor(Number(J.start)||1)));
+  var slots = new Array(start - 1).fill(null).concat(labels), pages = [];
+  for(var p=0; p<slots.length; p+=21) pages.push(slots.slice(p, p+21));
+  var W = 70, H = 297/7;
+  var html = pages.map(function(pg){
+    return '<div class="pg">'+pg.map(function(l, i){
+      if(!l) return '';
+      return '<div class="lb" style="left:'+((i % 3) * W).toFixed(2)+'mm;top:'+(Math.floor(i / 3) * H).toFixed(2)+'mm;"><div class="a">'+esc(l.a)+'</div><div class="b">'+esc(l.b)+'</div><div class="c" style="font-size:'+jodNameSize(l.c)+'mm;">'+esc(l.c)+'</div><div class="d">'+esc(l.d)+'</div><div class="n'+(l.k===1 ? ' n1' : '')+'">'+l.k+'/'+l.n+'</div></div>';
+    }).join('')+'</div>';
+  }).join('');
+  var css = '@page{size:A4 portrait;margin:0;} html,body{margin:0;padding:0;} .pg{position:relative;width:210mm;height:297mm;overflow:hidden;page-break-after:always;} .pg:last-child{page-break-after:auto;}'+
+    '.lb{position:absolute;width:'+W+'mm;height:'+H.toFixed(2)+'mm;font-family:"Meiryo","Yu Gothic",sans-serif;color:#000;line-height:1;} .lb div{position:absolute;white-space:nowrap;}'+
+    '.a{left:4.7mm;top:4.4mm;font-size:9mm;} .b{left:0;right:0;text-align:center;top:13.1mm;font-size:9.9mm;} .c{left:0;right:0;text-align:center;top:25.5mm;} .d{left:0;right:0;text-align:center;top:29.7mm;font-size:8.1mm;} .lb .n{right:3mm;top:4.6mm;font-size:3.2mm;font-family:Arial,sans-serif;padding:0.6mm 1.2mm;border:0.3mm solid #000;border-radius:1mm;} .lb .n1{background:#000;color:#fff;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact;}';
+  printHtmlDoc('JODラベル_'+(J.file||''), html, css);
+}
+function bindJodLabel(){
+  var J = state.jodLabel; if(!J) return;
+  var readOne = async function(file){
+    if(!file) return;
+    try{
+      var rows = await clientReadFile(file), r = jodParseRows(rows);
+      if(r.error){ J.msg = '⚠️ '+r.error; render(); return; }
+      J.file = file.name; J.rows = r.rows; J.over = {}; J.msg = '';
+    }catch(e){ J.msg = '⚠️ 読めませんでした: '+((e && e.message) || ''); }
+    render();
+  };
+  var fi = document.getElementById('jodFile');
+  if(fi) fi.addEventListener('change', function(){ readOne(fi.files && fi.files[0]); });
+  document.querySelectorAll('[data-jod-drop]').forEach(function(zone){
+    ['dragenter','dragover'].forEach(function(ev){ zone.addEventListener(ev, function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; zone.classList.add('is-dragover'); }); });
+    zone.addEventListener('dragleave', function(e){ if(!zone.contains(e.relatedTarget)) zone.classList.remove('is-dragover'); });
+    zone.addEventListener('drop', function(e){ e.preventDefault(); zone.classList.remove('is-dragover'); var f = e.dataTransfer && e.dataTransfer.files; if(f && f.length) readOne(f[0]); });
+  });
+  var q = document.getElementById('jodQcol'); if(q) q.addEventListener('change', function(){ J.qcol = q.value; render(); });
+  var s = document.getElementById('jodStart'); if(s) s.addEventListener('change', function(){ J.start = s.value; render(); });
+  document.querySelectorAll('[data-jod-over]').forEach(function(el){ el.addEventListener('change', function(){ J.over[el.getAttribute('data-jod-over')] = el.value; render(); }); });
+  var pb = document.getElementById('jodPrint'); if(pb) pb.addEventListener('click', jodPrint);
+  var cb = document.getElementById('jodClear'); if(cb) cb.addEventListener('click', function(){ J.rows = null; J.file = null; J.over = {}; render(); });
+}
 function renderCsvImportPanel(){
   var wvTargetDate = state.wvTargetDate || todayStr();
   var workVolumePanel = '';

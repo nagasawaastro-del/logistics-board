@@ -15814,10 +15814,33 @@ function outlookEstimateLines(ol, opt){
     var rk = outlookRoundKey(x.subject); if(rk) newer(latest, x.party+'|'+rk, x.recordId);
     if(isFc(x)) newer(latestFc, x.party+'|'+x.code, x.recordId);
   });
+  /* 作り直した見積もり(2026-11-10): 同じ得意先・同じ件名(「○月○回」の無いもの)の見積もりを見積日ごとにまとめ、
+     新しい日のまとまりが古い日のまとまりの品番の9割以上を同じ数で含んでいれば、古いほうは作り直す前とみなして数えない。
+     (例: アマゾン「月曜PO12月頭」が 12/1 と 12/2 に同じ中身で入っていた。1回分が明細の多さで2〜3件に分かれるので、件ではなく日でまとめる。
+      中身の重ならない同じ件名の PO(「月曜PO出荷予定数」など)は全部数える) */
+  var subjKey = function(x){ return x.party+'|'+String(x.subject||'').normalize('NFKC').trim(); };
+  var batches = {};
+  est.forEach(function(x){
+    if(!x.subject || outlookRoundKey(x.subject) || isFc(x)) return;
+    var g = batches[subjKey(x)] || (batches[subjKey(x)] = {}), b = g[x.date] || (g[x.date] = {});
+    b[x.code] = (b[x.code]||0) + (Number(x.qty)||0);
+  });
+  var replaced = {};
+  Object.keys(batches).forEach(function(k){
+    var g = batches[k], ds = Object.keys(g).sort();
+    ds.forEach(function(d, i){
+      var A = g[d], ka = Object.keys(A);
+      for(var j=i+1; j<ds.length; j++){
+        var B = g[ds[j]], same = ka.filter(function(c){ return B[c]===A[c]; }).length;
+        if(same>=2 && same >= ka.length*0.9){ replaced[k+'|'+d] = true; break; }
+      }
+    });
+  });
   var old = 0, forecast = 0, out = [];
   est.forEach(function(x){
     var rk = outlookRoundKey(x.subject);
     if(rk && String(latest[x.party+'|'+rk])!==String(x.recordId)){ old++; return; }
+    if(replaced[subjKey(x)+'|'+x.date]){ old++; return; }
     if(isFc(x)){
       if(String(latestFc[x.party+'|'+x.code])!==String(x.recordId)){ old++; return; }
       forecast++;
@@ -16579,7 +16602,7 @@ function renderStockOutlook(st){
     }).join('') || '<tr><td colspan="5" class="empty-note">見積もりの入っていない在庫はありません</td></tr>')+
     '</tbody></table></div>'+(o.noEst.length>LIMIT ? '<div class="pool-hint">ほか '+formatNum(o.noEst.length-LIMIT)+'品番(CSV出力で全部)</div>' : '');
   return sync+cards+tblA+tblB+tblC+
-    '<div class="pool-hint" style="margin-top:10px;">今の在庫 = ロジザードの在庫('+esc(fmtDateTime(st.lz.uploadedAt))+'取込)から引当数を除いた数(ピース)。見積もり = kintone の見積もりアプリ(956)の明細の数量(スタンプは見ない。明細の日付が今日以降の行を、その日に在庫から出ていくとみなす。明細に日付が無ければ見積日)。アマゾン・楽天の需要予測も数えます(同じ品番は最新の予測だけ。明細に日付の無い予測は、見積日から4か月のあいだ週ごとに均等に割って数えます)。入荷予定 = 発注履歴アプリ(949)の、仕入番号の入っていない(まだ入荷していない)発注の数量。高屋・丹南(発送先・倉庫コード 0018・0000)以外の明細と、98・99で始まる品番(作業費・送料など)は数えません。納入期日に入荷するとみなし、納入期日を過ぎた物は「遅れ」として今日に数えます(60日より前は除く)。'+
+    '<div class="pool-hint" style="margin-top:10px;">今の在庫 = ロジザードの在庫('+esc(fmtDateTime(st.lz.uploadedAt))+'取込)から引当数を除いた数(ピース)。見積もり = kintone の見積もりアプリ(956)の明細の数量(スタンプは見ない。明細の日付が今日以降の行を、その日に在庫から出ていくとみなす。明細に日付が無ければ見積日)。アマゾン・楽天の需要予測も数えます(同じ品番は最新の予測だけ。明細に日付の無い予測は、見積日から4か月のあいだ週ごとに均等に割って数えます)。同じ件名で中身がほぼ同じ見積もりが別の日にもあれば、新しい日の分だけ数えます(作り直し)。入荷予定 = 発注履歴アプリ(949)の、仕入番号の入っていない(まだ入荷していない)発注の数量。高屋・丹南(発送先・倉庫コード 0018・0000)以外の明細と、98・99で始まる品番(作業費・送料など)は数えません。納入期日に入荷するとみなし、納入期日を過ぎた物は「遅れ」として今日に数えます(60日より前は除く)。'+
     '拠点は明細の倉庫コード(高屋 0018・丹南 0000)で分けます(倉庫コードの無い明細は「全部」のときだけ数えます)。1日の出荷は、作業量CSVの出荷記録('+((st.ship||{}).days||0)+'日分)からの目安です。</div>';
 }
 /* 在庫 →「外部から戻す」(2026-10-22): ロジザードの在庫では今日〜2か月の見積に足りず、外部倉庫(弥生の高屋・丹南以外の倉庫)にある品番。

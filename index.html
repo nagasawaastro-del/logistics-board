@@ -12796,7 +12796,24 @@ function vcAllocArrival(p){
   var L = A.byCode[p.code] || [], total = L.reduce(function(a, x){ return a + (Number(x[2])||0); }, 0);
   var dl = function(x){ var w = outlookSiteOfWarehouse(x[4]); return (x[5] ? '遅れ('+String(x[5]).slice(5).replace('-','/')+')' : String(x[1]).slice(5).replace('-','/'))+' '+formatNum(x[2])+'個'+(w ? '('+SHUKEI_SITES[w].name+')' : ''); };
   var left = p.qty - Math.max(0, p.takaya) - Math.max(0, p.tannan) - total;
-  return { lines: L.map(dl), total: total, known: true, left: left, text: L.length ? L.map(dl).join('、')+(left>0 ? ' 入荷しても '+formatNum(left)+'足りない' : ' 入荷で足りる') : '入荷予定なし' };
+  var parts = L.length ? null : vcAllocPartsCheck(p, Math.max(0, left));
+  return { lines: L.map(dl), total: total, known: true, left: left, parts: parts, text: L.length ? L.map(dl).join('、')+(left>0 ? ' 入荷しても '+formatNum(left)+'足りない' : ' 入荷で足りる') : '入荷予定なし'+(parts ? '(部品: '+parts.verdict+' '+parts.items.map(function(it){ return it.code+' '+it.text; }).join('・')+')' : '') };
+}
+/* 入荷予定の無い品番は、セット構成の部品の在庫と入荷予定を見る(2026-11-09)。need = 足りない数(在庫で出せない分) */
+function vcAllocPartsCheck(p, need){
+  var pats = setBomPatterns(((state.setBom && state.setBom.sets) || {})[p.code]);
+  if(!pats.length || !(need > 0)) return null;
+  var A = state.vcArrival, pt = pats[0], run = setBomRun(need, pt), nShort = 0, nWait = 0;
+  var items = pt.items.map(function(it){
+    var n = (Number(it.qty)||0) * run.runs, sv = setBomStockFor(it.code, n), st = logiStockOf(it.code);
+    var L = (A && A.byCode[it.code]) || [], tot = L.reduce(function(a, x){ return a + (Number(x[2])||0); }, 0);
+    var have = st ? st.tk + st.tn : 0, arr = L.map(function(x){ return (x[5] ? '遅れ' : String(x[1]).slice(5).replace('-','/'))+' '+formatNum(x[2]); }).join('、');
+    var state0 = !sv.short ? 'ok' : (sv.made ? 'ok' : (!sv.allShort ? 'ok' : (have + tot >= n ? 'wait' : 'short')));
+    if(state0==='wait') nWait++; if(state0==='short') nShort++;
+    var text = sv.made ? sv.text : (state0==='ok' ? '在庫あり('+formatNum(have)+')' : '在庫 '+formatNum(have)+'/'+formatNum(n)+(L.length ? '・入荷 '+arr : '・入荷予定なし'));
+    return { code: it.code, name: (st && st.name) || it.name || '', need: n, st: state0, text: text };
+  });
+  return { need: need, items: items, verdict: nShort ? '部品も足りない' : (nWait ? '部品の入荷を待てば作れる' : '部品の在庫で作れる'), level: nShort ? 'short' : (nWait ? 'wait' : 'ok') };
 }
 function vcAllocOtherRows(calc, kind){
   var by = {}; calc.products.forEach(function(p){ by[p.code] = p; });
@@ -13293,7 +13310,15 @@ function renderVcAllocTable(calc, kind){
     if(p.auto) return '<td></td>'; // 在庫が足りる品番には出さない
     var a = vcAllocArrival(p);
     if(!a.known) return '<td class="sk-minor">次の kintone の同期で出ます</td>';
-    if(!a.lines.length) return '<td style="color:#B42318;font-weight:700;white-space:nowrap;">入荷予定なし</td>';
+    if(!a.lines.length){
+      var P = a.parts;
+      if(!P) return '<td style="color:#B42318;font-weight:700;white-space:nowrap;">入荷予定なし</td>';
+      var col = { ok:'#067647', wait:'#B54708', short:'#B42318' };
+      return '<td style="font-size:12px;min-width:180px;"><div style="color:#B42318;font-weight:700;white-space:nowrap;">入荷予定なし</div>'+
+        '<div style="font-weight:700;color:'+col[P.level]+';">🧩 '+esc(P.verdict)+'</div>'+
+        '<div class="sk-minor">足りない '+formatNum(P.need)+'個分の部品</div>'+
+        P.items.map(function(it){ return '<div style="white-space:nowrap;"><b>'+esc(it.code)+'</b> ×'+formatNum(it.need)+' <span style="color:'+col[it.st]+';'+(it.st!=='ok' ? 'font-weight:700;' : '')+'">'+esc(it.text)+'</span></div>'; }).join('')+'</td>';
+    }
     return '<td style="white-space:nowrap;font-size:12px;">'+a.lines.slice(0, 3).map(function(x){ return '<div>'+esc(x)+'</div>'; }).join('')+(a.lines.length>3 ? '<div class="sk-minor">ほか'+(a.lines.length-3)+'件</div>' : '')+'<div style="font-weight:700;color:'+(a.left>0 ? '#B42318' : '#067647')+';">'+(a.left>0 ? '入荷しても '+formatNum(a.left)+' 足りない' : '入荷で足りる')+'</div></td>';
   };
   var sumQty = 0;

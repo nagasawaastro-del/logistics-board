@@ -19751,7 +19751,8 @@ function renderManager(){
 /* 発注ラベル(2026-11-09): 発注データの CSV(JODH○○○.CSV。ﾒｰｶｰｺｰﾄﾞ・商品ｺｰﾄﾞ・品名・色柄・ﾒｰｶｰ品番・当日発注残…)を取り込んで、
    A4 の 21面(3列×7段)にラベルを印刷する。1枚 = 「ﾒｰｶｰｺｰﾄﾞ-00」「商品ｺｰﾄﾞ」「品名 色柄」「ﾒｰｶｰ品番」。
    枚数 = 数量(1ピース1枚)+ ケースに貼る分(1 + 入数を超えるごとに1。入数は商品台帳でﾒｰｶｰ品番を引く。分からなければ1)。CSV の並び順。
-   取り込んだ中身はこの端末の画面の中だけ(保存しない・通信しない。入数を商品台帳から読むだけ) */
+   取り込んだ中身はこの端末の画面の中だけ(保存しない・通信しない。入数を商品台帳から読むだけ)
+   2026-11-09: 倉庫(1号・2号)ごとに、アストロ品番(ﾒｰｶｰ品番)の順で出す(★JOD出荷の「アストロ品番1号/2号」のシートと同じ並び)。Excel(★JOD出荷の「JOD受注」のシート)も読む。右上の枚数の印は出す・出さないを選ぶ */
 var JOD_QTY_COLS = [['zan','当日発注残'],['today','当日発注数']];
 function jodParseRows(rows){
   var norm = function(s){ return String(s||'').normalize('NFKC').replace(/\s+/g,''); };
@@ -19759,15 +19760,42 @@ function jodParseRows(rows){
   for(var i=0; i<Math.min(rows.length, 5); i++){ if(rows[i].some(function(h){ return norm(h)==='商品コード'; })){ hi = i; break; } }
   if(hi<0) return { error: '「商品ｺｰﾄﾞ」の列が見つかりません(発注データの CSV か確かめてください)' };
   var H = rows[hi].map(norm), col = function(n, d){ var k = H.indexOf(n); return k>=0 ? k : d; };
-  var C = { mk: col('メーカーコード', 0), code: col('商品コード', 2), name: col('品名', 3), color: col('色柄', 4), pn: col('メーカー品番', 5), zan: col('当日発注残', 6), today: col('当日発注数', 10) };
+  var C = { wh: col('倉庫', 1), mk: col('メーカーコード', 0), code: col('商品コード', 2), name: col('品名', 3), color: col('色柄', 4), pn: col('メーカー品番', 5), zan: col('当日発注残', 6), today: col('当日発注数', 10) };
   var clean = function(s){ return String(s||'').replace(/^[\s　]+|[\s　]+$/g,''); };
   var num = function(s){ var n = Number(String(s||'').normalize('NFKC').replace(/,/g,'')); return isFinite(n) ? Math.max(0, Math.floor(n)) : 0; };
   var out = [];
   rows.slice(hi+1).forEach(function(r){
     var code = clean(r[C.code]); if(!code) return;
-    out.push({ mk: clean(r[C.mk]), code: code, name: clean(r[C.name]), color: clean(r[C.color]), pn: clean(r[C.pn]), zan: num(r[C.zan]), today: num(r[C.today]) });
+    if(!/^\d+$/.test(code.normalize('NFKC'))) return; // 合計や式のエラー(#N/A など)の行は飛ばす
+    out.push({ wh: clean(r[C.wh]).normalize('NFKC'), mk: clean(r[C.mk]), code: code, name: clean(r[C.name]), color: clean(r[C.color]), pn: clean(r[C.pn]), zan: num(r[C.zan]), today: num(r[C.today]) });
   });
+  if(H.indexOf('メーカーコード')<0) return { error: '「ﾒｰｶｰｺｰﾄﾞ」の列が見つかりません', rows: out };
   return { rows: out };
+}
+/* CSV はそのまま。Excel は「ﾒｰｶｰｺｰﾄﾞ」と「商品ｺｰﾄﾞ」のあるシート(★JOD出荷 なら「JOD受注」)を探す */
+async function jodReadFile(file){
+  if(/\.(xlsx|xlsm|xls)$/i.test(file.name)){
+    var X = await clientLoadXlsx(), wb = X.read(await file.arrayBuffer(), { type: 'array' });
+    for(var k=0; k<wb.SheetNames.length; k++){
+      var rows = X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[k]], { header: 1, raw: false, defval: '' }).map(function(r){ return r.map(function(v){ return String(v===null||v===undefined ? '' : v).trim(); }); });
+      var r = jodParseRows(rows);
+      if(!r.error && r.rows.length) return r;
+    }
+    return { error: '「ﾒｰｶｰｺｰﾄﾞ」「商品ｺｰﾄﾞ」の列のあるシートが見つかりません' };
+  }
+  return jodParseRows(await clientReadFile(file));
+}
+function jodMarkOn(){ try{ return localStorage.getItem('jod-mark')!=='0'; }catch(e){ return true; } }
+/* 表と印刷の行: 選んだ倉庫の行を、アストロ品番の順(またはファイルの並び順)に。i = 取り込んだ行の番号(枚数の手直しの印) */
+function jodView(J){
+  var v = J.rows.map(function(r, i){ return { r: r, i: i }; }).filter(function(x){ return !J.wh || x.r.wh===J.wh; });
+  var wo = function(x){ var n = Number(x.r.wh); return isFinite(n) && x.r.wh!=='' ? n : 999; }; // 全部のときは 1号 → 2号 の順(倉庫ごとに続けて出す)
+  v.sort(function(a, b){
+    if(!J.wh && wo(a)!==wo(b)) return wo(a) - wo(b);
+    if(J.order!=='astro') return a.i - b.i;
+    var x = a.r.pn.toUpperCase(), y = b.r.pn.toUpperCase(); return x<y ? -1 : x>y ? 1 : a.i-b.i;
+  });
+  return v;
 }
 function jodPackOf(r){ var pm = state.shukeiPm && state.shukeiPm[r.pn]; return pm && pm.packQty>0 ? pm.packQty : null; }
 function jodRowCount(r, qcol){
@@ -19776,37 +19804,44 @@ function jodRowCount(r, qcol){
 }
 function jodLabelCount(r, i, qcol){ var J = state.jodLabel, ov = J && J.over && J.over[i]; return (ov!==undefined && ov!==null && ov!=='') ? Math.max(0, Math.floor(Number(ov)||0)) : jodRowCount(r, qcol).auto; }
 function renderJodLabel(){
-  var J = state.jodLabel || (state.jodLabel = { file: null, rows: null, qcol: 'zan', start: 1, over: {}, msg: '' });
+  var J = state.jodLabel || (state.jodLabel = { file: null, rows: null, qcol: 'zan', start: 1, over: {}, msg: '', wh: '', order: 'astro' });
   var html = '<div class="panel"><div class="panel-title">JODラベル</div>'+
-    '<div class="pool-hint" style="margin:0 0 10px;">発注データの CSV(JODH○○○.CSV)を取り込むと、A4 の 21面(3列×7段)のラベルに印刷します。<b>枚数 = 数量(1ピースに1枚)+ ケースに貼る分</b>(1枚。入数を超えるごとに1枚足す。入数は商品台帳でﾒｰｶｰ品番を引きます)。CSV の並び順で出します。<b>商品の区切り</b>が分かるよう、右上に「何枚目/その商品の枚数」を小さく入れ、商品の1枚目は黒地にします。取り込んだ中身は保存しません。</div>'+
+    '<div class="pool-hint" style="margin:0 0 10px;">発注データの CSV(JODH○○○.CSV)か、★JOD出荷の Excel を取り込むと、<b>倉庫(1号・2号)ごとに、アストロ品番の順</b>で A4 の 21面(3列×7段)のラベルに印刷します。<b>枚数 = 数量(1ピースに1枚)+ ケースに貼る分</b>(1枚。入数を超えるごとに1枚足す。入数は商品台帳でﾒｰｶｰ品番を引きます)。右上の「何枚目/その商品の枚数」(商品の1枚目は黒地)は、出す・出さないを選べます。取り込んだ中身は保存しません。</div>'+
     '<div class="ll-form-group shukei-drop" data-jod-drop="1" style="margin:0 0 10px;">'+
       '<div class="ll-form-group-title">発注データの取り込み</div>'+
-      '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 CSVを選んで取り込む<input type="file" id="jodFile" accept=".csv,.txt" style="display:none;"></label>'+
-      '<span class="shukei-drop-hint">またはCSVファイルをこの枠にドラッグ&ドロップ</span>'+
+      '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 ファイルを選んで取り込む<input type="file" id="jodFile" accept=".csv,.txt,.xlsx,.xlsm,.xls" style="display:none;"></label>'+
+      '<span class="shukei-drop-hint">またはファイルをこの枠にドラッグ&ドロップ(CSV・Excel)</span>'+
       (J.msg ? '<div class="vc-import-status" style="margin-top:6px;">'+esc(J.msg)+'</div>' : '')+
     '</div>';
   if(!J.rows) return html+'</div>';
   ensureShukeiProductMaster(J.rows.map(function(r){ return r.pn; }).filter(Boolean));
-  var total = 0, nNoPack = 0;
-  var body = J.rows.map(function(r, i){
+  var total = 0, nNoPack = 0, view = jodView(J);
+  var nWh = function(w){ return J.rows.filter(function(r){ return r.wh===w; }).length; };
+  var whs = ['1','2'].concat(J.rows.map(function(r){ return r.wh; }).filter(function(w, k, a){ return w && w!=='1' && w!=='2' && a.indexOf(w)===k; }));
+  var whSwitch = '<div class="sub-switch" style="margin:0 0 10px;"><button type="button" class="sub-switch-btn'+(!J.wh ? ' active' : '')+'" data-jod-wh="">全部(1号 → 2号の順・'+J.rows.length+'行)</button>'+whs.map(function(w){ return '<button type="button" class="sub-switch-btn'+(J.wh===w ? ' active' : '')+'" data-jod-wh="'+esc(w)+'">'+esc(w)+'号('+nWh(w)+'行)</button>'; }).join('')+'</div>';
+  var body = view.map(function(x, no){
+    var r = x.r, i = x.i;
     var c = jodRowCount(r, J.qcol), n = jodLabelCount(r, i, J.qcol), ov = J.over[i];
     total += n; if(c.qty>0 && !c.pack) nNoPack++;
-    return '<tr'+(c.qty ? '' : ' style="color:#98A2B3;"')+'><td class="sk-no">'+(i+1)+'</td><td class="sk-code">'+esc(r.code)+'</td><td>'+esc(r.name)+(r.color ? ' <span class="sk-minor">'+esc(r.color)+'</span>' : '')+'</td><td>'+esc(r.pn)+'</td>'+
+    return '<tr'+(c.qty ? '' : ' style="color:#98A2B3;"')+'><td class="sk-no">'+(no+1)+'</td><td>'+esc(r.wh ? r.wh+'号' : '')+'</td><td class="sk-code">'+esc(r.code)+'</td><td>'+esc(r.name)+(r.color ? ' <span class="sk-minor">'+esc(r.color)+'</span>' : '')+'</td><td>'+esc(r.pn)+'</td>'+
       '<td class="num"><b>'+formatNum(c.qty)+'</b></td><td class="num">'+(c.pack ? formatNum(c.pack) : (c.qty ? '<span class="sk-minor" style="color:#B54708;">不明</span>' : ''))+'</td><td class="num">'+(c.qty ? formatNum(c.cases) : '')+'</td>'+
       '<td class="num"><input type="number" min="0" data-jod-over="'+i+'" value="'+(ov!==undefined && ov!=='' ? esc(String(ov)) : '')+'" placeholder="'+c.auto+'" style="width:64px;text-align:right;border:1px solid var(--paper-line);border-radius:6px;padding:3px 5px;'+(ov!==undefined && ov!=='' ? 'background:#FFFAEB;font-weight:700;' : '')+'"></td></tr>';
   }).join('');
   var start = Math.min(21, Math.max(1, Math.floor(Number(J.start)||1))), pages = Math.ceil((total + start - 1) / 21);
-  html += '<div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin:0 0 10px;">'+
+  var F = 'display:flex;flex-direction:column;gap:3px;', L = 'font-size:11px;color:var(--slate-500);', I = 'border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:14px;';
+  html += whSwitch+'<div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin:0 0 10px;">'+
       '<div style="display:flex;flex-direction:column;gap:3px;"><span style="font-size:11px;color:var(--slate-500);">ファイル</span><div style="padding:8px 0;font-size:14px;font-weight:700;">'+esc(J.file||'')+'('+formatNum(J.rows.length)+'行)</div></div>'+
+      '<label style="'+F+'"><span style="'+L+'">並び順</span><select id="jodOrder" style="'+I+'"><option value="astro"'+(J.order==='astro' ? ' selected' : '')+'>アストロ品番の順</option><option value="file"'+(J.order==='file' ? ' selected' : '')+'>ファイルの並び順</option></select></label>'+
       '<label style="display:flex;flex-direction:column;gap:3px;"><span style="font-size:11px;color:var(--slate-500);">数量に使う列</span><select id="jodQcol" style="border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:14px;">'+JOD_QTY_COLS.map(function(q){ return '<option value="'+q[0]+'"'+(J.qcol===q[0] ? ' selected' : '')+'>'+q[1]+'</option>'; }).join('')+'</select></label>'+
       '<label style="display:flex;flex-direction:column;gap:3px;"><span style="font-size:11px;color:var(--slate-500);">1枚目に使う位置(1〜21・左上から横へ)</span><input type="number" id="jodStart" min="1" max="21" value="'+start+'" style="border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:14px;width:90px;"></label>'+
-      '<button type="button" class="add-btn" id="jodPrint"'+(total ? '' : ' disabled')+'>🖨 ラベルを印刷('+formatNum(total)+'枚・'+formatNum(pages)+'ページ)</button>'+
+      '<label style="'+F+'"><span style="'+L+'">右上の枚数の印</span><span style="padding:8px 0;font-size:14px;"><input type="checkbox" id="jodMark"'+(jodMarkOn() ? ' checked' : '')+'> 出す</span></label>'+
+      '<button type="button" class="add-btn" id="jodPrint"'+(total ? '' : ' disabled')+'>🖨 '+(J.wh ? esc(J.wh)+'号の' : '1号・2号の')+'ラベルを印刷('+formatNum(total)+'枚・'+formatNum(pages)+'ページ)</button>'+
       '<button type="button" class="vc-manage-toggle-btn" id="jodClear">取り込みをやめる</button>'+
     '</div>'+
     (nNoPack ? '<div class="pool-hint" style="margin:0 0 8px;color:#B54708;">入数の分からない品番が '+nNoPack+' あります(ケースの分は1枚にしています。違うときは「枚数」を直してください)。</div>' : '')+
     '<div class="pool-hint" style="margin:0 0 6px;">「枚数」は空なら自動(数量+ケース数)。数を入れると、その行はその枚数で印刷します。</div>'+
-    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th class="sk-no">No</th><th>商品ｺｰﾄﾞ</th><th>品名・色柄</th><th>ﾒｰｶｰ品番</th><th class="num">数量</th><th class="num">入数</th><th class="num">ケース</th><th class="num">枚数</th></tr></thead><tbody>'+body+
-      '<tr class="sk-total"><td></td><td colspan="6">合計</td><td class="num">'+formatNum(total)+'</td></tr></tbody></table></div>';
+    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th class="sk-no">No</th><th>倉庫</th><th>商品ｺｰﾄﾞ</th><th>品名・色柄</th><th>ﾒｰｶｰ品番</th><th class="num">数量</th><th class="num">入数</th><th class="num">ケース</th><th class="num">枚数</th></tr></thead><tbody>'+body+
+      '<tr class="sk-total"><td></td><td colspan="7">合計</td><td class="num">'+formatNum(total)+'</td></tr></tbody></table></div>';
   return html+'</div>';
 }
 function jodNameSize(t){
@@ -19816,32 +19851,33 @@ function jodNameSize(t){
 function jodPrint(){
   var J = state.jodLabel; if(!J || !J.rows) return;
   var labels = [];
-  J.rows.forEach(function(r, i){
+  jodView(J).forEach(function(x){
+    var r = x.r, i = x.i;
     var n = jodLabelCount(r, i, J.qcol), nm = r.name+(r.color ? ' '+r.color : '');
-    for(var k=0; k<n; k++) labels.push({ a: r.mk+'-00', b: r.code, c: nm, d: r.pn, k: k+1, n: n }); // k/n: 商品の区切りの印
+    for(var k=0; k<n; k++) labels.push({ a: r.mk, b: r.code, c: nm, d: r.pn, k: k+1, n: n }); // k/n: 商品の区切りの印
   });
   if(!labels.length){ appAlert('印刷するラベルがありません'); return; }
   var start = Math.min(21, Math.max(1, Math.floor(Number(J.start)||1)));
   var slots = new Array(start - 1).fill(null).concat(labels), pages = [];
   for(var p=0; p<slots.length; p+=21) pages.push(slots.slice(p, p+21));
-  var W = 70, H = 297/7;
+  var W = 70, H = 297/7, mark = jodMarkOn();
   var html = pages.map(function(pg){
     return '<div class="pg">'+pg.map(function(l, i){
       if(!l) return '';
-      return '<div class="lb" style="left:'+((i % 3) * W).toFixed(2)+'mm;top:'+(Math.floor(i / 3) * H).toFixed(2)+'mm;"><div class="a">'+esc(l.a)+'</div><div class="b">'+esc(l.b)+'</div><div class="c" style="font-size:'+jodNameSize(l.c)+'mm;">'+esc(l.c)+'</div><div class="d">'+esc(l.d)+'</div><div class="n'+(l.k===1 ? ' n1' : '')+'">'+l.k+'/'+l.n+'</div></div>';
+      return '<div class="lb" style="left:'+((i % 3) * W).toFixed(2)+'mm;top:'+(Math.floor(i / 3) * H).toFixed(2)+'mm;"><div class="a">'+esc(l.a)+'</div><div class="b">'+esc(l.b)+'</div><div class="c" style="font-size:'+jodNameSize(l.c)+'mm;">'+esc(l.c)+'</div><div class="d">'+esc(l.d)+'</div>'+(mark ? '<div class="n'+(l.k===1 ? ' n1' : '')+'">'+l.k+'/'+l.n+'</div>' : '')+'</div>';
     }).join('')+'</div>';
   }).join('');
   var css = '@page{size:A4 portrait;margin:0;} html,body{margin:0;padding:0;} .pg{position:relative;width:210mm;height:297mm;overflow:hidden;page-break-after:always;} .pg:last-child{page-break-after:auto;}'+
     '.lb{position:absolute;width:'+W+'mm;height:'+H.toFixed(2)+'mm;font-family:"Meiryo","Yu Gothic",sans-serif;color:#000;line-height:1;} .lb div{position:absolute;white-space:nowrap;}'+
-    '.a{left:4.7mm;top:4.4mm;font-size:9mm;} .b{left:4.7mm;top:13.1mm;font-size:9.9mm;} .c{left:4.7mm;top:25.5mm;} .d{left:4.7mm;top:29.7mm;font-size:8.1mm;} .lb .n{right:3mm;top:4.6mm;font-size:3.2mm;font-family:Arial,sans-serif;padding:0.6mm 1.2mm;border:0.3mm solid #000;border-radius:1mm;} .lb .n1{background:#000;color:#fff;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact;}';
-  printHtmlDoc('JODラベル_'+(J.file||''), html, css);
+    '.a{left:4.7mm;top:4.2mm;font-size:6.5mm;} .b{left:4.7mm;top:11.2mm;font-size:12.5mm;} .c{left:4.7mm;top:25.8mm;} .d{left:4.7mm;top:30.6mm;font-size:6.6mm;} .lb .n{right:3mm;top:4.6mm;font-size:3.2mm;font-family:Arial,sans-serif;padding:0.6mm 1.2mm;border:0.3mm solid #000;border-radius:1mm;} .lb .n1{background:#000;color:#fff;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact;}';
+  printHtmlDoc('JODラベル_'+(J.wh ? J.wh+'号_' : '')+(J.file||''), html, css);
 }
 function bindJodLabel(){
   var J = state.jodLabel; if(!J) return;
   var readOne = async function(file){
     if(!file) return;
     try{
-      var rows = await clientReadFile(file), r = jodParseRows(rows);
+      var r = await jodReadFile(file);
       if(r.error){ J.msg = '⚠️ '+r.error; render(); return; }
       J.file = file.name; J.rows = r.rows; J.over = {}; J.msg = '';
     }catch(e){ J.msg = '⚠️ 読めませんでした: '+((e && e.message) || ''); }
@@ -19856,6 +19892,9 @@ function bindJodLabel(){
   });
   var q = document.getElementById('jodQcol'); if(q) q.addEventListener('change', function(){ J.qcol = q.value; render(); });
   var s = document.getElementById('jodStart'); if(s) s.addEventListener('change', function(){ J.start = s.value; render(); });
+  var o = document.getElementById('jodOrder'); if(o) o.addEventListener('change', function(){ J.order = o.value; render(); });
+  var mk = document.getElementById('jodMark'); if(mk) mk.addEventListener('change', function(){ try{ localStorage.setItem('jod-mark', mk.checked ? '1' : '0'); }catch(e){} render(); });
+  document.querySelectorAll('[data-jod-wh]').forEach(function(el){ el.addEventListener('click', function(){ J.wh = el.getAttribute('data-jod-wh'); render(); }); });
   document.querySelectorAll('[data-jod-over]').forEach(function(el){ el.addEventListener('change', function(){ J.over[el.getAttribute('data-jod-over')] = el.value; render(); }); });
   var pb = document.getElementById('jodPrint'); if(pb) pb.addEventListener('click', jodPrint);
   var cb = document.getElementById('jodClear'); if(cb) cb.addEventListener('click', function(){ J.rows = null; J.file = null; J.over = {}; render(); });

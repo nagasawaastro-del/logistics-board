@@ -11265,6 +11265,14 @@ function bindClientHub(){
   var c = clientDataState(), cl = clientCur();
   document.querySelectorAll('[data-client-tab]').forEach(function(el){ el.addEventListener('click', function(){ state.clientTab = el.getAttribute('data-client-tab'); render(); }); });
   var tab = state.clientTab || 'dash';
+  /* 明細(折りたたみ)の開き具合を、タブを切り替えても・描き直しても残す(見出しの文字で見分ける。行数などの( )は除く。2026-11-09) */
+  var dOpen = state.clientDetailsOpen || (state.clientDetailsOpen = {});
+  document.querySelectorAll('.client-hub details').forEach(function(el){
+    var sm = el.querySelector('summary'); if(!sm) return;
+    var key = tab+':'+(el.getAttribute('data-cd-fold') || sm.textContent.replace(/[(（][^)）]*[)）]/g, '').trim());
+    if(key in dOpen) el.open = dOpen[key];
+    el.addEventListener('toggle', function(){ dOpen[key] = el.open; });
+  });
   bindClientData(); // 荷主の選択・登録(上の行)と、取込のタブ
   if(!cl || (tab!=='dash' && tab!=='bill' && tab!=='set' && tab!=='rates')) return;
   var mo = document.getElementById('chMonth');

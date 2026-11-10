@@ -19856,7 +19856,7 @@ function jodLabelCount(r, i, qcol){ var J = state.jodLabel, ov = J && J.over && 
 function renderJodLabel(){
   var J = state.jodLabel || (state.jodLabel = { file: null, rows: null, qcol: 'zan', start: 1, over: {}, msg: '', wh: '', order: 'astro' });
   var html = '<div class="panel"><div class="panel-title">JODラベル</div>'+
-    '<div class="pool-hint" style="margin:0 0 10px;">発注データの CSV(JODH○○○.CSV)か、★JOD出荷の Excel を取り込むと、<b>倉庫(1号・2号)ごとに、アストロ品番の順</b>で A4 の 21面(3列×7段)のラベルに印刷します。<b>枚数 = 数量(1ピースに1枚)+ ケースに貼る分</b>(1枚。入数を超えるごとに1枚足す。入数は商品台帳でﾒｰｶｰ品番を引きます)。右上の「何枚目/その商品の枚数」(商品の1枚目は黒地)は、出す・出さないを選べます。取り込んだ中身は保存しません。</div>'+
+    '<div class="pool-hint" style="margin:0 0 10px;">発注データの CSV(JODH○○○.CSV)か、★JOD出荷の Excel を取り込むと、<b>倉庫(1号・2号)ごとに、アストロ品番の順</b>で A4 の 21面(3列×7段)のラベルに印刷します。<b>枚数 = 数量(1ピースに1枚)+ ケースに貼る分</b>(1枚。入数を超えるごとに1枚足す。入数は商品台帳でﾒｰｶｰ品番を引きます)。「何枚目/その商品の枚数」(商品の1枚目は黒地)は、出す・出さないを選べます。取り込んだ中身は保存しません。</div>'+
     '<div class="ll-form-group shukei-drop" data-jod-drop="1" style="margin:0 0 10px;">'+
       '<div class="ll-form-group-title">発注データの取り込み</div>'+
       '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 ファイルを選んで取り込む<input type="file" id="jodFile" accept=".csv,.txt,.xlsx,.xlsm,.xls" style="display:none;"></label>'+
@@ -19884,7 +19884,7 @@ function renderJodLabel(){
       '<label style="'+F+'"><span style="'+L+'">並び順</span><select id="jodOrder" style="'+I+'"><option value="astro"'+(J.order==='astro' ? ' selected' : '')+'>アストロ品番の順</option><option value="file"'+(J.order==='file' ? ' selected' : '')+'>ファイルの並び順</option></select></label>'+
       '<label style="display:flex;flex-direction:column;gap:3px;"><span style="font-size:11px;color:var(--slate-500);">数量に使う列</span><select id="jodQcol" style="border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:14px;">'+JOD_QTY_COLS.map(function(q){ return '<option value="'+q[0]+'"'+(J.qcol===q[0] ? ' selected' : '')+'>'+q[1]+'</option>'; }).join('')+'</select></label>'+
       '<label style="display:flex;flex-direction:column;gap:3px;"><span style="font-size:11px;color:var(--slate-500);">1枚目に使う位置(1〜21・左上から横へ)</span><input type="number" id="jodStart" min="1" max="21" value="'+start+'" style="border:1px solid var(--paper-line);border-radius:8px;padding:8px 9px;font-size:14px;width:90px;"></label>'+
-      '<label style="'+F+'"><span style="'+L+'">右上の枚数の印</span><span style="padding:8px 0;font-size:14px;"><input type="checkbox" id="jodMark"'+(jodMarkOn() ? ' checked' : '')+'> 出す</span></label>'+
+      '<label style="'+F+'"><span style="'+L+'">枚数の印</span><span style="padding:8px 0;font-size:14px;"><input type="checkbox" id="jodMark"'+(jodMarkOn() ? ' checked' : '')+'> 出す</span></label>'+
       '<button type="button" class="add-btn" id="jodPrint"'+(total ? '' : ' disabled')+'>🖨 '+(J.wh ? esc(J.wh)+'号の' : '1号・2号の')+'ラベルを印刷('+formatNum(total)+'枚・'+formatNum(pages)+'ページ)</button>'+
       '<button type="button" class="vc-manage-toggle-btn" id="jodClear">取り込みをやめる</button>'+
     '</div>'+
@@ -19894,10 +19894,27 @@ function renderJodLabel(){
       '<tr class="sk-total"><td></td><td colspan="7">合計</td><td class="num">'+formatNum(total)+'</td></tr></tbody></table></div>';
   return html+'</div>';
 }
-function jodNameSize(t){
-  var w = 0; String(t).split('').forEach(function(ch){ w += /[\x20-\x7e｡-ﾟ]/.test(ch) ? 0.55 : 1; });
-  return Math.min(4.1, 64 / Math.max(1, w)).toFixed(2); // mm。ラベルの幅(70mm)に収める
+/* 文字の大きさ(mm)を、ラベルの右端からはみ出さない大きさにする(2026-11-10。前は品名だけ・幅の見積もりも甘く、右端からはみ出していた)。
+   印刷と同じ字体(Meiryo)で実際の幅を測る。測れないときは、半角 0.6・全角 1.0 文字分として見積もる */
+var JOD_TEXT_W = 60; // 使える幅(mm) = 70 − 左の余白 4.7 − 右の余白 約5
+var jodMeasureCv = null;
+function jodFitSize(t, base){
+  t = String(t||''); if(!t) return base.toFixed(2);
+  return Math.min(base, JOD_TEXT_W / Math.max(0.1, jodTextEm(t))).toFixed(2);
 }
+/* 文字の幅(字の大きさ 1 あたり) */
+function jodTextEm(t){
+  t = String(t||'');
+  var em = 0;
+  try{
+    jodMeasureCv = jodMeasureCv || document.createElement('canvas');
+    var g = jodMeasureCv.getContext('2d'); g.font = '100px Meiryo, "Yu Gothic", sans-serif';
+    em = g.measureText(t).width / 100;
+  }catch(e){ em = 0; }
+  if(!(em>0)) t.split('').forEach(function(ch){ em += /[\x20-\x7e｡-ﾟ]/.test(ch) ? 0.6 : 1; });
+  return em;
+}
+function jodNameSize(t){ return jodFitSize(t, 4.1); }
 function jodPrint(){
   var J = state.jodLabel; if(!J || !J.rows) return;
   var labels = [];
@@ -19914,12 +19931,12 @@ function jodPrint(){
   var html = pages.map(function(pg){
     return '<div class="pg">'+pg.map(function(l, i){
       if(!l) return '';
-      return '<div class="lb" style="left:'+((i % 3) * W).toFixed(2)+'mm;top:'+(Math.floor(i / 3) * H).toFixed(2)+'mm;"><div class="a">'+esc(l.a)+'</div><div class="b">'+esc(l.b)+'</div><div class="c" style="font-size:'+jodNameSize(l.c)+'mm;">'+esc(l.c)+'</div><div class="d">'+esc(l.d)+'</div>'+(mark ? '<div class="n'+(l.k===1 ? ' n1' : '')+'">'+l.k+'/'+l.n+'</div>' : '')+'</div>';
+      return '<div class="lb" style="left:'+((i % 3) * W).toFixed(2)+'mm;top:'+(Math.floor(i / 3) * H).toFixed(2)+'mm;"><div class="a">'+esc(l.a)+'</div><div class="b" style="font-size:'+jodFitSize(l.b, 12.5)+'mm;">'+esc(l.b)+'</div><div class="c" style="font-size:'+jodNameSize(l.c)+'mm;">'+esc(l.c)+'</div><div class="d" style="font-size:'+jodFitSize(l.d, 6.6)+'mm;">'+esc(l.d)+'</div>'+(mark ? '<div class="n'+(l.k===1 ? ' n1' : '')+'" style="left:'+(4.7 + jodTextEm(l.a)*6.5 + 3).toFixed(2)+'mm;">'+l.k+'/'+l.n+'</div>' : '')+'</div>';
     }).join('')+'</div>';
   }).join('');
   var css = '@page{size:A4 portrait;margin:0;} html,body{margin:0;padding:0;} .pg{position:relative;width:210mm;height:297mm;overflow:hidden;page-break-after:always;} .pg:last-child{page-break-after:auto;}'+
-    '.lb{position:absolute;width:'+W+'mm;height:'+H.toFixed(2)+'mm;font-family:"Meiryo","Yu Gothic",sans-serif;color:#000;line-height:1;} .lb div{position:absolute;white-space:nowrap;}'+
-    '.a{left:4.7mm;top:4.2mm;font-size:6.5mm;} .b{left:4.7mm;top:11.2mm;font-size:12.5mm;} .c{left:4.7mm;top:25.8mm;} .d{left:4.7mm;top:30.6mm;font-size:6.6mm;} .lb .n{right:3mm;top:4.6mm;font-size:3.2mm;font-family:Arial,sans-serif;padding:0.6mm 1.2mm;border:0.3mm solid #000;border-radius:1mm;} .lb .n1{background:#000;color:#fff;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact;}';
+    '.lb{position:absolute;width:'+W+'mm;height:'+H.toFixed(2)+'mm;font-family:"Meiryo","Yu Gothic",sans-serif;color:#000;line-height:1;} .lb{overflow:hidden;} .lb div{position:absolute;white-space:nowrap;}'+
+    '.a{left:4.7mm;top:4.2mm;font-size:6.5mm;} .b{left:4.7mm;top:11.2mm;font-size:12.5mm;} .c{left:4.7mm;top:25.8mm;} .d{left:4.7mm;top:30.6mm;font-size:6.6mm;} .lb .n{top:5.4mm;font-size:3.2mm;font-family:Arial,sans-serif;padding:0.6mm 1.2mm;border:0.3mm solid #000;border-radius:1mm;} .lb .n1{background:#000;color:#fff;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact;}';
   printHtmlDoc('JODラベル_'+(J.wh ? J.wh+'号_' : '')+(J.file||''), html, css);
 }
 function bindJodLabel(){

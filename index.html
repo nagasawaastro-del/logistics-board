@@ -20129,7 +20129,7 @@ function jodPrint(){
   }).join('');
   var css = '@page{size:A4 portrait;margin:0;} html,body{margin:0;padding:0;} .pg{position:relative;width:210mm;height:297mm;overflow:hidden;page-break-after:always;} .pg:last-child{page-break-after:auto;}'+
     '.lb{position:absolute;width:'+W+'mm;height:'+H.toFixed(2)+'mm;font-family:"Meiryo","Yu Gothic",sans-serif;color:#000;line-height:1;} .lb{overflow:hidden;} .lb div{position:absolute;white-space:nowrap;}'+
-    '.a{left:4.7mm;top:4.2mm;font-size:6.5mm;} .b{left:4.7mm;top:11.2mm;font-size:12.5mm;} .c{left:4.7mm;top:25.8mm;} .d{left:4.7mm;top:30.6mm;font-size:6.6mm;} .lb .n{top:5.4mm;font-size:3.2mm;font-family:Arial,sans-serif;padding:0.6mm 1.2mm;border:0.3mm solid #000;border-radius:1mm;} .lb .n1{background:#000;color:#fff;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact;}';
+    '.a{left:4.7mm;top:5.2mm;font-size:6.5mm;} .b{left:4.7mm;top:12mm;font-size:12.5mm;} .c{left:4.7mm;top:26.4mm;} .d{left:4.7mm;top:31.2mm;font-size:6.6mm;} .lb .n{top:6.4mm;font-size:3.2mm;font-family:Arial,sans-serif;padding:0.6mm 1.2mm;border:0.3mm solid #000;border-radius:1mm;} .lb .n1{background:#000;color:#fff;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact;}';
   printHtmlDoc('JODラベル_'+(J.wh ? J.wh+'号_' : '')+(J.file||''), html, css);
 }
 function bindJodLabel(){

@@ -13637,7 +13637,8 @@ function renderDataHub(){
     (editable ? '<div class="ll-form-group shukei-drop" data-hub-drop="1" style="margin-bottom:14px;">'+
       '<div class="ll-form-group-title">CSVファイルの取り込み(まとめてOK)</div>'+
       '<div class="pool-hint" style="margin:0 0 6px;">次のCSVを、まとめて選ぶか、この枠にまとめてドラッグ&ドロップしてください。ファイルの中身から種類を見分けます。<br>'+
-        '・ロジザードの在庫 ・弥生の在庫(「高屋在庫.csv」「丹南在庫.csv」「全外部倉庫.csv」など。倉庫コードで高屋('+esc(SHUKEI_SITES.takaya.yayoiWarehouse)+')・丹南('+esc(SHUKEI_SITES.tannan.yayoiWarehouse)+')に分けます) ・ロジザードの Amazon VC の出荷指示</div>'+
+        '・ロジザードの在庫 ・弥生の在庫(「高屋在庫.csv」「丹南在庫.csv」「全外部倉庫.csv」など。倉庫コードで高屋('+esc(SHUKEI_SITES.takaya.yayoiWarehouse)+')・丹南('+esc(SHUKEI_SITES.tannan.yayoiWarehouse)+')に分けます) ・ロジザードの Amazon VC の出荷指示<br>'+
+        '<b>弥生の在庫は、kintone の商品台帳の同期(毎朝の自動・「商品台帳」の取得)で、商品台帳の「在庫数」の表から自動で新しくなります</b>(2026-11-12)。CSV はそれより新しい在庫を使いたいときだけ取り込んでください(次の同期で商品台帳の在庫に置き換わります)。</div>'+
       '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 CSVファイルを選んで取り込む(複数可)'+
         '<input type="file" accept=".csv,text/csv" multiple data-hub-upload="1" style="display:none;"></label>'+
       '<span class="shukei-drop-hint">またはCSVファイルをこの枠にドラッグ&ドロップ</span>'+
@@ -13646,7 +13647,7 @@ function renderDataHub(){
       '<div class="ll-form-group-title">今のデータ <button type="button" class="vc-manage-toggle-btn" id="hubReload" style="min-height:0;padding:3px 10px;margin-left:6px;">🔄 読み直す</button></div>'+
       '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>データ</th><th>最終更新</th><th>内容</th><th>使う画面</th></tr></thead><tbody>'+
         row('ロジザードの在庫', lz, lz ? formatNum(lz.rowCount||0)+'行'+(lzOld ? '(引当数の無い以前の形。取り込み直してください)' : '') : '', '出荷集計表・在庫差異・VC引き当て')+
-        Object.keys(SHUKEI_SITES).map(function(k){ var y = yb[k]; return row('弥生の在庫('+SHUKEI_SITES[k].name+')', y, y ? formatNum(y.rowCount||0)+'商品' : '', '出荷集計表・在庫差異・VC引き当て(入数)'); }).join('')+
+        Object.keys(SHUKEI_SITES).map(function(k){ var y = yb[k]; return row('弥生の在庫('+SHUKEI_SITES[k].name+')', y, y ? formatNum(y.rowCount||0)+'商品'+(y.source==='kintone' ? '(kintone の商品台帳から)' : '(CSV)') : '', '出荷集計表・在庫差異・VC引き当て(入数)'); }).join('')+
         row('VCの出荷指示', order, order ? formatNum(order.rowCount||0)+'行'+(order.workDates && order.workDates.length ? '・出荷作業日 '+order.workDates.map(dateLabelFromStr).join('・') : '')+(order.fileName ? '・'+order.fileName : '') : '', 'VC引き当て')+
         '<tr><td><b>納品先一覧</b></td><td>'+(d.dests && d.dests.updatedAt ? esc(fmtDateTime(d.dests.updatedAt))+'に変更' : '初期値(Excel の一覧)')+'</td><td>'+formatNum(Object.keys(vcAllocDestGroups(d.dests)).length)+'か所</td><td class="sk-minor">VC引き当て(振り分け番号)</td></tr>'+
       '</tbody></table></div>'+
@@ -16959,7 +16960,7 @@ function renderStockBack(st){
     }).catch(function(){ state.yayoiWh = { products:{}, warehouses:{} }; }).then(function(){ state.yayoiWhLoading = false; render(); });
   }
   if(!state.yayoiWh) return '<div class="empty-note">読み込み中…</div>';
-  if(!Object.keys(state.yayoiWh.warehouses||{}).length) return '<div class="empty-note">外部倉庫の在庫がまだありません。管理 → 在庫・kintone取込 で、弥生の在庫のCSV(全外部倉庫)を取り込み直してください(高屋・丹南以外の倉庫の在庫も残すようにしました)。</div>';
+  if(!Object.keys(state.yayoiWh.warehouses||{}).length) return '<div class="empty-note">外部倉庫の在庫がまだありません。kintone の商品台帳を取得すると(毎朝の自動でも)、商品台帳の「在庫数」の表から入ります。弥生の在庫のCSV(全外部倉庫)を取り込んでも入ります(高屋・丹南以外の倉庫の在庫も残すようにしました)。</div>';
   if(!st.outlook) return '<div class="empty-note">見積もり・入荷予定がまだありません(管理 → 在庫・kintone取込 → kintoneの同期)。</div>';
   var R = stockBackCompute(st);
   if(!R) return '<div class="empty-note">読み込み中…</div>';
@@ -18187,7 +18188,7 @@ function renderKintoneSyncPanel(){
     // 個別のボタンは折りたたむ(2026-10-20。自動になったため)
     '<details'+(state.kSyncDetailsOpen ? ' open' : '')+' id="kSyncDetails"><summary style="cursor:pointer;font-weight:700;margin:4px 0;">個別に取得する・最終同期</summary>'+
     '<table class="report-table"><thead><tr><th>データ</th><th>最終同期</th><th></th></tr></thead><tbody>'+
-      row('商品台帳(入数・才数)', ps && ps.fetchedAt, ps ? formatNum(ps.savedCount||0)+'件' : '', 'kSyncProduct')+
+      row('商品台帳(入数・才数・弥生の在庫)', ps && ps.fetchedAt, ps ? formatNum(ps.savedCount||0)+'件' : '', 'kSyncProduct')+
       row('作業単価', wp && wp.lastSyncedAt, wp && wp.prices ? formatNum(wp.prices.length)+'件' : '', 'kSyncPrice')+
       row('作業日報', ws && ws.syncedAt, ws ? (ws.from||'')+'〜'+(ws.to||'') : '', 'kSyncReport',
         '<input type="date" id="kSyncFrom" value="'+esc(f.from)+'"> 〜 <input type="date" id="kSyncTo" value="'+esc(f.to)+'"> ')+
@@ -18218,7 +18219,8 @@ function bindKintoneSyncPanel(){
       if(!r.ok) return '⚠️ 商品台帳: '+r.error;
       state.kintoneSyncStatus = r.status;
       await appendAuditLog({ action:'kintone商品マスタ同期', target:'product_master', before:null, after: '取得'+r.status.fetchedCount+'件・保存'+r.status.savedCount+'件' });
-      return '✅ 商品台帳を取得しました('+formatNum(r.status.savedCount)+'件)';
+      var ys = r.status.yayoiStock;
+      return '✅ 商品台帳を取得しました('+formatNum(r.status.savedCount)+'件)'+(ys ? '。弥生の在庫も新しくしました(高屋 '+formatNum(ys.takaya)+'・丹南 '+formatNum(ys.tannan)+'商品・ほかの倉庫 '+formatNum(ys.other)+'行)' : r.status.yayoiStockError ? '。⚠️ 弥生の在庫: '+r.status.yayoiStockError : '');
     },
     kSyncPrice: async function(){
       var r = await syncWorkPriceMasterFromKintone();
@@ -18339,6 +18341,7 @@ function renderKintoneProductSettingsPanel(){
       'kintone商品マスタ取得完了<br>'+
       '取得件数: '+formatNum(status.fetchedCount)+'件 ・ 保存件数: '+formatNum(status.savedCount)+'件'+
       (status.skippedNoProductCode ? ' ・ 商品コード無しのためスキップ: '+formatNum(status.skippedNoProductCode)+'件' : '')+'<br>'+
+      (status.yayoiStock ? '弥生の在庫: 高屋 '+formatNum(status.yayoiStock.takaya)+'・丹南 '+formatNum(status.yayoiStock.tannan)+'商品・ほかの倉庫 '+formatNum(status.yayoiStock.other)+'行<br>' : status.yayoiStockError ? '⚠️ 弥生の在庫: '+esc(status.yayoiStockError)+'<br>' : '')+
       '最終取得日時: '+fmtDateTime(status.fetchedAt)+
     '</div>';
   }
@@ -23245,9 +23248,11 @@ async function syncProductMasterFromKintone(settings){
     }
     var status = {
       fetchedCount: data.fetchedCount, savedCount: data.savedCount,
-      skippedNoProductCode: data.skippedNoProductCode, fetchedAt: data.fetchedAt
+      skippedNoProductCode: data.skippedNoProductCode, fetchedAt: data.fetchedAt,
+      yayoiStock: data.yayoiStock || null, yayoiStockError: data.yayoiStockError || '' // 弥生の在庫(商品台帳の「在庫数」の表から。2026-11-12)
     };
     state.gateDataStatus = null;
+    if(data.yayoiStock){ state.shukeiData = null; state.vcAllocData = null; state.stockData = null; state.yayoiWh = null; } // 弥生の在庫が変わったので、使う画面は開いたときに読み直す
     if(!(await saveKintoneSyncStatus(status))){
       console.error('[LOGI LINK] kintone同期は成功しましたが、同期状況の保存に失敗しました');
     }

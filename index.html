@@ -11088,6 +11088,14 @@ function clientSetFileTag(S){
   var im = S.mode && S.imps.filter(function(i){ return i.id===S.mode; })[0];
   return im ? '_'+String(im.file||'').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '').slice(0, 40) : '';
 }
+/* 指示書の題目(2026-11-12): 取込のファイル名から拡張子・「セット作業指示書」「作業指示書」・「のコピー」を落とした物(例「10月3,4週目分(PJ)」)。
+   どの指示書か分かるよう、印刷の一番上に大きく出す。作業日の範囲で選んだときは作業日 */
+function clientSetTitle(S){
+  var im = S.mode && S.imps.filter(function(i){ return i.id===S.mode; })[0];
+  if(!im) return S.label;
+  var t = String(im.file||'').replace(/\.[^.]+$/, '').replace(/\s*の?コピー(\s*\(\d+\))?\s*$/, '').replace(/\s*(セット)?作業指示書\s*/g, ' ').replace(/\s+/g, ' ').trim();
+  return t || String(im.file||'');
+}
 /* 取込を1つ選んで印刷(画面で選んでいる取込は変えない) */
 function clientSetPrintImp(cl, kind, impId){
   var c = clientDataState(), keep = c.setImp;
@@ -11113,10 +11121,10 @@ function clientSetDestPrint(cl){
   var html = T.dests.map(function(D){
     var rows = D.items.map(function(it, i){ var j = clientJan(it.code), mk = j ? clientJanMark(it.F, j) : null;
       return '<tr><td class="no">'+(i+1)+'</td><td><div class="nm1">'+esc(nameOf(it.code, it.name))+'</div><div class="cd">'+esc(it.code)+'</div></td><td class="mk">'+(mk ? '<b>'+esc(mk.big)+'</b><i>'+esc(mk.tail)+'</i>' : '')+'</td><td class="q">'+formatNum(it.qty)+'</td><td class="chk"></td></tr>'; }).join('');
-    return '<div class="pg"><div class="ce">'+esc(D.center || 'センターなし')+'</div><div class="meta">'+esc(cl.name)+' ・ '+esc(S.label)+' ・ '+D.items.length+'品番・<b>'+formatNum(D.qty)+'個</b></div>'+
+    return '<div class="pg"><div class="tt">'+esc(clientSetTitle(S))+'</div><div class="ce">'+esc(D.center || 'センターなし')+'</div><div class="meta">'+esc(cl.name)+' ・ '+esc(S.label)+' ・ '+D.items.length+'品番・<b>'+formatNum(D.qty)+'個</b></div>'+
       '<table><thead><tr><th>No</th><th>完成品</th><th>入数・下4桁</th><th>個数</th><th>済</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   }).join('');
-  var css = '@page{size:A4 portrait;margin:8mm;} .pg{page-break-after:always;} .pg:last-child{page-break-after:auto;} .ce{font-family:Arial,Helvetica,sans-serif;font-size:72px;font-weight:700;letter-spacing:.05em;border:4px solid #000;border-radius:8px;text-align:center;padding:6px 0;margin-bottom:6px;} .meta{font-size:13px;margin-bottom:8px;}'+
+  var css = '@page{size:A4 portrait;margin:8mm;} .pg{page-break-after:always;} .pg:last-child{page-break-after:auto;} .tt{font-size:20px;font-weight:700;margin:0 0 4px;} .ce{font-family:Arial,Helvetica,sans-serif;font-size:72px;font-weight:700;letter-spacing:.05em;border:4px solid #000;border-radius:8px;text-align:center;padding:6px 0;margin-bottom:6px;} .meta{font-size:13px;margin-bottom:8px;}'+
     'table{width:100%;border-collapse:collapse;font-size:12px;} th{background:#eee;border:1px solid #000;padding:3px;} td{border:1px solid #000;padding:4px 6px;vertical-align:middle;} tr{page-break-inside:avoid;}'+
     'td.no{width:24px;text-align:center;font-weight:700;} td.mk{width:70px;text-align:center;line-height:1.1;font-family:Arial,Helvetica,sans-serif;} td.mk b{display:block;font-size:16px;} td.mk i{font-style:normal;font-weight:700;font-size:12px;} td.q{width:56px;text-align:right;font-size:20px;font-weight:700;} td.chk{width:30px;} .nm1{font-size:12px;font-weight:700;} .cd{font-size:10px;color:#475467;}';
   printHtmlDoc('出荷先センターの札_'+cl.name+'_'+from+clientSetFileTag(S), html, css);
@@ -11163,11 +11171,11 @@ function clientSetSheetPrint(cl){
   var nameOf = function(code, n){ if(n) return n; var st = logiStockOf(code); return st ? st.name : ''; };
   var totalSets = T.fin.reduce(function(a, x){ return a + x.qty; }, 0);
   var partRows = T.parts.map(function(x){ return '<tr><td><div class="nm2">'+esc(nameOf(x.code, x.name))+'</div><div class="cd">'+esc(x.code)+'</div></td><td class="pq">'+formatNum(x.qty)+'</td><td class="chk"></td></tr>'; }).join('');
-  var html = '<h1>セット作業指示書</h1><div class="meta">'+esc(cl.name)+' ・ '+esc(S.label)+' ・ 作るセット '+formatNum(totalSets)+'個('+T.fin.length+'品番) ・ 作成 '+esc(fmtDateTime(new Date().toISOString()))+'</div>'+
+  var html = '<div class="kind">セット作業指示書 ・ '+esc(cl.name)+'</div><h1>'+esc(clientSetTitle(S))+(S.df ? '<span class="df">'+(S.df==='done' ? '完了済みだけ' : '未完了だけ')+'</span>' : '')+'</h1><div class="meta">'+esc(S.label)+' ・ 作るセット '+formatNum(totalSets)+'個('+T.fin.length+'品番) ・ 作成 '+esc(fmtDateTime(new Date().toISOString()))+'</div>'+
     '<div class="memo">上から順に作ってください。「シール」は JAN ラベルの何枚目か(ラベルも同じ順に並んでいます)。'+(T.hasCenter ? '組んだら「割り振り」のセンターの箱に、書いてある個数ずつ入れてください。' : '')+'</div>'+
     clientSetOrderTable(T, nameOf, true)+
     '<h2 class="pb">使う部品の合計(集めるとき用)</h2><table class="parts"><thead><tr><th>部品</th><th>合計</th><th>済</th></tr></thead><tbody>'+partRows+'</tbody></table>';
-  var css = '@page{size:A4 portrait;margin:8mm;} h1{font-size:20px;letter-spacing:.2em;margin:0 0 2px;} .meta{font-size:11px;margin-bottom:4px;} .memo{font-size:11px;margin-bottom:6px;} h2{font-size:14px;margin:10px 0 4px;border-left:4px solid #000;padding-left:6px;} h2.pb{page-break-before:always;}'+
+  var css = '@page{size:A4 portrait;margin:8mm;} .kind{font-size:11px;letter-spacing:.1em;margin:0 0 1px;} h1{font-size:24px;margin:0 0 3px;border-bottom:2px solid #000;padding-bottom:2px;} h1 .df{font-size:13px;font-weight:700;border:1px solid #000;border-radius:3px;padding:0 6px;margin-left:10px;vertical-align:middle;} .meta{font-size:11px;margin-bottom:4px;} .memo{font-size:11px;margin-bottom:6px;} h2{font-size:14px;margin:10px 0 4px;border-left:4px solid #000;padding-left:6px;} h2.pb{page-break-before:always;}'+
     'table{width:100%;border-collapse:collapse;font-size:11px;} th{background:#eee;border:1px solid #000;padding:3px;font-size:10.5px;} td{border:1px solid #000;padding:3px 5px;vertical-align:middle;}'+
     'td.no{width:22px;text-align:center;font-weight:700;} td.fin{width:36%;} td.q{width:46px;text-align:right;font-size:18px;font-weight:700;} td.pt{} td.per{width:44px;text-align:right;} td.pq{width:50px;text-align:right;font-size:15px;font-weight:700;} td.lbl{width:54px;text-align:center;font-size:10px;} td.chk{width:26px;}'+
     'tr.sub td{border-top:1px dashed #98A2B3;} .nm1{font-size:11.5px;font-weight:700;} .nm2{font-size:11px;} .cd{font-size:9.5px;color:#475467;} .dst{font-size:11px;font-weight:700;margin-top:1px;} .bcs svg{height:30px;width:auto;display:block;margin-top:2px;} tbody{page-break-inside:auto;} tr{page-break-inside:avoid;}'+
@@ -11835,8 +11843,10 @@ function tpickTileButton(tid, isActive){
   tpickEnsureLoaded(false);
   var t = state.tpk || {};
   if(!t.tp || t.date!==todayStr()) return '';
-  var bs = tpickBatchesForTask(t.tp, state.workVolume, tid).filter(tpickTracked); // 事務所の分は事務所で印刷・リフトマン用は紙だけ(2026-11-11)
-  if(!bs.length) return '';
+  var all = tpickBatchesForTask(t.tp, state.workVolume, tid).filter(function(b){ return b.who!=='office'; }); // 事務所の分は事務所で印刷
+  if(!all.length) return '';
+  var bs = all.filter(tpickTracked); // 空き・受け持ちを数えるのはパートさん用だけ(リフトマン用は紙で取る。見るだけ)
+  if(!bs.length) return '<button type="button" class="add-btn tpick-open-btn" data-tpick-open="'+esc(tid)+'" style="margin-top:10px;width:100%;">📋 トータルピッキング(リフトマン用を見る)</button>';
   var mine = bs.filter(function(b){ var p = tpickProgOf(b.id); return p && p.staffId===state.activeStaffId && !p.doneAt; });
   var free = bs.filter(function(b){ var p = tpickProgOf(b.id); return !p || (!p.staffId && !p.doneAt); }).length;
   return '<button type="button" class="add-btn tpick-open-btn" data-tpick-open="'+esc(tid)+'" style="margin-top:10px;width:100%;">📋 トータルピッキング'+
@@ -11845,8 +11855,18 @@ function tpickTileButton(tid, isActive){
 function renderTpickListModal(m){
   var t = state.tpk || {};
   var bs = tpickBatchesForTask(t.tp, state.workVolume, m.taskId);
-  var list = bs.filter(tpickTracked); // タブレットはパートさん用だけ(リフトマン用は紙で取る。2026-11-11)
+  // パートさん用は受け持って進み具合を付ける。リフトマン用は紙で取るので見るだけ(2026-11-12。11/11 にいったん出さなくした)
+  var cnt = function(w){ return bs.filter(function(b){ return b.who===w; }).length; };
+  var who = m.who || 'part';
+  if(who==='liftA' && !m.whoPicked && !cnt('liftA') && cnt('lift')) who = 'lift'; // リフトの人ははじめ A。A の番号がなければ A以外
+  if(who==='part' && !m.whoPicked && !cnt('part') && (cnt('liftA') || cnt('lift'))) who = cnt('liftA') ? 'liftA' : 'lift';
+  var list = bs.filter(function(b){ return b.who===who; });
   var rows = list.map(function(b){
+    if(!tpickTracked(b)){
+      return '<div class="tpick-row"><div class="tpick-no">'+esc(b.label)+'</div>'+
+        '<div class="tpick-info"><div><b>'+b.items.length+'行 ・ '+formatNum(b.qty)+'個</b></div><div class="muted">'+esc(b.from)+' 〜 '+esc(b.to)+'</div></div>'+
+        '<div><span class="st-label is-gray">紙で取る</span></div><div><button type="button" class="ll-btn" data-tpick-batch="'+esc(b.id)+'">見る</button></div></div>';
+    }
     var st = tpickBatchState(b);
     var mineB = st.p && st.p.staffId===state.activeStaffId;
     var btn = st.free ? '<button type="button" class="modal-confirm tpick-claim" data-tpick-claim="'+esc(b.id)+'">受け持つ</button>'
@@ -11855,10 +11875,12 @@ function renderTpickListModal(m){
     return '<div class="tpick-row'+(mineB ? ' is-mine' : '')+'"><div class="tpick-no">'+esc(b.label)+'</div>'+
       '<div class="tpick-info"><div><b>'+b.items.length+'行 ・ '+formatNum(b.qty)+'個</b></div><div class="muted">'+esc(b.from)+' 〜 '+esc(b.to)+'</div></div>'+
       '<div><span class="st-label '+st.cls+'">'+esc(st.label)+'</span></div><div>'+btn+'</div></div>';
-  }).join('') || '<div class="empty-note">パートさん用の番号はありません</div>';
+  }).join('') || '<div class="empty-note">この分けにはありません</div>';
+  var tab = function(w, label){ return '<button type="button" class="sub-switch-btn'+(who===w ? ' active' : '')+'" data-tpick-who="'+w+'">'+label+' '+cnt(w)+'</button>'; };
   return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card tpick-modal">'+
     '<div class="modal-task-name">📋 トータルピッキング ・ '+esc(taskById(m.taskId).name)+'</div>'+
-    '<div class="pool-hint" style="margin:4px 0 10px;">パートさん用の番号です。番号を選んで「受け持つ」と、ほかの人は選べなくなります('+TPICK_BATCH_ROWS+'行ずつに分けています。リフトマン用は紙で取るので出しません)。</div>'+
+    '<div class="pool-hint" style="margin:4px 0 10px;">'+(who==='part' ? '番号を選んで「受け持つ」と、ほかの人は選べなくなります('+TPICK_BATCH_ROWS+'行ずつに分けています)。' : 'リフトマン用は紙で取ります。ここでは中身を見るだけです(受け持ち・済はありません)。')+'</div>'+
+    '<div class="sub-switch" style="margin:0 0 10px;">'+tab('part', '👩 パートさん用')+tab('liftA', '🚜 リフト A')+tab('lift', '🚜 リフト A以外')+'</div>'+
     '<div class="tpick-list">'+rows+'</div>'+
     '<div class="modal-actions" style="margin-top:12px;"><button type="button" class="modal-cancel" id="tpickClose">閉じる</button></div>'+
   '</div></div>';
@@ -12232,6 +12254,8 @@ function renderTpickBatchModal(m){
   var b = tpickBatchesForTask(t.tp, state.workVolume, m.taskId).filter(function(x){ return x.id===m.batchId; })[0];
   if(!b) return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card"><div class="empty-note">この番号は見つかりませんでした(取込が削除された可能性があります)</div><div class="modal-actions"><button type="button" class="modal-cancel" id="tpickBack">戻る</button></div></div></div>';
   var st = tpickBatchState(b), p = st.p || {}, mine = p.staffId===state.activeStaffId, done = p.done || {}, short = p.short || {}, cnt = p.cnt || {};
+  var viewOnly = !tpickTracked(b); // リフトマン用: 紙で取るので、前の済・欠品の印は使わず全部の行を見せるだけ(2026-11-12)
+  if(viewOnly){ p = {}; mine = false; done = {}; short = {}; cnt = {}; }
   var canEdit = mine && !p.doneAt;
   // 済・欠品にした行は、下の「ピッキング済み」へ移す(上には、まだ取っていない行だけ。2026-10-21)
   var prevB = null, prevL = null;
@@ -12241,7 +12265,7 @@ function renderTpickBatchModal(m){
     var sh = short[i];
     var isDone = !!done[i] && !sh;
     var item = '<button type="button" class="tpick-item'+(isDone ? ' is-done' : '')+(sh ? ' is-short' : '')+'"'+(canEdit ? ' data-tpick-check="'+i+'"' : ' disabled')+'>'+
-      '<span class="tpick-chk">'+(isDone ? '✓' : sh ? '!' : '')+'</span>'+
+      '<span class="tpick-chk"'+(viewOnly ? ' style="visibility:hidden;"' : '')+'>'+(isDone ? '✓' : sh ? '!' : '')+'</span>'+
       '<span class="tpick-loc">'+(showL ? '<b>'+esc(it.b)+'</b> '+esc(tpickLocText(it.l)) : '')+'</span>'+
       '<span class="tpick-code"><b>'+esc(it.c)+'</b><span class="muted">'+esc(it.n)+'</span></span>'+
       '<span class="tpick-qty">'+(sh ? '欠品 '+formatNum(sh.got)+'/'+formatNum(it.qty) : (!isDone && cnt[i]) ? '<span class="tpick-cnt">'+formatNum(cnt[i])+'/</span>'+formatNum(it.qty) : formatNum(it.qty))+'</span></button>';
@@ -12256,7 +12280,7 @@ function renderTpickBatchModal(m){
     ? (todoIdx.map(rowHtml).join('') || '<div class="empty-note" style="margin:4px 0;">'+(b.items.length ? '全部ピッキング済みです' : '')+(canEdit ? '。下の「✅ この番号を完了」を押してください' : '')+'</div>')
     : (doneIdx.map(rowHtml).join('') || '<div class="empty-note" style="margin:4px 0;">まだありません</div>');
   var flash = state.tpickDoneFlash && Date.now()-state.tpickDoneFlash.at < 1500 ? state.tpickDoneFlash.to : ''; // 移ったばかり: 移った先のタブを光らせる
-  var tabsHtml = '<div class="sub-switch tpick-tabs" style="margin:0 0 10px;">'+
+  var tabsHtml = viewOnly ? '' : '<div class="sub-switch tpick-tabs" style="margin:0 0 10px;">'+
     '<button type="button" class="sub-switch-btn'+(tab==='todo' ? ' active' : '')+(flash==='todo' ? ' is-flash' : '')+'" data-tpick-tab="todo">📋 未ピッキング '+todoIdx.length+'</button>'+
     '<button type="button" class="sub-switch-btn'+(tab==='done' ? ' active' : '')+(flash==='done' ? ' is-flash' : '')+'" data-tpick-tab="done">✓ ピッキング済み '+doneIdx.length+(nShort ? '(欠品 '+nShort+')' : '')+'</button></div>'+
     (tab==='done' && canEdit ? '<div class="pool-hint" style="margin:-4px 0 8px;">まちがえた行は押すと「未ピッキング」に戻ります</div>' : '');
@@ -12269,7 +12293,7 @@ function renderTpickBatchModal(m){
     '<div class="muted" style="margin-top:6px;font-size:12px;">全く無いときは 0。事務所の「今日の状況 → トータルピッキング」に欠品として出ます。</div></div>' : '';
   return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card tpick-modal">'+
     '<div class="modal-task-name">'+esc(b.label)+' ・ '+b.items.length+'行 ・ '+formatNum(b.qty)+'個</div>'+
-    '<div class="pool-hint" style="margin:4px 0 8px;">'+(mine ? (p.doneAt ? '完了しました' : '取った行を押すと「済」になります(もう一度押すと戻ります)。足りないときは右の「欠品」') : (p.staffId ? esc(p.staffName||'')+'さんが受け持っています(見るだけ)' : '受け持っていません(見るだけ)'))+' ・ 済 '+nDone+'/'+b.items.length+'</div>'+
+    '<div class="pool-hint" style="margin:4px 0 8px;">'+(!tpickTracked(b) ? 'リフトマン用は紙で取ります(見るだけ)' : (mine ? (p.doneAt ? '完了しました' : '取った行を押すと「済」になります(もう一度押すと戻ります)。足りないときは右の「欠品」') : (p.staffId ? esc(p.staffName||'')+'さんが受け持っています(見るだけ)' : '受け持っていません(見るだけ)'))+' ・ 済 '+nDone+'/'+b.items.length)+'</div>'+
     shortHtml+
     (canEdit ? '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px;"><button type="button" class="add-btn" id="tpickScanBtn">📷 バーコードを読む</button><span class="pool-hint" style="margin:0;">1個ずつ読みます(読むたびに1個。指示数まで読むと「済」)。同じ品番の次の1個は、いったん枠から外してから読みます。スキャナーならそのまま読めます。手で押すと数えずに済にできます</span></div>' : '')+
     tabsHtml+
@@ -12296,6 +12320,7 @@ function bindTpickModals(m){
   document.querySelectorAll('[data-tpick-tab]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = Object.assign({}, m, { tab: el.getAttribute('data-tpick-tab'), shortIdx: null }); render(); }); });
   document.querySelectorAll('[data-tpick-batch]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = { kind:'tpickBatch', taskId: m.taskId, who: m.who, batchId: el.getAttribute('data-tpick-batch') }; render(); }); });
   var busy = false;
+  document.querySelectorAll('[data-tpick-who]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = Object.assign({}, m, { who: el.getAttribute('data-tpick-who'), whoPicked: true }); render(); }); });
   document.querySelectorAll('[data-tpick-claim]').forEach(function(el){
     el.addEventListener('click', async function(){
       if(busy) return; busy = true; el.disabled = true; el.textContent = '確認中…';
@@ -22389,7 +22414,7 @@ function bindInput(){
       e.stopPropagation();
       tpickEnsureLoaded(true);
       var me = staffById(state.activeStaffId);
-      state.modal = { kind:'tpickList', taskId: el.getAttribute('data-tpick-open'), who: 'part' };
+      state.modal = { kind:'tpickList', taskId: el.getAttribute('data-tpick-open'), who: me && me.workerType==='lift' ? 'liftA' : 'part' };
       state.suppressRender = true;
       render();
     });

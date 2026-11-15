@@ -9501,6 +9501,7 @@ function tpickAfterImportGroups(m){
 /* SET の部品の不足と未登録(取込のすぐあとの画面で知らせる。2026-10-22)。items: 事務所用の行 */
 function setBomWarnHtml(items){
   if(!(items||[]).some(function(it){ return String(it.b||'').toUpperCase()==='SET'; })) return '';
+  logiStockCheckFresh();
   if(!state.setBom || !state.logiStock){ Promise.all([setBomLoad(), logiStockLoad()]).then(function(){ render(); }); return '<div class="pool-hint" style="margin:0 0 10px;">SET の部品を確かめています…</div>'; }
   var exp = setBomExpand(items);
   var shorts = exp.totals.filter(function(t){ return setBomStockFor(t.code, t.need).short; });
@@ -9593,6 +9594,7 @@ function renderTpickPanel(){
 function setBomPanelHtml(officeBatches){
   var items = []; (officeBatches||[]).forEach(function(b){ items = items.concat(b.items); });
   if(!items.some(function(it){ return String(it.b||'').toUpperCase()==='SET'; })) return '';
+  logiStockCheckFresh();
   if(!state.setBom || !state.logiStock){ Promise.all([setBomLoad(), logiStockLoad()]).then(function(){ render(); }); return '<div class="empty-note">セット構成を読み込み中…</div>'; }
   var exp = setBomExpand(items), names = {};
   exp.sets.forEach(function(S){ names[S.code] = S.name; });
@@ -9669,10 +9671,22 @@ function setBomLoad(force){
   }).catch(function(){ return state.setBom || { sets:{} }; });
 }
 function logiStockLoad(){
-  if(state.logiStock) return Promise.resolve(state.logiStock);
+  if(state.logiStock){ logiStockCheckFresh(); return Promise.resolve(state.logiStock); }
   return loadKeyJson(SHUKEI_KEYS.logizard, function(){ return null; }).then(function(v){
-    state.logiStock = (v && !isUnverified(v) && v.products) ? v : { products:{} }; return state.logiStock;
+    state.logiStock = (v && !isUnverified(v) && v.products) ? v : { products:{} }; state.logiStockCheckedAt = Date.now(); return state.logiStock;
   }).catch(function(){ return { products:{} }; });
+}
+/* 読み込み済みのロジザードの在庫が古くなっていないか(ほかの端末で取り込んだとき)。5分に1回だけ、小さな「共有データの更新時刻」を読んで比べ、
+   変わっていたら読み直す(在庫の本体は大きいので毎回は読まない。2026-11-16) */
+function logiStockCheckFresh(){
+  if(!state.logiStock || state.logiStockChecking) return;
+  var now = Date.now();
+  if(state.logiStockCheckedAt && now-state.logiStockCheckedAt < 5*60*1000) return;
+  state.logiStockCheckedAt = now; state.logiStockChecking = true;
+  loadKeyJson(SHARED_DATA_META_KEY, function(){ return {}; }).then(function(m){
+    var at = m && !isUnverified(m) && m.logizard && m.logizard.at;
+    if(at && state.logiStock && at!==state.logiStock.uploadedAt){ state.logiStock = null; render(); }
+  }).catch(function(){}).then(function(){ state.logiStockChecking = false; });
 }
 /* ロジザードの在庫(引当込み)・引当・ロケーションごとの在庫 */
 function logiStockOf(code){
@@ -11005,6 +11019,7 @@ function clientSetSel(cl){
 }
 function renderClientSetSheet(cl){
   var c = clientDataState();
+  logiStockCheckFresh();
   if(!state.logiStock || !state.setBom){ Promise.all([logiStockLoad(), setBomLoad()]).then(function(){ render(); }); }
   var S = clientSetSel(cl);
   if(!S) return '<div class="panel"><div class="empty-note">読み込み中…</div></div>';
@@ -11491,6 +11506,7 @@ function bindClientHub(){
 }
 /* 管理 →「セット構成」: 登録済みの SET の一覧(探す・直す・消す)と、新しい SET 品番の登録(2026-10-22) */
 function renderSetBomAdmin(){
+  logiStockCheckFresh();
   if(!state.setBom || !state.logiStock){ Promise.all([setBomLoad(true), logiStockLoad()]).then(function(){ render(); }); return '<div class="panel"><div class="empty-note">読み込み中…</div></div>'; }
   var sets = state.setBom.sets || {}, q = String(state.setBomQuery||'').trim().toLowerCase();
   var codes = Object.keys(sets).sort();
@@ -13596,6 +13612,7 @@ async function importSharedDataFiles(files){
   state.shukeiData = null;
   state.vcAllocData = null; state.vcDestData = null;
   state.stockData = null;
+  state.logiStock = null; state.yayoiWh = null; // セット作業・トータルピッキング・セット構成・外部から戻すも読み直す(2026-11-16)
   if(msgs.some(function(m){ return m.indexOf('✅ ロジザードの在庫')===0; })){
     try{ state.stockData = await loadStockAnalysis(); msgs.push('✅ 在庫の記録を残しました(トップの「在庫」で推移が見られます)'); }catch(e){}
   }

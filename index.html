@@ -11345,7 +11345,7 @@ function renderClientSlip(cl){
     (pick.length ? '<div style="overflow:auto;"><table class="report-table" style="font-size:13px;"><thead><tr><th>納品先</th><th>住所</th><th class="num">個口</th><th></th></tr></thead><tbody>'+
       pick.map(function(p, i){ var m = st.master[p.ce]; return '<tr><td><b>'+esc(b2CenterLabel(st, p.ce))+'</b>'+(m ? '' : ' <b style="color:#B42318;">⚠️ マスタにありません(CSV に入りません)</b>')+'</td><td class="sk-minor">'+(m ? esc(String(m['お届け先住所']||'').slice(0, 10))+'…' : '')+'</td><td class="num"><input type="number" min="1" max="99" data-b2-pick-n="'+i+'" value="'+esc(String(p.n))+'" style="width:70px;text-align:right;"></td><td><button type="button" class="ll-btn" data-b2-pick-del="'+i+'">×</button></td></tr>'; }).join('')+
       '</tbody></table></div>'+
-      '<div class="ch-row" style="margin:8px 0 0;"><button type="button" class="add-btn" id="chB2PickCsv">📤 '+pick.length+'件('+pick.reduce(function(a, p){ return a + p.n; }, 0)+'個口)の送り状の CSV を出す</button><button type="button" class="ll-btn" style="color:var(--slate-500);" id="chB2PickClear">一覧を全部消す</button></div>'
+      '<div class="ch-row" style="margin:8px 0 0;"><button type="button" class="add-btn" id="chB2PickCsv">📤 '+pick.length+'件('+pick.reduce(function(a, p){ return a + p.n; }, 0)+'個口)の送り状の CSV を出す</button><label style="display:inline-flex;align-items:center;gap:4px;font-size:13px;"><input type="checkbox" id="chB2Head"'+(b2SlipHeadOn() ? ' checked' : '')+'>1行目に見出しを入れる</label><button type="button" class="ll-btn" style="color:var(--slate-500);" id="chB2PickClear">一覧を全部消す</button></div>'
       : '<div class="empty-note">納品先を選び、個口を入れて「＋ 追加」してください。何件でも足せます(同じ納品先を足すと個口を足し合わせます)。</div>');
   return '<div class="panel">'+
     '<div class="panel-title">送り状(ヤマト B2クラウド)の CSV</div>'+
@@ -11359,8 +11359,11 @@ function renderClientSlip(cl){
       (state.b2SlipMsg ? '<div class="pool-hint" style="white-space:pre-line;margin-top:6px;">'+esc(state.b2SlipMsg)+'</div>' : '')+
     '</details></div>';
 }
-/* 送り状の CSV を作る。list = [{ ce: センター記号, n: 個口 }]。戻り値 { text, rows, miss, boxIdx } */
-function b2SlipBuild(list, st, date){
+/* CSV の1行目に見出しを入れるか(B2クラウドの取込設定に合わせる。この端末に覚える。はじめは入れる)(2026-11-17) */
+function b2SlipHeadOn(){ try{ return localStorage.getItem('ll-b2-slip-head')!=='0'; }catch(e){ return true; } }
+function b2SlipHeadSet(on){ try{ localStorage.setItem('ll-b2-slip-head', on ? '1' : '0'); }catch(e){} }
+/* 送り状の CSV を作る。list = [{ ce: センター記号, n: 個口 }]。noHead = 見出しの行を入れない。戻り値 { text, rows, miss, boxIdx } */
+function b2SlipBuild(list, st, date, noHead){
   var H = st.header.map(b2Norm), idx = function(k){ return H.indexOf(k); }, out = [], miss = [];
   list.forEach(function(x){
     var ce = b2CenterKey(x.ce), m = st.master[ce];
@@ -11373,24 +11376,25 @@ function b2SlipBuild(list, st, date){
     out.push(row);
   });
   var q = function(v){ return '"'+String(v===undefined || v===null ? '' : v).replace(/"/g, '""')+'"'; };
-  return { text: [st.header].concat(out).map(function(r){ return r.map(q).join(','); }).join('\r\n')+'\r\n', rows: out, miss: miss, boxIdx: idx('発行枚数') };
+  return { text: (noHead ? [] : [st.header]).concat(out).map(function(r){ return r.map(q).join(','); }).join('\r\n')+'\r\n', rows: out, miss: miss, boxIdx: idx('発行枚数') };
 }
 function b2SlipCsv(cl, list){
   var st = state.b2Slip, c = clientDataState(); if(!st || !st.master || !st.header) return;
-  var date = (c.b2Date || todayStr()).replace(/-/g, '/'), R = b2SlipBuild(list, st, date);
+  var date = (c.b2Date || todayStr()).replace(/-/g, '/'), R = b2SlipBuild(list, st, date, !b2SlipHeadOn());
   if(!R.rows.length){ appAlert('出せる納品先がありません(お届け先マスタにある納品先がありません)'); return; }
   var sj = cxInSjis(R.text), blob = new Blob([sj.bytes], { type: 'text/csv' }), url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = 'B2送り状_'+cl.name+'_'+date.replace(/\//g, '')+'.csv';
   document.body.appendChild(a); a.click();
   setTimeout(function(){ if(a.parentNode) a.parentNode.removeChild(a); URL.revokeObjectURL(url); }, 200);
   var nBox = R.rows.reduce(function(a, r){ return a + (Number(r[R.boxIdx]) || 1); }, 0);
-  showToast('送り状の CSV: '+R.rows.length+'件・'+nBox+'個口'+(R.miss.length ? '(マスタにない '+R.miss.join('・')+' は入れていません)' : '')+(sj.bad.length ? '。Shift_JIS にできない文字 '+sj.bad.length+'字は ? にしました' : ''));
+  showToast('送り状の CSV: '+R.rows.length+'件・'+nBox+'個口('+(b2SlipHeadOn() ? '見出しあり' : '見出しなし')+')'+(R.miss.length ? '(マスタにない '+R.miss.join('・')+' は入れていません)' : '')+(sj.bad.length ? '。Shift_JIS にできない文字 '+sj.bad.length+'字は ? にしました' : ''));
 }
 function bindB2Slip(cl){
   var c = clientDataState(), clampN = function(v){ return Math.max(1, Math.min(99, Math.round(Number(v)) || 1)); };
   var keepN = function(){ document.querySelectorAll('[data-b2-pick-n]').forEach(function(el){ var p = (c.b2Pick || [])[Number(el.getAttribute('data-b2-pick-n'))]; if(p) p.n = clampN(el.value); }); };
   var f = document.getElementById('chB2File'); if(f) f.addEventListener('change', function(){ var fs = Array.prototype.slice.call(f.files||[]); if(fs.length){ keepN(); b2SlipImport(fs); } });
   var d = document.getElementById('chB2Date'); if(d) d.addEventListener('change', function(){ c.b2Date = d.value; });
+  var hd = document.getElementById('chB2Head'); if(hd) hd.addEventListener('change', function(){ b2SlipHeadSet(hd.checked); });
   document.querySelectorAll('[data-b2-pick-n]').forEach(function(el){ el.addEventListener('change', function(){ keepN(); render(); }); });
   var add = document.getElementById('chB2PickAdd'); if(add) add.addEventListener('click', function(){
     keepN();

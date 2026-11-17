@@ -10301,7 +10301,7 @@ function bindClientData(){
    ダッシュボード(毎日の作業料・半月の請求見込み)/入荷実績/出荷実績/セット指示書(完成品と構成部品の合計・JAN のバーコード)/料金表(見積書)/請求(請求書の印刷)。
    売上 = 料金表の項目ごとに「何に掛けるか」(入荷のケース数・出荷のピース数など)× 単価(2026-10-24。見積書は作業ごとの料金のため)。
    入荷の行の分け方(JAN 貼り・ケース・ピース)などは仮のルール。荷主の指示に合わせて直す */
-var CLIENT_HUB_TABS = [['dash','ダッシュボード'],['inb','入荷実績'],['ship','出荷実績'],['set','セット指示書'],['rates','料金表(見積書)'],['bill','請求']];
+var CLIENT_HUB_TABS = [['dash','ダッシュボード'],['inb','入荷実績'],['ship','出荷実績'],['set','セット指示書'],['slip','送り状'],['rates','料金表(見積書)'],['bill','請求']];
 // 何に掛けるか: [キー, 説明, 日々(1) か 月(0)]
 var CLIENT_FEE_BASIS = [
   ['inbCase','入荷のケース数(区分がケースの行)',1],
@@ -10510,6 +10510,7 @@ function renderClientHub(){
   else if(tab==='dash') body = renderClientDash(cl);
   else if(tab==='bill') body = renderClientBill(cl);
   else if(tab==='rates') body = renderClientRates(cl);
+  else if(tab==='slip') body = renderClientSlip(cl); // 送り状(B2クラウド)の CSV(2026-11-17)
   else if(tab==='set'){ if(c.kind!=='set'){ c.kind = 'set'; c.data = null; c.file = null; c.cols = null; } body = renderClientData()+renderClientSetSheet(cl); } // 上で指示書を取り込み、下で作り直す
   else { if(c.kind!==tab){ c.kind = tab; c.data = null; c.file = null; c.cols = null; } body = renderClientData(); }
   return '<div class="mgr-wrap client-hub">'+tabs+(cl ? '<div class="ch-row ch-clientbar">'+clientPickerHtml()+'</div>' : '')+body+'</div>';
@@ -11083,7 +11084,6 @@ function renderClientSetSheet(cl){
     (S.otherCount ? '<div class="pool-hint" style="margin:0 0 8px;">この取込のうち <b>'+S.otherCount+'伝票</b> は、ほかの月に完了しているので出していません。そのため、ここでは作る数を直せません(完了日を入れる前の月か、すべて出る月で直してください)。</div>' : '')+
     (view==='dest' && T.hasCenter ? destView : view==='slips' ? slipView : clientFoldOpen('setList:'+view, '商品コードの明細('+(view==='parts' ? T.parts.length : T.fin.length)+'品番)'+(view==='order' ? '・作る数を直す' : ''))+(view==='parts' ? tbl(T.parts) : view==='fin' ? tbl(T.fin) : orderTbl)+'</details>')+
     '<div class="pool-hint" style="margin-top:8px;">並びは商品名の順(指示書・JAN ラベルも同じ順)。品番が13桁ならそれを JAN に、そうでなければロジザードの在庫の JAN を使います。</div>'+
-    b2SlipHtml(S, view==='dest' && T.hasCenter)+
   '</div>';
 }
 /* 取込ごとの数(取込ごとに指示書・ラベルを用意する一覧用)。選んでいる取込を一時的に切り替えて数える */
@@ -11308,6 +11308,7 @@ async function b2SlipImport(files){
       next.master = centers; next.masterFile = f.name; next.masterAt = new Date().toISOString();
       msgs.push('✅ お届け先マスタ: '+n+'センター('+f.name+')'+(none ? '。センターの記号が無い '+none+'件は使いません' : ''));
     }else if(h.indexOf('ご請求先顧客コード')!==-1 && h.indexOf('お届け先名')!==-1 && rows.length>=2){
+      if(next.header){ msgs.push('⚠️ '+f.name+': 見本の送り状は固定です(ご依頼主・請求先などは変えません)。お届け先マスタの CSV を選んでください'); continue; } // 2026-11-17 ユーザーの指示で固定
       var row = rows[1].slice(); while(row.length<h.length) row.push('');
       h.forEach(function(k, j){ if(/^お届け先/.test(k) || (/メール/.test(k) && !/利用区分$/.test(k)) || /^お届け予定\(指定\)日$/.test(k) || ['お客様管理番号','伝票番号','敬称','入力機種','連携管理番号'].indexOf(k)!==-1) row[j] = ''; });
       next.header = rows[0]; next.row = row; next.file = f.name; next.at = new Date().toISOString();
@@ -11320,43 +11321,41 @@ async function b2SlipImport(files){
   }
   state.b2SlipMsg = msgs.join('\n'); render();
 }
-function b2SlipBoxKey(S, ce){ return (S.mode || S.from+'~'+S.to)+'|'+ce; }
 function b2CenterLabel(st, ce){ var m = st.master && st.master[ce]; return m ? (m['お届け先名'] || ce) : ce; }
-/* fromSet = セット指示書の出荷先センターから出す表も出す(「出荷先センターごと」のタブのとき)。納品先と個口を選んで出す所はいつも出す(2026-11-17) */
-function b2SlipHtml(S, fromSet){
+/* 荷主ページの「送り状」タブ(2026-11-17 にセット指示書のタブから分けた)。納品先と個口を選んで出す。セット指示書の出荷先センターをまとめて入れることもできる */
+function renderClientSlip(cl){
   b2SlipLoad();
   var c = clientDataState(), st = state.b2Slip;
-  if(!st) return '<div class="empty-note">送り状の設定を読み込み中…</div>';
+  if(!st) return '<div class="panel"><div class="empty-note">送り状の設定を読み込み中…</div></div>';
   var ready = !!(st.master && st.header && st.row), H = (st.header || []).map(b2Norm), val = function(k){ var j = H.indexOf(k); return j<0 || !st.row ? '' : st.row[j]; };
-  var boxes = c.b2Boxes || {}, dests = fromSet ? (S.T.dests || []).filter(function(D){ return D.center; }) : [];
-  var setPart = !ready || !fromSet ? '' : '<div style="font-weight:700;margin:10px 0 6px;">この指示書の出荷先センターから出す</div>'+
-    '<div class="ch-row" style="margin:0 0 8px;"><button type="button" class="add-btn" id="chB2Csv"'+(dests.some(function(D){ return st.master[b2CenterKey(D.center)]; }) ? '' : ' disabled')+'>📤 この指示書のセンターで CSV を出す</button></div>'+
-    '<div style="overflow:auto;max-height:420px;"><table class="report-table" style="font-size:13px;"><thead><tr><th>センター</th><th class="num">完成品</th><th>お届け先(マスタ)</th><th class="num">個口</th></tr></thead><tbody>'+
-    dests.map(function(D){ var ce = b2CenterKey(D.center), m = st.master[ce], k = b2SlipBoxKey(S, ce);
-      return '<tr><td style="font-size:16px;"><b>'+esc(D.center)+'</b></td><td class="num">'+formatNum(D.qty)+'</td><td>'+(m ? esc(m['お届け先名'] || '')+' <span class="sk-minor">'+esc(String(m['お届け先住所']||'').slice(0, 6))+'…</span>' : '<b style="color:#B42318;">⚠️ マスタにありません(CSV に入りません)</b>')+'</td>'+
-        '<td class="num">'+(m ? '<input type="number" min="1" max="99" data-b2-box="'+esc(k)+'" value="'+esc(String(boxes[k] || 1))+'" style="width:70px;text-align:right;">' : '')+'</td></tr>'; }).join('')+'</tbody></table></div>';
-  // 納品先と個口を選んで出す
   var pick = c.b2Pick || [], ces = ready ? Object.keys(st.master).sort() : [];
-  var pickPart = !ready ? '' : '<div style="font-weight:700;margin:10px 0 6px;">納品先と個口を選んで出す</div>'+
-    '<div class="ch-row" style="margin:0 0 8px;align-items:flex-end;"><label class="ch-field"><span>納品先</span><select id="chB2PickCe"><option value="">選んでください</option>'+
-      ces.map(function(ce){ return '<option value="'+esc(ce)+'">'+esc(b2CenterLabel(st, ce))+'</option>'; }).join('')+'</select></label>'+
+  // セット指示書(セット指示書のタブで選んでいる取込)の出荷先センター
+  var S = ready ? clientSetSel(cl) : null, sDests = S ? (S.T.dests || []).filter(function(D){ return D.center; }) : [];
+  var fromSet = !ready ? '' : '<div class="ll-form-group" style="margin:12px 0 0;"><div class="ll-form-group-title">セット指示書の出荷先センターを入れる</div>'+
+    (!S ? '<div class="pool-hint" style="margin:0;">セット指示書を読み込み中…</div>'
+      : !sDests.length ? '<div class="pool-hint" style="margin:0;">セット指示書のタブで選んでいる指示書(「'+esc(clientSetTitle(S))+'」)には、出荷先センターがありません。</div>'
+      : '<div class="pool-hint" style="margin:0 0 6px;">セット指示書のタブで選んでいる指示書「<b>'+esc(clientSetTitle(S))+'</b>」のセンター: '+sDests.map(function(D){ var ok = st.master[b2CenterKey(D.center)]; return '<b'+(ok ? '' : ' style="color:#B42318;"')+'>'+esc(D.center)+'</b>'+(ok ? '' : '(マスタになし)'); }).join('・')+'</div>'+
+        '<button type="button" class="ll-btn" id="chB2FromSet">📥 この '+sDests.length+'センターを下の一覧に入れる(個口は1)</button>')+'</div>';
+  var pickPart = !ready ? '' :
+    '<div class="ch-row" style="margin:12px 0 8px;align-items:flex-end;">'+
+      '<label class="ch-field"><span>出荷予定日</span><input type="date" id="chB2Date" value="'+esc(c.b2Date || todayStr())+'"></label>'+
+      '<label class="ch-field"><span>納品先</span><select id="chB2PickCe"><option value="">選んでください</option>'+ces.map(function(ce){ return '<option value="'+esc(ce)+'">'+esc(b2CenterLabel(st, ce))+'</option>'; }).join('')+'</select></label>'+
       '<label class="ch-field"><span>個口</span><input type="number" min="1" max="99" id="chB2PickN" value="1" style="width:80px;text-align:right;"></label>'+
       '<button type="button" class="ll-btn" id="chB2PickAdd">＋ 追加</button></div>'+
-    (pick.length ? '<div style="overflow:auto;"><table class="report-table" style="font-size:13px;"><thead><tr><th>納品先</th><th class="num">個口</th><th></th></tr></thead><tbody>'+
-      pick.map(function(p, i){ return '<tr><td><b>'+esc(b2CenterLabel(st, p.ce))+'</b>'+(st.master[p.ce] ? '' : ' <b style="color:#B42318;">⚠️ マスタにありません</b>')+'</td><td class="num"><input type="number" min="1" max="99" data-b2-pick-n="'+i+'" value="'+esc(String(p.n))+'" style="width:70px;text-align:right;"></td><td><button type="button" class="ll-btn" data-b2-pick-del="'+i+'">×</button></td></tr>'; }).join('')+
+    (pick.length ? '<div style="overflow:auto;"><table class="report-table" style="font-size:13px;"><thead><tr><th>納品先</th><th>住所</th><th class="num">個口</th><th></th></tr></thead><tbody>'+
+      pick.map(function(p, i){ var m = st.master[p.ce]; return '<tr><td><b>'+esc(b2CenterLabel(st, p.ce))+'</b>'+(m ? '' : ' <b style="color:#B42318;">⚠️ マスタにありません(CSV に入りません)</b>')+'</td><td class="sk-minor">'+(m ? esc(String(m['お届け先住所']||'').slice(0, 10))+'…' : '')+'</td><td class="num"><input type="number" min="1" max="99" data-b2-pick-n="'+i+'" value="'+esc(String(p.n))+'" style="width:70px;text-align:right;"></td><td><button type="button" class="ll-btn" data-b2-pick-del="'+i+'">×</button></td></tr>'; }).join('')+
       '</tbody></table></div>'+
-      '<div class="ch-row" style="margin:8px 0 0;"><button type="button" class="add-btn" id="chB2PickCsv">📤 選んだ '+pick.length+'件('+pick.reduce(function(a, p){ return a + p.n; }, 0)+'個口)の CSV を出す</button><button type="button" class="ll-btn" style="color:var(--slate-500);" id="chB2PickClear">選んだのを全部消す</button></div>'
-      : '<div class="pool-hint" style="margin:0;">納品先を選び、個口を入れて「＋ 追加」。何件でも足せます(同じ納品先を足すと個口を足し合わせます)。</div>');
-  return '<div style="border:1px solid var(--slate-200,#e4e7ec);border-radius:10px;padding:12px 14px;margin:12px 0 0;">'+
-    '<div style="font-weight:700;margin:0 0 6px;">🚚 送り状(ヤマト B2クラウド)の CSV</div>'+
-    '<div class="pool-hint" style="margin:0 0 8px;">納品先ごとに送り状1件(個口 = 発行枚数)。「CSV を出す」→ B2クラウドの「外部データから発行」で取り込みます。'+
+      '<div class="ch-row" style="margin:8px 0 0;"><button type="button" class="add-btn" id="chB2PickCsv">📤 '+pick.length+'件('+pick.reduce(function(a, p){ return a + p.n; }, 0)+'個口)の送り状の CSV を出す</button><button type="button" class="ll-btn" style="color:var(--slate-500);" id="chB2PickClear">一覧を全部消す</button></div>'
+      : '<div class="empty-note">納品先を選び、個口を入れて「＋ 追加」してください。何件でも足せます(同じ納品先を足すと個口を足し合わせます)。</div>');
+  return '<div class="panel">'+
+    '<div class="panel-title">送り状(ヤマト B2クラウド)の CSV</div>'+
+    '<div class="pool-hint" style="margin:0 0 4px;">納品先ごとに送り状1件(個口 = 発行枚数)。「送り状の CSV を出す」→ B2クラウドの「外部データから発行」で取り込みます。'+
       (ready ? '<br>ご依頼主 <b>'+esc(val('ご依頼主名'))+'</b> ・ 品名 '+esc(val('品名1') || '—')+' ・ 荷扱い '+esc(val('荷扱い1') || '—')+' ・ 請求先 …'+esc(String(val('ご請求先顧客コード')).slice(-4))+'-'+esc(val('運賃管理番号'))+'(見本: '+esc(st.file || '')+')' : '')+'</div>'+
-    (ready ? '<div class="ch-row" style="margin:0 0 4px;align-items:flex-end;"><label class="ch-field"><span>出荷予定日</span><input type="date" id="chB2Date" value="'+esc(c.b2Date || todayStr())+'"></label></div>'+pickPart+setPart
-      : '<div class="pool-hint" style="margin:0 0 8px;color:#B54708;">はじめに下の「送り状の設定」で、お届け先マスタと見本の送り状の CSV を取り込んでください。</div>')+
-    '<details style="margin-top:8px;"'+(ready ? '' : ' open')+'><summary style="cursor:pointer;font-size:13px;">送り状の設定(お届け先マスタ・見本の送り状)</summary>'+
-      '<div class="pool-hint" style="margin:6px 0;">・<b>お届け先マスタ</b>: B2クラウドのアドレス帳から出した「お届け先マスタ」の CSV。会社・部門名かお届け先名にある記号(FSZ1 など)でセンターを見分けます。今: '+(st.master ? Object.keys(st.master).length+'センター('+esc(st.masterFile||'')+'・'+esc(fmtDateTime(st.masterAt))+')' : 'なし')+'<br>'+
-      '・<b>見本の送り状</b>: B2クラウドの「発行済データ」の CSV(1件でよい)。ご依頼主・請求先・品名・荷扱い・送り状の種類などをこの見本と同じにします(お届け先・伝票番号は消して使います)。今: '+(st.header ? esc(st.file||'')+'・'+esc(fmtDateTime(st.at)) : 'なし')+'<br>2つまとめて選べます。</div>'+
-      '<input type="file" id="chB2File" accept=".csv" multiple>'+
+    (ready ? pickPart+fromSet : '<div class="pool-hint" style="margin:8px 0;color:#B54708;">はじめに下の「送り状の設定」で、お届け先マスタと見本の送り状の CSV を取り込んでください。</div>')+
+    '<details style="margin-top:12px;"'+(ready ? '' : ' open')+'><summary style="cursor:pointer;font-size:13px;">お届け先マスタを取り込み直す'+(st.master ? ' <span style="color:#067647;font-weight:700;">✓ 保存済み '+Object.keys(st.master).length+'センター</span>' : '')+'</summary>'+
+      '<div class="pool-hint" style="margin:6px 0;">B2クラウドのアドレス帳から出した「お届け先マスタ」の CSV を選ぶと、保存してあるマスタと入れ替えます(センターが増えた・住所が変わったときだけ)。会社・部門名かお届け先名にある記号(FSZ1 など)でセンターを見分けます。今: '+(st.master ? esc(st.masterFile||'')+'・'+esc(fmtDateTime(st.masterAt)) : 'なし')+'<br>'+
+      (st.header ? 'ご依頼主・請求先・品名・荷扱い・送り状の種類は固定です(見本: '+esc(st.file||'')+')。' : '・<b>見本の送り状</b>(はじめの1回だけ): B2クラウドの「発行済データ」の CSV(1件でよい)。ご依頼主・請求先・品名・荷扱い・送り状の種類などをこの見本と同じにします。')+'</div>'+
+      '<input type="file" id="chB2File" accept=".csv"'+(st.header ? '' : ' multiple')+'>'+
       (state.b2SlipMsg ? '<div class="pool-hint" style="white-space:pre-line;margin-top:6px;">'+esc(state.b2SlipMsg)+'</div>' : '')+
     '</details></div>';
 }
@@ -11376,12 +11375,12 @@ function b2SlipBuild(list, st, date){
   var q = function(v){ return '"'+String(v===undefined || v===null ? '' : v).replace(/"/g, '""')+'"'; };
   return { text: [st.header].concat(out).map(function(r){ return r.map(q).join(','); }).join('\r\n')+'\r\n', rows: out, miss: miss, boxIdx: idx('発行枚数') };
 }
-function b2SlipCsv(cl, list, tag){
+function b2SlipCsv(cl, list){
   var st = state.b2Slip, c = clientDataState(); if(!st || !st.master || !st.header) return;
   var date = (c.b2Date || todayStr()).replace(/-/g, '/'), R = b2SlipBuild(list, st, date);
   if(!R.rows.length){ appAlert('出せる納品先がありません(お届け先マスタにある納品先がありません)'); return; }
   var sj = cxInSjis(R.text), blob = new Blob([sj.bytes], { type: 'text/csv' }), url = URL.createObjectURL(blob), a = document.createElement('a');
-  a.href = url; a.download = 'B2送り状_'+cl.name+'_'+date.replace(/\//g, '')+(tag || '')+'.csv';
+  a.href = url; a.download = 'B2送り状_'+cl.name+'_'+date.replace(/\//g, '')+'.csv';
   document.body.appendChild(a); a.click();
   setTimeout(function(){ if(a.parentNode) a.parentNode.removeChild(a); URL.revokeObjectURL(url); }, 200);
   var nBox = R.rows.reduce(function(a, r){ return a + (Number(r[R.boxIdx]) || 1); }, 0);
@@ -11389,29 +11388,27 @@ function b2SlipCsv(cl, list, tag){
 }
 function bindB2Slip(cl){
   var c = clientDataState(), clampN = function(v){ return Math.max(1, Math.min(99, Math.round(Number(v)) || 1)); };
-  var keepBoxes = function(){
-    document.querySelectorAll('[data-b2-box]').forEach(function(el){ var x = c.b2Boxes || (c.b2Boxes = {}); x[el.getAttribute('data-b2-box')] = clampN(el.value); });
-    document.querySelectorAll('[data-b2-pick-n]').forEach(function(el){ var p = (c.b2Pick || [])[Number(el.getAttribute('data-b2-pick-n'))]; if(p) p.n = clampN(el.value); });
-  };
-  var f = document.getElementById('chB2File'); if(f) f.addEventListener('change', function(){ var fs = Array.prototype.slice.call(f.files||[]); if(fs.length){ keepBoxes(); b2SlipImport(fs); } });
+  var keepN = function(){ document.querySelectorAll('[data-b2-pick-n]').forEach(function(el){ var p = (c.b2Pick || [])[Number(el.getAttribute('data-b2-pick-n'))]; if(p) p.n = clampN(el.value); }); };
+  var f = document.getElementById('chB2File'); if(f) f.addEventListener('change', function(){ var fs = Array.prototype.slice.call(f.files||[]); if(fs.length){ keepN(); b2SlipImport(fs); } });
   var d = document.getElementById('chB2Date'); if(d) d.addEventListener('change', function(){ c.b2Date = d.value; });
-  document.querySelectorAll('[data-b2-box]').forEach(function(el){ el.addEventListener('change', keepBoxes); });
-  document.querySelectorAll('[data-b2-pick-n]').forEach(function(el){ el.addEventListener('change', function(){ keepBoxes(); render(); }); });
-  var b = document.getElementById('chB2Csv'); if(b) b.addEventListener('click', function(){
-    keepBoxes(); var S = clientSetSel(cl); if(!S) return;
-    var list = (S.T.dests || []).filter(function(D){ return D.center; }).map(function(D){ var ce = b2CenterKey(D.center); return { ce: ce, n: (c.b2Boxes || {})[b2SlipBoxKey(S, ce)] || 1 }; });
-    b2SlipCsv(cl, list, clientSetFileTag(S));
-  });
+  document.querySelectorAll('[data-b2-pick-n]').forEach(function(el){ el.addEventListener('change', function(){ keepN(); render(); }); });
   var add = document.getElementById('chB2PickAdd'); if(add) add.addEventListener('click', function(){
-    keepBoxes();
+    keepN();
     var ce = document.getElementById('chB2PickCe').value, n = clampN(document.getElementById('chB2PickN').value);
     if(!ce){ appAlert('納品先を選んでください'); return; }
     var list = c.b2Pick || (c.b2Pick = []), same = list.filter(function(p){ return p.ce===ce; })[0];
     if(same) same.n = clampN(same.n + n); else list.push({ ce: ce, n: n });
     render();
   });
-  document.querySelectorAll('[data-b2-pick-del]').forEach(function(el){ el.addEventListener('click', function(){ keepBoxes(); (c.b2Pick || []).splice(Number(el.getAttribute('data-b2-pick-del')), 1); render(); }); });
-  var pc = document.getElementById('chB2PickCsv'); if(pc) pc.addEventListener('click', function(){ keepBoxes(); b2SlipCsv(cl, (c.b2Pick || []).slice()); });
+  var fs2 = document.getElementById('chB2FromSet'); if(fs2) fs2.addEventListener('click', function(){
+    keepN(); var S = clientSetSel(cl); if(!S) return;
+    var list = c.b2Pick || (c.b2Pick = []), added = 0;
+    (S.T.dests || []).forEach(function(D){ if(!D.center) return; var ce = b2CenterKey(D.center); if(list.some(function(p){ return p.ce===ce; })) return; list.push({ ce: ce, n: 1 }); added++; });
+    showToast(added ? added+'センターを入れました。個口を直してから CSV を出してください' : 'もう全部入っています');
+    render();
+  });
+  document.querySelectorAll('[data-b2-pick-del]').forEach(function(el){ el.addEventListener('click', function(){ keepN(); (c.b2Pick || []).splice(Number(el.getAttribute('data-b2-pick-del')), 1); render(); }); });
+  var pc = document.getElementById('chB2PickCsv'); if(pc) pc.addEventListener('click', function(){ keepN(); b2SlipCsv(cl, (c.b2Pick || []).slice()); });
   var clr = document.getElementById('chB2PickClear'); if(clr) clr.addEventListener('click', function(){ c.b2Pick = []; render(); });
 }
 function bindClientHub(){
@@ -11428,6 +11425,7 @@ function bindClientHub(){
     el.addEventListener('toggle', function(){ dOpen[key] = el.open; });
   });
   bindClientData(); // 荷主の選択・登録(上の行)と、取込のタブ
+  if(cl && tab==='slip'){ bindB2Slip(cl); return; }
   if(!cl || (tab!=='dash' && tab!=='bill' && tab!=='set' && tab!=='rates')) return;
   var mo = document.getElementById('chMonth');
   if(mo) mo.addEventListener('change', function(){ if(mo.value){ c.month = mo.value; c.data = null; render(); } });
@@ -11640,7 +11638,6 @@ function bindClientHub(){
   var jp = document.getElementById('chJanPrint'); if(jp) jp.addEventListener('click', function(){ clientJanLabelPrint(cl); });
   var bc = document.getElementById('chSetBomCsv'); if(bc) bc.addEventListener('click', function(){ clientSetBomCsv(cl); });
   var dp = document.getElementById('chSetDestPrint'); if(dp) dp.addEventListener('click', function(){ clientSetDestPrint(cl); });
-  bindB2Slip(cl);
   document.querySelectorAll('[data-setimp-print]').forEach(function(el){ el.addEventListener('click', function(){ var p = el.getAttribute('data-setimp-print').split('|'); clientSetPrintImp(cl, p[0], p[1]); }); });
   ['chJanDx','chJanDy','chJanStart'].forEach(function(id){ var el = document.getElementById(id); if(el) el.addEventListener('change', function(){ var v = clientJanCfg(); v[{ chJanDx:'dx', chJanDy:'dy', chJanStart:'start' }[id]] = Number(el.value)||0; try{ localStorage.setItem('janLabelCfg', JSON.stringify(v)); }catch(e){} }); });
   var jm = document.getElementById('chJanMark'); if(jm) jm.addEventListener('change', function(){ var v = clientJanCfg(); v.mark = jm.checked; try{ localStorage.setItem('janLabelCfg', JSON.stringify(v)); }catch(e){} });

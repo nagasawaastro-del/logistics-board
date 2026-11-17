@@ -11081,9 +11081,9 @@ function renderClientSetSheet(cl){
   // ① 取り込んだファイルを選ぶ → ② そのファイルの指示書・ラベル・完了(2026-11-06 に画面を整理。前は選ぶ所と出す所が何か所もあり、ややこしかった)
   var perImp = clientSetPerImp(cl);
   var stPill = function(x){ var t = !x.allSlips ? ['—','#667085'] : !x.undone ? ['完了','#067647'] : x.undone===x.allSlips ? ['未完了','#B54708'] : ['途中','#175CD3']; return '<span style="display:inline-block;padding:1px 8px;border-radius:10px;border:1px solid '+t[1]+';color:'+t[1]+';font-size:12px;font-weight:700;">'+t[0]+'</span>'; };
-  var fileList = '<div style="overflow:auto;"><table class="report-table" style="font-size:13px;"><thead><tr><th></th><th>取込</th><th>ファイル</th><th class="num">伝票</th><th class="num">作る数</th><th>完了</th></tr></thead><tbody>'+
+  var fileList = '<div style="overflow:auto;"><table class="report-table" style="font-size:13px;"><thead><tr><th></th><th>取込</th><th>ファイル</th><th class="num">伝票</th><th class="num">作る数</th><th>完了</th><th></th></tr></thead><tbody>'+
     (perImp.map(function(x){ var on = x.id===S.mode;
-      return '<tr data-setimp-sel="'+esc(x.id)+'" style="cursor:pointer;'+(on ? 'background:rgba(99,102,241,.12);font-weight:700;' : '')+'"><td><input type="radio" name="chSetImpSel"'+(on ? ' checked' : '')+' tabindex="-1"></td><td>'+esc(fmtDateTime(x.at))+'</td><td>'+esc(x.file)+'</td><td class="num">'+formatNum(x.allSlips)+'</td><td class="num">'+formatNum(x.qty)+'</td><td>'+stPill(x)+' <span class="sk-minor">'+(x.allSlips - x.undone)+' / '+x.allSlips+'</span></td></tr>'; }).join('') || '<tr><td colspan="6" class="empty-note">この月の取込はありません</td></tr>')+
+      return '<tr data-setimp-sel="'+esc(x.id)+'" style="cursor:pointer;'+(on ? 'background:rgba(99,102,241,.12);font-weight:700;' : '')+'"><td><input type="radio" name="chSetImpSel"'+(on ? ' checked' : '')+' tabindex="-1"></td><td>'+esc(fmtDateTime(x.at))+'</td><td>'+esc(x.file)+'</td><td class="num">'+formatNum(x.allSlips)+'</td><td class="num">'+formatNum(x.qty)+'</td><td>'+stPill(x)+' <span class="sk-minor">'+(x.allSlips - x.undone)+' / '+x.allSlips+'</span></td><td><button type="button" class="log-stop-btn" style="white-space:nowrap;" data-setimp-del="'+esc(x.id)+'" title="この指示書(取り込んだファイル)を消します">削除</button></td></tr>'; }).join('') || '<tr><td colspan="7" class="empty-note">この月の取込はありません</td></tr>')+
     '</tbody></table></div>'+
     '<div style="margin-top:6px;font-size:12px;">'+(S.mode ? '<button type="button" class="vc-manage-toggle-btn" data-setimp-sel="">ファイルではなく、作業日の範囲で選ぶ</button>'
       : '<b>作業日の範囲で選んでいます</b> <label class="ch-field" style="display:inline-flex;"><span>から</span><input type="date" id="chSetFrom" value="'+esc(S.from)+'"></label> <label class="ch-field" style="display:inline-flex;"><span>まで</span><input type="date" id="chSetTo" value="'+esc(S.to)+'"></label>'+(perImp.length ? ' <button type="button" class="vc-manage-toggle-btn" data-setimp-sel="'+esc(perImp[0].id)+'">ファイルで選ぶ</button>' : ''))+'</div>';
@@ -11656,6 +11656,29 @@ function bindClientHub(){
   var simp = document.getElementById('chSetImp'); if(simp) simp.addEventListener('change', function(){ c.setImp = simp.value; render(); });
   var sid = document.getElementById('chSetImpDate'); if(sid) sid.addEventListener('change', function(){ c.setBulkDate = sid.value; });
   document.querySelectorAll('[data-setimp-sel]').forEach(function(el){ el.addEventListener('click', function(){ c.setImp = el.getAttribute('data-setimp-sel'); render(); }); });
+  // セット指示書(取り込んだファイル)を削除する(2026-11-18)。行・完了日・直した作る数もまとめて消す
+  document.querySelectorAll('[data-setimp-del]').forEach(function(el){ el.addEventListener('click', async function(ev){
+    ev.stopPropagation();
+    var id = el.getAttribute('data-setimp-del'), x = clientSetPerImp(cl).filter(function(i){ return i.id===id; })[0]; if(!x) return;
+    var keepImp = c.setImp; c.setImp = id; var S = clientSetSel(cl); c.setImp = keepImp; if(!S || S.mode!==id) return;
+    var doneN = x.allSlips - x.undone;
+    var NL = String.fromCharCode(10);
+    if(!(await appConfirm('このセット指示書を削除しますか?'+NL+'「'+x.file+'」('+fmtDateTime(x.at)+' 取込・伝票 '+x.allSlips+'件・作る数 '+x.qty+')'+(doneN ? NL+NL+'⚠️ 完了日の入った伝票が '+doneN+'件あります。削除すると請求のセット作業からも消えます。' : '')+NL+NL+'元に戻せません(もう一度取り込めば入ります)。'))) return;
+    var key = clientDataKey(cl.id, 'set', S.docMonth), n = 0;
+    var r = await tpickKvUpdate(key, function(cur){
+      var n0 = (cur.rows||[]).length;
+      cur.imports = (cur.imports||[]).filter(function(i){ return i.id!==id; });
+      cur.rows = (cur.rows||[]).filter(function(r){ return r.imp!==id; }); n = n0 - cur.rows.length;
+      ['setDone','setEdits'].forEach(function(f){ if(cur[f]) Object.keys(cur[f]).forEach(function(k){ if(k.indexOf(id+'|')===0) delete cur[f][k]; }); });
+      return cur;
+    });
+    if(!r.ok){ showToast('⚠️ 削除できませんでした'); return; }
+    (state.cdCache || (state.cdCache = {}))[key] = { at: Date.now(), v: r.value };
+    if(c.dataKey===key) c.data = r.value;
+    if(c.setImp===id) c.setImp = undefined;
+    await appendAuditLog({ action:'荷主のセット指示書を削除', target: cl.name+' / '+x.file, before: fmtDateTime(x.at)+' 取込・'+n+'行', after: null });
+    showToast('「'+x.file+'」を削除しました('+n+'行)'); render();
+  }); });
   document.querySelectorAll('[data-setimp-done]').forEach(function(el){ el.addEventListener('click', async function(){
     var p = el.getAttribute('data-setimp-done').split('|'), on = p[1]==='1', d = on ? ((sid && sid.value) || todayStr()) : '';
     var keepImp = c.setImp, keepDf = c.setDoneFilter; c.setImp = p[0]; c.setDoneFilter = '';

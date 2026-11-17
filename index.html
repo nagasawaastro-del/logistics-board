@@ -11083,6 +11083,7 @@ function renderClientSetSheet(cl){
     (S.otherCount ? '<div class="pool-hint" style="margin:0 0 8px;">この取込のうち <b>'+S.otherCount+'伝票</b> は、ほかの月に完了しているので出していません。そのため、ここでは作る数を直せません(完了日を入れる前の月か、すべて出る月で直してください)。</div>' : '')+
     (view==='dest' && T.hasCenter ? destView : view==='slips' ? slipView : clientFoldOpen('setList:'+view, '商品コードの明細('+(view==='parts' ? T.parts.length : T.fin.length)+'品番)'+(view==='order' ? '・作る数を直す' : ''))+(view==='parts' ? tbl(T.parts) : view==='fin' ? tbl(T.fin) : orderTbl)+'</details>')+
     '<div class="pool-hint" style="margin-top:8px;">並びは商品名の順(指示書・JAN ラベルも同じ順)。品番が13桁ならそれを JAN に、そうでなければロジザードの在庫の JAN を使います。</div>'+
+    b2SlipHtml(S, view==='dest' && T.hasCenter)+
   '</div>';
 }
 /* 取込ごとの数(取込ごとに指示書・ラベルを用意する一覧用)。選んでいる取込を一時的に切り替えて数える */
@@ -11273,6 +11274,145 @@ function clientSetBomCsv(cl){
   setTimeout(function(){ if(a.parentNode) a.parentNode.removeChild(a); URL.revokeObjectURL(url); }, 200);
   var sets = {}; rows.forEach(function(r){ sets[r[0]] = 1; });
   showToast('セット構成マスタ: '+Object.keys(sets).length+'品番・'+rows.length+'行'+(skip.length ? '(組数が整数にならない '+skip.length+'品番は出していません)' : '')+(sj.bad.length ? '。Shift_JIS にできない文字 '+sj.bad.length+'字は ? にしました' : ''));
+}
+/* ---------- 送り状(ヤマト B2クラウド)の CSV(2026-11-17) ----------
+   セット指示書の出荷先センターごとに送り状1件。B2クラウドの「外部データから発行」で取り込む形(見本の「発行済データ」の CSV と同じ列・Shift_JIS・CRLF・見出しあり)。
+   設定(kv b2-slip-settings)は画面から取り込む: ① お届け先マスタ(B2 のアドレス帳の CSV。センターの住所など) ② 見本の送り状の CSV(ご依頼主・請求先・品名・荷扱いなど)。
+   見本の行のお届け先・伝票番号・メールアドレスの欄は消してから残す */
+var B2_SLIP_KEY = 'b2-slip-settings';
+function b2Norm(h){ return String(h||'').normalize('NFKC').replace(/\s/g, '').replace(/\(漢字\)/g, ''); }
+var B2_MASTER_ALIAS = { 'お届け先建物名(アパートマンション名)':'お届け先住所(アパートマンション名)', 'お届け先敬称':'敬称', '配達時間帯区分':'配達時間帯', 'お届け予定eメール入力機種種別':'入力機種' };
+function b2CenterOf(text){ var m = /(?:^|[^A-Z0-9])([A-Z]{3}\d)(?![A-Z0-9])/.exec(String(text||'').normalize('NFKC').toUpperCase()); return m ? m[1] : ''; }
+function b2CenterKey(ce){ return String(ce||'').normalize('NFKC').trim().toUpperCase(); }
+function b2SlipLoad(){
+  if(state.b2Slip || state.b2SlipLoading) return;
+  state.b2SlipLoading = true;
+  loadKeyJson(B2_SLIP_KEY, function(){ return {}; }).then(function(v){ state.b2Slip = v || {}; }).catch(function(){ state.b2Slip = markUnverified({}); }).then(function(){ state.b2SlipLoading = false; render(); });
+}
+/* 取り込んだ CSV を見分けて設定にする(お届け先マスタ / 見本の送り状) */
+async function b2SlipImport(files){
+  var cur = state.b2Slip; if(!cur || isUnverified(cur)){ appAlert('送り状の設定を読み込めていません。少し待ってからもう一度選んでください'); return; }
+  var next = JSON.parse(JSON.stringify(cur)), msgs = [];
+  for(var i=0; i<files.length; i++){
+    var f = files[i], text;
+    try{ text = await shukeiReadFileText(f); }catch(e){ msgs.push('⚠️ '+f.name+': 読み込めませんでした'); continue; }
+    var rows = shukeiParseTable(text), h = (rows[0] || []).map(b2Norm);
+    if(h[0]==='お届け先コード'){
+      var centers = {}, n = 0, none = 0;
+      rows.slice(1).forEach(function(r){
+        var o = {}; h.forEach(function(k, j){ o[B2_MASTER_ALIAS[k] || k] = r[j]===undefined ? '' : r[j]; });
+        var ce = b2CenterOf([o['お届け先会社・部門名1'], o['お届け先会社・部門名2'], o['お届け先名']].join(' '));
+        if(ce){ centers[ce] = o; n++; } else none++;
+      });
+      if(!n){ msgs.push('⚠️ '+f.name+': センターの記号(FSZ1 など)の入ったお届け先がありませんでした'); continue; }
+      next.master = centers; next.masterFile = f.name; next.masterAt = new Date().toISOString();
+      msgs.push('✅ お届け先マスタ: '+n+'センター('+f.name+')'+(none ? '。センターの記号が無い '+none+'件は使いません' : ''));
+    }else if(h.indexOf('ご請求先顧客コード')!==-1 && h.indexOf('お届け先名')!==-1 && rows.length>=2){
+      var row = rows[1].slice(); while(row.length<h.length) row.push('');
+      h.forEach(function(k, j){ if(/^お届け先/.test(k) || (/メール/.test(k) && !/利用区分$/.test(k)) || /^お届け予定\(指定\)日$/.test(k) || ['お客様管理番号','伝票番号','敬称','入力機種','連携管理番号'].indexOf(k)!==-1) row[j] = ''; });
+      next.header = rows[0]; next.row = row; next.file = f.name; next.at = new Date().toISOString();
+      msgs.push('✅ 見本の送り状: '+f.name+'(ご依頼主・請求先・品名・荷扱いをこの見本から使います)');
+    }else msgs.push('⚠️ '+f.name+': お届け先マスタ・B2クラウドの送り状の CSV のどちらでもないようです');
+  }
+  if(msgs.some(function(m){ return m.indexOf('✅')===0; })){
+    if(await persistKey(B2_SLIP_KEY, next)){ state.b2Slip = next; await appendAuditLog({ action:'送り状の設定を更新', target:'B2クラウド', before:null, after: msgs.filter(function(m){ return m.indexOf('✅')===0; }).join(' / ') }); }
+    else msgs.push('⚠️ 保存できませんでした');
+  }
+  state.b2SlipMsg = msgs.join('\n'); render();
+}
+function b2SlipBoxKey(S, ce){ return (S.mode || S.from+'~'+S.to)+'|'+ce; }
+function b2CenterLabel(st, ce){ var m = st.master && st.master[ce]; return m ? (m['お届け先名'] || ce) : ce; }
+/* fromSet = セット指示書の出荷先センターから出す表も出す(「出荷先センターごと」のタブのとき)。納品先と個口を選んで出す所はいつも出す(2026-11-17) */
+function b2SlipHtml(S, fromSet){
+  b2SlipLoad();
+  var c = clientDataState(), st = state.b2Slip;
+  if(!st) return '<div class="empty-note">送り状の設定を読み込み中…</div>';
+  var ready = !!(st.master && st.header && st.row), H = (st.header || []).map(b2Norm), val = function(k){ var j = H.indexOf(k); return j<0 || !st.row ? '' : st.row[j]; };
+  var boxes = c.b2Boxes || {}, dests = fromSet ? (S.T.dests || []).filter(function(D){ return D.center; }) : [];
+  var setPart = !ready || !fromSet ? '' : '<div style="font-weight:700;margin:10px 0 6px;">この指示書の出荷先センターから出す</div>'+
+    '<div class="ch-row" style="margin:0 0 8px;"><button type="button" class="add-btn" id="chB2Csv"'+(dests.some(function(D){ return st.master[b2CenterKey(D.center)]; }) ? '' : ' disabled')+'>📤 この指示書のセンターで CSV を出す</button></div>'+
+    '<div style="overflow:auto;max-height:420px;"><table class="report-table" style="font-size:13px;"><thead><tr><th>センター</th><th class="num">完成品</th><th>お届け先(マスタ)</th><th class="num">個口</th></tr></thead><tbody>'+
+    dests.map(function(D){ var ce = b2CenterKey(D.center), m = st.master[ce], k = b2SlipBoxKey(S, ce);
+      return '<tr><td style="font-size:16px;"><b>'+esc(D.center)+'</b></td><td class="num">'+formatNum(D.qty)+'</td><td>'+(m ? esc(m['お届け先名'] || '')+' <span class="sk-minor">'+esc(String(m['お届け先住所']||'').slice(0, 6))+'…</span>' : '<b style="color:#B42318;">⚠️ マスタにありません(CSV に入りません)</b>')+'</td>'+
+        '<td class="num">'+(m ? '<input type="number" min="1" max="99" data-b2-box="'+esc(k)+'" value="'+esc(String(boxes[k] || 1))+'" style="width:70px;text-align:right;">' : '')+'</td></tr>'; }).join('')+'</tbody></table></div>';
+  // 納品先と個口を選んで出す
+  var pick = c.b2Pick || [], ces = ready ? Object.keys(st.master).sort() : [];
+  var pickPart = !ready ? '' : '<div style="font-weight:700;margin:10px 0 6px;">納品先と個口を選んで出す</div>'+
+    '<div class="ch-row" style="margin:0 0 8px;align-items:flex-end;"><label class="ch-field"><span>納品先</span><select id="chB2PickCe"><option value="">選んでください</option>'+
+      ces.map(function(ce){ return '<option value="'+esc(ce)+'">'+esc(b2CenterLabel(st, ce))+'</option>'; }).join('')+'</select></label>'+
+      '<label class="ch-field"><span>個口</span><input type="number" min="1" max="99" id="chB2PickN" value="1" style="width:80px;text-align:right;"></label>'+
+      '<button type="button" class="ll-btn" id="chB2PickAdd">＋ 追加</button></div>'+
+    (pick.length ? '<div style="overflow:auto;"><table class="report-table" style="font-size:13px;"><thead><tr><th>納品先</th><th class="num">個口</th><th></th></tr></thead><tbody>'+
+      pick.map(function(p, i){ return '<tr><td><b>'+esc(b2CenterLabel(st, p.ce))+'</b>'+(st.master[p.ce] ? '' : ' <b style="color:#B42318;">⚠️ マスタにありません</b>')+'</td><td class="num"><input type="number" min="1" max="99" data-b2-pick-n="'+i+'" value="'+esc(String(p.n))+'" style="width:70px;text-align:right;"></td><td><button type="button" class="ll-btn" data-b2-pick-del="'+i+'">×</button></td></tr>'; }).join('')+
+      '</tbody></table></div>'+
+      '<div class="ch-row" style="margin:8px 0 0;"><button type="button" class="add-btn" id="chB2PickCsv">📤 選んだ '+pick.length+'件('+pick.reduce(function(a, p){ return a + p.n; }, 0)+'個口)の CSV を出す</button><button type="button" class="ll-btn" style="color:var(--slate-500);" id="chB2PickClear">選んだのを全部消す</button></div>'
+      : '<div class="pool-hint" style="margin:0;">納品先を選び、個口を入れて「＋ 追加」。何件でも足せます(同じ納品先を足すと個口を足し合わせます)。</div>');
+  return '<div style="border:1px solid var(--slate-200,#e4e7ec);border-radius:10px;padding:12px 14px;margin:12px 0 0;">'+
+    '<div style="font-weight:700;margin:0 0 6px;">🚚 送り状(ヤマト B2クラウド)の CSV</div>'+
+    '<div class="pool-hint" style="margin:0 0 8px;">納品先ごとに送り状1件(個口 = 発行枚数)。「CSV を出す」→ B2クラウドの「外部データから発行」で取り込みます。'+
+      (ready ? '<br>ご依頼主 <b>'+esc(val('ご依頼主名'))+'</b> ・ 品名 '+esc(val('品名1') || '—')+' ・ 荷扱い '+esc(val('荷扱い1') || '—')+' ・ 請求先 …'+esc(String(val('ご請求先顧客コード')).slice(-4))+'-'+esc(val('運賃管理番号'))+'(見本: '+esc(st.file || '')+')' : '')+'</div>'+
+    (ready ? '<div class="ch-row" style="margin:0 0 4px;align-items:flex-end;"><label class="ch-field"><span>出荷予定日</span><input type="date" id="chB2Date" value="'+esc(c.b2Date || todayStr())+'"></label></div>'+pickPart+setPart
+      : '<div class="pool-hint" style="margin:0 0 8px;color:#B54708;">はじめに下の「送り状の設定」で、お届け先マスタと見本の送り状の CSV を取り込んでください。</div>')+
+    '<details style="margin-top:8px;"'+(ready ? '' : ' open')+'><summary style="cursor:pointer;font-size:13px;">送り状の設定(お届け先マスタ・見本の送り状)</summary>'+
+      '<div class="pool-hint" style="margin:6px 0;">・<b>お届け先マスタ</b>: B2クラウドのアドレス帳から出した「お届け先マスタ」の CSV。会社・部門名かお届け先名にある記号(FSZ1 など)でセンターを見分けます。今: '+(st.master ? Object.keys(st.master).length+'センター('+esc(st.masterFile||'')+'・'+esc(fmtDateTime(st.masterAt))+')' : 'なし')+'<br>'+
+      '・<b>見本の送り状</b>: B2クラウドの「発行済データ」の CSV(1件でよい)。ご依頼主・請求先・品名・荷扱い・送り状の種類などをこの見本と同じにします(お届け先・伝票番号は消して使います)。今: '+(st.header ? esc(st.file||'')+'・'+esc(fmtDateTime(st.at)) : 'なし')+'<br>2つまとめて選べます。</div>'+
+      '<input type="file" id="chB2File" accept=".csv" multiple>'+
+      (state.b2SlipMsg ? '<div class="pool-hint" style="white-space:pre-line;margin-top:6px;">'+esc(state.b2SlipMsg)+'</div>' : '')+
+    '</details></div>';
+}
+/* 送り状の CSV を作る。list = [{ ce: センター記号, n: 個口 }]。戻り値 { text, rows, miss, boxIdx } */
+function b2SlipBuild(list, st, date){
+  var H = st.header.map(b2Norm), idx = function(k){ return H.indexOf(k); }, out = [], miss = [];
+  list.forEach(function(x){
+    var ce = b2CenterKey(x.ce), m = st.master[ce];
+    if(!m){ miss.push(x.ce); return; }
+    var row = st.row.slice();
+    Object.keys(m).forEach(function(k){ var j = idx(k); if(j<0) return; if(/^お届け先|^敬称$|^配達時間帯$|メール|^入力機種$/.test(k) || m[k]) row[j] = m[k]; });
+    if(idx('出荷予定日')>=0) row[idx('出荷予定日')] = date;
+    if(idx('お届け予定(指定)日')>=0) row[idx('お届け予定(指定)日')] = ''; // お届け日は指定しない(最短)
+    if(idx('発行枚数')>=0) row[idx('発行枚数')] = String(Math.max(1, Math.min(99, Number(x.n) || 1)));
+    out.push(row);
+  });
+  var q = function(v){ return '"'+String(v===undefined || v===null ? '' : v).replace(/"/g, '""')+'"'; };
+  return { text: [st.header].concat(out).map(function(r){ return r.map(q).join(','); }).join('\r\n')+'\r\n', rows: out, miss: miss, boxIdx: idx('発行枚数') };
+}
+function b2SlipCsv(cl, list, tag){
+  var st = state.b2Slip, c = clientDataState(); if(!st || !st.master || !st.header) return;
+  var date = (c.b2Date || todayStr()).replace(/-/g, '/'), R = b2SlipBuild(list, st, date);
+  if(!R.rows.length){ appAlert('出せる納品先がありません(お届け先マスタにある納品先がありません)'); return; }
+  var sj = cxInSjis(R.text), blob = new Blob([sj.bytes], { type: 'text/csv' }), url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = 'B2送り状_'+cl.name+'_'+date.replace(/\//g, '')+(tag || '')+'.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ if(a.parentNode) a.parentNode.removeChild(a); URL.revokeObjectURL(url); }, 200);
+  var nBox = R.rows.reduce(function(a, r){ return a + (Number(r[R.boxIdx]) || 1); }, 0);
+  showToast('送り状の CSV: '+R.rows.length+'件・'+nBox+'個口'+(R.miss.length ? '(マスタにない '+R.miss.join('・')+' は入れていません)' : '')+(sj.bad.length ? '。Shift_JIS にできない文字 '+sj.bad.length+'字は ? にしました' : ''));
+}
+function bindB2Slip(cl){
+  var c = clientDataState(), clampN = function(v){ return Math.max(1, Math.min(99, Math.round(Number(v)) || 1)); };
+  var keepBoxes = function(){
+    document.querySelectorAll('[data-b2-box]').forEach(function(el){ var x = c.b2Boxes || (c.b2Boxes = {}); x[el.getAttribute('data-b2-box')] = clampN(el.value); });
+    document.querySelectorAll('[data-b2-pick-n]').forEach(function(el){ var p = (c.b2Pick || [])[Number(el.getAttribute('data-b2-pick-n'))]; if(p) p.n = clampN(el.value); });
+  };
+  var f = document.getElementById('chB2File'); if(f) f.addEventListener('change', function(){ var fs = Array.prototype.slice.call(f.files||[]); if(fs.length){ keepBoxes(); b2SlipImport(fs); } });
+  var d = document.getElementById('chB2Date'); if(d) d.addEventListener('change', function(){ c.b2Date = d.value; });
+  document.querySelectorAll('[data-b2-box]').forEach(function(el){ el.addEventListener('change', keepBoxes); });
+  document.querySelectorAll('[data-b2-pick-n]').forEach(function(el){ el.addEventListener('change', function(){ keepBoxes(); render(); }); });
+  var b = document.getElementById('chB2Csv'); if(b) b.addEventListener('click', function(){
+    keepBoxes(); var S = clientSetSel(cl); if(!S) return;
+    var list = (S.T.dests || []).filter(function(D){ return D.center; }).map(function(D){ var ce = b2CenterKey(D.center); return { ce: ce, n: (c.b2Boxes || {})[b2SlipBoxKey(S, ce)] || 1 }; });
+    b2SlipCsv(cl, list, clientSetFileTag(S));
+  });
+  var add = document.getElementById('chB2PickAdd'); if(add) add.addEventListener('click', function(){
+    keepBoxes();
+    var ce = document.getElementById('chB2PickCe').value, n = clampN(document.getElementById('chB2PickN').value);
+    if(!ce){ appAlert('納品先を選んでください'); return; }
+    var list = c.b2Pick || (c.b2Pick = []), same = list.filter(function(p){ return p.ce===ce; })[0];
+    if(same) same.n = clampN(same.n + n); else list.push({ ce: ce, n: n });
+    render();
+  });
+  document.querySelectorAll('[data-b2-pick-del]').forEach(function(el){ el.addEventListener('click', function(){ keepBoxes(); (c.b2Pick || []).splice(Number(el.getAttribute('data-b2-pick-del')), 1); render(); }); });
+  var pc = document.getElementById('chB2PickCsv'); if(pc) pc.addEventListener('click', function(){ keepBoxes(); b2SlipCsv(cl, (c.b2Pick || []).slice()); });
+  var clr = document.getElementById('chB2PickClear'); if(clr) clr.addEventListener('click', function(){ c.b2Pick = []; render(); });
 }
 function bindClientHub(){
   if(!hasManagerSession()){ bindManagerLoginForm(); return; } // ログイン画面(これが無く、ログインを押しても何も起きなかった。2026-11-05)
@@ -11500,6 +11640,7 @@ function bindClientHub(){
   var jp = document.getElementById('chJanPrint'); if(jp) jp.addEventListener('click', function(){ clientJanLabelPrint(cl); });
   var bc = document.getElementById('chSetBomCsv'); if(bc) bc.addEventListener('click', function(){ clientSetBomCsv(cl); });
   var dp = document.getElementById('chSetDestPrint'); if(dp) dp.addEventListener('click', function(){ clientSetDestPrint(cl); });
+  bindB2Slip(cl);
   document.querySelectorAll('[data-setimp-print]').forEach(function(el){ el.addEventListener('click', function(){ var p = el.getAttribute('data-setimp-print').split('|'); clientSetPrintImp(cl, p[0], p[1]); }); });
   ['chJanDx','chJanDy','chJanStart'].forEach(function(id){ var el = document.getElementById(id); if(el) el.addEventListener('change', function(){ var v = clientJanCfg(); v[{ chJanDx:'dx', chJanDy:'dy', chJanStart:'start' }[id]] = Number(el.value)||0; try{ localStorage.setItem('janLabelCfg', JSON.stringify(v)); }catch(e){} }); });
   var jm = document.getElementById('chJanMark'); if(jm) jm.addEventListener('change', function(){ var v = clientJanCfg(); v.mark = jm.checked; try{ localStorage.setItem('janLabelCfg', JSON.stringify(v)); }catch(e){} });

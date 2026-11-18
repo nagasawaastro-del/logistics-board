@@ -13878,9 +13878,8 @@ function renderDataHub(){
         (at && !fresh ? ' <span class="vca-site is-split">今日まだ更新していません</span>' : '')+'</td>'+
       '<td>'+esc(detail||'')+'</td><td class="sk-minor">'+esc(usedBy)+'</td></tr>';
   }
-  var lz = st.logizard, order = d.order;
+  var lz = st.logizard;
   var lzOld = lz && lz.products && Object.keys(lz.products).slice(0,50).some(function(c){ var b = lz.products[c].blocks; return Object.keys(b).some(function(k){ return !b[k].locAlloc; }); });
-  var calc = order && order.lines ? computeVcAlloc(order, d.dests, st, state.shukeiPm) : null;
   return '<div class="panel" style="margin-top:14px;">'+
     '<div class="panel-title">在庫</div>'+
     '<div class="pool-hint" style="margin:0 0 10px;">出荷集計表・VC引当で使うデータです。取り込むと前のデータと置き換わります。</div>'+
@@ -13889,7 +13888,6 @@ function renderDataHub(){
       '<div class="ll-form-group-title">CSVファイルの取り込み(まとめてOK)</div>'+
       '<div class="pool-hint" style="margin:0 0 6px;">次のCSVを、まとめて選ぶか、この枠にまとめてドラッグ&ドロップしてください。ファイルの中身から種類を見分けます。<br>'+
         '・ロジザードの在庫 ・弥生の在庫(「高屋在庫.csv」「丹南在庫.csv」「全外部倉庫.csv」など。倉庫コードで高屋('+esc(SHUKEI_SITES.takaya.yayoiWarehouse)+')・丹南('+esc(SHUKEI_SITES.tannan.yayoiWarehouse)+')に分けます)<br>'+
-        '<b>VCの出荷指示は「VC引当」のページで取り込みます</b>(2026-11-18)。<br>'+
         '<b>弥生の在庫は、kintone の商品台帳の同期(毎朝の自動・「商品台帳」の取得)で、商品台帳の「在庫数」の表から自動で新しくなります</b>(2026-11-12)。CSV はそれより新しい在庫を使いたいときだけ取り込んでください(次の同期で商品台帳の在庫に置き換わります)。</div>'+
       '<label class="add-btn" style="display:inline-block;cursor:pointer;">📄 CSVファイルを選んで取り込む(複数可)'+
         '<input type="file" accept=".csv,text/csv" multiple data-hub-upload="1" style="display:none;"></label>'+
@@ -13900,8 +13898,6 @@ function renderDataHub(){
       '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>データ</th><th>最終更新</th><th>内容</th><th>使う画面</th></tr></thead><tbody>'+
         row('ロジザードの在庫', lz, lz ? formatNum(lz.rowCount||0)+'行'+(lzOld ? '(引当数の無い以前の形。取り込み直してください)' : '') : '', '出荷集計表・在庫差異・VC引き当て')+
         Object.keys(SHUKEI_SITES).map(function(k){ var y = yb[k]; return row('弥生の在庫('+SHUKEI_SITES[k].name+')', y, y ? formatNum(y.rowCount||0)+'商品'+(y.source==='kintone' ? '(kintone の商品台帳から)' : '(CSV)') : '', '出荷集計表・在庫差異・VC引き当て(入数)'); }).join('')+
-        row('VCの出荷指示', order, order ? formatNum(order.rowCount||0)+'行'+(order.workDates && order.workDates.length ? '・出荷作業日 '+order.workDates.map(dateLabelFromStr).join('・') : '')+(order.fileName ? '・'+order.fileName : '') : '', 'VC引き当て(取り込みは VC引当のページで)')+
-        '<tr><td><b>納品先一覧</b></td><td>'+(d.dests && d.dests.updatedAt ? esc(fmtDateTime(d.dests.updatedAt))+'に変更' : '初期値(Excel の一覧)')+'</td><td>'+formatNum(Object.keys(vcAllocDestGroups(d.dests)).length)+'か所</td><td class="sk-minor">VC引き当て(振り分け番号)</td></tr>'+
       '</tbody></table></div>'+
     '</div>'+
   '</div>';
@@ -16790,7 +16786,7 @@ function renderCoopSwap(st){
   var body = view==='this'
     ? '<div class="stf-section-title" style="display:flex;align-items:center;gap:8px;">'+esc(ti.thisW)+selHtml.this+coopSendBtn('this', coopThisPlanRows(r).length)+'</div>'+okToggle(nOkThis)+'<div style="overflow-x:auto;">'+t.thisWeek+'</div>'
     : view==='next'
-    ? '<div class="stf-section-title" style="display:flex;align-items:center;gap:8px;">'+esc(ti.nextW)+selHtml.next+coopSendBtn('next', r.nextRows.filter(function(x){ return x.short; }).length)+'</div>'+okToggle(nOkNext)+'<div style="overflow-x:auto;">'+t.nextWeek+'</div>'
+    ? '<div class="stf-section-title" style="display:flex;align-items:center;gap:8px;">'+esc(ti.nextW)+selHtml.next+coopSendBtn('next', coopThisPlanRows(r, 'next').length)+'</div>'+okToggle(nOkNext)+'<div style="overflow-x:auto;">'+t.nextWeek+'</div>'
     : '<div class="stf-section-title" style="display:flex;align-items:center;gap:8px;">'+esc(ti.put)+selHtml.put+coopSendBtn('put', r.putAway.length)+'</div><div style="overflow-x:auto;">'+t.putAway+'</div>'+keepList;
   return head+cards+'<div class="pool-hint" style="margin:-4px 0 6px;">上のカードを押すと、その表に切り替わります(印刷は ①②③ 全部)</div>'+body+
     '<div class="pool-hint" style="margin-top:10px;">生協ロケ = ロジザードのブロック「'+COOP_BLOCK+'」(棚在庫の '+esc(coopHoldText())+' は、生協ロケの在庫に数えますが、片付けには出しません)。'+
@@ -16798,15 +16794,17 @@ function renderCoopSwap(st){
     '来週の補充数 = 来週の企画の数 − 今週の分を引いた生協ロケの残り。在庫は引当数を除いた数。持ってくるロケは、高屋の生協ロケ以外で在庫の多いロケから(今週の分を先に取る)。</div>';
 }
 function coopSendBtn(kind, n){
-  return '<button type="button" class="vc-manage-toggle-btn" data-coop-send="'+kind+'"'+(n ? '' : ' disabled')+' style="font-weight:400;">🧾 '+(kind==='this' ? '企画の商品を全部 ' : '')+'高屋の出荷集計表へ('+n+'行)</button>';
+  return '<button type="button" class="vc-manage-toggle-btn" data-coop-send="'+kind+'"'+(n ? '' : ' disabled')+' style="font-weight:400;">🧾 '+(kind!=='put' ? '企画の商品を全部 ' : '')+'高屋の出荷集計表へ('+n+'行)</button>';
 }
-/* ② 今週の企画を出荷集計表へ送る行(2026-11-06): 補充数ではなく、今週の企画の商品一覧を全部(数 = 企画の数)。
+/* ② 今週・③ 来週の企画を出荷集計表へ送る行(② 2026-11-06・③ 2026-11-19。前の ③ は足りない分だけだった):
+   補充数ではなく、その週の企画の商品一覧を全部(数 = 企画の数)。
    企画(日付・得意先・件名)ごとに1行ずつ。備考はホームの生協企画から送るときと同じ形(同じ行を二重に足さない) */
-function coopThisPlanRows(r){
+function coopThisPlanRows(r, week){
+  week = week || 'this';
   var by = {}, order = [];
-  r.thisRows.forEach(function(x){
+  (week==='next' ? r.nextRows : r.thisRows).forEach(function(x){
     x.plans.forEach(function(p){
-      if(p.week!=='this' || !p.qty) return;
+      if(p.week!==week || !p.qty) return;
       var note = '生協 '+coopDate(p.date)+coopPartyShort(p.party)+(p.subject ? ' '+p.subject : '');
       var k = p.date+'|'+note;
       if(!by[k]){ by[k] = []; order.push(k); }
@@ -16820,19 +16818,14 @@ function coopThisPlanRows(r){
 /* 生協の入れ替えの行を、高屋の出荷集計表(この端末の入力中の表)に 品番・数量・備考 で追加する。同じ備考・品番の行が既にあれば足さない */
 async function coopSendToShukei(st, kind){
   var r = coopApplyParties(computeCoopSwap(st), coopPartySel()), rows = [];
-  function planNote(x, week){ return x.plans.filter(function(p){ return p.week===week; }).map(function(p){ return coopDate(p.date)+coopPartyShort(p.party); }).join('・'); }
   if(kind==='put') r.putAway.forEach(function(x){ rows.push({ code: x.code, qty: x.qty, note: '生協 片付け '+coopLocName(x.loc) }); });
-  else if(kind==='this') rows = coopThisPlanRows(r);
-  else r.nextRows.forEach(function(x){
-    if(!x.short) return;
-    rows.push({ code: x.code, qty: x.short, note: '生協 来週補充 '+planNote(x, kind)+(Object.keys(x.sLocs).length ? ' →'+Object.keys(x.sLocs).sort(coopLocCmp).map(coopLocName).join('・') : '') });
-  });
+  else rows = coopThisPlanRows(r, kind);
   if(!rows.length){ showToast('送る行がありません'); return; }
   var dr = loadShukeiDraft('takaya'), have = {};
   dr.rows.forEach(function(x){ have[x.code+'|'+x.note] = true; });
   var add = rows.filter(function(x){ return !have[x.code+'|'+x.note]; });
   var psel = coopPartySel()[kind];
-  var label = { put:'① 片付け', this:'② 今週の企画の商品', next:'③ 来週の補充' }[kind]+(psel ? '('+(psel===COOP_NO_PLAN ? '次の企画なし' : psel)+')' : '');
+  var label = { put:'① 片付け', this:'② 今週の企画の商品', next:'③ 来週の企画の商品' }[kind]+(psel ? '('+(psel===COOP_NO_PLAN ? '次の企画なし' : psel)+')' : '');
   if(!add.length){ showToast(label+'の行は、もう出荷集計表に入っています'); return; }
   if(!await appConfirm('高屋の出荷集計表に'+label+'の '+add.length+'行を追加します'+(dr.rows.length ? '(今入っている'+dr.rows.length+'行のあとに)' : '')+(rows.length>add.length ? '\n同じ行が既にある'+(rows.length-add.length)+'行は足しません。' : '')+'\nよろしいですか?')) return;
   add.forEach(function(x){ dr.rows.push({ vc:'', code: x.code, qty: String(x.qty), note: x.note }); });

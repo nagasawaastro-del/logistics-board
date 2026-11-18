@@ -1422,6 +1422,14 @@ html[data-app-theme="dark"] .hd-coop-badge.is-short{background:rgba(240,68,56,.1
 .hd-coop-q{white-space:nowrap;font-weight:700;text-align:right;}
 .hd-coop-q small{font-weight:400;color:var(--slate-500);}
 .hd-span3{grid-column:1 / -1;}
+.hd-todo-card{gap:10px;}
+.hd-todo-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;}
+.hd-todo{border-bottom:1px solid var(--paper-line);font-size:15px;}
+.hd-todo:last-child{border-bottom:none;}
+.hd-todo label{display:flex;align-items:flex-start;gap:10px;padding:8px 0;cursor:pointer;line-height:1.5;}
+.hd-todo input{width:18px;height:18px;margin-top:3px;flex:none;}
+.hd-todo span{min-width:0;overflow-wrap:anywhere;}
+.hd-todo.is-done span{text-decoration:line-through;color:var(--slate-500);}
 .hd-arrival #arrivalSheetPanel{margin:0 !important;padding:0 !important;border:none !important;background:transparent !important;box-shadow:none !important;}
 .hd-arrival #arrivalSheetPanel > .stf-section-title{display:none;}
 .hd-arrival [data-arrival-pdf],.hd-arrival [data-arrival-pdf-all],.hd-arrival [data-arrival-pdf-no],.hd-arrival [data-arrival-pdf-split]{white-space:nowrap;}
@@ -17458,7 +17466,7 @@ function isUserBusy(){
 /* ---------- 開いている画面をアドレス(#のあと)に残す ----------
    再読み込みしてもトップ画面に戻らず、同じ画面(と画面内のタブ・作業記録で選んでいる人)を開き直すため。
    例: #role=adminHub&tab=financial / #role=input&staff=<スタッフID> / #role=shukei&site=tannan&tab=diff */
-var VIEW_URL_ROLES = ['input','report','monitor','achievements','history','adminHub','settingsHub','shukei','vcAlloc','cxOrder','dataHub','billing','stock','clientHub','wvImport','jodLabel'];
+var VIEW_URL_ROLES = ['input','report','monitor','achievements','history','adminHub','settingsHub','shukei','vcAlloc','cxOrder','dataHub','billing','stock','clientHub','wvImport','jodLabel','todo'];
 function viewStateToHash(){
   if(!state.role) return '';
   var q = { role: state.role };
@@ -17554,6 +17562,7 @@ function render(){
     var gateHtml = renderTopbar() + renderGate();
     root.innerHTML = gateHtml;
     bindGate();
+    bindTodoChecks();
     bindCommon();
     restoreScroll();
     syncViewToUrl();
@@ -17586,6 +17595,7 @@ function render(){
   else if(state.role==='stock') html += renderStockTab();
   else if(state.role==='wvImport') html += '<div class="mgr-wrap">'+renderCsvImportPanel()+'</div>';
   else if(state.role==='jodLabel') html += '<div class="mgr-wrap">'+renderJodLabel()+'</div>';
+  else if(state.role==='todo') html += '<div class="mgr-wrap client-hub">'+renderTodoPage()+'</div>';
   else if(state.role==='clientHub') html += renderClientHub();
   if(state.modal) html += renderModal();
   html += renderInstructionAlert();
@@ -17608,6 +17618,7 @@ function render(){
   if(state.role==='stock') bindStockTab();
   if(state.role==='wvImport') bindCsvImportPanel();
   if(state.role==='jodLabel') bindJodLabel();
+  if(state.role==='todo') bindTodoPage();
   if(state.role==='clientHub') bindClientHub();
   bindCsvButtons();
   document.querySelectorAll('[data-go-datahub]').forEach(function(el){
@@ -17873,7 +17884,7 @@ function renderGateDashboard(){
       kpiTile('作業時間', fmtHM(wsum), '', '休憩を除く')+
     '</div>';
   }catch(e){ kpiHtml = ''; }
-  return kpiHtml+'<section class="hd-grid">'+progress+staffCard+taskCard+statusCard+arrivalCard+coopCard+dataCard+'</section>';
+  return kpiHtml+'<section class="hd-grid">'+renderHomeTodoCard(label)+progress+staffCard+taskCard+statusCard+arrivalCard+coopCard+dataCard+'</section>';
 }
 /* トップページの「今週の生協企画」(2026-10-29): 今週(月〜日)の生協の見積もりを、日付順に 得意先・件名・倉庫・品番の数・数量。
    データは kv「coop-plans」(kintone の同期のときに作る小さな一覧)。データの更新状況と一緒に読む */
@@ -18033,12 +18044,13 @@ var COMMON_NAV_ITEMS = [
   { role:'cxOrder', label:'入出庫指示', ic:'🚚' },
   { role:'stock', label:'在庫', ic:'🏢' },
   { role:'wvImport', label:'作業量CSV取込', ic:'📥' }, // だれでも取り込める(2026-11-09。前は管理の中)
-  { role:'jodLabel', label:'JODラベル', ic:'🏷️' } // 発注データの CSV からラベルを印刷(2026-11-09)
+  { role:'jodLabel', label:'JODラベル', ic:'🏷️' }, // 発注データの CSV からラベルを印刷(2026-11-09)
+  { role:'todo', label:'タスク管理', ic:'✅' } // 日付と内容だけのやること。今日の分はホームに出す(2026-11-18)
 ];
 /* サイドバーのまとまり(トップのカードの並びと同じ)。管理の項目は鍵の印(ログインしていないとき) */
 var NAV_GROUPS = [
   { label:'現場', items:[ { role:'input' }, { role:'monitor' } ] },
-  { label:'事務所', items:[ { role:'wvImport', ic:'data' }, { role:'jodLabel', ic:'tag' }, { role:'report' }, { role:'shukei' }, { role:'vcAlloc' }, { role:'cxOrder' }, { role:'stock' } ] },
+  { label:'事務所', items:[ { role:'todo', ic:'listChecks' }, { role:'wvImport', ic:'data' }, { role:'jodLabel', ic:'tag' }, { role:'report' }, { role:'shukei' }, { role:'vcAlloc' }, { role:'cxOrder' }, { role:'stock' } ] },
   { label:'管理', items:[ { role:'adminHub', tab:'stockData', label:'在庫・kintone取込', ic:'database', lock:true }, { role:'adminHub', lock:true }, { role:'adminHub', tab:'setBom', label:'セット構成', ic:'listChecks', lock:true }, { role:'clientHub', label:'荷主ページ', ic:'truck', lock:true }, { role:'settingsHub', lock:true }, { href:'factory.html', label:'生産管理', ic:'factory', lock:true } ] }
 ];
 var ADMIN_NAV_ITEMS = [
@@ -18097,7 +18109,7 @@ document.addEventListener('click', function(ev){
   document.querySelectorAll('[data-theme-toggle]').forEach(function(x){ x.innerHTML = themeToggleInner(t==='dark'); });
 });
 function renderTopbar(){
-  var roleLabel = {wvImport:'作業量CSV取込', jodLabel:'JODラベル', cxOrder:'入出庫指示', clientHub:'荷主ページ', manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'出荷集計表(高屋・丹南)', vcAlloc:'VC引当', stock:'在庫'}[state.role] || (state.role ? '' : 'ホーム');
+  var roleLabel = {todo:'タスク管理', wvImport:'作業量CSV取込', jodLabel:'JODラベル', cxOrder:'入出庫指示', clientHub:'荷主ページ', manager:'管理者', register:'作業登録', report:'集計', input:'作業記録', monitor:'モニター', achievements:'実績', history:'操作履歴', settings:'設定', financial:'収支・分析', staffing:'人員配置', adminHub:'管理者', settingsHub:'設定', shukei:'出荷集計表(高屋・丹南)', vcAlloc:'VC引当', stock:'在庫'}[state.role] || (state.role ? '' : 'ホーム');
   var lockBtn = (hasManagerSession() && ADMIN_GATED_ROLES().indexOf(state.role)!==-1) ? '<button class="pill-btn" id="adminLockBtn" title="ログアウトする">🔓 ログアウト</button>' : '';
   // 共通ナビゲーション: どのページからでも他の主要ページへ直接移動できるようにする。
   // 管理者専用項目(管理者/設定)は、実際にログイン済みの場合のみ表示する
@@ -20279,6 +20291,148 @@ function jodRowCount(r, qcol){
   return { qty: q, pack: pack, cases: cases, auto: q + cases };
 }
 function jodLabelCount(r, i, qcol){ var J = state.jodLabel, ov = J && J.over && J.over[i]; return (ov!==undefined && ov!==null && ov!=='') ? Math.max(0, Math.floor(Number(ov)||0)) : jodRowCount(r, qcol).auto; }
+/* ---------- タスク管理(2026-11-18) ----------
+   日付と内容(自由入力)だけのやることの一覧。kv「todo-tasks」= { items:[{ id, date, text, done(完了にした日時。未完了は ''), at(追加した日時), by }] }。
+   ホームには今日のタスクだけ出す(そこでも完了にできる)。読むのは、ホームかこのページを開いているときに1分に1回まで(通信量を増やさない)。
+   完了して60日たったものは、保存のときに消す(大きくしない) */
+var TODO_KEY = 'todo-tasks';
+function todoTyping(){ var a = document.activeElement; return !!(a && (a.id==='todoText' || a.id==='todoDate')); }
+function todoEnsure(force){
+  if(!hasDataAccess() || !state.appDataLoaded) return;
+  var T = state.todo || (state.todo = { items: null, at: 0, loading: false, filter: 'open' });
+  if(T.loading || (!force && T.items && Date.now()-T.at < 60000)) return;
+  T.loading = true;
+  loadKeyJson(TODO_KEY, function(){ return { items: [] }; }).then(function(d){
+    T.loading = false; T.at = Date.now();
+    var items = (d && Array.isArray(d.items)) ? d.items : [];
+    var changed = JSON.stringify(items)!==JSON.stringify(T.items);
+    T.items = items; T.bad = isUnverified(d);
+    if(changed && (!state.role || state.role==='todo') && !todoTyping()) render();
+  }).catch(function(){ T.loading = false; T.at = Date.now(); });
+}
+async function todoUpdate(fn){
+  if(isReadOnlyAccount()){ showToast(READONLY_BLOCKED_TITLE); return null; }
+  var old = new Date(Date.now()-60*864e5).toISOString();
+  var r = await tpickKvUpdate(TODO_KEY, function(cur){
+    var items = Array.isArray(cur.items) ? cur.items.slice() : [];
+    var next = fn(items);
+    if(next===false) return false;
+    return { items: next.filter(function(x){ return !(x.done && x.done < old); }) };
+  });
+  if(!r.ok){ if(!r.aborted) showToast('保存できませんでした。もう一度押してください'); return null; }
+  var T = state.todo || (state.todo = { filter: 'open' });
+  T.items = r.value.items; T.at = Date.now();
+  return r.value;
+}
+function todoDateLabel(d){
+  var WDJ = ['日','月','火','水','木','金','土'], t = new Date(d+'T00:00:00');
+  return isNaN(t) ? d : (t.getMonth()+1)+'/'+t.getDate()+'('+WDJ[t.getDay()]+')';
+}
+function todoTextHtml(s){ return esc(s).replace(/\n/g, '<br>'); }
+function renderTodoPage(){
+  todoEnsure();
+  var T = state.todo || { items: null, filter: 'open' }, ro = isReadOnlyAccount(), today = todayStr();
+  var html = '<div class="panel"><div class="panel-title">タスク管理</div>'+
+    '<div class="pool-hint" style="margin:0 0 10px;">日付とやることを入れて「追加」を押します。<b>ホームには、今日のタスクだけ</b>が出ます(ホームでも完了にできます)。完了して60日たったものは自動で消えます。</div>'+
+    '<div class="ch-row">'+
+      '<label class="ch-field"><span>日付</span><input type="date" id="todoDate" value="'+esc(T.draftDate || today)+'"></label>'+
+      '<label class="ch-field" style="flex:1;min-width:240px;"><span>内容</span><textarea id="todoText" rows="2" placeholder="やることを自由に入力" style="width:100%;box-sizing:border-box;resize:vertical;">'+esc(T.draftText || '')+'</textarea></label>'+
+      '<button type="button" class="add-btn" id="todoAdd"'+(ro ? ' disabled title="'+READONLY_BLOCKED_TITLE+'"' : '')+'>追加</button>'+
+    '</div>'+
+  '</div>';
+  if(!T.items) return html+'<div class="panel"><div class="hd-empty">読み込み中…</div></div>';
+  var items = T.items, f = T.filter || 'open';
+  var nOpen = items.filter(function(x){ return !x.done; }).length, nDone = items.length - nOpen;
+  var list = items.filter(function(x){ return f==='all' ? true : f==='done' ? !!x.done : !x.done; })
+    .sort(function(a, b){ return f==='done' ? String(b.date).localeCompare(String(a.date)) || String(b.done).localeCompare(String(a.done)) : String(a.date).localeCompare(String(b.date)) || String(a.at).localeCompare(String(b.at)); });
+  var sw = '<div class="sub-switch" style="margin:0 0 10px;">'+[['open','これから(未完了) '+nOpen+'件'],['done','完了 '+nDone+'件'],['all','全部']].map(function(o){
+    return '<button type="button" class="sub-switch-btn'+(f===o[0] ? ' active' : '')+'" data-todo-filter="'+o[0]+'">'+esc(o[1])+'</button>'; }).join('')+'</div>';
+  var rows = list.map(function(x){
+    var late = !x.done && x.date < today;
+    return '<tr'+(x.done ? ' style="opacity:.55;"' : '')+'>'+
+      '<td style="white-space:nowrap;'+(x.date===today ? 'font-weight:700;color:var(--dash-acc);' : '')+'">'+esc(todoDateLabel(x.date))+(x.date===today ? ' 今日' : '')+(late ? ' <span class="hd-chip is-warn">過ぎています</span>' : '')+'</td>'+
+      '<td style="overflow-wrap:anywhere;'+(x.done ? 'text-decoration:line-through;' : '')+'">'+todoTextHtml(x.text)+'</td>'+
+      '<td style="white-space:nowrap;"><label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" data-todo-done="'+esc(x.id)+'"'+(x.done ? ' checked' : '')+(ro ? ' disabled' : '')+'>完了</label></td>'+
+      '<td><button type="button" class="log-stop-btn" style="white-space:nowrap;" data-todo-del="'+esc(x.id)+'"'+(ro ? ' disabled' : '')+'>削除</button></td>'+
+    '</tr>';
+  }).join('');
+  return html+'<div class="panel"><div class="panel-title">タスクの一覧</div>'+sw+
+    (rows ? '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>日付</th><th>内容</th><th>完了</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+      : '<div class="hd-empty">'+(f==='done' ? '完了したタスクはありません' : f==='open' ? '未完了のタスクはありません' : 'タスクはありません')+'</div>')+
+  '</div>';
+}
+/* ホームの「本日のタスク」。今日の日付のタスクだけ(未完了が上) */
+function renderHomeTodoCard(label){
+  if(!hasDataAccess()) return '';
+  todoEnsure();
+  var T = state.todo || {}, today = todayStr(), ro = isReadOnlyAccount();
+  var list = (T.items || []).filter(function(x){ return x.date===today; })
+    .sort(function(a, b){ return (a.done ? 1 : 0) - (b.done ? 1 : 0) || String(a.at).localeCompare(String(b.at)); });
+  var nOpen = list.filter(function(x){ return !x.done; }).length;
+  var navBtn = '<button type="button" class="hd-btn" data-nav-role="todo" style="margin-left:auto;">タスク管理を開く</button>';
+  var body = !T.items ? '<div class="hd-empty">読み込み中…</div>'
+    : !list.length ? '<div class="hd-empty" style="padding:4px 0;">今日のタスクはありません</div>'
+    : '<ul class="hd-todo-list">'+list.map(function(x){
+        return '<li class="hd-todo'+(x.done ? ' is-done' : '')+'"><label><input type="checkbox" data-todo-done="'+esc(x.id)+'"'+(x.done ? ' checked' : '')+(ro ? ' disabled' : '')+'><span>'+todoTextHtml(x.text)+'</span></label></li>';
+      }).join('')+'</ul>';
+  return '<article class="hd-card hd-span3 hd-todo-card">'+
+    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+label('listChecks','本日のタスク'+(T.items && list.length ? ' ・ 残り '+nOpen+' / '+list.length+'件' : ''),'')+navBtn+'</div>'+
+    body+
+  '</article>';
+}
+/* 完了のチェック(ホームとタスク管理のページの両方) */
+function bindTodoChecks(){
+  document.querySelectorAll('[data-todo-done]').forEach(function(el){
+    el.addEventListener('change', async function(){
+      var id = el.getAttribute('data-todo-done'), on = el.checked;
+      el.disabled = true;
+      var r = await todoUpdate(function(items){
+        return items.map(function(x){ return x.id===id ? Object.assign({}, x, { done: on ? new Date().toISOString() : '' }) : x; });
+      });
+      if(r) showToast(on ? '完了にしました' : '未完了に戻しました');
+      render();
+    });
+  });
+}
+function bindTodoPage(){
+  var T = state.todo || (state.todo = { items: null, at: 0, filter: 'open' });
+  var dt = document.getElementById('todoDate'), tx = document.getElementById('todoText');
+  if(dt) dt.addEventListener('change', function(){ T.draftDate = dt.value; });
+  if(tx) tx.addEventListener('input', function(){ T.draftText = tx.value; });
+  var add = document.getElementById('todoAdd');
+  if(add) add.addEventListener('click', async function(){
+    var date = dt ? dt.value : '', text = tx ? tx.value.trim() : '';
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ showToast('日付を入れてください'); return; }
+    if(!text){ showToast('内容を入れてください'); if(tx) tx.focus(); return; }
+    add.disabled = true;
+    var email = (state.managerSession && state.managerSession.user && state.managerSession.user.email) || '';
+    var item = { id: 't'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), date: date, text: text.slice(0, 1000), done: '', at: new Date().toISOString(), by: email };
+    var r = await todoUpdate(function(items){ return items.concat([item]); });
+    add.disabled = false;
+    if(!r){ render(); return; }
+    T.draftText = ''; T.draftDate = date;
+    try{ await appendAuditLog({ action:'タスクを追加', target: todoDateLabel(date), before: null, after: item.text }); }catch(e){}
+    showToast(todoDateLabel(date)+' のタスクを追加しました'+(date===todayStr() ? '(ホームに出ます)' : ''));
+    render();
+  });
+  document.querySelectorAll('[data-todo-filter]').forEach(function(el){
+    el.addEventListener('click', function(){ T.filter = el.getAttribute('data-todo-filter'); render(); });
+  });
+  document.querySelectorAll('[data-todo-del]').forEach(function(el){
+    el.addEventListener('click', async function(){
+      var id = el.getAttribute('data-todo-del'), x = (T.items || []).filter(function(y){ return y.id===id; })[0];
+      if(!x) return;
+      if(!confirm(todoDateLabel(x.date)+' のタスクを削除します。'+String.fromCharCode(10)+String.fromCharCode(10)+x.text.slice(0, 200))) return;
+      var r = await todoUpdate(function(items){ return items.filter(function(y){ return y.id!==id; }); });
+      if(r){
+        try{ await appendAuditLog({ action:'タスクを削除', target: todoDateLabel(x.date), before: x.text, after: null }); }catch(e){}
+        showToast('削除しました');
+      }
+      render();
+    });
+  });
+  bindTodoChecks();
+}
 function renderJodLabel(){
   var J = state.jodLabel || (state.jodLabel = { file: null, rows: null, qcol: 'zan', start: 1, over: {}, msg: '', wh: '', order: 'astro' });
   var html = '<div class="panel"><div class="panel-title">JODラベル</div>'+

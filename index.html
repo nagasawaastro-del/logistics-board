@@ -10395,18 +10395,21 @@ function clientQ(v){ return typeof v==='number' ? v : (clientNum(v)||0); }
    行に当てて返す(r.done・直した setQty と部品の数・r.setOrig = 元のセット数)。数量は指示(PO)の順に割り振り、増えた分は最後の指示に足す */
 function clientSetApply(doc){
   var rows = (doc && doc.rows) || [], edits = (doc && doc.setEdits) || {}, dones = (doc && doc.setDone) || {}, groups = {};
-  rows.forEach(function(r){
+  // 割り振りは指示の1行(部品の行のまとまり)ごと。同じ伝票に同じセットが2行あっても、それぞれに割り振る(2026-11-19。前は伝票ごとで、直すと倍になった)
+  var LS = clientSetLineStarts(rows), lid = [], cur = -1;
+  rows.forEach(function(r, i){ if(LS[i]) cur = i; lid[i] = 'L'+cur; });
+  rows.forEach(function(r, i){
     if(!r.setCode) return;
-    var gk = (r.imp||'')+'|'+r.setCode, G = groups[gk] || (groups[gk] = { order: [], q: {} }), k = r.date+'|'+(r.no||'');
+    var gk = (r.imp||'')+'|'+r.setCode, G = groups[gk] || (groups[gk] = { order: [], q: {} }), k = lid[i];
     if(G.q[k]===undefined){ G.q[k] = clientQ(r.setQty); G.order.push(k); }
   });
   Object.keys(groups).forEach(function(gk){
     var G = groups[gk], e = edits[gk], left = e && typeof e.qty==='number' ? e.qty : null; G.to = {};
     G.order.forEach(function(k, i){ if(left===null){ G.to[k] = G.q[k]; return; } var n = i===G.order.length-1 ? left : Math.min(left, G.q[k]); G.to[k] = n; left -= n; });
   });
-  return rows.map(function(r){
+  return rows.map(function(r, i){
     if(!r.setCode) return r;
-    var gk = (r.imp||'')+'|'+r.setCode, k = r.date+'|'+(r.no||''), oq = groups[gk].q[k], nq = groups[gk].to[k];
+    var gk = (r.imp||'')+'|'+r.setCode, k = lid[i], oq = groups[gk].q[k], nq = groups[gk].to[k];
     var x = Object.assign({}, r, { setOrig: oq, done: dones[(r.imp||'')+'|'+(r.no||'')] || '' });
     if(nq!==oq){
       x.setQty = nq;

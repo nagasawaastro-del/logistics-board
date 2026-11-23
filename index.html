@@ -20427,7 +20427,15 @@ function jodLabelCount(r, i, qcol){ var J = state.jodLabel, ov = J && J.over && 
    ホームには今日のタスクだけ出す(そこでも完了にできる)。読むのは、ホームかこのページを開いているときに1分に1回まで(通信量を増やさない)。
    完了して60日たったものは、保存のときに消す(大きくしない) */
 var TODO_KEY = 'todo-tasks';
-function todoTyping(){ var a = document.activeElement; return !!(a && (a.id==='todoText' || a.id==='todoDate')); }
+/* 前に入れた内容の候補(2026-11-23): kv の texts = [内容](新しい順・50件まで)。タスクを消しても候補は残る。texts がまだ無いときは、今のタスクから作る */
+var TODO_TEXTS_MAX = 50;
+function todoTextsOf(d){
+  if(d && Array.isArray(d.texts)) return d.texts.slice(0, TODO_TEXTS_MAX);
+  var seen = {}, out = [];
+  ((d && d.items) || []).slice().sort(function(a, b){ return String(b.at).localeCompare(String(a.at)); }).forEach(function(x){ var t = String(x.text||'').trim(); if(t && !seen[t]){ seen[t] = 1; out.push(t); } });
+  return out.slice(0, TODO_TEXTS_MAX);
+}
+function todoTyping(){ var a = document.activeElement; return !!(a && (a.id==='todoText' || a.id==='todoDate' || a.id==='todoPick')); }
 function todoEnsure(force){
   if(!hasDataAccess() || !state.appDataLoaded) return;
   var T = state.todo || (state.todo = { items: null, at: 0, loading: false, filter: 'open' });
@@ -20436,23 +20444,26 @@ function todoEnsure(force){
   loadKeyJson(TODO_KEY, function(){ return { items: [] }; }).then(function(d){
     T.loading = false; T.at = Date.now();
     var items = (d && Array.isArray(d.items)) ? d.items : [];
-    var changed = JSON.stringify(items)!==JSON.stringify(T.items);
-    T.items = items; T.bad = isUnverified(d);
+    var texts = todoTextsOf(d);
+    var changed = JSON.stringify(items)!==JSON.stringify(T.items) || JSON.stringify(texts)!==JSON.stringify(T.texts);
+    T.items = items; T.texts = texts; T.bad = isUnverified(d);
     if(changed && (!state.role || state.role==='todo') && !todoTyping()) render();
   }).catch(function(){ T.loading = false; T.at = Date.now(); });
 }
-async function todoUpdate(fn){
+async function todoUpdate(fn, textsFn){
   if(isReadOnlyAccount()){ showToast(READONLY_BLOCKED_TITLE); return null; }
   var old = new Date(Date.now()-60*864e5).toISOString();
   var r = await tpickKvUpdate(TODO_KEY, function(cur){
     var items = Array.isArray(cur.items) ? cur.items.slice() : [];
-    var next = fn(items);
+    var next = fn ? fn(items) : items;
     if(next===false) return false;
-    return { items: next.filter(function(x){ return !(x.done && x.done < old); }) };
+    var texts = todoTextsOf(cur);
+    if(textsFn) texts = textsFn(texts).slice(0, TODO_TEXTS_MAX);
+    return { items: next.filter(function(x){ return !(x.done && x.done < old); }), texts: texts };
   });
   if(!r.ok){ if(!r.aborted) showToast('保存できませんでした。もう一度押してください'); return null; }
   var T = state.todo || (state.todo = { filter: 'open' });
-  T.items = r.value.items; T.at = Date.now();
+  T.items = r.value.items; T.texts = r.value.texts || []; T.at = Date.now();
   return r.value;
 }
 function todoDateLabel(d){
@@ -20467,9 +20478,10 @@ function renderTodoPage(){
     '<div class="pool-hint" style="margin:0 0 10px;">日付とやることを入れて「追加」を押します。<b>ホームには、今日のタスクだけ</b>が出ます(ホームでも完了にできます)。完了して60日たったものは自動で消えます。</div>'+
     '<div class="ch-row">'+
       '<label class="ch-field"><span>日付</span><input type="date" id="todoDate" value="'+esc(T.draftDate || today)+'"></label>'+
-      '<label class="ch-field" style="flex:1;min-width:240px;"><span>内容</span><textarea id="todoText" rows="2" placeholder="やることを自由に入力" style="width:100%;box-sizing:border-box;resize:vertical;">'+esc(T.draftText || '')+'</textarea></label>'+
+      '<label class="ch-field" style="flex:1;min-width:240px;"><span>内容</span><textarea id="todoText" rows="2" placeholder="やることを自由に入力(下の「前に入れた内容から選ぶ」からも選べます)" style="width:100%;box-sizing:border-box;resize:vertical;">'+esc(T.draftText || '')+'</textarea></label>'+
       '<button type="button" class="add-btn" id="todoAdd"'+(ro ? ' disabled title="'+READONLY_BLOCKED_TITLE+'"' : '')+'>追加</button>'+
     '</div>'+
+    todoPickHtml(T, ro)+
   '</div>';
   if(!T.items) return html+'<div class="panel"><div class="hd-empty">読み込み中…</div></div>';
   var items = T.items, f = T.filter || 'open';
@@ -20490,6 +20502,18 @@ function renderTodoPage(){
   return html+'<div class="panel"><div class="panel-title">タスクの一覧</div>'+sw+
     (rows ? '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>日付</th><th>内容</th><th>完了</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'
       : '<div class="hd-empty">'+(f==='done' ? '完了したタスクはありません' : f==='open' ? '未完了のタスクはありません' : 'タスクはありません')+'</div>')+
+  '</div>';
+}
+/* 前に入れた内容から選ぶ(選ぶと内容の欄に入る。直してから追加もできる) */
+function todoOneLine(t){ var s = String(t||'').replace(/\s*\n\s*/g, ' / '); return s.length>70 ? s.slice(0, 70)+'…' : s; }
+function todoPickHtml(T, ro){
+  var texts = T.texts || [];
+  if(!texts.length) return '';
+  var cur = String(T.draftText || '').trim(), has = cur && texts.indexOf(cur)!==-1;
+  return '<div class="ch-row" style="margin-top:6px;align-items:flex-end;">'+
+    '<label class="ch-field" style="flex:1;min-width:240px;"><span>前に入れた内容から選ぶ('+texts.length+'件・新しい順)</span><select id="todoPick" style="width:100%;"><option value="">選んでください</option>'+
+      texts.map(function(t, i){ return '<option value="'+i+'"'+(t===cur ? ' selected' : '')+'>'+esc(todoOneLine(t))+'</option>'; }).join('')+'</select></label>'+
+    (has && !ro ? '<button type="button" class="vc-manage-toggle-btn" id="todoPickDel" title="選んでいる内容を候補から消します(タスクは消えません)">この内容を候補から消す</button>' : '')+
   '</div>';
 }
 /* ホームの「本日のタスク」。今日の日付のタスクだけ(未完了が上) */
@@ -20538,12 +20562,27 @@ function bindTodoPage(){
     add.disabled = true;
     var email = (state.managerSession && state.managerSession.user && state.managerSession.user.email) || '';
     var item = { id: 't'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), date: date, text: text.slice(0, 1000), done: '', at: new Date().toISOString(), by: email };
-    var r = await todoUpdate(function(items){ return items.concat([item]); });
+    var r = await todoUpdate(function(items){ return items.concat([item]); }, function(texts){ return [item.text].concat(texts.filter(function(t){ return t!==item.text; })); });
     add.disabled = false;
     if(!r){ render(); return; }
     T.draftText = ''; T.draftDate = date;
     try{ await appendAuditLog({ action:'タスクを追加', target: todoDateLabel(date), before: null, after: item.text }); }catch(e){}
     showToast(todoDateLabel(date)+' のタスクを追加しました'+(date===todayStr() ? '(ホームに出ます)' : ''));
+    render();
+  });
+  var pick = document.getElementById('todoPick');
+  if(pick) pick.addEventListener('change', function(){
+    var t = (T.texts || [])[Number(pick.value)];
+    if(pick.value==='' || t===undefined) return;
+    T.draftText = t; render();
+    var tx2 = document.getElementById('todoText'); if(tx2){ tx2.focus(); tx2.setSelectionRange(tx2.value.length, tx2.value.length); }
+  });
+  var pdel = document.getElementById('todoPickDel');
+  if(pdel) pdel.addEventListener('click', async function(){
+    var t = String(T.draftText || '').trim(); if(!t) return;
+    pdel.disabled = true;
+    var r = await todoUpdate(null, function(texts){ return texts.filter(function(x){ return x!==t; }); });
+    if(r){ T.draftText = ''; showToast('候補から消しました(タスクはそのままです)'); }
     render();
   });
   document.querySelectorAll('[data-todo-filter]').forEach(function(el){

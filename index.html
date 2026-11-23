@@ -19456,6 +19456,14 @@ function bindCsvImportPanel(){
       });
     });
   }
+  var wvCf = document.getElementById('wvCsvFrom'), wvCt = document.getElementById('wvCsvTo'), wvCx = document.getElementById('wvCsvExport');
+  if(wvCf) wvCf.addEventListener('change', function(){ state.wvCsvFrom = wvCf.value; });
+  if(wvCt) wvCt.addEventListener('change', function(){ state.wvCsvTo = wvCt.value; });
+  if(wvCx) wvCx.addEventListener('click', async function(){
+    if(wvCx.disabled) return;
+    wvCx.disabled = true;
+    try{ await wvStaffCsvExport(wvCf ? wvCf.value : '', wvCt ? wvCt.value : ''); }finally{ wvCx.disabled = false; }
+  });
   document.querySelectorAll('[data-wv-import-edit]').forEach(function(el){
     el.addEventListener('click', function(){
       var importId = el.getAttribute('data-wv-import-edit');
@@ -20881,6 +20889,24 @@ function renderCsvImportPanel(){
           ? '<button type="button" class="vc-manage-toggle-btn" data-wv-tp-part="'+esc(imp.id)+'|0" title="パートさん用を使わないにしています。押すと使うに戻します" style="opacity:.7;">パート: 使わない</button> '
           : '<button type="button" class="vc-manage-toggle-btn" data-wv-tp-part="'+esc(imp.id)+'|1" title="押すと、パートさん用の番号をタブレットに出しません(リフトマン用・事務所用はそのまま)">パート: 使う</button> ') : '');
   };
+  // 取込ごとの作業時間(作業記録と結び付けた分。結び付いていない記録は、その作業の取込が1つだけの日は推定で数える)
+  var wvLogsForView = null;
+  if(isViewingToday) wvLogsForView = (state.day && state.day.logs) || [];
+  else if(state.wvStatsDay && state.wvStatsDay.date===wvTargetDate) wvLogsForView = state.wvStatsDay.logs;
+  else if(!state.wvStatsDayLoading){
+    state.wvStatsDayLoading = true;
+    loadDayByDate(wvTargetDate).then(function(d){ state.wvStatsDay = { date: wvTargetDate, logs: (d && d.logs) || [] }; })
+      .catch(function(){}).then(function(){ state.wvStatsDayLoading = false; render(); });
+  }
+  var wvTimeStats = wvLogsForView ? wvImportTimeStats(wvLogsForView, wvViewData.imports, Date.now()) : null;
+  var wvTimeCell = function(imp){
+    if(!wvTimeStats) return '<td class="num" style="color:var(--slate-500);">読み込み中</td><td></td>';
+    var s = wvTimeStats[imp.id];
+    if(!s) return '<td class="num" style="color:var(--slate-500);">記録なし</td><td></td>';
+    var basis = staffingBasisOf(taskById(imp.taskId)), q = qtyForBasis(imp, basis), h = s.min/60;
+    return '<td class="num" title="作業記録で、この取込に結び付いた時間の合計'+(s.inferredMin ? '(うち '+Math.round(s.inferredMin)+'分は、取込を選ばずに始めた記録。この日のこの作業の取込が1つだけなので、この取込の分として数えています)' : '')+'">'+h.toFixed(1)+'人時・'+Object.keys(s.staff).length+'人'+(s.inferredMin ? '<div class="sk-minor">推定を含む</div>' : '')+'</td>'+
+      '<td class="num">'+(q>0 && s.min>=5 ? (q/h).toFixed(1)+esc(basisUnitLabel(basis, imp.taskKind==='vc'))+'/人時' : '')+'</td>';
+  };
   var wvImportRows = wvActiveImports(wvViewData).slice().sort(function(a,b){
     return new Date(b.importedAt) - new Date(a.importedAt);
   }).map(function(imp){
@@ -20896,9 +20922,10 @@ function renderCsvImportPanel(){
       '<td class="num">'+formatNum(imp.totalQty)+'ピース</td>'+
       '<td class="num" data-wv-split="'+imp.id+'">'+(outboundSplitOfImport(imp) ? formatNum(outboundSplitOfImport(imp).caseCount)+'ケース / バラ'+formatNum(outboundSplitOfImport(imp).pieceCount)+'ピース' : '<span style="color:var(--slate-500);">データなし</span>')+'</td>'+
       '<td class="num">'+(importSetText(imp) || '<span style="color:var(--slate-500);" title="ブロック略称の列が無いCSVか、機能追加前の取込です(取り込み直すと数えます)">データなし</span>')+'</td>'+
+      wvTimeCell(imp)+
       '<td class="num">'+todayBtn+tpBtn(imp)+'<button type="button" class="vc-manage-toggle-btn" data-wv-import-edit="'+imp.id+'">編集</button> <button type="button" class="vc-manage-toggle-btn" data-wv-import-carry="'+imp.id+'" title="終わらなかった分を次の日に続ける(トータルピッキングの番号に枝番)">繰越</button> <button type="button" class="vc-manage-toggle-btn" data-wv-import-move="'+imp.id+'">日付変更</button> <button type="button" class="log-stop-btn" data-wv-import-delete="'+imp.id+'">削除</button></td>'+
     '</tr>';
-  }).join('') || '<tr><td colspan="9" style="color:var(--slate-500);">この日付の取込履歴はまだありません</td></tr>';
+  }).join('') || '<tr><td colspan="11" style="color:var(--slate-500);">この日付の取込履歴はまだありません</td></tr>';
   var wvDeletedImports = (wvViewData.imports||[]).filter(function(i){ return i.deletedAt; });
   var wvDeletedHtml = wvDeletedImports.map(function(imp){
     var t = taskById(imp.taskId);
@@ -20907,7 +20934,8 @@ function renderCsvImportPanel(){
 
   var wvHistoryHtml = pastDatesHtml+
     '<div class="panel-title" style="font-size:15px;margin-top:18px;">取込履歴('+esc(dateLabelFromStr(wvTargetDate))+')</div>'+
-    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>作業</th><th>合計</th><th>明細</th><th>出荷数量</th><th>ケース / バラ</th><th>セット</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
+    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>作業</th><th>合計</th><th>明細</th><th>出荷数量</th><th>ケース / バラ</th><th>セット</th><th title="作業記録でこの取込に結び付いた時間">作業時間</th><th title="作業の単位(人員配置の単位)の量 ÷ 作業時間">速さ</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
+    '<div class="pool-hint" style="margin-top:6px;">作業時間・速さ: 作業記録で、始めるときにこの取込を選んだ時間の合計です。その日のその作業の取込が1つだけなら、選ばずに始めた記録もこの取込に数えます(推定)。</div>'+
     '<details class="vc-manage-details" id="wvDeletedDetails" '+(state.wvDeletedOpen?'open':'')+' style="margin-top:12px;">'+
       '<summary>削除済み'+(wvDeletedImports.length?'('+wvDeletedImports.length+'件)':'')+'</summary>'+
       '<div class="vc-slip-list" style="margin-top:8px;">'+wvDeletedHtml+'</div>'+
@@ -20929,6 +20957,18 @@ function renderCsvImportPanel(){
     '</div>'+
     (state.autoMapImporting ? '<div class="empty-note">解析中...</div>' : '')+
     wvHistoryHtml+
+    (isManagerRole(state.authRole) ? (function(){
+      var tdy = todayStr(), from = state.wvCsvFrom || (tdy.slice(0,8)+'01'), to = state.wvCsvTo || tdy;
+      return '<div class="ll-form-group" style="margin-top:16px;">'+
+        '<div class="ll-form-group-title">👥 作業者ごとのデータ(CSV)</div>'+
+        '<div class="pool-hint" style="margin:0 0 8px;">期間の作業記録を1行1記録で出します(管理者だけ)。結び付けた取込・担当分の量・作業の平均の速さで換算した分が入ります。「分」と「平均の速さで換算した分」を比べると、平均より速いか遅いかがわかります。賃金は入りません。期間は62日まで。</div>'+
+        '<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">'+
+          '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">から</label><input type="date" id="wvCsvFrom" value="'+esc(from)+'" style="border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
+          '<div><label style="font-size:11px;color:var(--slate-500);display:block;margin-bottom:4px;">まで</label><input type="date" id="wvCsvTo" value="'+esc(to)+'" style="border:1px solid var(--paper-line);border-radius:8px;padding:8px;"></div>'+
+          '<button type="button" class="add-btn" id="wvCsvExport">📥 作業者ごとのデータをCSVで出力</button>'+
+        '</div>'+
+      '</div>';
+    })() : '')+
   '</div>';
 
   return workVolumePanel;
@@ -22951,6 +22991,9 @@ function renderInput(){
           '<div class="task-tile-status"><span class="status-dot '+(isActive?'working':'idle')+'"></span>'+(isActive?'作業中':'タップして開始')+'</div>'+
           (isActive && !(t.subcategories && t.subcategories.length) ? '<div class="task-tile-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsed)+'</div>' : '')+
           (isActive && log.foldPlanLabel ? '<div style="margin-top:6px;font-size:12.5px;font-weight:700;color:#4338CA;background:#EEF2FF;border-radius:8px;padding:4px 8px;display:inline-block;">📋 '+esc(log.foldPlanLabel)+'</div>' : '')+
+          (isActive && (log.wvImportLabel || wvPickCandidates(tid).length>1) ? '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+
+            (log.wvImportLabel ? '<span style="font-size:12.5px;font-weight:700;color:#4338CA;background:#EEF2FF;border-radius:8px;padding:4px 8px;">📄 '+esc(log.wvImportLabel)+'</span>' : '<span style="font-size:12.5px;color:#B54708;font-weight:700;">取込を選んでいません</span>')+
+            (wvPickCandidates(tid).length>1 ? '<button type="button" class="ll-btn" data-wv-change="'+esc(log.id)+'" style="padding:4px 10px;font-size:12.5px;">取込を'+(log.wvImportLabel ? '変える' : '選ぶ')+'</button>' : '')+'</div>' : '')+
         '</div>'+
         liveCountersHtml+
         coworkerHtml+
@@ -23067,6 +23110,16 @@ function bindInput(){
     el.addEventListener('click', function(e){
       e.stopPropagation();
       completeMyTask(el.getAttribute('data-complete-mytask'));
+    });
+  });
+  document.querySelectorAll('[data-wv-change]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      var lid = el.getAttribute('data-wv-change'), lg = ((state.day && state.day.logs) || []).find(function(l){ return l.id===lid; });
+      if(!lg) return;
+      state.modal = { kind:'wvImportPick', taskId: lg.taskId, changeLogId: lid };
+      state.suppressRender = true;
+      render();
     });
   });
   var camTest = document.getElementById('camTestBtn');
@@ -24399,7 +24452,133 @@ async function taskUndoApply(u){
   render();
   showToast('取り消しました(押す前の状態に戻しました)');
 }
-async function startTask(taskId, chosenSubcat, foldPick){
+/* ---------- 作業記録と作業量CSVの取込の結び付け(2026-11-23) ----------
+   作業を始めるとき、その日にその作業へ取り込んだ CSV(作業量CSV取込)を選んで、記録(log.wvImportId)に結び付ける。
+   取込が1つだけなら自動で結び付け、2つ以上なら選ぶ画面を出す。取込ごとの時間・速さと、作業者ごとのデータ(CSV)に使う。
+   結び付いていない記録でも、その日のその作業の取込が1つだけなら、その取込の分として数える(推定) */
+function wvImportLabel(imp){ return (fmtClock(imp.importedAt)+' '+(imp.fileName||'')+(imp.carryNo ? ' 枝番'+imp.carryNo : '')).trim(); }
+function wvPickCandidates(taskId){
+  var wv = state.workVolume;
+  if(!wv || isUnverified(wv)) return [];
+  return wvActiveImports(wv).filter(function(i){ return i.taskId===taskId; }).sort(function(a,b){ return new Date(a.importedAt) - new Date(b.importedAt); });
+}
+function wvLinkEntry(entry, imp){
+  if(imp && imp.id){ entry.wvImportId = imp.id; entry.wvImportLabel = wvImportLabel(imp); }
+  else { delete entry.wvImportId; delete entry.wvImportLabel; }
+}
+function wvImportQtyText(imp){
+  var basis = staffingBasisOf(taskById(imp.taskId));
+  return formatNum(qtyForBasis(imp, basis))+basisUnitLabel(basis, imp.taskKind==='vc');
+}
+function renderWvImportPickModal(m){
+  var day = state.day, nowLogs = ((day && day.logs) || []).filter(function(l){ return l.end===null && l.wvImportId; });
+  var imps = wvPickCandidates(m.taskId);
+  var cur = m.changeLogId ? (((day && day.logs) || []).find(function(l){ return l.id===m.changeLogId; }) || {}).wvImportId : null;
+  return '<div class="modal-overlay" id="modalOverlay">'+
+    '<div class="modal-card" style="max-width:560px;">'+
+      '<div class="modal-task-name">どの取込(CSV)の分を作業しますか?</div>'+
+      '<div class="pool-hint" style="margin:6px 0 12px;">'+esc(taskById(m.taskId).name)+(m.changeLogId ? ' の今の記録の取込を変えます。' : ' を始めます。')+'選んだ取込に、この作業の時間が入ります。</div>'+
+      '<div style="display:flex;flex-direction:column;gap:8px;max-height:55vh;overflow-y:auto;">'+
+        imps.map(function(imp){
+          var n = nowLogs.filter(function(l){ return l.wvImportId===imp.id && l.staffId!==state.activeStaffId; }).length;
+          return '<button type="button" class="ll-btn" data-wv-pick="'+esc(imp.id)+'" style="text-align:left;padding:14px 16px;font-size:16px;border-radius:14px;'+(imp.id===cur ? 'border:2px solid #4338CA;' : '')+'">'+
+            (imp.id===cur ? '<span class="st-label is-blue" style="margin-right:6px;">今の取込</span>' : '')+
+            '<b>'+esc(fmtClock(imp.importedAt))+'</b> '+esc(imp.fileName||'')+(imp.carryNo ? ' <span class="muted" style="font-size:12px;">枝番'+imp.carryNo+'</span>' : '')+
+            '<div class="muted" style="font-size:13px;margin-top:2px;">'+esc(wvImportQtyText(imp))+(n ? ' ・ <b style="color:#067647;">'+n+'人が作業中</b>' : '')+'</div></button>';
+        }).join('')+
+      '</div>'+
+      '<div class="modal-actions" style="margin-top:12px;display:flex;gap:8px;">'+
+        '<button type="button" class="ll-btn" id="wvPickNone" style="flex:1;">'+(m.changeLogId ? '取込を外す' : '取込を選ばずに始める')+'</button>'+
+        '<button type="button" class="ll-btn" id="wvPickCancel" style="flex:1;">やめる</button>'+
+      '</div>'+
+    '</div></div>';
+}
+function bindWvImportPickModal(m){
+  async function go(imp){
+    state.modal = null; state.suppressRender = false;
+    if(m.changeLogId){
+      var log = ((state.day && state.day.logs) || []).find(function(l){ return l.id===m.changeLogId; });
+      if(!log){ render(); return; }
+      wvLinkEntry(log, imp);
+      var ok = await saveDay(state.day);
+      render();
+      showToast(ok===false ? '⚠️ 保存できませんでした。もう一度お試しください' : (imp ? '取込を「'+wvImportLabel(imp)+'」にしました' : '取込を外しました'));
+      return;
+    }
+    startTask(m.taskId, m.chosenSubcat, m.foldPick, imp || null);
+  }
+  var imps = wvPickCandidates(m.taskId);
+  document.querySelectorAll('[data-wv-pick]').forEach(function(el){ el.addEventListener('click', function(){ go(imps.find(function(i){ return i.id===el.getAttribute('data-wv-pick'); }) || null); }); });
+  var none = document.getElementById('wvPickNone'); if(none) none.addEventListener('click', function(){ go(null); });
+  var cancel = document.getElementById('wvPickCancel'); if(cancel) cancel.addEventListener('click', function(){ state.modal = null; state.suppressRender = false; render(); });
+}
+/* 取込ごとの時間: logs(その日の記録)と imports(その日の取込)から { 取込ID: { min, staff:{ 人: 分 }, inferredMin } }。
+   結び付いていない記録は、その日のその作業の取込が1つだけなら、その取込に数える(推定) */
+function wvLogMinutes(l, nowMs){
+  var s = new Date(l.start).getTime(), e = l.end ? new Date(l.end).getTime() : nowMs;
+  return (isFinite(s) && isFinite(e) && e>s) ? (e-s)/60000 : 0;
+}
+function wvLogImportOf(l, imps, byTask){
+  if(!l || l.taskId==='BREAK') return null;
+  if(l.wvImportId){ var x = imps.find(function(i){ return i.id===l.wvImportId; }); return x ? { imp: x, inferred: false } : null; }
+  var t = byTask[l.taskId];
+  return (t && t.length===1) ? { imp: t[0], inferred: true } : null;
+}
+function wvImportTimeStats(logs, imports, nowMs){
+  var imps = (imports||[]).filter(function(i){ return !i.deletedAt; }), byTask = {}, out = {};
+  imps.forEach(function(i){ (byTask[i.taskId] = byTask[i.taskId] || []).push(i); });
+  (logs||[]).forEach(function(l){
+    var li = wvLogImportOf(l, imps, byTask); if(!li) return;
+    var m = wvLogMinutes(l, nowMs); if(!(m>0)) return;
+    var o = out[li.imp.id] || (out[li.imp.id] = { min: 0, staff: {}, inferredMin: 0 });
+    o.min += m; o.staff[l.staffId] = (o.staff[l.staffId]||0) + m; if(li.inferred) o.inferredMin += m;
+  });
+  return out;
+}
+/* 作業者ごとのデータ(CSV): 期間の記録を1行1記録で出す(評価はアプリの外で。賃金は入れない) */
+async function wvStaffCsvExport(from, to){
+  if(!from || !to || from>to){ showToast('期間を正しく入れてください'); return; }
+  var dates = dateRangeList(from, to);
+  if(dates.length>62){ showToast('期間は62日までにしてください'); return; }
+  showToast('読み込んでいます…('+dates.length+'日分)');
+  var recs = [], failed = 0, nowMs = Date.now();
+  for(var i=0;i<dates.length;i++){
+    var d = dates[i], day, wv;
+    if(d===todayStr()){ day = state.day; wv = state.workVolume; }
+    else {
+      day = await loadDayByDate(d);
+      try{ wv = await fetchWorkVolumeRaw(d); }catch(e){ wv = null; failed++; }
+    }
+    if(!day || !day.logs || !day.logs.length) continue;
+    var imps = ((wv && wv.imports) || []).filter(function(x){ return !x.deletedAt; }), byTask = {};
+    imps.forEach(function(x){ (byTask[x.taskId] = byTask[x.taskId] || []).push(x); });
+    var st = wvImportTimeStats(day.logs, imps, nowMs);
+    day.logs.forEach(function(l){
+      if(l.taskId==='BREAK' || !l.end) return; // 休憩と作業中の記録は入れない
+      var min = wvLogMinutes(l, nowMs); if(!(min>0)) return;
+      var li = wvLogImportOf(l, imps, byTask), imp = li && li.imp, s = imp ? st[imp.id] : null;
+      var task = taskById(l.taskId), basis = staffingBasisOf(task);
+      var q = imp ? qtyForBasis(imp, basis) : null, share = (imp && s && s.min>0) ? q*min/s.min : null;
+      recs.push({ d: d, l: l, min: min, imp: imp, inferred: !!(li && li.inferred), s: s, q: q, share: share, basis: basis, key: resolveProductivityKey(l.taskId)+'|'+basis });
+    });
+  }
+  // 作業の平均の速さ(期間の全員分。取込に結び付いた記録だけ): 作業・単位ごとに 量 ÷ 時間
+  var rate = {};
+  recs.forEach(function(r){ if(r.share===null) return; var a = rate[r.key] || (rate[r.key] = { q: 0, min: 0 }); a.q += r.share; a.min += r.min; });
+  var rows = [['日付','作業者','作業','開始','終了','分','取込の時刻','取込のファイル','結び付け','単位','取込の量','その取込の総作業時間(分)','その取込の人数','担当分の量','作業の平均の速さ(量/時)','平均の速さで換算した分']];
+  recs.forEach(function(r){
+    var a = rate[r.key], avg = (a && a.min>0) ? a.q/(a.min/60) : null;
+    var unit = basisUnitLabel(r.basis, r.imp && r.imp.taskKind==='vc');
+    rows.push([r.d, staffById(r.l.staffId).name, r.l.taskName || taskById(r.l.taskId).name, fmtClock(r.l.start), fmtClock(r.l.end), Math.round(r.min),
+      r.imp ? fmtClock(r.imp.importedAt) : '', r.imp ? (r.imp.fileName||'') + (r.imp.carryNo ? ' 枝番'+r.imp.carryNo : '') : '', r.imp ? (r.inferred ? '推定(取込が1つだけ)' : '選んだ') : 'なし',
+      r.imp ? unit : '', r.imp ? r.q : '', r.s ? Math.round(r.s.min) : '', r.s ? Object.keys(r.s.staff).length : '',
+      r.share!==null ? Math.round(r.share*10)/10 : '', avg ? Math.round(avg*10)/10 : '', (avg && r.share!==null) ? Math.round(r.share/avg*60) : '']);
+  });
+  if(rows.length===1){ showToast('この期間の記録がありません'); return; }
+  downloadCSV('作業者ごとのデータ_'+from+'_'+to+'.csv', rows);
+  showToast((rows.length-1)+'行を出しました'+(failed ? '(⚠️ '+failed+'日分の取込を読めませんでした)' : ''));
+}
+async function startTask(taskId, chosenSubcat, foldPick, wvPick){
   // 安全策: 1スタッフにつき進行中の実績は1件だけ。確認と追加は同期的に行うため、
   // 連打や二重呼び出しでも同じ作業の実績が2件作られることはない。
   var openLogs = openLogsForStaff(state.day, state.activeStaffId);
@@ -24425,7 +24604,19 @@ async function startTask(taskId, chosenSubcat, foldPick){
       return;
     }
   }
+  // 作業量CSVの取込: 2つ以上あれば選ぶ。1つだけなら自動で結び付ける
+  if(wvPick===undefined && !isFoldTask(taskId)){
+    var wcands = wvPickCandidates(taskId);
+    if(wcands.length>1){
+      state.modal = { kind:'wvImportPick', taskId: taskId, chosenSubcat: chosenSubcat, foldPick: foldPick };
+      state.suppressRender = true;
+      render();
+      return;
+    }
+    wvPick = wcands[0] || null;
+  }
   var entry = {id:uid(), staffId:state.activeStaffId, taskId:taskId, start:new Date().toISOString(), end:null, quantity:null};
+  wvLinkEntry(entry, wvPick);
   if(foldPick && foldPick.id){ entry.foldPlanId = foldPick.id; entry.foldPlanLabel = ((foldPick.planNo ? '計画'+foldPick.planNo+' ' : '')+(foldPick.productName||'')).trim(); if(foldPick.lineId) entry.foldPlanLineId = foldPick.lineId; }
   var snapshotName = taskNameSnapshot(taskId);
   if(snapshotName) entry.taskName = snapshotName;
@@ -24495,7 +24686,7 @@ async function checkAutoBreak(){
         if(pre && pre.taskId!=='BREAK' && tasksForToday().some(function(t){ return t.id===pre.taskId; }) &&
            !taskFullyCompleted(day, pre.taskId) && staffShiftEndMs(s.id, day, state.shiftSettings) > now.getTime()+5*60000){
           var entry = {id:uid(), staffId:s.id, taskId:pre.taskId, start:nowIso, end:null, quantity:null, autoResumed:true};
-          ['taskName','foldPlanId','foldPlanLabel','foldPlanLineId'].forEach(function(k){ if(pre[k]) entry[k] = pre[k]; });
+          ['taskName','foldPlanId','foldPlanLabel','foldPlanLineId','wvImportId','wvImportLabel'].forEach(function(k){ if(pre[k]) entry[k] = pre[k]; });
           var task = taskById(pre.taskId);
           if(task.subcategories && task.subcategories.length){
             var names = task.subcategories.map(subcatName);
@@ -25259,6 +25450,7 @@ function renderModal(){
   if(m.kind==='autoMapPreview') return renderAutoMapPreviewModal(m);
   if(m.kind==='pickSubcat') return renderPickSubcatModal(m);
   if(m.kind==='foldPlanPick') return renderFoldPlanPickModal(m);
+  if(m.kind==='wvImportPick') return renderWvImportPickModal(m);
   if(m.kind!=='qty') return '';
   return '<div class="modal-overlay" id="modalOverlay">'+
     '<div class="modal-card">'+
@@ -26169,6 +26361,7 @@ function bindModal(){
   if(m.kind==='autoMapPreview'){ bindAutoMapPreviewModal(m); return; }
   if(m.kind==='pickSubcat'){ bindPickSubcatModal(m); return; }
   if(m.kind==='foldPlanPick'){ bindFoldPlanPickModal(m); return; }
+  if(m.kind==='wvImportPick'){ bindWvImportPickModal(m); return; }
   document.querySelectorAll('[data-qty-delta]').forEach(function(el){
     el.addEventListener('click', function(){
       var d = parseInt(el.getAttribute('data-qty-delta'),10);

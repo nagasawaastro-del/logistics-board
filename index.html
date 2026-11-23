@@ -13634,6 +13634,7 @@ function renderVcAllocTable(calc, kind){
   if(sort) rows.sort(function(a,b){ return shukeiCompareValues(vcAllocSortValue(sort.key,a), vcAllocSortValue(sort.key,b), sort.dir) || shukeiCompareValues(a.p.code, b.p.code, 'asc'); });
   else rows.sort(function(a,b){ return shukeiCompareValues(vcAllocSortValue('group',a), vcAllocSortValue('group',b), 'asc') || (b.qty-a.qty) || shukeiCompareValues(a.p.code, b.p.code, 'asc'); });
   if(state.vcAllocOnlyCheck) rows = rows.filter(function(r){ return !r.p.site || r.p.site==='split' || r.p.overridden; });
+  if(state.vcAllocOnlyUnstocked) rows = rows.filter(function(r){ return !!vcAllocUnstocked(r.p); });
   var editable = !isReadOnlyAccount();
   var cols = [['振り分け番号','group',' num'],['品番','code',''],['商品名','name',''],['発注数','qty',' num'],['入数','pack',' num'],['ケース数','cases',' num'],['高屋','takaya',' num'],['丹南','tannan',' num'],['倉庫','site','']];
   var head = '<tr><th class="sk-no">No</th>'+cols.map(function(c){ return '<th class="shukei-sortable'+c[2]+'" data-vca-sort="'+c[1]+'" title="押すと「'+esc(c[0])+'」で並び替え">'+esc(c[0])+shukeiSortMark(sort, c[1])+'</th>'; }).join('')+'<th>入荷予定</th><th title="弥生の在庫がロジザードより多い倉庫(入ったのに、まだロジザードへ入庫していないかもしれない)">未入庫かも</th><th>備考</th></tr>';
@@ -13691,6 +13692,7 @@ function renderVcAllocTable(calc, kind){
   var label = kind==='case' ? 'ケース引当' : 'ピース引当';
   return '<div class="no-print" style="display:flex;gap:12px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">'+
       '<label><input type="checkbox" id="vcaOnlyCheck"'+(state.vcAllocOnlyCheck?' checked':'')+'> 要確認・分ける・変更した品番だけ表示</label>'+
+      '<label title="弥生の在庫がロジザードより多い倉庫がある品番(表の「未入庫かも」の列に出ている品番)"><input type="checkbox" id="vcaOnlyUnstocked"'+(state.vcAllocOnlyUnstocked?' checked':'')+'> 未入庫かもの品番だけ表示</label>'+
       (editable ? (function(){
         var sr = vcAllocSheetRows(calc, kind);
         return ['takaya','tannan'].map(function(k){
@@ -13767,6 +13769,8 @@ function bindVcAlloc(){
   if(pr) pr.addEventListener('click', function(){ window.print(); });
   var oc = document.getElementById('vcaOnlyCheck');
   if(oc) oc.addEventListener('change', function(){ state.vcAllocOnlyCheck = oc.checked; render(); });
+  var ou = document.getElementById('vcaOnlyUnstocked');
+  if(ou) ou.addEventListener('change', function(){ state.vcAllocOnlyUnstocked = ou.checked; render(); });
   var sr = document.getElementById('vcaSortReset');
   if(sr) sr.addEventListener('click', function(){ state.vcAllocSort = null; render(); });
   document.querySelectorAll('[data-vca-sort]').forEach(function(el){

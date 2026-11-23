@@ -13195,6 +13195,58 @@ function vcAllocOtherCanvas(calc, kind){
   if(!rows.length){ g.fillStyle = '#475467'; g.font = '14px '+FONT; g.fillText('ありません(すべて高屋か丹南から出せます)', 24, TOP+RH*1.5); }
   return { canvas: cv, headH: TOP+RH, rowH: RH, rows: rows.length, scale: SC, width: W, height: H };
 }
+/* 未入庫かもの一覧(ピース・ケース両方)を1枚の絵にする。倉庫で現物を確かめる用に、確認の欄を空けておく */
+function vcAllocUnstockedCanvas(calc){
+  var rows = [];
+  calc.products.forEach(function(p){
+    var u = vcAllocUnstocked(p); if(!u) return;
+    u.items.forEach(function(x){ rows.push({ p: p, x: x }); });
+  });
+  var rank = function(r){ return r.x.cause && r.x.cause.indexOf('可能性が高い')>=0 ? 0 : (r.x.cause ? 1 : 2); };
+  rows.sort(function(a,b){ return rank(a)-rank(b) || (a.x.site===b.x.site ? 0 : (a.x.site==='takaya' ? -1 : 1)) || b.p.qty-a.p.qty || shukeiCompareValues(a.p.code, b.p.code, 'asc'); });
+  var cols = [['区分',60],['品番',100],['商品名',250],['発注数',70],['倉庫',56],['弥生',70],['ロジ',70],['差',70],['要因(最近14日の仕入)',380],['入庫で足りる?',110],['現物',110]];
+  var FONT = '"Yu Gothic UI","Meiryo","Hiragino Sans",sans-serif';
+  var W = cols.reduce(function(a,c){ return a+c[1]; }, 0) + 32, RH = 30, TOP = 64;
+  var H = TOP + RH*(Math.max(rows.length,1)+1) + 24, SC = 2;
+  var cv = document.createElement('canvas'); cv.width = W*SC; cv.height = H*SC;
+  var g = cv.getContext('2d'); g.scale(SC, SC);
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#101828'; g.font = '700 18px '+FONT; g.textBaseline = 'middle';
+  var nCode = {}; rows.forEach(function(r){ nCode[r.p.code] = 1; });
+  g.fillText('VC引当 '+vcAllocDateLabel()+' 未入庫かも '+Object.keys(nCode).length+'品番', 16, 24);
+  g.font = '12px '+FONT; g.fillStyle = '#475467';
+  g.fillText('在庫が足りない品番で、弥生の在庫がロジザードより多い倉庫。現物があればロジザードへ入庫して、在庫を取り込み直してください。', 16, 46);
+  function fit(t, w){ t = String(t===null||t===undefined ? '' : t); if(g.measureText(t).width<=w) return t; while(t.length && g.measureText(t+'…').width>w) t = t.slice(0,-1); return t+'…'; }
+  function row(y, cells, head, colorOf){
+    var x = 16;
+    g.fillStyle = head ? '#F2F4F7' : '#fff'; g.fillRect(16, y, W-32, RH);
+    cols.forEach(function(col, i){
+      var num = !head && i>=3 && i<=7 && i!==4;
+      g.fillStyle = head ? '#344054' : ((colorOf && colorOf[i]) || (i===1 ? '#101828' : '#344054'));
+      g.font = (head || i===1 || (colorOf && colorOf[i]) ? '700 ' : '')+'13px '+FONT;
+      var t = fit(cells[i], col[1]-12);
+      if(num){ g.textAlign = 'right'; g.fillText(t, x+col[1]-6, y+RH/2); g.textAlign = 'left'; }
+      else g.fillText(t, x+6, y+RH/2);
+      if(!head && i===cols.length-1){ g.strokeStyle = '#98A2B3'; g.strokeRect(x+8, y+8, 14, 14); g.fillStyle = '#344054'; g.font = '12px '+FONT; g.fillText('あり', x+26, y+RH/2); g.strokeRect(x+58, y+8, 14, 14); g.fillText('なし', x+76, y+RH/2); }
+      x += col[1];
+    });
+    g.strokeStyle = '#EAECF0'; g.beginPath(); g.moveTo(16, y+RH); g.lineTo(W-16, y+RH); g.stroke();
+  }
+  row(TOP, cols.map(function(c){ return c[0]; }), true);
+  rows.forEach(function(r, i){
+    var x = r.x, p = r.p;
+    row(TOP+RH*(i+1), [VC_ALLOC_KIND_LABEL[p.kind] ? VC_ALLOC_KIND_LABEL[p.kind].replace('引当','') : '', p.code, p.name, formatNum(p.qty), SHUKEI_SITES[x.site].name, formatNum(x.yayoi), formatNum(x.logi), '+'+formatNum(x.diff), x.cause || '最近14日の仕入なし', x.enough ? '足りる' : '足りない', ''],
+      false, { 7:'#B54708', 8: x.cause ? '#B54708' : '#667085', 9: x.enough ? '#067647' : '#B42318' });
+  });
+  if(!rows.length){ g.fillStyle = '#475467'; g.font = '14px '+FONT; g.fillText('ありません', 24, TOP+RH*1.5); }
+  return { canvas: cv, headH: TOP+RH, rowH: RH, rows: rows.length, scale: SC, width: W, height: H };
+}
+async function vcAllocUnstockedPdf(calc, print){
+  var blob;
+  try{ blob = vcCanvasToPdf(vcAllocUnstockedCanvas(calc)); }catch(e){ showToast('PDFを作れませんでした'); return; }
+  if(print){ vcPrintPdf(blob); return; }
+  await vcSavePdf(blob, 'VC引当_未入庫かも_'+todayStr()+'.pdf');
+}
 /* キャンバスの絵を A4横の PDF にする(ページに入らなければ、行の切れ目でページを分ける。2ページ目からも見出しを付ける) */
 function vcCanvasToPdf(d){
   var PW = d.portrait ? 595 : 842, PH = d.portrait ? 842 : 595, M = 24, k = (PW-2*M)/d.width;            // ポイント / キャンバスの1単位
@@ -13233,10 +13285,11 @@ function vcCanvasToPdf(d){
   return new Blob(parts, { type:'application/pdf' });
 }
 /* 高屋・丹南以外の品番を PDF にして保存する。パソコンの Chrome・Edge は保存の画面(デスクトップから)、ほかはダウンロード */
-async function vcAllocOtherPdf(calc, kind){
+async function vcAllocOtherPdf(calc, kind, print){
   kind = VC_ALLOC_KIND_LABEL[kind] ? kind : 'all';
   var blob;
   try{ blob = vcCanvasToPdf(vcAllocOtherCanvas(calc, kind)); }catch(e){ showToast('PDFを作れませんでした'); return; }
+  if(print){ vcPrintPdf(blob); return; }
   await vcSavePdf(blob, 'VC引当_'+VC_ALLOC_KIND_LABEL[kind]+'_高屋丹南以外_'+todayStr()+'.pdf'); // ピース・ケースで名前を分ける
 }
 /* ダッシュボードを1枚の絵にする(PDF で共有する用)。画面のダッシュボードと同じ中身 */
@@ -13295,10 +13348,27 @@ function vcAllocDashCanvas(calc){
     topDest.map(function(x){ return [x.name || x.id, x.group ? String(x.group) : '?', formatNum(Object.keys(x.pos).length), formatNum(x.qty)]; }));
   return { canvas: cv, headH: 0, rowH: H, rows: 1, scale: SC, width: W, height: H };
 }
-async function vcAllocDashPdf(calc){
+async function vcAllocDashPdf(calc, print){
   var blob;
   try{ blob = vcCanvasToPdf(vcAllocDashCanvas(calc)); }catch(e){ showToast('PDFを作れませんでした'); return; }
+  if(print){ vcPrintPdf(blob); return; }
   await vcSavePdf(blob, 'VC引当_ダッシュボード_'+todayStr()+'.pdf');
+}
+/* PDF をそのまま印刷する(PDFと同じ中身。見えない枠で開いて印刷の画面を出す。出せないときは新しいタブで開く) */
+function vcPrintPdf(blob){
+  var url = URL.createObjectURL(blob);
+  var old = document.getElementById('vcPrintFrame'); if(old) old.remove();
+  var f = document.createElement('iframe');
+  f.id = 'vcPrintFrame'; f.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;';
+  f.onload = function(){
+    setTimeout(function(){
+      try{ f.contentWindow.focus(); f.contentWindow.print(); }
+      catch(e){ window.open(url, '_blank'); showToast('新しいタブで開きました。そこから印刷してください'); }
+    }, 300);
+  };
+  f.src = url;
+  document.body.appendChild(f);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 10*60*1000);
 }
 /* PDF を保存する。パソコンの Chrome・Edge は保存の画面(デスクトップから)、ほかはダウンロード */
 async function vcSavePdf(blob, name){
@@ -13574,7 +13644,8 @@ function renderVcAllocDash(calc){
   var topDest = calc.dests.slice().sort(function(a,b){ return b.qty-a.qty; }).slice(0,5);
   var nCase = calc.products.filter(function(p){ return p.kind==='case'; }).length;
   return '<div class="pool-hint" style="margin:0 0 8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><span>引当の決まり: '+esc(vcAllocRulesText(calc.rules || vcAllocRules(null)))+'(設定 → 得意先・単価 で変えられます)</span>'+
-      '<button type="button" class="vc-manage-toggle-btn no-print" data-vca-dash-pdf="1" style="margin-left:auto;">📄 ダッシュボードをPDFで出力</button></div>'+
+      '<button type="button" class="vc-manage-toggle-btn no-print" data-vca-dash-pdf="1" style="margin-left:auto;">📄 ダッシュボードをPDFで出力</button>'+
+      '<button type="button" class="vc-manage-toggle-btn no-print" data-vca-dash-print="1">🖨 ダッシュボードを印刷</button></div>'+
     '<div class="vca-cards">'+
       card('PO数', formatNum(calc.poCount), formatNum(t.lines)+'行')+
       card('数量', formatNum(t.qty), 'ピース')+
@@ -13701,6 +13772,9 @@ function renderVcAllocTable(calc, kind){
         }).join('');
       })() : '')+
       '<button type="button" class="vc-manage-toggle-btn" data-vca-pdf="'+kind+'">📄 PDFで出力('+(kind==='case' ? 'ケース' : 'ピース')+'引当の高屋・丹南以外)</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" data-vca-print="'+kind+'">🖨 印刷('+(kind==='case' ? 'ケース' : 'ピース')+'引当の高屋・丹南以外)</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" data-vca-un-pdf="1" title="ピース引当・ケース引当の両方の「未入庫かも」を1つの一覧に">📄 未入庫かもの一覧をPDFで出力</button>'+
+      '<button type="button" class="vc-manage-toggle-btn" data-vca-un-print="1" title="ピース引当・ケース引当の両方の「未入庫かも」を1つの一覧に">🖨 未入庫かもの一覧を印刷</button>'+
       (sort ? '<button type="button" class="vc-manage-toggle-btn" id="vcaSortReset">並びを戻す(番号順)</button>' : '')+
     '</div>'+
     '<div class="shukei-print-head"><b>VC '+esc(label)+'</b> ・ '+esc(vcAllocDateLabel())+'</div>'+
@@ -13811,6 +13885,15 @@ function bindVcAlloc(){
   // ダッシュボードを PDF で出力
   document.querySelectorAll('[data-vca-dash-pdf]').forEach(function(btn){
     btn.addEventListener('click', function(){ vcAllocDashPdf(computeVcAlloc(d.order, d.dests, d.stock, state.shukeiPm)); });
+  });
+  document.querySelectorAll('[data-vca-dash-print]').forEach(function(btn){
+    btn.addEventListener('click', function(){ vcAllocDashPdf(computeVcAlloc(d.order, d.dests, d.stock, state.shukeiPm), true); });
+  });
+  document.querySelectorAll('[data-vca-print]').forEach(function(btn){
+    btn.addEventListener('click', function(){ vcAllocOtherPdf(computeVcAlloc(d.order, d.dests, d.stock, state.shukeiPm), btn.getAttribute('data-vca-print'), true); });
+  });
+  document.querySelectorAll('[data-vca-un-pdf],[data-vca-un-print]').forEach(function(btn){
+    btn.addEventListener('click', function(){ vcAllocUnstockedPdf(computeVcAlloc(d.order, d.dests, d.stock, state.shukeiPm), btn.hasAttribute('data-vca-un-print')); });
   });
   // 高屋・丹南以外の品番を PDF で出力
   document.querySelectorAll('[data-vca-pdf]').forEach(function(btn){

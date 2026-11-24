@@ -1539,6 +1539,9 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 .tpick-modal{ max-width:760px !important; width:96vw; text-align:left; max-height:92vh; overflow-y:auto; }
 .tpick-row{ display:grid; grid-template-columns:90px 1fr auto auto; gap:12px; align-items:center; padding:12px; border:1px solid var(--paper-line); border-radius:12px; margin-bottom:8px; background:var(--paper-50); }
 .tpick-row.is-mine{ border-color:#6366F1; box-shadow:0 0 0 1px #6366F1; }
+.tpick-imp{ border:1px solid var(--paper-line); border-radius:14px; padding:10px 10px 2px; margin-bottom:12px; }
+.tpick-imp.is-cur{ border-color:#4338CA; box-shadow:0 0 0 1px #4338CA; background:rgba(67,56,202,.06); }
+.tpick-imp-head{ display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin:0 2px 8px; }
 .tpick-no{ font-size:20px; font-weight:800; }
 .tpick-claim{ min-width:110px; border:1px solid transparent; border-radius:8px; padding:6px 14px; font-size:14px; font-weight:700; cursor:pointer; box-shadow:none; } /* 「見る」と同じ形(色だけ目立つ。2026-10-20) */
 .tpick-items{ display:flex; flex-direction:column; gap:6px; }
@@ -12192,7 +12195,9 @@ function renderTpickListModal(m){
   if(who==='liftA' && !m.whoPicked && !cnt('liftA') && cnt('lift')) who = 'lift'; // リフトの人ははじめ A。A の番号がなければ A以外
   if(who==='part' && !m.whoPicked && !cnt('part') && (cnt('liftA') || cnt('lift'))) who = cnt('liftA') ? 'liftA' : 'lift';
   var list = bs.filter(function(b){ return b.who===who; });
-  var rows = list.map(function(b){
+  var myLog = ((state.day && state.day.logs) || []).find(function(l){ return l.staffId===state.activeStaffId && l.taskId===m.taskId && l.end===null; });
+  var impById = {}; wvPickCandidates(m.taskId).forEach(function(i){ impById[i.id] = i; });
+  var rowOf = function(b){
     if(!tpickTracked(b)){
       return '<div class="tpick-row"><div class="tpick-no">'+esc(b.label)+'</div>'+
         '<div class="tpick-info"><div><b>'+b.items.length+'行 ・ '+formatNum(b.qty)+'個</b></div><div class="muted">'+esc(b.from)+' 〜 '+esc(b.to)+'</div></div>'+
@@ -12206,11 +12211,23 @@ function renderTpickListModal(m){
     return '<div class="tpick-row'+(mineB ? ' is-mine' : '')+'"><div class="tpick-no">'+esc(b.label)+'</div>'+
       '<div class="tpick-info"><div><b>'+b.items.length+'行 ・ '+formatNum(b.qty)+'個</b></div><div class="muted">'+esc(b.from)+' 〜 '+esc(b.to)+'</div></div>'+
       '<div><span class="st-label '+st.cls+'">'+esc(st.label)+'</span></div><div>'+btn+'</div></div>';
+  };
+  // 取込(CSV)ごとに分けて出す(2026-11-25)。見出しで、いま作業している取込がわかり、選べる
+  var groups = [], gBy = {};
+  list.forEach(function(b){ var iid = tpickImportIdOf(b); if(!gBy[iid]){ gBy[iid] = { iid: iid, bs: [] }; groups.push(gBy[iid]); } gBy[iid].bs.push(b); });
+  var rows = groups.map(function(g, gi){
+    var imp = impById[g.iid], isCur = !!(myLog && myLog.wvImportId===g.iid);
+    var rowsN = g.bs.reduce(function(a, b){ return a + b.items.length; }, 0), qtyN = g.bs.reduce(function(a, b){ return a + b.qty; }, 0);
+    return '<div class="tpick-imp'+(isCur ? ' is-cur' : '')+'">'+
+      '<div class="tpick-imp-head"><div><b>📄 取込'+(gi+1)+' ・ '+esc(imp ? fmtClock(imp.importedAt) : '')+'</b> <span class="muted">'+esc((imp && imp.fileName) || g.bs[0].fileName || '')+(imp && imp.carryNo ? ' 枝番'+imp.carryNo : '')+'</span>'+
+        '<div class="muted" style="font-size:12px;">'+g.bs.length+'番号 ・ '+rowsN+'行 ・ '+formatNum(qtyN)+'個</div></div>'+
+        (myLog ? (isCur ? '<span class="st-label is-blue">いま作業中の取込</span>' : '<button type="button" class="ll-btn" data-tpick-imp="'+esc(g.iid)+'">この取込を作業する</button>') : '')+'</div>'+
+      g.bs.map(rowOf).join('')+'</div>';
   }).join('') || '<div class="empty-note">この分けにはありません</div>';
   var tab = function(w, label){ return '<button type="button" class="sub-switch-btn'+(who===w ? ' active' : '')+'" data-tpick-who="'+w+'">'+label+' '+cnt(w)+'</button>'; };
   return '<div class="modal-overlay" id="modalOverlay"><div class="modal-card tpick-modal">'+
     '<div class="modal-task-name">📋 トータルピッキング ・ '+esc(taskById(m.taskId).name)+'</div>'+
-    '<div class="pool-hint" style="margin:4px 0 10px;">'+(who==='part' ? '番号を選んで「受け持つ」と、ほかの人は選べなくなります('+TPICK_BATCH_ROWS+'行ずつに分けています)。' : 'リフトマン用は紙で取ります。ここでは中身を見るだけです(受け持ち・済はありません)。')+'</div>'+
+    '<div class="pool-hint" style="margin:4px 0 10px;">'+(who==='part' ? '取込(CSV)ごとに分けています。番号を選んで「受け持つ」と、ほかの人は選べなくなり、あなたの作業の時間はその取込に入ります('+TPICK_BATCH_ROWS+'行ずつに分けています)。' : 'リフトマン用は紙で取ります。ここでは中身を見るだけです(受け持ち・済はありません)。取る取込の「この取込を作業する」を押すと、あなたの作業の時間はその取込に入ります。')+'</div>'+
     '<div class="sub-switch" style="margin:0 0 10px;">'+tab('part', '👩 パートさん用')+tab('liftA', '🚜 リフト A')+tab('lift', '🚜 リフト A以外')+'</div>'+
     '<div class="tpick-list">'+rows+'</div>'+
     '<div class="modal-actions" style="margin-top:12px;"><button type="button" class="modal-cancel" id="tpickClose">閉じる</button></div>'+
@@ -12651,6 +12668,9 @@ function bindTpickModals(m){
   document.querySelectorAll('[data-tpick-tab]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = Object.assign({}, m, { tab: el.getAttribute('data-tpick-tab'), shortIdx: null }); render(); }); });
   document.querySelectorAll('[data-tpick-batch]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = { kind:'tpickBatch', taskId: m.taskId, who: m.who, batchId: el.getAttribute('data-tpick-batch') }; render(); }); });
   var busy = false;
+  document.querySelectorAll('[data-tpick-imp]').forEach(function(el){
+    el.addEventListener('click', async function(){ el.disabled = true; await wvLinkActiveLog(m.taskId, el.getAttribute('data-tpick-imp')); render(); });
+  });
   document.querySelectorAll('[data-tpick-who]').forEach(function(el){ el.addEventListener('click', function(){ state.modal = Object.assign({}, m, { who: el.getAttribute('data-tpick-who'), whoPicked: true }); render(); }); });
   document.querySelectorAll('[data-tpick-claim]').forEach(function(el){
     el.addEventListener('click', async function(){
@@ -12665,6 +12685,8 @@ function bindTpickModals(m){
       if(r.aborted){ showToast('ほかの人が先に受け持ちました。別の番号を選んでください'); render(); return; }
       if(!r.ok){ showToast('⚠️ 保存できませんでした。もう一度お試しください'); render(); return; }
       state.modal = { kind:'tpickBatch', taskId: m.taskId, who: m.who, batchId: bid }; render();
+      var cb = tpickBatchesForTask((state.tpk||{}).tp, state.workVolume, m.taskId).filter(function(x){ return x.id===bid; })[0];
+      if(cb) wvLinkActiveLog(m.taskId, tpickImportIdOf(cb), true).then(function(){ render(); }); // 受け持った番号の取込に、作業の時間を入れる
     });
   });
   document.querySelectorAll('[data-tpick-check]').forEach(function(el){
@@ -23035,9 +23057,12 @@ function renderInput(){
           '<div class="task-tile-status"><span class="status-dot '+(isActive?'working':'idle')+'"></span>'+(isActive?'作業中':'タップして開始')+'</div>'+
           (isActive && !(t.subcategories && t.subcategories.length) ? '<div class="task-tile-timer" data-live-timer="'+log.start+'">'+fmtElapsed(elapsed)+'</div>' : '')+
           (isActive && log.foldPlanLabel ? '<div style="margin-top:6px;font-size:12.5px;font-weight:700;color:#4338CA;background:#EEF2FF;border-radius:8px;padding:4px 8px;display:inline-block;">📋 '+esc(log.foldPlanLabel)+'</div>' : '')+
-          (isActive && (log.wvImportLabel || wvPickCandidates(tid).length>1) ? '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+
-            (log.wvImportLabel ? '<span style="font-size:12.5px;font-weight:700;color:#4338CA;background:#EEF2FF;border-radius:8px;padding:4px 8px;">📄 '+esc(log.wvImportLabel)+'</span>' : '<span style="font-size:12.5px;color:#B54708;font-weight:700;">取込を選んでいません</span>')+
-            (wvPickCandidates(tid).length>1 ? '<button type="button" class="ll-btn" data-wv-change="'+esc(log.id)+'" style="padding:4px 10px;font-size:12.5px;">取込を'+(log.wvImportLabel ? '変える' : '選ぶ')+'</button>' : '')+'</div>' : '')+
+          (isActive && (log.wvImportLabel || wvPickCandidates(tid).length>1) ? (function(){
+            var hasTp = !!tpickTileButton(tid, true); // トータルピッキングがある作業は、番号を受け持つと取込が決まる(2026-11-25)
+            return '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+
+            (log.wvImportLabel ? '<span style="font-size:12.5px;font-weight:700;color:#4338CA;background:#EEF2FF;border-radius:8px;padding:4px 8px;">📄 '+esc(log.wvImportLabel)+'</span>' : '<span style="font-size:12.5px;color:#B54708;font-weight:700;">'+(hasTp ? '📋 トータルピッキングで番号を受け持つと、取込が決まります' : '取込を選んでいません')+'</span>')+
+            (wvPickCandidates(tid).length>1 && !hasTp ? '<button type="button" class="ll-btn" data-wv-change="'+esc(log.id)+'" style="padding:4px 10px;font-size:12.5px;">取込を'+(log.wvImportLabel ? '変える' : '選ぶ')+'</button>' : '')+'</div>';
+          })() : '')+
         '</div>'+
         liveCountersHtml+
         coworkerHtml+
@@ -24510,6 +24535,18 @@ function wvLinkEntry(entry, imp){
   if(imp && imp.id){ entry.wvImportId = imp.id; entry.wvImportLabel = wvImportLabel(imp); }
   else { delete entry.wvImportId; delete entry.wvImportLabel; }
 }
+/* いま作業中の記録(この人・この作業)を取込に結び付けて保存する。同じなら何もしない(2026-11-25) */
+async function wvLinkActiveLog(taskId, importId, quiet){
+  var log = ((state.day && state.day.logs) || []).find(function(l){ return l.staffId===state.activeStaffId && l.taskId===taskId && l.end===null; });
+  if(!log || log.wvImportId===importId) return true;
+  var imp = wvPickCandidates(taskId).find(function(i){ return i.id===importId; });
+  if(!imp) return false;
+  wvLinkEntry(log, imp);
+  var ok = await saveDay(state.day);
+  if(!quiet) showToast(ok===false ? '⚠️ 保存できませんでした。もう一度お試しください' : '作業の取込を「'+wvImportLabel(imp)+'」にしました');
+  return ok!==false;
+}
+function tpickImportIdOf(b){ var k = b.id.indexOf(':'+b.who+':'); return k>0 ? b.id.slice(0, k) : ''; }
 function wvImportQtyText(imp){
   var basis = staffingBasisOf(taskById(imp.taskId));
   return formatNum(qtyForBasis(imp, basis))+basisUnitLabel(basis, imp.taskKind==='vc');
@@ -24648,16 +24685,10 @@ async function startTask(taskId, chosenSubcat, foldPick, wvPick){
       return;
     }
   }
-  // 作業量CSVの取込: 2つ以上あれば選ぶ。1つだけなら自動で結び付ける
+  // 作業量CSVの取込: 1つだけなら自動で結び付ける。2つ以上なら、トータルピッキングで番号を受け持ったときに結び付ける(2026-11-25。前は始めるときに選ぶ画面を出していた)
   if(wvPick===undefined && !isFoldTask(taskId)){
     var wcands = wvPickCandidates(taskId);
-    if(wcands.length>1){
-      state.modal = { kind:'wvImportPick', taskId: taskId, chosenSubcat: chosenSubcat, foldPick: foldPick };
-      state.suppressRender = true;
-      render();
-      return;
-    }
-    wvPick = wcands[0] || null;
+    wvPick = wcands.length===1 ? wcands[0] : null;
   }
   var entry = {id:uid(), staffId:state.activeStaffId, taskId:taskId, start:new Date().toISOString(), end:null, quantity:null};
   wvLinkEntry(entry, wvPick);

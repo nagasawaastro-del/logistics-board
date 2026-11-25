@@ -1537,6 +1537,8 @@ html[data-app-theme="dark"] .kpi-delta.is-down{ background:rgba(240,68,56,.16); 
 @keyframes kpiDeltaFade{ 0%,70%{ opacity:1; } 100%{ opacity:0; } }
 @media (prefers-reduced-motion: reduce){ .kpi-flash{ animation:none; } .kpi-delta{ animation:none; } }
 .tpick-modal{ max-width:760px !important; width:96vw; text-align:left; max-height:92vh; overflow-y:auto; }
+.top-scroll{ overflow-x:auto; overflow-y:hidden; height:14px; margin:0 0 2px; }
+.top-scroll > div{ height:1px; }
 .tpick-row{ display:grid; grid-template-columns:90px 1fr auto auto; gap:12px; align-items:center; padding:12px; border:1px solid var(--paper-line); border-radius:12px; margin-bottom:8px; background:var(--paper-50); }
 .tpick-row.is-mine{ border-color:#6366F1; box-shadow:0 0 0 1px #6366F1; }
 .tpick-imp{ border:1px solid var(--paper-line); border-radius:14px; padding:10px 10px 2px; margin-bottom:12px; }
@@ -19522,6 +19524,7 @@ function bindCsvImportPanel(){
       });
     });
   }
+  bindTopScrolls();
   var wvCf = document.getElementById('wvCsvFrom'), wvCt = document.getElementById('wvCsvTo'), wvCx = document.getElementById('wvCsvExport');
   if(wvCf) wvCf.addEventListener('change', function(){ state.wvCsvFrom = wvCf.value; });
   if(wvCt) wvCt.addEventListener('change', function(){ state.wvCsvTo = wvCt.value; });
@@ -20908,6 +20911,19 @@ function bindJodLabel(){
   var pb = document.getElementById('jodPrint'); if(pb) pb.addEventListener('click', jodPrint);
   var cb = document.getElementById('jodClear'); if(cb) cb.addEventListener('click', function(){ J.rows = null; J.file = null; J.over = {}; render(); });
 }
+/* 横に長い表の上にも横スクロールの棒を出す(2026-11-26)。<div class="top-scroll" data-top-scroll-for="名前"><div></div></div> を
+   data-keep-scroll="名前" の枠のすぐ上に置く。棒と表は一緒に動く(位置は描き直しても data-keep-scroll で保つ) */
+function bindTopScrolls(){
+  document.querySelectorAll('[data-top-scroll-for]').forEach(function(bar){
+    var box = document.querySelector('[data-keep-scroll="'+bar.getAttribute('data-top-scroll-for')+'"]');
+    if(!box) return;
+    var inner = bar.firstChild;
+    var fit = function(){ inner.style.width = box.scrollWidth+'px'; bar.style.display = box.scrollWidth > box.clientWidth+1 ? '' : 'none'; bar.scrollLeft = box.scrollLeft; };
+    fit(); setTimeout(fit, 0);
+    bar.addEventListener('scroll', function(){ if(box.scrollLeft!==bar.scrollLeft) box.scrollLeft = bar.scrollLeft; });
+    box.addEventListener('scroll', function(){ if(bar.scrollLeft!==box.scrollLeft) bar.scrollLeft = box.scrollLeft; });
+  });
+}
 function renderCsvImportPanel(){
   var wvTargetDate = state.wvTargetDate || todayStr();
   var workVolumePanel = '';
@@ -21000,8 +21016,8 @@ function renderCsvImportPanel(){
 
   var wvHistoryHtml = pastDatesHtml+
     '<div class="panel-title" style="font-size:15px;margin-top:18px;">取込履歴('+esc(dateLabelFromStr(wvTargetDate))+')</div>'+
-    '<div style="overflow-x:auto;"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>作業</th><th>合計</th><th>明細</th><th>出荷数量</th><th>ケース / バラ</th><th>セット</th><th title="作業記録でこの取込に結び付いた時間">作業時間</th><th title="作業の単位(人員配置の単位)の量 ÷ 作業時間">速さ</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
-    '<div class="pool-hint" style="margin-top:6px;">作業時間・速さ: 作業記録で、始めるときにこの取込を選んだ時間の合計です。その日のその作業の取込が1つだけなら、選ばずに始めた記録もこの取込に数えます(推定)。</div>'+
+    '<div class="top-scroll" data-top-scroll-for="wvHist"><div></div></div><div style="overflow-x:auto;" data-keep-scroll="wvHist"><table class="report-table"><thead><tr><th>取込日時</th><th>ファイル名</th><th>作業</th><th>合計</th><th>明細</th><th>出荷数量</th><th>ケース / バラ</th><th>セット</th><th title="作業記録でこの取込に結び付いた時間">作業時間</th><th title="作業の単位(人員配置の単位)の量 ÷ 作業時間">速さ</th><th></th></tr></thead><tbody>'+wvImportRows+'</tbody></table></div>'+
+    '<div class="pool-hint" style="margin-top:6px;">作業時間・速さ: 作業記録で、この取込に結び付いた時間の合計です(トータルピッキングでこの取込の番号を受け持った・「この取込を作業する」を押した時間)。その日のその作業の取込が1つだけなら、結び付いていない記録もこの取込に数えます(推定)。表が横に長いときは、表の上の棒でも横に動かせます。</div>'+
     '<details class="vc-manage-details" id="wvDeletedDetails" '+(state.wvDeletedOpen?'open':'')+' style="margin-top:12px;">'+
       '<summary>削除済み'+(wvDeletedImports.length?'('+wvDeletedImports.length+'件)':'')+'</summary>'+
       '<div class="vc-slip-list" style="margin-top:8px;">'+wvDeletedHtml+'</div>'+
